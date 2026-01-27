@@ -34,3 +34,14 @@ model Settings {
   cashBalance Float    @default(0)
   updatedAt   DateTime @updatedAt
 }
+
+model DividendEvent {
+  id        String   @id @default(uuid())
+  ticker    String
+  amount    Float
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([ticker])
+}

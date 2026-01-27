@@ -22,7 +22,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
 
   const portfolio = await getPortfolio();
 
-  // Don't create snapshot if quotes are unavailable or stale - data would be misleading
+  // Don't create snapshot if quotes are unavailable - data would be misleading
   if (portfolio.quotesUnavailableCount && portfolio.quotesUnavailableCount > 0) {
     console.log(
       `[Snapshot] Skipped - ${portfolio.quotesUnavailableCount} quotes unavailable`
@@ -31,11 +31,10 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   }
 
   // Don't create snapshot if portfolio value seems suspiciously low
-  // This prevents corrupting history with bad data from API failures
-  const minValueForSnapshot = 100; // $100 minimum
+  const minValueForSnapshot = 100;
   if (portfolio.holdings.length > 0 && portfolio.totalValue < minValueForSnapshot) {
     console.log(
-      `[Snapshot] Skipped - totalValue $${portfolio.totalValue.toFixed(2)} too low (min: $${minValueForSnapshot})`
+      `[Snapshot] Skipped - totalValue $${portfolio.totalValue.toFixed(2)} too low`
     );
     return null;
   }
@@ -72,14 +71,24 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   return snapshot;
 }
 
-export async function getSnapshots(limit: number = config.projectionWindow): Promise<PortfolioSnapshot[]> {
+export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     orderBy: { timestamp: 'asc' },
-    take: limit,
   });
 }
 
-export async function getRecentSnapshots(limit: number = config.projectionWindow): Promise<PortfolioSnapshot[]> {
+export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnapshot[]> {
+  return prisma.portfolioSnapshot.findMany({
+    where: {
+      timestamp: {
+        gte: startDate,
+      },
+    },
+    orderBy: { timestamp: 'asc' },
+  });
+}
+
+export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapshot[]> {
   const snapshots = await prisma.portfolioSnapshot.findMany({
     orderBy: { timestamp: 'desc' },
     take: limit,
@@ -93,8 +102,6 @@ export async function getLatestSnapshot(): Promise<PortfolioSnapshot | null> {
   });
 }
 
-export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
-  return prisma.portfolioSnapshot.findMany({
-    orderBy: { timestamp: 'asc' },
-  });
+export async function getSnapshotCount(): Promise<number> {
+  return prisma.portfolioSnapshot.count();
 }

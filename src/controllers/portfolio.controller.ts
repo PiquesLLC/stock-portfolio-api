@@ -6,7 +6,15 @@ import {
   updateCashBalance,
 } from '../services/portfolio.service';
 import { createSnapshotIfNeeded, getAllSnapshots } from '../services/snapshot.service';
-import { getProjections } from '../services/projection.service';
+import {
+  getSP500Projections,
+  getRealizedProjections,
+  getMetrics,
+} from '../services/projection.service';
+import { LookbackPeriod, ProjectionMode } from '../types';
+
+const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
+const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
 
 export async function getPortfolioHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -97,10 +105,54 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
 
 export async function getProjectionsHandler(req: Request, res: Response): Promise<void> {
   try {
-    const projections = await getProjections();
+    const mode = (req.query.mode as ProjectionMode) || 'sp500';
+    const lookback = (req.query.lookback as LookbackPeriod) || '1y';
+
+    // Validate mode
+    if (!VALID_MODES.includes(mode)) {
+      res.status(400).json({
+        error: `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}`,
+      });
+      return;
+    }
+
+    // Validate lookback for realized mode
+    if (mode === 'realized' && !VALID_LOOKBACKS.includes(lookback)) {
+      res.status(400).json({
+        error: `Invalid lookback. Must be one of: ${VALID_LOOKBACKS.join(', ')}`,
+      });
+      return;
+    }
+
+    let projections;
+    if (mode === 'sp500') {
+      projections = await getSP500Projections();
+    } else {
+      projections = await getRealizedProjections(lookback);
+    }
+
     res.json(projections);
   } catch (error) {
     console.error('Error calculating projections:', error);
     res.status(500).json({ error: 'Failed to calculate projections' });
+  }
+}
+
+export async function getMetricsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const lookback = (req.query.lookback as LookbackPeriod) || '1y';
+
+    if (!VALID_LOOKBACKS.includes(lookback)) {
+      res.status(400).json({
+        error: `Invalid lookback. Must be one of: ${VALID_LOOKBACKS.join(', ')}`,
+      });
+      return;
+    }
+
+    const metrics = await getMetrics(lookback);
+    res.json(metrics);
+  } catch (error) {
+    console.error('Error calculating metrics:', error);
+    res.status(500).json({ error: 'Failed to calculate metrics' });
   }
 }

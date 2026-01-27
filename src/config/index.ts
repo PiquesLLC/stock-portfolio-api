@@ -8,5 +8,8 @@ export const config = {
   finnhubApiKey: process.env.FINNHUB_API_KEY || '',
   priceCacheTtl: parseInt(process.env.PRICE_CACHE_TTL || '5', 10),
   snapshotIntervalSeconds: parseInt(process.env.SNAPSHOT_INTERVAL_SECONDS || '60', 10),
-  projectionWindow: parseInt(process.env.PROJECTION_WINDOW || '30', 10),
+
+  // Projection settings
+  sp500CagrTotalReturn: parseFloat(process.env.SP500_CAGR_TOTAL_RETURN || '0.10'), // 10% default
+  riskFreeRate: parseFloat(process.env.RISK_FREE_RATE || '0.02'), // 2% default
 };

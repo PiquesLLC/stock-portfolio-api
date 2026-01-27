@@ -1,231 +1,340 @@
-import { Projection, ProjectionResponse, ProjectionMetrics } from '../types';
-import { getRecentSnapshots } from './snapshot.service';
+import {
+  SP500ProjectionResponse,
+  RealizedProjectionResponse,
+  RealizedMetrics,
+  MetricsResponse,
+  LookbackPeriod,
+  ProjectionHorizons,
+  PortfolioSnapshot,
+} from '../types';
 import { getPortfolio } from './portfolio.service';
+import { getSnapshotsAfter, getAllSnapshots } from './snapshot.service';
+import { getTotalDividendsBetween } from './dividend.service';
 import { config } from '../config';
 
-const MINIMUM_SNAPSHOTS = 3;
-const MINIMUM_VALUE_FOR_PROJECTION = 100; // Don't project on tiny/zero portfolios
-const VOLATILITY_FACTOR = 1.5;
-
-// Guardrails for projection values
-const MAX_DAILY_RETURN = 0.10;     // 10% daily max (unrealistic beyond this)
-const MIN_DAILY_RETURN = -0.10;    // -10% daily min
-const MAX_ANNUALIZED_RETURN = 2.0; // 200% annual cap
-const MIN_ANNUALIZED_RETURN = -0.95; // -95% annual floor
-const MAX_VOLATILITY = 0.15;       // Cap daily volatility at 15%
-const MAX_PROJECTION_MULTIPLIER = 100; // Don't show projections > 100x current value
-
-function calculateReturns(values: number[]): number[] {
-  const returns: number[] = [];
-  for (let i = 1; i < values.length; i++) {
-    if (values[i - 1] > 0) {
-      const ret = (values[i] - values[i - 1]) / values[i - 1];
-      // Clamp extreme returns that would skew calculations
-      returns.push(Math.max(MIN_DAILY_RETURN, Math.min(MAX_DAILY_RETURN, ret)));
-    }
-  }
-  return returns;
-}
-
-function mean(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, v) => sum + v, 0) / values.length;
-}
-
-function standardDeviation(values: number[]): number {
-  if (values.length < 2) return 0;
-  const avg = mean(values);
-  const squaredDiffs = values.map((v) => Math.pow(v - avg, 2));
-  return Math.sqrt(mean(squaredDiffs));
-}
-
-function diff(values: number[]): number[] {
-  const result: number[] = [];
-  for (let i = 1; i < values.length; i++) {
-    result.push(values[i] - values[i - 1]);
-  }
-  return result;
-}
-
-function calculateMetrics(values: number[]): ProjectionMetrics {
-  const returns = calculateReturns(values);
-
-  if (returns.length === 0) {
-    return { velocity: 0, acceleration: 0, volatility: 0, drawdown: 0 };
-  }
-
-  const velocity = mean(returns);
-  const acceleration = returns.length > 1 ? mean(diff(returns)) : 0;
-  const volatility = Math.min(MAX_VOLATILITY, standardDeviation(returns));
-
-  const maxValue = Math.max(...values);
-  const currentValue = values[values.length - 1];
-  const drawdown = maxValue > 0 ? (currentValue - maxValue) / maxValue : 0;
-
-  return { velocity, acceleration, volatility, drawdown };
-}
-
-function calculateConfidence(snapshotCount: number, volatility: number): number {
-  const sampleConfidence = Math.min(1, snapshotCount / 30);
-  const volPenalty = Math.min(1, volatility * 20);
-  return Math.max(0, (sampleConfidence * 0.6 + (1 - volPenalty) * 0.4)) * 100;
-}
-
-interface HorizonConfig {
-  horizon: '6mo' | '1yr' | '5yr' | '10yr';
-  periods: number;
-}
-
-const HORIZONS: HorizonConfig[] = [
-  { horizon: '6mo', periods: 126 },
-  { horizon: '1yr', periods: 252 },
-  { horizon: '5yr', periods: 1260 },
-  { horizon: '10yr', periods: 2520 },
+// Horizon periods in years
+const HORIZONS: { key: keyof ProjectionHorizons; years: number }[] = [
+  { key: '6m', years: 0.5 },
+  { key: '1y', years: 1 },
+  { key: '5y', years: 5 },
+  { key: '10y', years: 10 },
 ];
 
-function clampProjection(value: number, currentValue: number): number {
-  // Prevent exponential overflow and unrealistic projections
-  const maxValue = currentValue * MAX_PROJECTION_MULTIPLIER;
-  const minValue = 0;
+// Lookback periods in days
+const LOOKBACK_DAYS: Record<LookbackPeriod, number | null> = {
+  '1d': 1,
+  '1w': 7,
+  '1m': 30,
+  '6m': 180,
+  '1y': 365,
+  'max': null, // Use all available data
+};
 
-  if (!isFinite(value) || isNaN(value)) {
-    return currentValue;
-  }
+/**
+ * Calculate the start date for a given lookback period
+ */
+function getLookbackStartDate(lookback: LookbackPeriod): Date | null {
+  const days = LOOKBACK_DAYS[lookback];
+  if (days === null) return null; // 'max' means no start date filter
 
-  return Math.max(minValue, Math.min(maxValue, value));
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date;
 }
 
-export async function getProjections(): Promise<ProjectionResponse> {
-  const [snapshots, portfolio] = await Promise.all([
-    getRecentSnapshots(config.projectionWindow),
-    getPortfolio(),
-  ]);
-
+/**
+ * Project portfolio value using S&P 500 long-run total return
+ */
+export async function getSP500Projections(): Promise<SP500ProjectionResponse> {
+  const portfolio = await getPortfolio();
   const currentValue = portfolio.totalValue;
-  const snapshotCount = snapshots.length;
+  const annualReturn = config.sp500CagrTotalReturn;
 
-  // Check for insufficient data conditions
-  if (snapshotCount < MINIMUM_SNAPSHOTS) {
-    return {
-      currentValue,
-      projections: HORIZONS.map(({ horizon }) => ({
-        horizon,
-        base: currentValue,
-        bull: currentValue,
-        bear: currentValue,
-        confidence: 0,
-      })),
-      snapshotCount,
-      method: 'insufficient_data',
-      metrics: null,
-      message: `Need more history. Minimum ${MINIMUM_SNAPSHOTS} snapshots required, currently have ${snapshotCount}.`,
-    };
+  // Monthly compounding: (1 + r)^(years*12) where r = monthly rate
+  const monthlyRate = Math.pow(1 + annualReturn, 1 / 12) - 1;
+
+  const horizons: ProjectionHorizons = {
+    '6m': { base: 0 },
+    '1y': { base: 0 },
+    '5y': { base: 0 },
+    '10y': { base: 0 },
+  };
+
+  for (const { key, years } of HORIZONS) {
+    const months = years * 12;
+    const futureValue = currentValue * Math.pow(1 + monthlyRate, months);
+    horizons[key] = { base: Math.round(futureValue * 100) / 100 };
   }
 
-  // Check for near-zero or invalid portfolio value
-  if (currentValue < MINIMUM_VALUE_FOR_PROJECTION) {
-    return {
-      currentValue,
-      projections: HORIZONS.map(({ horizon }) => ({
-        horizon,
-        base: currentValue,
-        bull: currentValue,
-        bear: currentValue,
-        confidence: 0,
-      })),
-      snapshotCount,
-      method: 'insufficient_data',
-      metrics: null,
-      message: `Portfolio value too low for meaningful projections. Need at least $${MINIMUM_VALUE_FOR_PROJECTION}.`,
-    };
-  }
+  return {
+    mode: 'sp500',
+    asOf: new Date().toISOString(),
+    currentValue,
+    assumptions: {
+      annualReturn,
+      compounding: 'monthly',
+    },
+    horizons,
+  };
+}
 
-  // Check if any quotes are unavailable (could skew projections)
-  if (portfolio.quotesUnavailableCount && portfolio.quotesUnavailableCount > 0) {
-    const unavailablePercent = portfolio.quotesUnavailableCount / portfolio.holdings.length;
-    if (unavailablePercent > 0.5) {
-      return {
-        currentValue,
-        projections: HORIZONS.map(({ horizon }) => ({
-          horizon,
-          base: currentValue,
-          bull: currentValue,
-          bear: currentValue,
-          confidence: 0,
-        })),
-        snapshotCount,
-        method: 'insufficient_data',
-        metrics: null,
-        message: `Too many quotes unavailable (${portfolio.quotesUnavailableCount} of ${portfolio.holdings.length}). Waiting for price data.`,
-      };
-    }
+/**
+ * Calculate realized metrics from snapshot history
+ */
+function calculateRealizedMetrics(
+  snapshots: PortfolioSnapshot[],
+  totalDividends: number
+): { metrics: RealizedMetrics; notes: string[] } {
+  const notes: string[] = [];
+
+  if (snapshots.length < 2) {
+    notes.push('Need at least 2 snapshots to calculate metrics');
+    return {
+      metrics: { cagr: null, volatility: null, maxDrawdown: null, sharpe: null },
+      notes,
+    };
   }
 
   const values = snapshots.map((s) => s.totalValue);
+  const startValue = values[0];
+  const endValue = values[values.length - 1];
 
-  // Additional check: make sure we don't have a bunch of zeros in snapshot history
-  const validValues = values.filter(v => v > MINIMUM_VALUE_FOR_PROJECTION);
-  if (validValues.length < MINIMUM_SNAPSHOTS) {
-    return {
-      currentValue,
-      projections: HORIZONS.map(({ horizon }) => ({
-        horizon,
-        base: currentValue,
-        bull: currentValue,
-        bear: currentValue,
-        confidence: 0,
-      })),
-      snapshotCount,
-      method: 'insufficient_data',
-      metrics: null,
-      message: `Insufficient valid snapshot history. Some snapshots had near-zero values.`,
-    };
+  // Calculate time span in years
+  const startDate = new Date(snapshots[0].timestamp);
+  const endDate = new Date(snapshots[snapshots.length - 1].timestamp);
+  const daysDiff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+  const yearsDiff = daysDiff / 365;
+
+  // CAGR calculation: (endValue / startValue)^(1/years) - 1
+  // Include dividends in the total return
+  let cagr: number | null = null;
+  if (startValue > 0 && yearsDiff > 0) {
+    const totalReturn = (endValue + totalDividends) / startValue;
+    if (totalReturn > 0) {
+      cagr = Math.pow(totalReturn, 1 / yearsDiff) - 1;
+
+      // Sanity check - cap at reasonable bounds
+      if (cagr > 10) {
+        notes.push('CAGR capped at 1000% due to extreme value');
+        cagr = 10;
+      } else if (cagr < -0.99) {
+        notes.push('CAGR floored at -99% due to extreme value');
+        cagr = -0.99;
+      }
+
+      cagr = Math.round(cagr * 10000) / 10000;
+    }
   }
 
-  const metrics = calculateMetrics(values);
+  // Calculate period returns for volatility
+  const periodReturns: number[] = [];
+  for (let i = 1; i < values.length; i++) {
+    if (values[i - 1] > 0) {
+      const ret = (values[i] - values[i - 1]) / values[i - 1];
+      // Clamp extreme single-period returns
+      periodReturns.push(Math.max(-0.5, Math.min(0.5, ret)));
+    }
+  }
 
-  // Clamp velocity to reasonable bounds
-  const clampedVelocity = Math.max(
-    MIN_ANNUALIZED_RETURN / 252,
-    Math.min(MAX_ANNUALIZED_RETURN / 252, metrics.velocity)
-  );
+  // Volatility: stddev of returns * sqrt(periods per year)
+  // Assume snapshots are roughly daily (or at interval seconds)
+  let volatility: number | null = null;
+  if (periodReturns.length >= 2) {
+    const meanReturn = periodReturns.reduce((a, b) => a + b, 0) / periodReturns.length;
+    const squaredDiffs = periodReturns.map((r) => Math.pow(r - meanReturn, 2));
+    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (periodReturns.length - 1);
+    const stddev = Math.sqrt(variance);
 
-  const confidence = calculateConfidence(snapshotCount, metrics.volatility);
+    // Annualize: assume periods per year based on actual data frequency
+    const periodsPerYear = periodReturns.length / yearsDiff;
+    volatility = stddev * Math.sqrt(periodsPerYear);
 
-  const projections: Projection[] = HORIZONS.map(({ horizon, periods }) => {
-    // Use clamped velocity for projections
-    const baseGrowth = Math.pow(1 + clampedVelocity, periods);
-    const base = clampProjection(currentValue * baseGrowth, currentValue);
+    // Cap volatility at reasonable max
+    if (volatility > 5) {
+      notes.push('Volatility capped at 500%');
+      volatility = 5;
+    }
 
-    const volSpread = metrics.volatility * VOLATILITY_FACTOR * Math.sqrt(periods);
+    volatility = Math.round(volatility * 10000) / 10000;
+  } else {
+    notes.push('Need more data points for volatility calculation');
+  }
 
-    const bullVelocity = Math.min(MAX_ANNUALIZED_RETURN / 252, clampedVelocity + volSpread);
-    const bullGrowth = Math.pow(1 + bullVelocity, periods);
-    const bull = clampProjection(currentValue * bullGrowth, currentValue);
+  // Max Drawdown: largest peak-to-trough decline
+  let maxDrawdown: number | null = null;
+  if (values.length >= 2) {
+    let peak = values[0];
+    let maxDD = 0;
 
-    const bearVelocity = Math.max(MIN_ANNUALIZED_RETURN / 252, clampedVelocity - volSpread);
-    const bearGrowth = Math.pow(1 + bearVelocity, periods);
-    const bear = clampProjection(Math.max(0, currentValue * bearGrowth), currentValue);
+    for (const value of values) {
+      if (value > peak) {
+        peak = value;
+      }
+      const drawdown = (peak - value) / peak;
+      if (drawdown > maxDD) {
+        maxDD = drawdown;
+      }
+    }
 
-    return {
-      horizon,
-      base: Math.round(base * 100) / 100,
-      bull: Math.round(bull * 100) / 100,
-      bear: Math.round(bear * 100) / 100,
-      confidence: Math.round(confidence * 10) / 10,
-    };
-  });
+    maxDrawdown = -Math.round(maxDD * 10000) / 10000; // Negative to show as loss
+  }
+
+  // Sharpe Ratio: (CAGR - riskFreeRate) / volatility
+  let sharpe: number | null = null;
+  if (cagr !== null && volatility !== null && volatility > 0) {
+    sharpe = (cagr - config.riskFreeRate) / volatility;
+    sharpe = Math.round(sharpe * 100) / 100;
+  }
+
+  return { metrics: { cagr, volatility, maxDrawdown, sharpe }, notes };
+}
+
+/**
+ * Determine the best available lookback period given the data
+ */
+function getBestAvailableLookback(
+  snapshots: PortfolioSnapshot[],
+  requested: LookbackPeriod
+): LookbackPeriod {
+  if (snapshots.length === 0) return requested;
+
+  const oldestDate = new Date(snapshots[0].timestamp);
+  const now = new Date();
+  const availableDays = (now.getTime() - oldestDate.getTime()) / (1000 * 60 * 60 * 24);
+
+  const requestedDays = LOOKBACK_DAYS[requested];
+
+  // If 'max' or we have enough data, use requested
+  if (requestedDays === null || availableDays >= requestedDays) {
+    return requested;
+  }
+
+  // Otherwise find the best available
+  const periods: LookbackPeriod[] = ['1y', '6m', '1m', '1w', '1d'];
+  for (const period of periods) {
+    const days = LOOKBACK_DAYS[period];
+    if (days !== null && availableDays >= days) {
+      return period;
+    }
+  }
+
+  return '1d'; // Fallback to shortest period
+}
+
+/**
+ * Get realized projections based on portfolio history
+ */
+export async function getRealizedProjections(
+  lookback: LookbackPeriod = '1y'
+): Promise<RealizedProjectionResponse> {
+  const portfolio = await getPortfolio();
+  const currentValue = portfolio.totalValue;
+  const allSnapshots = await getAllSnapshots();
+
+  // Determine what lookback to actually use
+  const lookbackUsed = getBestAvailableLookback(allSnapshots, lookback);
+  const startDate = getLookbackStartDate(lookbackUsed);
+
+  // Filter snapshots to lookback period
+  const snapshots = startDate
+    ? allSnapshots.filter((s) => new Date(s.timestamp) >= startDate)
+    : allSnapshots;
+
+  // Get dividends in the period
+  const dividendStartDate = startDate || (allSnapshots.length > 0 ? new Date(allSnapshots[0].timestamp) : new Date());
+  const totalDividends = await getTotalDividendsBetween(dividendStartDate, new Date());
+
+  // Calculate metrics
+  const { metrics: realized, notes } = calculateRealizedMetrics(snapshots, totalDividends);
+
+  // Build projections using realized CAGR (or 0 if unavailable)
+  const projectionRate = realized.cagr ?? 0;
+  const monthlyRate = Math.pow(1 + projectionRate, 1 / 12) - 1;
+
+  const horizons: ProjectionHorizons = {
+    '6m': { base: 0 },
+    '1y': { base: 0 },
+    '5y': { base: 0 },
+    '10y': { base: 0 },
+  };
+
+  for (const { key, years } of HORIZONS) {
+    const months = years * 12;
+    let futureValue = currentValue * Math.pow(1 + monthlyRate, months);
+
+    // Prevent insane values
+    if (!isFinite(futureValue) || isNaN(futureValue)) {
+      futureValue = currentValue;
+      if (!notes.includes('Some projections reset to current value due to calculation issues')) {
+        notes.push('Some projections reset to current value due to calculation issues');
+      }
+    }
+
+    // Cap at reasonable multipliers
+    const maxMultiplier = 1000;
+    if (futureValue > currentValue * maxMultiplier) {
+      futureValue = currentValue * maxMultiplier;
+    }
+    if (futureValue < 0) {
+      futureValue = 0;
+    }
+
+    horizons[key] = { base: Math.round(futureValue * 100) / 100 };
+  }
+
+  if (lookbackUsed !== lookback) {
+    notes.push(`Requested ${lookback} lookback not available, used ${lookbackUsed} instead`);
+  }
 
   return {
+    mode: 'realized',
+    lookback,
+    lookbackUsed,
+    asOf: new Date().toISOString(),
     currentValue,
-    projections,
-    snapshotCount,
-    method: 'momentum',
-    metrics: {
-      velocity: Math.round(metrics.velocity * 1000000) / 1000000,
-      acceleration: Math.round(metrics.acceleration * 1000000) / 1000000,
-      volatility: Math.round(metrics.volatility * 1000000) / 1000000,
-      drawdown: Math.round(metrics.drawdown * 1000000) / 1000000,
-    },
+    realized,
+    horizons,
+    notes,
+    snapshotCount: snapshots.length,
+    dataStartDate: snapshots.length > 0 ? snapshots[0].timestamp.toISOString() : null,
+    dataEndDate: snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp.toISOString() : null,
   };
+}
+
+/**
+ * Get metrics only (without projections)
+ */
+export async function getMetrics(lookback: LookbackPeriod = '1y'): Promise<MetricsResponse> {
+  const portfolio = await getPortfolio();
+  const currentValue = portfolio.totalValue;
+  const allSnapshots = await getAllSnapshots();
+
+  const lookbackUsed = getBestAvailableLookback(allSnapshots, lookback);
+  const startDate = getLookbackStartDate(lookbackUsed);
+
+  const snapshots = startDate
+    ? allSnapshots.filter((s) => new Date(s.timestamp) >= startDate)
+    : allSnapshots;
+
+  const dividendStartDate = startDate || (allSnapshots.length > 0 ? new Date(allSnapshots[0].timestamp) : new Date());
+  const totalDividends = await getTotalDividendsBetween(dividendStartDate, new Date());
+
+  const { metrics, notes } = calculateRealizedMetrics(snapshots, totalDividends);
+
+  return {
+    lookback,
+    lookbackUsed,
+    asOf: new Date().toISOString(),
+    currentValue,
+    metrics,
+    notes,
+    snapshotCount: snapshots.length,
+    dataStartDate: snapshots.length > 0 ? snapshots[0].timestamp.toISOString() : null,
+    dataEndDate: snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp.toISOString() : null,
+  };
+}
+
+// Legacy export for backwards compatibility during transition
+export async function getProjections(): Promise<RealizedProjectionResponse> {
+  return getRealizedProjections('1y');
 }

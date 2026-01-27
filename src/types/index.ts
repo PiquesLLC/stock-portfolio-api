@@ -40,7 +40,8 @@ export interface Quote {
   open: number;
   previousClose: number;
   timestamp: number;
-  isStale?: boolean;  // true if this is cached data after a fetch failure
+  isStale?: boolean;
+  staleAge?: number; // seconds since last fresh update
 }
 
 export interface HoldingWithQuote extends Holding {
@@ -51,8 +52,8 @@ export interface HoldingWithQuote extends Holding {
   profitLossPercent: number;
   dayChange: number;
   dayChangePercent: number;
-  priceUnavailable?: boolean;  // true if no price data available at all
-  priceIsStale?: boolean;      // true if using cached/old price data
+  priceUnavailable?: boolean;
+  priceIsStale?: boolean;
 }
 
 export interface Portfolio {
@@ -64,41 +65,91 @@ export interface Portfolio {
   totalPLPercent: number;
   dayChange: number;
   dayChangePercent: number;
-  quotesStale?: boolean;           // true if any quotes are stale
-  quotesUnavailableCount?: number; // count of holdings with no price data
+  quotesStale?: boolean;
+  quotesUnavailableCount?: number;
 }
 
-export interface ProjectionMetrics {
-  velocity: number;
-  acceleration: number;
-  volatility: number;
-  drawdown: number;
+// Dividend types
+export interface DividendEvent {
+  id: string;
+  ticker: string;
+  amount: number;
+  date: Date;
+  createdAt: Date;
 }
 
-export interface Projection {
-  horizon: '6mo' | '1yr' | '5yr' | '10yr';
-  base: number;
-  bull: number;
-  bear: number;
-  confidence: number;
+export interface DividendInput {
+  ticker: string;
+  amount: number;
+  date: string; // ISO date string
 }
 
-export interface ProjectionResponse {
+// New Projection types
+export type ProjectionMode = 'sp500' | 'realized';
+export type LookbackPeriod = '1d' | '1w' | '1m' | '6m' | '1y' | 'max';
+export type HorizonPeriod = '6m' | '1y' | '5y' | '10y';
+
+export interface ProjectionHorizons {
+  '6m': { base: number };
+  '1y': { base: number };
+  '5y': { base: number };
+  '10y': { base: number };
+}
+
+export interface SP500ProjectionResponse {
+  mode: 'sp500';
+  asOf: string;
   currentValue: number;
-  projections: Projection[];
-  snapshotCount: number;
-  method: 'momentum' | 'insufficient_data';
-  metrics: ProjectionMetrics | null;
-  message?: string;
+  assumptions: {
+    annualReturn: number;
+    compounding: 'monthly';
+  };
+  horizons: ProjectionHorizons;
 }
 
+export interface RealizedMetrics {
+  cagr: number | null;
+  volatility: number | null;
+  maxDrawdown: number | null;
+  sharpe: number | null;
+}
+
+export interface RealizedProjectionResponse {
+  mode: 'realized';
+  lookback: LookbackPeriod;
+  lookbackUsed: LookbackPeriod; // actual lookback used if requested wasn't available
+  asOf: string;
+  currentValue: number;
+  realized: RealizedMetrics;
+  horizons: ProjectionHorizons;
+  notes: string[];
+  snapshotCount: number;
+  dataStartDate: string | null;
+  dataEndDate: string | null;
+}
+
+export type ProjectionResponse = SP500ProjectionResponse | RealizedProjectionResponse;
+
+export interface MetricsResponse {
+  lookback: LookbackPeriod;
+  lookbackUsed: LookbackPeriod;
+  asOf: string;
+  currentValue: number;
+  metrics: RealizedMetrics;
+  notes: string[];
+  snapshotCount: number;
+  dataStartDate: string | null;
+  dataEndDate: string | null;
+}
+
+// Finnhub types
 export interface FinnhubQuote {
-  c: number;  // Current price
-  d: number;  // Change
-  dp: number; // Percent change
-  h: number;  // High price of the day
-  l: number;  // Low price of the day
-  o: number;  // Open price of the day
-  pc: number; // Previous close price
-  t: number;  // Timestamp
+  c: number;
+  d: number;
+  dp: number;
+  h: number;
+  l: number;
+  o: number;
+  pc: number;
+  t: number;
 }
