@@ -775,28 +775,17 @@ export async function getCurrentPaceProjection(
     note,
   });
 
-  // ---- 1D special path: use latest snapshot's dailyPLPercent ----
+  // ---- 1D special path: use LIVE portfolio dayChangePercent (same as Day Change card) ----
   if (window === '1D') {
-    const allSnapshots = await getAllSnapshots();
-    if (allSnapshots.length === 0) {
-      return emptyResponse('no_data', 'No snapshots available.');
-    }
-
-    const latest = allSnapshots[allSnapshots.length - 1];
-
-    // dailyPLPercent is stored as a percentage (e.g., -0.16 means -0.16%)
-    let windowReturnDecimal: number;
-    if (latest.dailyPLPercent !== null && latest.dailyPLPercent !== undefined && isFinite(latest.dailyPLPercent)) {
-      windowReturnDecimal = latest.dailyPLPercent / 100;
-    } else if (latest.dailyPL !== null && latest.totalValue > 0) {
-      // fallback: dailyPL / (totalValue - dailyPL) = dailyPL / previousValue
-      const prevValue = latest.totalValue - latest.dailyPL;
-      windowReturnDecimal = prevValue > 0 ? latest.dailyPL / prevValue : 0;
-    } else {
-      windowReturnDecimal = 0;
-    }
-
+    // Use the live portfolio's dayChangePercent directly so 1D return always matches
+    // the Day Change summary card. No snapshot lag.
+    const windowReturnDecimal = portfolio.dayChangePercent / 100;
     const windowReturnPct = Math.round(windowReturnDecimal * 10000) / 100;
+
+    // Reference = current assets minus today's change
+    const referenceAssets = portfolio.dayChange !== 0
+      ? currentAssets - portfolio.dayChange
+      : currentAssets;
 
     // Annualize: (1 + r)^252 - 1  (252 trading days)
     let cagr = Math.pow(1 + windowReturnDecimal, 252) - 1;
@@ -808,42 +797,20 @@ export async function getCurrentPaceProjection(
 
     const annualizedPacePct = Math.round(cagr * 10000) / 100;
 
-    const makeProjection = (years: number) => {
-      let value = currentAssets * Math.pow(1 + cagr, years);
-      if (!isFinite(value) || isNaN(value)) value = currentAssets;
-      if (value < 0) value = 0;
-      value = Math.round(value * 100) / 100;
-      const gainPct = currentAssets > 0
-        ? Math.round(((value - currentAssets) / currentAssets) * 10000) / 100
-        : 0;
-      return { value, gainPct };
-    };
-
-    console.log(
-      `[CurrentPace 1D] dashboardDayChange%=${portfolio.dayChangePercent.toFixed(4)}% | ` +
-      `snapshot.dailyPLPercent=${latest.dailyPLPercent}% | ` +
-      `currentPace1D%=${windowReturnPct}%`
-    );
-
     return {
       window,
       windowLabel: WINDOW_LABELS[window],
       dataStatus: 'ok',
-      snapshotCount: allSnapshots.length,
-      dataStartDate: latest.timestamp.toISOString(),
-      dataEndDate: latest.timestamp.toISOString(),
+      snapshotCount: 0,
+      dataStartDate: new Date().toISOString(),
+      dataEndDate: new Date().toISOString(),
       daysCovered: 1,
       currentAssets: Math.round(currentAssets * 100) / 100,
-      referenceAssets: Math.round((latest.totalValue - latest.dailyPL) * 100) / 100,
+      referenceAssets: Math.round(referenceAssets * 100) / 100,
       windowReturnPct,
       annualizedPacePct,
       capped,
-      projections: {
-        '1y': makeProjection(1),
-        '2y': makeProjection(2),
-        '5y': makeProjection(5),
-        '10y': makeProjection(10),
-      },
+      projections: makeProjections(currentAssets, cagr),
       note: capped ? `Annualized projection capped at ±${cap * 100}% for ${WINDOW_LABELS[window]} window.` : null,
     };
   }
@@ -865,24 +832,23 @@ export async function getCurrentPaceProjection(
   }
 
   const refSnapshot = snapshots[0];
-  const latestSnapshot = snapshots[snapshots.length - 1];
   const referenceAssets = refSnapshot.totalValue;
-  const latestAssets = latestSnapshot.totalValue;
 
   if (referenceAssets <= 0) {
     return emptyResponse('insufficient', 'Reference snapshot has zero value.', snapshots);
   }
 
+  // Use LIVE currentAssets (not latest snapshot) so return matches the portfolio summary
   const startMs = new Date(refSnapshot.timestamp).getTime();
-  const endMs = new Date(latestSnapshot.timestamp).getTime();
+  const endMs = Date.now();
   const daysCovered = Math.max(1, (endMs - startMs) / (1000 * 60 * 60 * 24));
 
-  // Window return (always truthful, never capped)
-  const windowReturn = (latestAssets - referenceAssets) / referenceAssets;
+  // Window return: live assets vs reference snapshot
+  const windowReturn = (currentAssets - referenceAssets) / referenceAssets;
   const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
   // CAGR = (endValue / startValue)^(365/days) - 1
-  const ratio = latestAssets / referenceAssets;
+  const ratio = currentAssets / referenceAssets;
   let cagr: number;
   if (ratio <= 0) {
     cagr = -0.99;
@@ -899,36 +865,20 @@ export async function getCurrentPaceProjection(
 
   const annualizedPacePct = Math.round(cagr * 10000) / 100;
 
-  const makeProjection = (years: number) => {
-    let value = currentAssets * Math.pow(1 + cagr, years);
-    if (!isFinite(value) || isNaN(value)) value = currentAssets;
-    if (value < 0) value = 0;
-    value = Math.round(value * 100) / 100;
-    const gainPct = currentAssets > 0
-      ? Math.round(((value - currentAssets) / currentAssets) * 10000) / 100
-      : 0;
-    return { value, gainPct };
-  };
-
   return {
     window,
     windowLabel: WINDOW_LABELS[window],
     dataStatus: 'ok',
     snapshotCount: snapshots.length,
     dataStartDate: refSnapshot.timestamp.toISOString(),
-    dataEndDate: latestSnapshot.timestamp.toISOString(),
+    dataEndDate: new Date().toISOString(),
     daysCovered: Math.round(daysCovered * 10) / 10,
     currentAssets: Math.round(currentAssets * 100) / 100,
     referenceAssets: Math.round(referenceAssets * 100) / 100,
     windowReturnPct,
     annualizedPacePct,
     capped,
-    projections: {
-      '1y': makeProjection(1),
-      '2y': makeProjection(2),
-      '5y': makeProjection(5),
-      '10y': makeProjection(10),
-    },
+    projections: makeProjections(currentAssets, cagr),
     note: capped ? `Annualized projection capped at ±${cap * 100}% for ${WINDOW_LABELS[window]} window.` : null,
   };
 }
