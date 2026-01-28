@@ -458,7 +458,7 @@ export async function getPaceProjection(currentAssets: number): Promise<PaceProj
 }
 
 // ============================================================================
-// CURRENT PACE (CAGR-based, selectable window)
+// CURRENT PACE (Linear annualization model)
 // ============================================================================
 
 const WINDOW_LABELS: Record<PaceWindow, string> = {
@@ -469,33 +469,34 @@ const WINDOW_LABELS: Record<PaceWindow, string> = {
   'YTD': 'Year-to-Date',
 };
 
+// Linear annualization multipliers
+const LINEAR_MULTIPLIERS: Record<string, number> = {
+  '1D': 252,   // trading days per year
+  '1W': 52,    // weeks per year
+  '1M': 12,    // months per year
+  '6M': 2,     // half-years per year
+  '1Y': 1,     // already annual
+};
 
-// ============================================================================
-// YTD HELPERS
-// ============================================================================
+// Hard clamp bounds for annualized pace
+const PACE_CLAMP_MIN = -0.90; // -90%
+const PACE_CLAMP_MAX = 0.50;  // +50%
 
-function getFirstTradingDayOfYear(): Date {
-  const year = new Date().getFullYear();
-  let d = new Date(year, 0, 2); // Jan 2 (markets closed Jan 1)
-  while (d.getDay() === 0 || d.getDay() === 6) {
-    d.setDate(d.getDate() + 1);
-  }
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getDaysSinceYtdStart(): number {
-  const start = getFirstTradingDayOfYear();
-  const now = new Date();
-  return Math.max(1, (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+function clampLinearPace(pace: number): { pace: number; capped: boolean } {
+  if (!isFinite(pace) || isNaN(pace)) return { pace: 0, capped: true };
+  let capped = false;
+  if (pace > PACE_CLAMP_MAX) { pace = PACE_CLAMP_MAX; capped = true; }
+  if (pace < PACE_CLAMP_MIN) { pace = PACE_CLAMP_MIN; capped = true; }
+  return { pace, capped };
 }
 
 function makeProjections(
   currentAssets: number,
-  cagr: number
+  annualizedPace: number
 ): CurrentPaceResponse['projections'] {
+  // Compound growth across future years: currentAssets * (1 + pace)^years
   const make = (years: number) => {
-    let value = currentAssets * Math.pow(1 + cagr, years);
+    let value = currentAssets * Math.pow(1 + annualizedPace, years);
     if (!isFinite(value) || isNaN(value)) value = currentAssets;
     if (value < 0) value = 0;
     value = Math.round(value * 100) / 100;
@@ -507,195 +508,76 @@ function makeProjections(
   return { '1y': make(1), '2y': make(2), '5y': make(5), '10y': make(10) };
 }
 
-function clampCagr(cagr: number, cap: number): { cagr: number; capped: boolean } {
-  let capped = false;
-  if (!isFinite(cagr) || isNaN(cagr)) return { cagr: 0, capped: true };
-  if (cagr > cap) { cagr = cap; capped = true; }
-  if (cagr < -cap) { cagr = -cap; capped = true; }
-  return { cagr, capped };
+function getCurrentMonthNumber(): number {
+  return new Date().getMonth() + 1; // 1-12
 }
 
-async function computeHoldingsYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
-  const currentAssets = portfolio.totalAssets;
-  const holdings = portfolio.holdings;
-  const settings = await getSettings();
-  const trueYtdAvailable = settings.ytdStartEquity !== null;
-
-  if (holdings.length === 0) {
-    return {
-      window: 'YTD', windowLabel: 'Holdings YTD', dataStatus: 'no_data',
-      snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
-      currentAssets, referenceAssets: null,
-      windowReturnPct: null, annualizedPacePct: null, capped: false,
-      projections: { '1y': null, '2y': null, '5y': null, '10y': null },
-      note: 'Add holdings to see YTD returns.',
-      estimated: false, estimatedReason: null,
-      ytdMode: 'holdings', trueYtdAvailable,
-    };
-  }
-
-  const tickers = holdings.map(h => h.ticker);
-  const fetchResult = await getMultipleCandlesGradual(tickers, 30);
-  const candleData = fetchResult.data;
-
-  const firstTradingDay = getFirstTradingDayOfYear();
-  const firstTradingDayMs = firstTradingDay.getTime();
-
-  let totalWeight = 0;
-  let weightedReturn = 0;
-  let tickersCovered = 0;
-  const totalHoldingsValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
-
-  for (const h of holdings) {
-    if (totalHoldingsValue <= 0) continue;
-    const candles = candleData.get(h.ticker);
-    if (!candles || candles.partial || candles.dates.length === 0) continue;
-
-    // Find earliest date >= first trading day of year
-    let ytdStartIdx = -1;
-    for (let i = 0; i < candles.dates.length; i++) {
-      if (candles.dates[i].getTime() >= firstTradingDayMs) {
-        ytdStartIdx = i;
-        break;
-      }
-    }
-    if (ytdStartIdx < 0) continue;
-
-    const ytdStartPrice = candles.closes[ytdStartIdx];
-    if (ytdStartPrice <= 0) continue;
-
-    const tickerReturn = (h.currentPrice - ytdStartPrice) / ytdStartPrice;
-    const weight = h.currentValue / totalHoldingsValue;
-    weightedReturn += weight * tickerReturn;
-    totalWeight += weight;
-    tickersCovered++;
-  }
-
-  if (tickersCovered === 0) {
-    return {
-      window: 'YTD', windowLabel: 'Holdings YTD', dataStatus: 'insufficient',
-      snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
-      currentAssets, referenceAssets: null,
-      windowReturnPct: null, annualizedPacePct: null, capped: false,
-      projections: { '1y': null, '2y': null, '5y': null, '10y': null },
-      note: `No YTD price data available yet. Candle data may still be loading.`,
-      estimated: false, estimatedReason: null,
-      ytdMode: 'holdings', trueYtdAvailable,
-      ytdDetail: { tickerCount: tickers.length, tickersCovered: 0 },
-    };
-  }
-
-  // Normalize if not all tickers covered
-  if (totalWeight > 0 && totalWeight < 1) {
-    weightedReturn = weightedReturn / totalWeight;
-  }
-
-  const windowReturnPct = Math.round(weightedReturn * 10000) / 100;
-  const daysSince = getDaysSinceYtdStart();
-  let cagr = Math.pow(1 + weightedReturn, 365 / daysSince) - 1;
-  const { cagr: clampedCagr, capped } = clampCagr(cagr, 2.0);
-  cagr = clampedCagr;
-  const annualizedPacePct = Math.round(cagr * 10000) / 100;
-
-  return {
-    window: 'YTD',
-    windowLabel: 'Holdings YTD',
-    dataStatus: 'ok',
-    snapshotCount: tickersCovered,
-    dataStartDate: firstTradingDay.toISOString(),
-    dataEndDate: new Date().toISOString(),
-    daysCovered: Math.round(daysSince * 10) / 10,
-    currentAssets: Math.round(currentAssets * 100) / 100,
-    referenceAssets: null,
-    windowReturnPct,
-    annualizedPacePct,
-    capped,
-    projections: makeProjections(currentAssets, cagr),
-    note: 'Assumes today\'s holdings were held since Jan 1. Does not reflect buys/sells/deposits.',
-    estimated: false, estimatedReason: null,
-    ytdMode: 'holdings',
-    trueYtdAvailable,
-    ytdDetail: { tickerCount: tickers.length, tickersCovered },
-  };
-}
-
-async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
+async function computeYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
   const currentAssets = portfolio.totalAssets;
   const settings = await getSettings();
 
   if (settings.ytdStartEquity === null) {
     return {
-      window: 'YTD', windowLabel: 'True YTD', dataStatus: 'no_data',
+      window: 'YTD', windowLabel: WINDOW_LABELS['YTD'], dataStatus: 'no_data',
       snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
       currentAssets, referenceAssets: null,
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
-      note: 'Enter Jan 1 equity to see True YTD.',
+      note: 'Enter Jan 1 equity to see YTD.',
       estimated: false, estimatedReason: null,
-      ytdMode: 'true', trueYtdAvailable: false,
+      trueYtdAvailable: false,
     };
   }
 
   const startEquity = settings.ytdStartEquity;
   const flows = settings.ytdNetContributions ?? 0;
-  const endEquity = portfolio.netEquity; // assets - margin debt
+  const endEquity = portfolio.netEquity;
 
   if (startEquity <= 0) {
     return {
-      window: 'YTD', windowLabel: 'True YTD', dataStatus: 'insufficient',
+      window: 'YTD', windowLabel: WINDOW_LABELS['YTD'], dataStatus: 'insufficient',
       snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
       currentAssets, referenceAssets: startEquity,
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: 'Start equity must be positive.',
       estimated: false, estimatedReason: null,
-      ytdMode: 'true', trueYtdAvailable: true,
+      trueYtdAvailable: true,
     };
   }
 
-  // Modified Dietz: return = (end - start - flows) / (start + flows * 0.5)
-  const denominator = startEquity + flows * 0.5;
-  if (denominator <= 0) {
-    return {
-      window: 'YTD', windowLabel: 'True YTD', dataStatus: 'insufficient',
-      snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
-      currentAssets, referenceAssets: startEquity,
-      windowReturnPct: null, annualizedPacePct: null, capped: false,
-      projections: { '1y': null, '2y': null, '5y': null, '10y': null },
-      note: 'Cannot compute return: adjusted start equity is zero or negative.',
-      estimated: false, estimatedReason: null,
-      ytdMode: 'true', trueYtdAvailable: true,
-    };
-  }
+  // Simple return: (end - start - flows) / start
+  const windowReturn = (endEquity - startEquity - flows) / startEquity;
+  const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
-  const modifiedDietzReturn = (endEquity - startEquity - flows) / denominator;
-  const windowReturnPct = Math.round(modifiedDietzReturn * 10000) / 100;
+  // Linear annualization: windowReturn × (12 / currentMonthNumber)
+  const monthNum = getCurrentMonthNumber();
+  let annualizedPace = windowReturn * (12 / monthNum);
+  const { pace: clampedPace, capped } = clampLinearPace(annualizedPace);
+  annualizedPace = clampedPace;
+  const annualizedPacePct = Math.round(annualizedPace * 10000) / 100;
 
-  const daysSince = getDaysSinceYtdStart();
-  let cagr = Math.pow(1 + modifiedDietzReturn, 365 / daysSince) - 1;
-  const { cagr: clampedCagr, capped } = clampCagr(cagr, 2.0);
-  cagr = clampedCagr;
-  const annualizedPacePct = Math.round(cagr * 10000) / 100;
-
-  const firstTradingDay = getFirstTradingDayOfYear();
+  const year = new Date().getFullYear();
+  const jan1 = new Date(year, 0, 1);
+  const now = new Date();
+  const daysCovered = (now.getTime() - jan1.getTime()) / (1000 * 60 * 60 * 24);
 
   return {
     window: 'YTD',
-    windowLabel: 'True YTD (Modified Dietz)',
+    windowLabel: WINDOW_LABELS['YTD'],
     dataStatus: 'ok',
     snapshotCount: 0,
-    dataStartDate: firstTradingDay.toISOString(),
-    dataEndDate: new Date().toISOString(),
-    daysCovered: Math.round(daysSince * 10) / 10,
+    dataStartDate: jan1.toISOString(),
+    dataEndDate: now.toISOString(),
+    daysCovered: Math.round(daysCovered * 10) / 10,
     currentAssets: Math.round(currentAssets * 100) / 100,
     referenceAssets: Math.round(startEquity * 100) / 100,
     windowReturnPct,
     annualizedPacePct,
     capped,
-    projections: makeProjections(currentAssets, cagr),
-    note: capped ? 'Annualized projection capped at ±200%.' : null,
+    projections: makeProjections(currentAssets, annualizedPace),
+    note: capped ? 'Capped for realism.' : null,
     estimated: false, estimatedReason: null,
-    ytdMode: 'true',
     trueYtdAvailable: true,
     ytdDetail: { startEquity, netContributions: flows },
   };
@@ -707,9 +589,9 @@ export async function getCurrentPaceProjection(
   const portfolio = await getPortfolio();
   const currentAssets = portfolio.totalAssets;
 
-  // ---- YTD: always use True YTD (Modified Dietz) ----
+  // ---- YTD: simple return with linear annualization ----
   if (window === 'YTD') {
-    return computeTrueYtd(portfolio);
+    return computeYtd(portfolio);
   }
 
   const emptyResponse = (
@@ -735,21 +617,19 @@ export async function getCurrentPaceProjection(
     estimatedReason: null,
   });
 
-  // ---- 1D: use LIVE portfolio dayChangePercent (same as Day Change card) ----
+  // ---- 1D: use LIVE portfolio dayChangePercent ----
   if (window === '1D') {
     const windowReturn = portfolio.dayChangePercent / 100;
     const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
-    // Reference = current assets minus today's change
     const referenceAssets = portfolio.dayChange !== 0
       ? currentAssets - portfolio.dayChange
       : currentAssets;
 
-    // Annualize using same formula as all other windows: (1+r)^(365/targetDays) - 1
-    // For 1D: targetDays=1, so annualized = (1+r)^365 - 1
-    let annualizedPace = Math.pow(1 + windowReturn, 365) - 1;
-    if (!isFinite(annualizedPace) || isNaN(annualizedPace)) { annualizedPace = 0; }
-
+    // Linear annualization: windowReturn × 252
+    let annualizedPace = windowReturn * LINEAR_MULTIPLIERS['1D'];
+    const { pace: clampedPace, capped } = clampLinearPace(annualizedPace);
+    annualizedPace = clampedPace;
     const annualizedPacePct = Math.round(annualizedPace * 10000) / 100;
 
     return {
@@ -764,33 +644,31 @@ export async function getCurrentPaceProjection(
       referenceAssets: Math.round(referenceAssets * 100) / 100,
       windowReturnPct,
       annualizedPacePct,
-      capped: false,
+      capped,
       projections: makeProjections(currentAssets, annualizedPace),
-      note: null,
+      note: capped ? 'Capped for realism.' : null,
       estimated: false,
       estimatedReason: null,
     };
   }
 
-  // ---- Non-1D windows: ONE consistent pipeline ----
+  // ---- Non-1D windows: Linear pace pipeline ----
   //
   // Pipeline:
   //   1. Find baseline snapshot for the selected window
-  //   2. Compute windowReturn = (currentAssets / baselineAssets) - 1
-  //   3. Annualize: annualizedPace = (1 + windowReturn)^(365/targetDays) - 1
-  //   4. Project: projectedValue(Y) = currentAssets * (1 + annualizedPace)^Y
+  //   2. windowReturn = (currentAssets - baselineAssets) / baselineAssets
+  //   3. annualizedPace = windowReturn × multiplier (12 for 1M, 2 for 6M, 1 for 1Y)
+  //   4. Clamp to [-90%, +50%]
+  //   5. projectedValue(Y) = currentAssets × (1 + annualizedPace)^Y
   //
-  // If no baseline exists for the requested window, estimate from best available
-  // history using geometric scaling, label as "Est.".
+  // If no baseline for requested window, estimate from best available
+  // using the estimation fallback: daily return × multiplier.
 
   const WINDOW_DAYS: Record<string, number> = { '1M': 30, '6M': 182, '1Y': 365 };
   const targetDays = WINDOW_DAYS[window] ?? 30;
   const targetTime = new Date(Date.now() - targetDays * 24 * 60 * 60 * 1000);
 
-  // Find baseline snapshot at-or-before the target time
   const baselineSnap = await getBaselineSnapshot(targetTime);
-
-  // Also find the oldest snapshot in case we need fallback
   const oldestSnap = await getOldestSnapshot();
   if (!oldestSnap) {
     return emptyResponse('no_data', `No snapshots available for ${WINDOW_LABELS[window]} window.`);
@@ -798,33 +676,25 @@ export async function getCurrentPaceProjection(
 
   const nowMs = Date.now();
 
-  // Determine baseline assets and whether this is estimated
   let baselineAssets: number;
   let baselineTimestamp: Date;
   let isEstimated: boolean;
-  let estimatedFromDays: number;
   let estimatedReason: string | null;
   let snapshotCount: number;
 
   if (baselineSnap && baselineSnap.totalValue > 0) {
-    // We have a real baseline snapshot for this window
     baselineAssets = baselineSnap.totalValue;
     baselineTimestamp = baselineSnap.timestamp;
     isEstimated = false;
-    estimatedFromDays = 0;
     estimatedReason = null;
-
-    // Count snapshots in the window for the footer
     const windowSnapshots = await getSnapshotsAfter(new Date(baselineSnap.timestamp));
     snapshotCount = windowSnapshots.length;
   } else {
-    // No baseline for the requested window — use earliest available snapshot
+    // Estimation fallback: use daily return scaled linearly
     baselineAssets = oldestSnap.totalValue;
     baselineTimestamp = oldestSnap.timestamp;
     isEstimated = true;
-    estimatedFromDays = 1; // Using today's live return as basis
-    estimatedReason = `Estimated from today's return, scaled to ${targetDays} days.`;
-
+    estimatedReason = `Estimated from today's return.`;
     const windowSnapshots = await getSnapshotsAfter(new Date(oldestSnap.timestamp));
     snapshotCount = windowSnapshots.length;
   }
@@ -835,45 +705,34 @@ export async function getCurrentPaceProjection(
 
   const actualSpanDays = Math.max(1, (nowMs - new Date(baselineTimestamp).getTime()) / (1000 * 60 * 60 * 24));
 
-  // ---- Step A+B: Compute window return ----
+  // Compute window return
   let windowReturn: number;
   if (!isEstimated) {
-    // Real baseline exists for this window — direct return
     windowReturn = (currentAssets - baselineAssets) / baselineAssets;
   } else {
-    // No baseline for requested window. Use live daily return (same as Day Change
-    // card) and scale geometrically. We do NOT use oldest-snapshot-to-now return
-    // because that span may include deposits/withdrawals, producing a fake return.
+    // Use live daily return scaled to window days
     const dailyReturn = portfolio.dayChangePercent / 100;
-    windowReturn = Math.pow(1 + dailyReturn, targetDays) - 1;
+    windowReturn = dailyReturn * targetDays;
   }
 
-  // Safety: clamp extreme windowReturn for sanity
   if (!isFinite(windowReturn) || isNaN(windowReturn)) {
     windowReturn = 0;
   }
 
   const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
-  // ---- Step C: Annualized Pace from the SAME windowReturn ----
-  let annualizedPace = Math.pow(1 + windowReturn, 365 / targetDays) - 1;
-
-  // Safety: handle non-finite
-  if (!isFinite(annualizedPace) || isNaN(annualizedPace)) {
-    annualizedPace = 0;
-  }
-
+  // Linear annualization: windowReturn × multiplier
+  const multiplier = LINEAR_MULTIPLIERS[window] ?? 1;
+  let annualizedPace = windowReturn * multiplier;
+  const { pace: clampedPace, capped } = clampLinearPace(annualizedPace);
+  annualizedPace = clampedPace;
   const annualizedPacePct = Math.round(annualizedPace * 10000) / 100;
 
-  // ---- Step D: Projections from the SAME annualizedPace ----
   const projections = makeProjections(currentAssets, annualizedPace);
 
-  // ---- Build notes ----
   const notes: string[] = [];
   if (isEstimated) notes.push(estimatedReason!);
-  if (isEstimated && estimatedFromDays < 7) {
-    notes.push('Low confidence: limited history. Projections can swing.');
-  }
+  if (capped) notes.push('Capped for realism.');
 
   return {
     window,
@@ -887,7 +746,7 @@ export async function getCurrentPaceProjection(
     referenceAssets: Math.round(baselineAssets * 100) / 100,
     windowReturnPct,
     annualizedPacePct,
-    capped: false,
+    capped,
     projections,
     note: notes.length > 0 ? notes.join(' ') : null,
     estimated: isEstimated,
