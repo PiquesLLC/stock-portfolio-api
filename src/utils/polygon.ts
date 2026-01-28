@@ -1,0 +1,563 @@
+import axios, { AxiosError } from 'axios';
+import NodeCache from 'node-cache';
+import { Quote, MarketSession } from '../types';
+import { config } from '../config';
+import { getMarketSession } from './market-hours';
+
+const POLYGON_BASE_URL = 'https://api.polygon.io';
+
+// Primary cache with configurable TTL (default 30 seconds)
+const cache = new NodeCache({ stdTTL: config.quoteCacheTtlSeconds });
+
+// Backup cache with longer TTL (1 hour) - NEVER loses valid prices
+const backupCache = new NodeCache({ stdTTL: 3600 });
+
+// Rate limit backoff tracking
+let rateLimitBackoffUntil: number = 0;
+const RATE_LIMIT_BACKOFF_MS = 60000; // 1 minute backoff on 429
+
+// Track if we have access to premium endpoints
+let hasPremiumAccess: boolean | null = null;
+
+// Polygon Previous Day response type (free tier)
+interface PolygonPrevDayResult {
+  T: string; // ticker
+  v: number; // volume
+  vw: number; // volume weighted average
+  o: number; // open
+  c: number; // close
+  h: number; // high
+  l: number; // low
+  t: number; // timestamp (milliseconds)
+  n: number; // number of transactions
+}
+
+interface PolygonPrevDayResponse {
+  status: string;
+  ticker: string;
+  resultsCount: number;
+  results: PolygonPrevDayResult[];
+}
+
+// Polygon Snapshot API response types (requires paid plan)
+interface PolygonTickerSnapshot {
+  ticker: string;
+  todaysChangePerc: number;
+  todaysChange: number;
+  updated: number; // nanoseconds timestamp
+  day: {
+    o: number; // open
+    h: number; // high
+    l: number; // low
+    c: number; // close
+    v: number; // volume
+    vw: number; // volume weighted average price
+  };
+  min?: {
+    av: number;
+    t: number;
+    n: number;
+    o: number;
+    h: number;
+    l: number;
+    c: number;
+    v: number;
+    vw: number;
+  };
+  prevDay: {
+    o: number;
+    h: number;
+    l: number;
+    c: number;
+    v: number;
+    vw: number;
+  };
+  lastQuote?: {
+    P: number; // ask price
+    S: number; // ask size
+    p: number; // bid price
+    s: number; // bid size
+    t: number; // timestamp
+  };
+  lastTrade?: {
+    c: number[]; // conditions
+    i: string; // trade ID
+    p: number; // price
+    s: number; // size
+    t: number; // timestamp (nanoseconds)
+    x: number; // exchange
+  };
+}
+
+interface PolygonSnapshotResponse {
+  status: string;
+  count: number;
+  tickers: PolygonTickerSnapshot[];
+}
+
+/**
+ * Gets the best available "current" price from Polygon snapshot data.
+ * Priority: lastTrade.p > min.c > day.c
+ * This handles pre-market and after-hours where day.c might not be updated.
+ */
+function getBestPrice(snapshot: PolygonTickerSnapshot): { price: number; timestamp: number } {
+  // Most recent trade is best for extended hours
+  if (snapshot.lastTrade?.p && snapshot.lastTrade.p > 0) {
+    return {
+      price: snapshot.lastTrade.p,
+      timestamp: Math.floor(snapshot.lastTrade.t / 1_000_000), // nanoseconds to milliseconds
+    };
+  }
+
+  // Minute bar close
+  if (snapshot.min?.c && snapshot.min.c > 0) {
+    return {
+      price: snapshot.min.c,
+      timestamp: snapshot.min.t,
+    };
+  }
+
+  // Day close
+  if (snapshot.day?.c && snapshot.day.c > 0) {
+    return {
+      price: snapshot.day.c,
+      timestamp: Math.floor(snapshot.updated / 1_000_000),
+    };
+  }
+
+  // Fallback to previous close (should rarely happen)
+  return {
+    price: snapshot.prevDay?.c || 0,
+    timestamp: Math.floor(snapshot.updated / 1_000_000),
+  };
+}
+
+/**
+ * Fetch a single ticker using the free tier previous day endpoint.
+ * Returns the previous day's close price.
+ */
+async function fetchPrevDayQuote(ticker: string): Promise<Quote | null> {
+  const session = getMarketSession();
+  const now = Date.now();
+
+  try {
+    const response = await axios.get<PolygonPrevDayResponse>(
+      `${POLYGON_BASE_URL}/v2/aggs/ticker/${ticker}/prev`,
+      {
+        params: { apiKey: config.polygonApiKey },
+        timeout: 10000,
+      }
+    );
+
+    if (response.data.status !== 'OK' || !response.data.results?.length) {
+      return null;
+    }
+
+    const result = response.data.results[0];
+    const price = result.c; // close price
+    const prevClose = result.c; // For prev day, close IS the prev close
+    const timestamp = result.t;
+
+    if (price <= 0) {
+      return null;
+    }
+
+    // Day change is 0 since we're using previous day's close as current price
+    // This is a limitation of the free tier
+    const change = 0;
+    const changePercent = 0;
+    const quoteAge = Math.floor((now - timestamp) / 1000);
+
+    const quote: Quote = {
+      ticker,
+      currentPrice: price,
+      change,
+      changePercent,
+      high: result.h || price,
+      low: result.l || price,
+      open: result.o || price,
+      previousClose: prevClose,
+      timestamp: Math.floor(timestamp / 1000),
+      updatedAt: timestamp,
+      isStale: true, // Always stale since it's previous day data
+      isRepricing: true, // Mark as repricing since data is delayed
+      quoteAgeSeconds: quoteAge,
+      session,
+    };
+
+    return quote;
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    const responseData = axiosError.response?.data as { status?: string; error?: string } | undefined;
+
+    // Handle rate limiting
+    if (axiosError.response?.status === 429 || responseData?.error?.includes('exceeded')) {
+      console.warn(`[Polygon] Rate limited on ${ticker}, entering backoff mode`);
+      rateLimitBackoffUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+      return null;
+    }
+
+    console.error(`[Polygon] Failed to fetch prev day for ${ticker}:`, responseData?.error || error);
+    return null;
+  }
+}
+
+/**
+ * Fetches batch quotes from Polygon Snapshot API.
+ * Uses caching and "never return 0" logic.
+ * Falls back to free tier individual requests if snapshot endpoint is not available.
+ */
+export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotesResult> {
+  const quotes = new Map<string, Quote>();
+  const failedTickers: string[] = [];
+  let staleCount = 0;
+  let repricingCount = 0;
+  const now = Date.now();
+  const session = getMarketSession();
+
+  // Check if we're in rate limit backoff
+  if (now < rateLimitBackoffUntil) {
+    console.log('[Polygon] In rate limit backoff, using cache only');
+    return getCachedQuotesForTickers(tickers, session);
+  }
+
+  // Check cache first for all tickers
+  const uncachedTickers: string[] = [];
+  for (const ticker of tickers) {
+    const upperTicker = ticker.toUpperCase();
+    const cached = cache.get<Quote>(`polygon:${upperTicker}`);
+    if (cached) {
+      // Check if quote is repricing based on age
+      const quoteAge = Math.floor((now - (cached.updatedAt || cached.timestamp * 1000)) / 1000);
+      const isRepricing = quoteAge > config.repriceThresholdSeconds;
+      quotes.set(upperTicker, {
+        ...cached,
+        quoteAgeSeconds: quoteAge,
+        isRepricing,
+        isStale: isRepricing,
+      });
+      if (isRepricing) {
+        repricingCount++;
+        staleCount++;
+      }
+    } else {
+      uncachedTickers.push(upperTicker);
+    }
+  }
+
+  // If all tickers are cached, return early
+  if (uncachedTickers.length === 0) {
+    return {
+      quotes,
+      staleCount,
+      repricingCount,
+      failedTickers,
+      provider: 'polygon',
+    };
+  }
+
+  // Try snapshot endpoint first if we haven't determined access level
+  // or if we know we have premium access
+  if (hasPremiumAccess === null || hasPremiumAccess === true) {
+    try {
+      const tickerList = uncachedTickers.join(',');
+      const response = await axios.get<PolygonSnapshotResponse>(
+        `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
+        {
+          params: {
+            tickers: tickerList,
+            apiKey: config.polygonApiKey,
+          },
+          timeout: 10000,
+        }
+      );
+
+      if (response.data.status === 'OK' || response.data.status === 'DELAYED') {
+        hasPremiumAccess = true;
+        console.log('[Polygon] Using premium snapshot endpoint');
+
+        // Process response tickers
+        const tickerMap = new Map<string, PolygonTickerSnapshot>();
+        for (const snapshot of response.data.tickers || []) {
+          tickerMap.set(snapshot.ticker.toUpperCase(), snapshot);
+        }
+
+        // Build quotes for each requested ticker
+        for (const ticker of uncachedTickers) {
+          const snapshot = tickerMap.get(ticker);
+
+          if (!snapshot) {
+            // Ticker not found in response - try backup cache
+            const backup = backupCache.get<Quote>(`polygon:${ticker}`);
+            if (backup && backup.currentPrice > 0) {
+              const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+              quotes.set(ticker, {
+                ...backup,
+                isRepricing: true,
+                isStale: true,
+                quoteAgeSeconds: quoteAge,
+              });
+              repricingCount++;
+              staleCount++;
+            } else {
+              failedTickers.push(ticker);
+            }
+            continue;
+          }
+
+          const { price, timestamp } = getBestPrice(snapshot);
+          const prevClose = snapshot.prevDay?.c || price;
+
+          // CRITICAL: Never use 0 as a valid price
+          if (price <= 0) {
+            const backup = backupCache.get<Quote>(`polygon:${ticker}`);
+            if (backup && backup.currentPrice > 0) {
+              const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+              quotes.set(ticker, {
+                ...backup,
+                isRepricing: true,
+                isStale: true,
+                quoteAgeSeconds: quoteAge,
+              });
+              repricingCount++;
+              staleCount++;
+            } else {
+              failedTickers.push(ticker);
+            }
+            continue;
+          }
+
+          const change = price - prevClose;
+          const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+          const quoteAge = Math.floor((now - timestamp) / 1000);
+          const isRepricing = quoteAge > config.repriceThresholdSeconds;
+
+          const quote: Quote = {
+            ticker,
+            currentPrice: price,
+            change,
+            changePercent,
+            high: snapshot.day?.h || price,
+            low: snapshot.day?.l || price,
+            open: snapshot.day?.o || price,
+            previousClose: prevClose,
+            timestamp: Math.floor(timestamp / 1000),
+            updatedAt: timestamp,
+            isStale: isRepricing,
+            isRepricing,
+            quoteAgeSeconds: quoteAge,
+            session,
+          };
+
+          quotes.set(ticker, quote);
+          cache.set(`polygon:${ticker}`, quote);
+          backupCache.set(`polygon:${ticker}`, quote);
+
+          if (isRepricing) {
+            repricingCount++;
+            staleCount++;
+          }
+        }
+
+        return {
+          quotes,
+          staleCount,
+          repricingCount,
+          failedTickers,
+          provider: 'polygon',
+        };
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      const responseData = axiosError.response?.data as { status?: string } | undefined;
+
+      if (axiosError.response?.status === 403 || responseData?.status === 'NOT_AUTHORIZED') {
+        console.log('[Polygon] Snapshot endpoint not authorized, falling back to free tier');
+        hasPremiumAccess = false;
+      } else if (axiosError.response?.status === 429) {
+        console.warn('[Polygon] Rate limited, entering backoff mode');
+        rateLimitBackoffUntil = now + RATE_LIMIT_BACKOFF_MS;
+        return getCachedQuotesForTickers(tickers, session);
+      } else {
+        console.error('[Polygon] Snapshot API error:', error);
+      }
+    }
+  }
+
+  // Fall back to free tier: individual previous day requests
+  // Free tier is limited to 5 requests/minute, so we need to be careful
+  if (hasPremiumAccess === false) {
+    console.log(`[Polygon] Using free tier for ${uncachedTickers.length} tickers`);
+
+    // Fetch sequentially with delay to avoid rate limits
+    // Free tier allows ~5 requests/minute
+    const DELAY_BETWEEN_REQUESTS_MS = 1200; // 1.2 seconds between requests
+
+    for (const ticker of uncachedTickers) {
+      // Check if we're rate limited
+      if (Date.now() < rateLimitBackoffUntil) {
+        // Use backup cache for remaining tickers
+        const backup = backupCache.get<Quote>(`polygon:${ticker}`);
+        if (backup && backup.currentPrice > 0) {
+          const quoteAge = Math.floor((Date.now() - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+          quotes.set(ticker, {
+            ...backup,
+            isRepricing: true,
+            isStale: true,
+            quoteAgeSeconds: quoteAge,
+          });
+          repricingCount++;
+          staleCount++;
+        } else {
+          failedTickers.push(ticker);
+        }
+        continue;
+      }
+
+      const quote = await fetchPrevDayQuote(ticker);
+
+      if (quote && quote.currentPrice > 0) {
+        quotes.set(ticker, quote);
+        cache.set(`polygon:${ticker}`, quote);
+        backupCache.set(`polygon:${ticker}`, quote);
+        // Free tier data is always considered repricing/stale
+        repricingCount++;
+        staleCount++;
+      } else {
+        // Try backup cache
+        const backup = backupCache.get<Quote>(`polygon:${ticker}`);
+        if (backup && backup.currentPrice > 0) {
+          const quoteAge = Math.floor((Date.now() - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+          quotes.set(ticker, {
+            ...backup,
+            isRepricing: true,
+            isStale: true,
+            quoteAgeSeconds: quoteAge,
+          });
+          repricingCount++;
+          staleCount++;
+        } else {
+          failedTickers.push(ticker);
+        }
+      }
+
+      // Delay between requests to avoid rate limiting
+      if (uncachedTickers.indexOf(ticker) < uncachedTickers.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS_MS));
+      }
+    }
+  }
+
+  return {
+    quotes,
+    staleCount,
+    repricingCount,
+    failedTickers,
+    provider: 'polygon',
+  };
+}
+
+/**
+ * Helper to get cached quotes for all tickers (used during rate limit backoff)
+ */
+function getCachedQuotesForTickers(tickers: string[], session: MarketSession): PolygonQuotesResult {
+  const quotes = new Map<string, Quote>();
+  const failedTickers: string[] = [];
+  let staleCount = 0;
+  let repricingCount = 0;
+  const now = Date.now();
+
+  for (const ticker of tickers) {
+    const upperTicker = ticker.toUpperCase();
+
+    // Try primary cache first, then backup
+    let cached = cache.get<Quote>(`polygon:${upperTicker}`);
+    if (!cached) {
+      cached = backupCache.get<Quote>(`polygon:${upperTicker}`);
+    }
+
+    if (cached && cached.currentPrice > 0) {
+      const quoteAge = Math.floor((now - (cached.updatedAt || cached.timestamp * 1000)) / 1000);
+      quotes.set(upperTicker, {
+        ...cached,
+        isRepricing: true, // All cached quotes during backoff are repricing
+        isStale: true,
+        quoteAgeSeconds: quoteAge,
+        session,
+      });
+      repricingCount++;
+      staleCount++;
+    } else {
+      failedTickers.push(upperTicker);
+    }
+  }
+
+  return {
+    quotes,
+    staleCount,
+    repricingCount,
+    failedTickers,
+    provider: 'polygon',
+  };
+}
+
+/**
+ * Fetches a single quote from Polygon
+ */
+export async function getPolygonQuote(ticker: string): Promise<Quote> {
+  const result = await getPolygonQuotes([ticker]);
+  const upperTicker = ticker.toUpperCase();
+  const quote = result.quotes.get(upperTicker);
+
+  if (!quote) {
+    // Check backup cache one more time
+    const backup = backupCache.get<Quote>(`polygon:${upperTicker}`);
+    if (backup && backup.currentPrice > 0) {
+      const now = Date.now();
+      const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+      return {
+        ...backup,
+        isRepricing: true,
+        isStale: true,
+        quoteAgeSeconds: quoteAge,
+      };
+    }
+
+    throw new Error(`No quote available for ${upperTicker}`);
+  }
+
+  return quote;
+}
+
+export interface PolygonQuotesResult {
+  quotes: Map<string, Quote>;
+  staleCount: number;
+  repricingCount: number;
+  failedTickers: string[];
+  provider: string;
+}
+
+/**
+ * Clear primary cache (for testing)
+ */
+export function clearPolygonCache(): void {
+  cache.flushAll();
+}
+
+/**
+ * Clear all caches (for testing)
+ */
+export function clearAllPolygonCaches(): void {
+  cache.flushAll();
+  backupCache.flushAll();
+}
+
+/**
+ * Get cache stats (for debugging)
+ */
+export function getPolygonCacheStats(): { primary: number; backup: number } {
+  return {
+    primary: cache.keys().length,
+    backup: backupCache.keys().length,
+  };
+}

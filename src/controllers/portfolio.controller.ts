@@ -11,8 +11,9 @@ import {
   getRealizedProjections,
   getMetrics,
   getPaceProjection,
+  getCurrentPaceProjection,
 } from '../services/projection.service';
-import { LookbackPeriod, ProjectionMode } from '../types';
+import { LookbackPeriod, ProjectionMode, PaceWindow } from '../types';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -162,5 +163,27 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
   } catch (error) {
     console.error('Error calculating metrics:', error);
     res.status(500).json({ error: 'Failed to calculate metrics' });
+  }
+}
+
+const VALID_PACE_WINDOWS: PaceWindow[] = ['1D', '1M', '6M', '1Y', 'YTD'];
+
+export async function getCurrentPaceHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const window = ((req.query.window as string) || '1M').toUpperCase() as PaceWindow;
+
+    if (!VALID_PACE_WINDOWS.includes(window)) {
+      res.status(400).json({
+        error: `Invalid window. Must be one of: ${VALID_PACE_WINDOWS.join(', ')}`,
+      });
+      return;
+    }
+
+    const ytdMode = ((req.query.mode as string) || 'holdings').toLowerCase() as 'holdings' | 'true';
+    const result = await getCurrentPaceProjection(window, ytdMode);
+    res.json(result);
+  } catch (error) {
+    console.error('Error calculating current pace:', error);
+    res.status(500).json({ error: 'Failed to calculate current pace' });
   }
 }

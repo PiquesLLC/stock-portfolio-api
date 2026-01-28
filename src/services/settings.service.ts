@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { Settings, BaselineInput, BrokerLifetimeInput, PerformanceSummary } from '../types';
+import { Settings, BaselineInput, BrokerLifetimeInput, YtdInput, PerformanceSummary } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { getSnapshotsAfter } from './snapshot.service';
 
@@ -82,6 +82,34 @@ export async function clearBrokerLifetime(): Promise<Settings> {
     },
   });
 
+  return settings as Settings;
+}
+
+export async function setYtdData(input: YtdInput): Promise<Settings> {
+  const settings = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: {
+      ytdStartEquity: input.ytdStartEquity,
+      ytdNetContributions: input.netContributionsYTD ?? 0,
+    },
+    create: {
+      id: 'default',
+      cashBalance: 0,
+      ytdStartEquity: input.ytdStartEquity,
+      ytdNetContributions: input.netContributionsYTD ?? 0,
+    },
+  });
+  return settings as Settings;
+}
+
+export async function clearYtdData(): Promise<Settings> {
+  const settings = await prisma.settings.update({
+    where: { id: 'default' },
+    data: {
+      ytdStartEquity: null,
+      ytdNetContributions: null,
+    },
+  });
   return settings as Settings;
 }
 

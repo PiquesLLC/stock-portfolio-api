@@ -43,6 +43,15 @@ export interface Settings {
   brokerLifetimeWithdrawals: number | null;
   brokerLifetimeValue: number | null;
   brokerLifetimeAsOf: Date | null;
+
+  // YTD tracking (user-provided for True YTD)
+  ytdStartEquity: number | null;
+  ytdNetContributions: number | null;
+}
+
+export interface YtdInput {
+  ytdStartEquity: number;
+  netContributionsYTD?: number;
 }
 
 export interface SettingsUpdateInput {
@@ -231,12 +240,46 @@ export interface MetricsResponse {
   dataEndDate: string | null;
 }
 
-// Pace Projection types (MTD-based simple linear projections)
+// Current Pace Projection types (CAGR-based)
+export type PaceWindow = '1D' | '1M' | '6M' | '1Y' | 'YTD';
+
+export interface CurrentPaceResponse {
+  window: PaceWindow;
+  windowLabel: string;
+  dataStatus: 'ok' | 'insufficient' | 'no_data';
+  snapshotCount: number;
+  dataStartDate: string | null;
+  dataEndDate: string | null;
+  daysCovered: number;
+  currentAssets: number;
+  referenceAssets: number | null;
+  windowReturnPct: number | null;     // raw return over the window
+  annualizedPacePct: number | null;   // CAGR extrapolation
+  capped: boolean;                    // true if CAGR was clamped
+  projections: {
+    '1y': { value: number; gainPct: number } | null;
+    '2y': { value: number; gainPct: number } | null;
+    '5y': { value: number; gainPct: number } | null;
+    '10y': { value: number; gainPct: number } | null;
+  };
+  note: string | null;
+  // YTD-specific fields
+  ytdMode?: 'holdings' | 'true';
+  ytdDetail?: {
+    tickerCount?: number;
+    tickersCovered?: number;
+    startEquity?: number;
+    netContributions?: number;
+  };
+  trueYtdAvailable?: boolean;
+}
+
+// Legacy PaceProjection (kept for backward compat on portfolio response)
 export interface PaceProjection {
   hasData: boolean;
-  mtdReturnPct: number | null;        // Month-to-date return percentage
-  paceMonthlyPct: number | null;      // Same as MTD (the month's current performance)
-  paceAnnualPct: number | null;       // Monthly * 12
+  mtdReturnPct: number | null;
+  paceMonthlyPct: number | null;
+  paceAnnualPct: number | null;
   horizonPct: {
     '1y': number | null;
     '2y': number | null;
@@ -249,11 +292,11 @@ export interface PaceProjection {
     '5y': number | null;
     '10y': number | null;
   };
-  baselineMonthDate: string | null;   // ISO date of baseline snapshot
-  baselineMonthAssets: number | null; // Asset value at start of month
-  currentAssets: number;              // Current total assets
-  daysIntoMonth: number;              // Days elapsed in current month
-  note: string | null;                // Any warning or info message
+  baselineMonthDate: string | null;
+  baselineMonthAssets: number | null;
+  currentAssets: number;
+  daysIntoMonth: number;
+  note: string | null;
 }
 
 // Finnhub types
@@ -311,15 +354,33 @@ export interface LeakDetectorResult {
   partial: boolean;
 }
 
+export interface RiskForecastBasis {
+  lookbackDays: number;           // Actual days of data used
+  dataQuality: 'full' | 'partial' | 'fallback';
+  tickersCovered: number;         // How many tickers had data
+  tickersTotal: number;           // Total tickers in portfolio
+  note: string | null;            // Explanation of data source
+}
+
+export interface RiskForecastMetrics {
+  annualReturn: number | null;    // CAGR from historical data
+  annualVolatility: number | null;
+  maxDrawdown: number | null;
+  sharpeRatio: number | null;     // Risk-adjusted return (rf=0)
+}
+
+export interface RiskForecastScenarios {
+  optimistic: number;             // 90th percentile outcome
+  baseCase: number;               // 50th percentile outcome
+  pessimistic: number;            // 10th percentile outcome
+}
+
 export interface RiskForecast {
-  expectedAnnualVol: number | null;
-  maxDrawdown1y: number | null;
-  monteCarloBands: {
-    p10: number;  // 10th percentile (pessimistic)
-    p50: number;  // 50th percentile (base)
-    p90: number;  // 90th percentile (optimistic)
-  } | null;
-  partial: boolean;
+  status: 'ready' | 'caching' | 'insufficient';
+  basis: RiskForecastBasis;
+  metrics: RiskForecastMetrics;
+  scenarios: RiskForecastScenarios | null;
+  currentValue: number;           // Portfolio value used as starting point
 }
 
 // Goal types

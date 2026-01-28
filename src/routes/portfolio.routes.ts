@@ -7,6 +7,7 @@ import {
   getHistory,
   getProjectionsHandler,
   getMetricsHandler,
+  getCurrentPaceHandler,
 } from '../controllers/portfolio.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 
@@ -18,6 +19,7 @@ router.delete('/holdings/:ticker', removeHolding);
 router.put('/cash', setCashBalance);
 router.get('/history', getHistory);
 router.get('/projections', getProjectionsHandler);
+router.get('/projections/current-pace', getCurrentPaceHandler);
 router.get('/metrics', getMetricsHandler);
 router.get('/summary', getSummaryHandler);
 

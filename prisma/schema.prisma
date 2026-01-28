@@ -46,6 +46,10 @@ model Settings {
   brokerLifetimeWithdrawals Float?
   brokerLifetimeValue       Float?
   brokerLifetimeAsOf        DateTime?
+
+  // Optional YTD tracking (user-provided for True YTD calculation)
+  ytdStartEquity      Float?    // Net equity on Jan 1
+  ytdNetContributions  Float?    // Deposits - withdrawals since Jan 1
 }
 
 model DividendEvent {
