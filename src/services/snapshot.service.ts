@@ -141,6 +141,30 @@ export async function getSnapshotCount(): Promise<number> {
   return prisma.portfolioSnapshot.count({ where: { userId: null } });
 }
 
+/**
+ * Get the snapshot closest to AND at-or-before the target time.
+ * Returns null if no snapshot exists before targetTime.
+ */
+export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSnapshot | null> {
+  return prisma.portfolioSnapshot.findFirst({
+    where: {
+      userId: null,
+      timestamp: { lte: targetTime },
+    },
+    orderBy: { timestamp: 'desc' },
+  });
+}
+
+/**
+ * Get the oldest snapshot (earliest timestamp) for the default user.
+ */
+export async function getOldestSnapshot(): Promise<PortfolioSnapshot | null> {
+  return prisma.portfolioSnapshot.findFirst({
+    where: { userId: null },
+    orderBy: { timestamp: 'asc' },
+  });
+}
+
 // Utility to clean up duplicate snapshots (for fixing existing data)
 export async function cleanupDuplicateSnapshots(): Promise<number> {
   // Get all snapshots

@@ -12,7 +12,7 @@ import {
   Portfolio,
 } from '../types';
 import { getPortfolio } from './portfolio.service';
-import { getSnapshotsAfter, getAllSnapshots } from './snapshot.service';
+import { getSnapshotsAfter, getAllSnapshots, getBaselineSnapshot, getOldestSnapshot } from './snapshot.service';
 import { getTotalDividendsBetween } from './dividend.service';
 import { getSettings } from './settings.service';
 import { getMultipleCandlesGradual } from '../utils/candle-cache';
@@ -469,55 +469,6 @@ const WINDOW_LABELS: Record<PaceWindow, string> = {
   'YTD': 'Year-to-Date',
 };
 
-const MIN_SNAPSHOTS: Record<PaceWindow, number> = {
-  '1D': 1,   // 1D uses latestSnapshot.dailyPLPercent, just need 1 snapshot
-  '1M': 2,
-  '6M': 2,
-  '1Y': 2,
-  'YTD': 2,
-};
-
-// Caps applied ONLY to annualized projection CAGR, never to displayed windowReturn
-const PROJECTION_CAGR_CAP: Record<PaceWindow, number> = {
-  '1D': 5.0,   // ±500% (1D annualized is inherently volatile)
-  '1M': 3.0,   // ±300%
-  '6M': 2.0,   // ±200%
-  '1Y': 1.5,   // ±150%
-  'YTD': 2.0,  // ±200%
-};
-
-function getWindowStartDate(window: PaceWindow): Date {
-  const now = new Date();
-  switch (window) {
-    case '1D': {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 1);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case '1M': {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 30);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case '6M': {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 182);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case '1Y': {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 365);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    case 'YTD': {
-      return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-    }
-  }
-}
 
 // ============================================================================
 // YTD HELPERS
@@ -578,6 +529,7 @@ async function computeHoldingsYtd(portfolio: Portfolio): Promise<CurrentPaceResp
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: 'Add holdings to see YTD returns.',
+      estimated: false, estimatedReason: null,
       ytdMode: 'holdings', trueYtdAvailable,
     };
   }
@@ -627,6 +579,7 @@ async function computeHoldingsYtd(portfolio: Portfolio): Promise<CurrentPaceResp
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: `No YTD price data available yet. Candle data may still be loading.`,
+      estimated: false, estimatedReason: null,
       ytdMode: 'holdings', trueYtdAvailable,
       ytdDetail: { tickerCount: tickers.length, tickersCovered: 0 },
     };
@@ -659,6 +612,7 @@ async function computeHoldingsYtd(portfolio: Portfolio): Promise<CurrentPaceResp
     capped,
     projections: makeProjections(currentAssets, cagr),
     note: 'Assumes today\'s holdings were held since Jan 1. Does not reflect buys/sells/deposits.',
+    estimated: false, estimatedReason: null,
     ytdMode: 'holdings',
     trueYtdAvailable,
     ytdDetail: { tickerCount: tickers.length, tickersCovered },
@@ -677,6 +631,7 @@ async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: 'Enter Jan 1 equity to see True YTD.',
+      estimated: false, estimatedReason: null,
       ytdMode: 'true', trueYtdAvailable: false,
     };
   }
@@ -693,6 +648,7 @@ async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: 'Start equity must be positive.',
+      estimated: false, estimatedReason: null,
       ytdMode: 'true', trueYtdAvailable: true,
     };
   }
@@ -707,6 +663,7 @@ async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
       note: 'Cannot compute return: adjusted start equity is zero or negative.',
+      estimated: false, estimatedReason: null,
       ytdMode: 'true', trueYtdAvailable: true,
     };
   }
@@ -737,6 +694,7 @@ async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse
     capped,
     projections: makeProjections(currentAssets, cagr),
     note: capped ? 'Annualized projection capped at ±200%.' : null,
+    estimated: false, estimatedReason: null,
     ytdMode: 'true',
     trueYtdAvailable: true,
     ytdDetail: { startEquity, netContributions: flows },
@@ -773,29 +731,26 @@ export async function getCurrentPaceProjection(
     capped: false,
     projections: { '1y': null, '2y': null, '5y': null, '10y': null },
     note,
+    estimated: false,
+    estimatedReason: null,
   });
 
-  // ---- 1D special path: use LIVE portfolio dayChangePercent (same as Day Change card) ----
+  // ---- 1D: use LIVE portfolio dayChangePercent (same as Day Change card) ----
   if (window === '1D') {
-    // Use the live portfolio's dayChangePercent directly so 1D return always matches
-    // the Day Change summary card. No snapshot lag.
-    const windowReturnDecimal = portfolio.dayChangePercent / 100;
-    const windowReturnPct = Math.round(windowReturnDecimal * 10000) / 100;
+    const windowReturn = portfolio.dayChangePercent / 100;
+    const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
     // Reference = current assets minus today's change
     const referenceAssets = portfolio.dayChange !== 0
       ? currentAssets - portfolio.dayChange
       : currentAssets;
 
-    // Annualize: (1 + r)^252 - 1  (252 trading days)
-    let cagr = Math.pow(1 + windowReturnDecimal, 252) - 1;
-    let capped = false;
-    const cap = PROJECTION_CAGR_CAP['1D'];
-    if (cagr > cap) { cagr = cap; capped = true; }
-    if (cagr < -cap) { cagr = -cap; capped = true; }
-    if (!isFinite(cagr) || isNaN(cagr)) { cagr = 0; capped = true; }
+    // Annualize using same formula as all other windows: (1+r)^(365/targetDays) - 1
+    // For 1D: targetDays=1, so annualized = (1+r)^365 - 1
+    let annualizedPace = Math.pow(1 + windowReturn, 365) - 1;
+    if (!isFinite(annualizedPace) || isNaN(annualizedPace)) { annualizedPace = 0; }
 
-    const annualizedPacePct = Math.round(cagr * 10000) / 100;
+    const annualizedPacePct = Math.round(annualizedPace * 10000) / 100;
 
     return {
       window,
@@ -809,76 +764,133 @@ export async function getCurrentPaceProjection(
       referenceAssets: Math.round(referenceAssets * 100) / 100,
       windowReturnPct,
       annualizedPacePct,
-      capped,
-      projections: makeProjections(currentAssets, cagr),
-      note: capped ? `Annualized projection capped at ±${cap * 100}% for ${WINDOW_LABELS[window]} window.` : null,
+      capped: false,
+      projections: makeProjections(currentAssets, annualizedPace),
+      note: null,
+      estimated: false,
+      estimatedReason: null,
     };
   }
 
-  // ---- Non-1D windows: snapshot-based return ----
-  const startDate = getWindowStartDate(window);
-  const snapshots = await getSnapshotsAfter(startDate);
+  // ---- Non-1D windows: ONE consistent pipeline ----
+  //
+  // Pipeline:
+  //   1. Find baseline snapshot for the selected window
+  //   2. Compute windowReturn = (currentAssets / baselineAssets) - 1
+  //   3. Annualize: annualizedPace = (1 + windowReturn)^(365/targetDays) - 1
+  //   4. Project: projectedValue(Y) = currentAssets * (1 + annualizedPace)^Y
+  //
+  // If no baseline exists for the requested window, estimate from best available
+  // history using geometric scaling, label as "Est.".
 
-  if (snapshots.length === 0) {
+  const WINDOW_DAYS: Record<string, number> = { '1M': 30, '6M': 182, '1Y': 365 };
+  const targetDays = WINDOW_DAYS[window] ?? 30;
+  const targetTime = new Date(Date.now() - targetDays * 24 * 60 * 60 * 1000);
+
+  // Find baseline snapshot at-or-before the target time
+  const baselineSnap = await getBaselineSnapshot(targetTime);
+
+  // Also find the oldest snapshot in case we need fallback
+  const oldestSnap = await getOldestSnapshot();
+  if (!oldestSnap) {
     return emptyResponse('no_data', `No snapshots available for ${WINDOW_LABELS[window]} window.`);
   }
 
-  if (snapshots.length < MIN_SNAPSHOTS[window]) {
-    return emptyResponse(
-      'insufficient',
-      `Not enough data for ${WINDOW_LABELS[window]} yet (have ${snapshots.length} snapshot${snapshots.length !== 1 ? 's' : ''}).`,
-      snapshots
-    );
+  const nowMs = Date.now();
+
+  // Determine baseline assets and whether this is estimated
+  let baselineAssets: number;
+  let baselineTimestamp: Date;
+  let isEstimated: boolean;
+  let estimatedFromDays: number;
+  let estimatedReason: string | null;
+  let snapshotCount: number;
+
+  if (baselineSnap && baselineSnap.totalValue > 0) {
+    // We have a real baseline snapshot for this window
+    baselineAssets = baselineSnap.totalValue;
+    baselineTimestamp = baselineSnap.timestamp;
+    isEstimated = false;
+    estimatedFromDays = 0;
+    estimatedReason = null;
+
+    // Count snapshots in the window for the footer
+    const windowSnapshots = await getSnapshotsAfter(new Date(baselineSnap.timestamp));
+    snapshotCount = windowSnapshots.length;
+  } else {
+    // No baseline for the requested window — use earliest available snapshot
+    baselineAssets = oldestSnap.totalValue;
+    baselineTimestamp = oldestSnap.timestamp;
+    isEstimated = true;
+    estimatedFromDays = 1; // Using today's live return as basis
+    estimatedReason = `Estimated from today's return, scaled to ${targetDays} days.`;
+
+    const windowSnapshots = await getSnapshotsAfter(new Date(oldestSnap.timestamp));
+    snapshotCount = windowSnapshots.length;
   }
 
-  const refSnapshot = snapshots[0];
-  const referenceAssets = refSnapshot.totalValue;
-
-  if (referenceAssets <= 0) {
-    return emptyResponse('insufficient', 'Reference snapshot has zero value.', snapshots);
+  if (baselineAssets <= 0) {
+    return emptyResponse('insufficient', 'Baseline snapshot has zero value.');
   }
 
-  // Use LIVE currentAssets (not latest snapshot) so return matches the portfolio summary
-  const startMs = new Date(refSnapshot.timestamp).getTime();
-  const endMs = Date.now();
-  const daysCovered = Math.max(1, (endMs - startMs) / (1000 * 60 * 60 * 24));
+  const actualSpanDays = Math.max(1, (nowMs - new Date(baselineTimestamp).getTime()) / (1000 * 60 * 60 * 24));
 
-  // Window return: live assets vs reference snapshot
-  const windowReturn = (currentAssets - referenceAssets) / referenceAssets;
+  // ---- Step A+B: Compute window return ----
+  let windowReturn: number;
+  if (!isEstimated) {
+    // Real baseline exists for this window — direct return
+    windowReturn = (currentAssets - baselineAssets) / baselineAssets;
+  } else {
+    // No baseline for requested window. Use live daily return (same as Day Change
+    // card) and scale geometrically. We do NOT use oldest-snapshot-to-now return
+    // because that span may include deposits/withdrawals, producing a fake return.
+    const dailyReturn = portfolio.dayChangePercent / 100;
+    windowReturn = Math.pow(1 + dailyReturn, targetDays) - 1;
+  }
+
+  // Safety: clamp extreme windowReturn for sanity
+  if (!isFinite(windowReturn) || isNaN(windowReturn)) {
+    windowReturn = 0;
+  }
+
   const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
-  // CAGR = (endValue / startValue)^(365/days) - 1
-  const ratio = currentAssets / referenceAssets;
-  let cagr: number;
-  if (ratio <= 0) {
-    cagr = -0.99;
-  } else {
-    cagr = Math.pow(ratio, 365 / daysCovered) - 1;
+  // ---- Step C: Annualized Pace from the SAME windowReturn ----
+  let annualizedPace = Math.pow(1 + windowReturn, 365 / targetDays) - 1;
+
+  // Safety: handle non-finite
+  if (!isFinite(annualizedPace) || isNaN(annualizedPace)) {
+    annualizedPace = 0;
   }
 
-  // Cap ONLY the annualized projection CAGR
-  const cap = PROJECTION_CAGR_CAP[window];
-  let capped = false;
-  if (cagr > cap) { cagr = cap; capped = true; }
-  if (cagr < -cap) { cagr = -cap; capped = true; }
-  if (!isFinite(cagr) || isNaN(cagr)) { cagr = 0; capped = true; }
+  const annualizedPacePct = Math.round(annualizedPace * 10000) / 100;
 
-  const annualizedPacePct = Math.round(cagr * 10000) / 100;
+  // ---- Step D: Projections from the SAME annualizedPace ----
+  const projections = makeProjections(currentAssets, annualizedPace);
+
+  // ---- Build notes ----
+  const notes: string[] = [];
+  if (isEstimated) notes.push(estimatedReason!);
+  if (isEstimated && estimatedFromDays < 7) {
+    notes.push('Low confidence: limited history. Projections can swing.');
+  }
 
   return {
     window,
     windowLabel: WINDOW_LABELS[window],
     dataStatus: 'ok',
-    snapshotCount: snapshots.length,
-    dataStartDate: refSnapshot.timestamp.toISOString(),
+    snapshotCount,
+    dataStartDate: baselineTimestamp.toISOString(),
     dataEndDate: new Date().toISOString(),
-    daysCovered: Math.round(daysCovered * 10) / 10,
+    daysCovered: Math.round(actualSpanDays * 10) / 10,
     currentAssets: Math.round(currentAssets * 100) / 100,
-    referenceAssets: Math.round(referenceAssets * 100) / 100,
+    referenceAssets: Math.round(baselineAssets * 100) / 100,
     windowReturnPct,
     annualizedPacePct,
-    capped,
-    projections: makeProjections(currentAssets, cagr),
-    note: capped ? `Annualized projection capped at ±${cap * 100}% for ${WINDOW_LABELS[window]} window.` : null,
+    capped: false,
+    projections,
+    note: notes.length > 0 ? notes.join(' ') : null,
+    estimated: isEstimated,
+    estimatedReason,
   };
 }

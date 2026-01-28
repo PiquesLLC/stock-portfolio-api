@@ -263,6 +263,8 @@ export interface CurrentPaceResponse {
     '10y': { value: number; gainPct: number } | null;
   };
   note: string | null;
+  estimated: boolean;               // true if return is estimated from shorter history
+  estimatedReason: string | null;   // explanation when estimated
   // YTD-specific fields
   ytdMode?: 'holdings' | 'true';
   ytdDetail?: {
