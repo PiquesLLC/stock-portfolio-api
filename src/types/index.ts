@@ -24,10 +24,75 @@ export interface PortfolioSnapshot {
   totalPLPercent: number;
 }
 
+export type BaselineType = 'fresh_start' | 'existing_portfolio';
+
 export interface Settings {
   id: string;
   cashBalance: number;
+  marginDebt: number;
   updatedAt: Date;
+
+  // Baseline tracking
+  trackingStartDate: Date | null;
+  baselineTotalValue: number | null;
+  baselineCashBalance: number | null;
+  baselineType: string | null; // 'fresh_start' | 'existing_portfolio'
+
+  // Broker lifetime stats (user-provided)
+  brokerLifetimeDeposits: number | null;
+  brokerLifetimeWithdrawals: number | null;
+  brokerLifetimeValue: number | null;
+  brokerLifetimeAsOf: Date | null;
+}
+
+export interface SettingsUpdateInput {
+  cashBalance?: number;
+  marginDebt?: number;
+}
+
+export interface BaselineInput {
+  type: BaselineType;
+  // For existing_portfolio, current holdings/cash will be used
+  // For fresh_start, baseline is set to 0 (or current if they add holdings first)
+}
+
+export interface BrokerLifetimeInput {
+  deposits: number;
+  withdrawals: number;
+  currentValue: number;
+}
+
+export interface PerformanceSummary {
+  // Since Tracking Start (snapshot-based)
+  sinceTracking: {
+    hasBaseline: boolean;
+    startDate: string | null;
+    startingValue: number | null;
+    currentValue: number;
+    absoluteReturn: number | null;
+    percentReturn: number | null;
+    snapshotCount: number;
+  };
+
+  // Current Holdings P/L (unrealized, from holdings)
+  holdingsPL: {
+    totalCost: number;
+    currentValue: number;
+    unrealizedPL: number;
+    unrealizedPLPercent: number;
+  };
+
+  // Broker Lifetime (optional, user-provided)
+  brokerLifetime: {
+    hasData: boolean;
+    deposits: number | null;
+    withdrawals: number | null;
+    currentValue: number | null;
+    netContributions: number | null;
+    absoluteReturn: number | null;
+    percentReturn: number | null;
+    asOf: string | null;
+  } | null;
 }
 
 export interface Quote {
@@ -59,7 +124,10 @@ export interface HoldingWithQuote extends Holding {
 export interface Portfolio {
   holdings: HoldingWithQuote[];
   cashBalance: number;
-  totalValue: number;
+  marginDebt: number;
+  holdingsValue: number;    // sum of all holdings market values
+  netEquity: number;        // holdingsValue + cashBalance - marginDebt
+  totalValue: number;       // same as netEquity (for backward compatibility)
   totalCost: number;
   totalPL: number;
   totalPLPercent: number;

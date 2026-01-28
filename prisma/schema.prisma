@@ -32,7 +32,20 @@ model PortfolioSnapshot {
 model Settings {
   id          String   @id @default("default")
   cashBalance Float    @default(0)
+  marginDebt  Float    @default(0)
   updatedAt   DateTime @updatedAt
+
+  // Baseline tracking for performance measurement
+  trackingStartDate   DateTime?
+  baselineTotalValue  Float?
+  baselineCashBalance Float?
+  baselineType        String?   // 'fresh_start' | 'existing_portfolio'
+
+  // Optional broker lifetime stats (user-provided, display-only)
+  brokerLifetimeDeposits    Float?
+  brokerLifetimeWithdrawals Float?
+  brokerLifetimeValue       Float?
+  brokerLifetimeAsOf        DateTime?
 }
 
 model DividendEvent {

@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { fetchPrices } from './market.service';
-import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings } from '../types';
+import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings, SettingsUpdateInput } from '../types';
 
 const prisma = new PrismaClient();
 
@@ -40,29 +40,54 @@ export async function getSettings(): Promise<Settings> {
 
   if (!settings) {
     settings = await prisma.settings.create({
-      data: { id: 'default', cashBalance: 0 },
+      data: { id: 'default', cashBalance: 0, marginDebt: 0 },
     });
   }
 
-  return settings;
+  return settings as Settings;
 }
 
 export async function updateCashBalance(cashBalance: number): Promise<Settings> {
-  return prisma.settings.upsert({
+  const result = await prisma.settings.upsert({
     where: { id: 'default' },
     update: { cashBalance },
-    create: { id: 'default', cashBalance },
+    create: { id: 'default', cashBalance, marginDebt: 0 },
   });
+  return result as Settings;
+}
+
+export async function updateSettings(input: SettingsUpdateInput): Promise<Settings> {
+  const updateData: Record<string, number> = {};
+
+  if (input.cashBalance !== undefined) {
+    updateData.cashBalance = input.cashBalance;
+  }
+  if (input.marginDebt !== undefined) {
+    updateData.marginDebt = input.marginDebt;
+  }
+
+  const result = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: updateData,
+    create: { id: 'default', cashBalance: input.cashBalance ?? 0, marginDebt: input.marginDebt ?? 0 },
+  });
+  return result as Settings;
 }
 
 export async function getPortfolio(): Promise<Portfolio> {
   const [holdings, settings] = await Promise.all([getHoldings(), getSettings()]);
 
+  const marginDebt = settings.marginDebt ?? 0;
+
   if (holdings.length === 0) {
+    const netEquity = settings.cashBalance - marginDebt;
     return {
       holdings: [],
       cashBalance: settings.cashBalance,
-      totalValue: settings.cashBalance,
+      marginDebt,
+      holdingsValue: 0,
+      netEquity,
+      totalValue: netEquity,
       totalCost: 0,
       totalPL: 0,
       totalPLPercent: 0,
@@ -76,7 +101,7 @@ export async function getPortfolio(): Promise<Portfolio> {
   const tickers = holdings.map((h) => h.ticker);
   const { quotes, staleCount, failedTickers } = await fetchPrices(tickers);
 
-  let totalValue = settings.cashBalance;
+  let holdingsValue = 0;
   let totalCost = 0;
   let dayChange = 0;
   let hasStaleQuotes = staleCount > 0;
@@ -112,7 +137,7 @@ export async function getPortfolio(): Promise<Portfolio> {
 
     // Only add to totals if we have valid price data
     if (hasValidPrice) {
-      totalValue += currentValue;
+      holdingsValue += currentValue;
       dayChange += holdingDayChange;
     }
     totalCost += holdingTotalCost;
@@ -132,16 +157,24 @@ export async function getPortfolio(): Promise<Portfolio> {
   });
 
   // Calculate portfolio totals
-  // Note: totalValue now only includes holdings with valid prices + cash
-  const totalPL = totalValue - totalCost - settings.cashBalance;
+  // netEquity = holdingsValue + cashBalance - marginDebt
+  const netEquity = holdingsValue + settings.cashBalance - marginDebt;
+
+  // Total P/L is unrealized P/L from holdings (market value - cost basis)
+  const totalPL = holdingsValue - totalCost;
   const totalPLPercent = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
-  const previousTotalValue = totalValue - dayChange;
-  const dayChangePercent = previousTotalValue > 0 ? (dayChange / previousTotalValue) * 100 : 0;
+
+  // Day change is based on holdings price movement
+  const previousHoldingsValue = holdingsValue - dayChange;
+  const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
 
   return {
     holdings: holdingsWithQuotes,
     cashBalance: settings.cashBalance,
-    totalValue,
+    marginDebt,
+    holdingsValue,
+    netEquity,
+    totalValue: netEquity, // backward compatibility
     totalCost,
     totalPL,
     totalPLPercent,

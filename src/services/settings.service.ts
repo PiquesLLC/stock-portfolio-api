@@ -1,0 +1,162 @@
+import { PrismaClient } from '@prisma/client';
+import { Settings, BaselineInput, BrokerLifetimeInput, PerformanceSummary } from '../types';
+import { getPortfolio } from './portfolio.service';
+import { getSnapshotsAfter } from './snapshot.service';
+
+const prisma = new PrismaClient();
+
+export async function getSettings(): Promise<Settings> {
+  let settings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+  });
+
+  if (!settings) {
+    settings = await prisma.settings.create({
+      data: { id: 'default', cashBalance: 0 },
+    });
+  }
+
+  return settings as Settings;
+}
+
+export async function setBaseline(input: BaselineInput): Promise<Settings> {
+  const portfolio = await getPortfolio();
+  const now = new Date();
+
+  // Set baseline based on current portfolio state
+  const baselineTotalValue = portfolio.totalValue;
+  const baselineCashBalance = portfolio.cashBalance;
+
+  const settings = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: {
+      trackingStartDate: now,
+      baselineTotalValue,
+      baselineCashBalance,
+      baselineType: input.type,
+    },
+    create: {
+      id: 'default',
+      cashBalance: portfolio.cashBalance,
+      trackingStartDate: now,
+      baselineTotalValue,
+      baselineCashBalance,
+      baselineType: input.type,
+    },
+  });
+
+  return settings as Settings;
+}
+
+export async function setBrokerLifetime(input: BrokerLifetimeInput): Promise<Settings> {
+  const settings = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: {
+      brokerLifetimeDeposits: input.deposits,
+      brokerLifetimeWithdrawals: input.withdrawals,
+      brokerLifetimeValue: input.currentValue,
+      brokerLifetimeAsOf: new Date(),
+    },
+    create: {
+      id: 'default',
+      cashBalance: 0,
+      brokerLifetimeDeposits: input.deposits,
+      brokerLifetimeWithdrawals: input.withdrawals,
+      brokerLifetimeValue: input.currentValue,
+      brokerLifetimeAsOf: new Date(),
+    },
+  });
+
+  return settings as Settings;
+}
+
+export async function clearBrokerLifetime(): Promise<Settings> {
+  const settings = await prisma.settings.update({
+    where: { id: 'default' },
+    data: {
+      brokerLifetimeDeposits: null,
+      brokerLifetimeWithdrawals: null,
+      brokerLifetimeValue: null,
+      brokerLifetimeAsOf: null,
+    },
+  });
+
+  return settings as Settings;
+}
+
+export async function getPerformanceSummary(): Promise<PerformanceSummary> {
+  const [settings, portfolio] = await Promise.all([
+    getSettings(),
+    getPortfolio(),
+  ]);
+
+  // Calculate holdings P/L (unrealized)
+  const holdingsPL = {
+    totalCost: portfolio.totalCost,
+    currentValue: portfolio.totalValue - portfolio.cashBalance, // Just holdings, not cash
+    unrealizedPL: portfolio.totalPL,
+    unrealizedPLPercent: portfolio.totalPLPercent,
+  };
+
+  // Calculate since tracking start
+  let sinceTracking: PerformanceSummary['sinceTracking'];
+
+  if (settings.trackingStartDate && settings.baselineTotalValue !== null) {
+    // Get snapshots since tracking start
+    const snapshots = await getSnapshotsAfter(settings.trackingStartDate);
+
+    const startingValue = settings.baselineTotalValue;
+    const currentValue = portfolio.totalValue;
+    const absoluteReturn = currentValue - startingValue;
+    const percentReturn = startingValue > 0 ? (absoluteReturn / startingValue) * 100 : 0;
+
+    sinceTracking = {
+      hasBaseline: true,
+      startDate: settings.trackingStartDate.toISOString(),
+      startingValue,
+      currentValue,
+      absoluteReturn,
+      percentReturn,
+      snapshotCount: snapshots.length,
+    };
+  } else {
+    sinceTracking = {
+      hasBaseline: false,
+      startDate: null,
+      startingValue: null,
+      currentValue: portfolio.totalValue,
+      absoluteReturn: null,
+      percentReturn: null,
+      snapshotCount: 0,
+    };
+  }
+
+  // Broker lifetime (optional)
+  let brokerLifetime: PerformanceSummary['brokerLifetime'] = null;
+
+  if (settings.brokerLifetimeDeposits !== null && settings.brokerLifetimeValue !== null) {
+    const deposits = settings.brokerLifetimeDeposits;
+    const withdrawals = settings.brokerLifetimeWithdrawals ?? 0;
+    const currentValue = settings.brokerLifetimeValue;
+    const netContributions = deposits - withdrawals;
+    const absoluteReturn = currentValue - netContributions;
+    const percentReturn = netContributions > 0 ? (absoluteReturn / netContributions) * 100 : 0;
+
+    brokerLifetime = {
+      hasData: true,
+      deposits,
+      withdrawals,
+      currentValue,
+      netContributions,
+      absoluteReturn,
+      percentReturn,
+      asOf: settings.brokerLifetimeAsOf?.toISOString() ?? null,
+    };
+  }
+
+  return {
+    sinceTracking,
+    holdingsPL,
+    brokerLifetime,
+  };
+}

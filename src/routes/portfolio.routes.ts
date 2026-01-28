@@ -8,6 +8,7 @@ import {
   getProjectionsHandler,
   getMetricsHandler,
 } from '../controllers/portfolio.controller';
+import { getSummaryHandler } from '../controllers/settings.controller';
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.put('/cash', setCashBalance);
 router.get('/history', getHistory);
 router.get('/projections', getProjectionsHandler);
 router.get('/metrics', getMetricsHandler);
+router.get('/summary', getSummaryHandler);
 
 export default router;
