@@ -179,8 +179,7 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const ytdMode = ((req.query.mode as string) || 'holdings').toLowerCase() as 'holdings' | 'true';
-    const result = await getCurrentPaceProjection(window, ytdMode);
+    const result = await getCurrentPaceProjection(window);
     res.json(result);
   } catch (error) {
     console.error('Error calculating current pace:', error);

@@ -745,17 +745,13 @@ async function computeTrueYtd(portfolio: Portfolio): Promise<CurrentPaceResponse
 
 export async function getCurrentPaceProjection(
   window: PaceWindow = '1M',
-  ytdMode: 'holdings' | 'true' = 'holdings'
 ): Promise<CurrentPaceResponse> {
   const portfolio = await getPortfolio();
   const currentAssets = portfolio.totalAssets;
 
-  // ---- YTD: delegate to specialized functions ----
+  // ---- YTD: always use True YTD (Modified Dietz) ----
   if (window === 'YTD') {
-    if (ytdMode === 'true') {
-      return computeTrueYtd(portfolio);
-    }
-    return computeHoldingsYtd(portfolio);
+    return computeTrueYtd(portfolio);
   }
 
   const emptyResponse = (
