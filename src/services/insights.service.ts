@@ -13,9 +13,13 @@ import {
   Attribution,
   LeakDetectorResult,
   RiskForecast,
+  RiskForecastBasis,
+  RiskForecastMetrics,
+  RiskForecastScenarios,
   HoldingWithQuote,
 } from '../types';
 import { config } from '../config';
+import { getSector } from '../utils/sectors';
 
 const prisma = new PrismaClient();
 
@@ -147,31 +151,13 @@ function estimateSectorDiversification(holdings: HoldingWithQuote[]): {
   effectiveDiversification: number;
   sectorConcentration: { sector: string; percent: number }[];
 } {
-  // Simple sector grouping by ticker patterns
-  // This is a heuristic - real implementation would use sector data
-  const sectorGroups: Record<string, string[]> = {
-    'Tech': ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'META', 'AMZN', 'NVDA', 'AMD', 'INTC', 'TSLA', 'CRM', 'ORCL', 'ADBE', 'NFLX'],
-    'Finance': ['JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'V', 'MA', 'AXP', 'BRK.A', 'BRK.B', 'SCHW', 'BLK'],
-    'Healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'ABT', 'DHR', 'BMY', 'AMGN', 'CVS'],
-    'Energy': ['XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'KMI'],
-    'Consumer': ['WMT', 'PG', 'KO', 'PEP', 'COST', 'HD', 'NKE', 'MCD', 'SBUX', 'TGT', 'LOW'],
-    'Industrial': ['CAT', 'DE', 'BA', 'HON', 'UPS', 'LMT', 'GE', 'RTX', 'MMM', 'UNP'],
-    'ETF/Index': ['SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'AGG', 'VNQ', 'XLF', 'XLK', 'XLE'],
-  };
-
   const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   if (totalValue === 0) return { apparentDiversification: 0, effectiveDiversification: 0, sectorConcentration: [] };
 
   const sectorValues = new Map<string, number>();
 
   for (const holding of holdings) {
-    let sector = 'Other';
-    for (const [s, tickers] of Object.entries(sectorGroups)) {
-      if (tickers.includes(holding.ticker.toUpperCase())) {
-        sector = s;
-        break;
-      }
-    }
+    const sector = getSector(holding.ticker);
     sectorValues.set(sector, (sectorValues.get(sector) || 0) + holding.currentValue);
   }
 
@@ -647,12 +633,175 @@ export async function getLeakDetector(): Promise<LeakDetectorResult> {
 }
 
 // ============================================================================
-// RISK FORECAST (MONTE CARLO) - WITH GRACEFUL DEGRADATION
+// RISK FORECAST (MONTE CARLO) - PORTFOLIO-SPECIFIC STATISTICS
 // ============================================================================
 
-// S&P 500 historical stats (fallback values)
-const SPY_ANNUAL_VOL = 0.16; // ~16% annualized volatility
-const SPY_ANNUAL_RETURN = config.sp500CagrTotalReturn || 0.10;
+// Configuration for Monte Carlo
+const MONTE_CARLO_SIMULATIONS = 5000;  // Number of simulation paths
+const TRADING_DAYS_PER_YEAR = 252;
+const RISK_FREE_RATE = 0.0;  // Assume 0 for Sharpe ratio (simplicity)
+
+// Target lookback periods (in trading days)
+const TARGET_LOOKBACK_1Y = 252;
+const TARGET_LOOKBACK_6M = 126;
+const TARGET_LOOKBACK_90D = 63;
+const MIN_LOOKBACK_DAYS = 60;  // Minimum days needed for any analysis
+
+/**
+ * Calculate portfolio daily returns with forward-fill for missing data.
+ * Returns { returns, lookbackDays, tickersCovered }
+ */
+function calculatePortfolioReturnsWithForwardFill(
+  holdings: HoldingWithQuote[],
+  candleData: Map<string, HistoricalCandles>,
+  targetDays: number
+): { returns: number[]; lookbackDays: number; tickersCovered: number } {
+  const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
+  if (totalValue === 0) {
+    return { returns: [], lookbackDays: 0, tickersCovered: 0 };
+  }
+
+  // Collect all available returns with their weights
+  const holdingData: { weight: number; returns: number[]; ticker: string }[] = [];
+  let maxLength = 0;
+
+  for (const holding of holdings) {
+    const candles = candleData.get(holding.ticker);
+    if (!candles || candles.partial || candles.returns.length < MIN_LOOKBACK_DAYS) continue;
+
+    const weight = holding.currentValue / totalValue;
+    holdingData.push({
+      weight,
+      returns: candles.returns,
+      ticker: holding.ticker,
+    });
+    maxLength = Math.max(maxLength, candles.returns.length);
+  }
+
+  if (holdingData.length === 0) {
+    return { returns: [], lookbackDays: 0, tickersCovered: 0 };
+  }
+
+  // Use the shorter of maxLength or targetDays
+  const lookbackDays = Math.min(maxLength, targetDays);
+
+  // Build portfolio returns using forward-fill for missing data
+  const portfolioReturns: number[] = [];
+
+  for (let i = 0; i < lookbackDays; i++) {
+    let dayReturn = 0;
+    let totalWeightUsed = 0;
+
+    for (const hd of holdingData) {
+      // Calculate index from the end of each return series
+      const idx = hd.returns.length - lookbackDays + i;
+
+      if (idx >= 0 && idx < hd.returns.length) {
+        // We have data for this day
+        dayReturn += hd.weight * hd.returns[idx];
+        totalWeightUsed += hd.weight;
+      } else {
+        // Forward-fill: use 0 return (hold position flat)
+        totalWeightUsed += hd.weight;
+      }
+    }
+
+    // Normalize if not all weight was used
+    if (totalWeightUsed > 0 && totalWeightUsed < 0.99) {
+      dayReturn = dayReturn / totalWeightUsed;
+    }
+
+    portfolioReturns.push(dayReturn);
+  }
+
+  return {
+    returns: portfolioReturns,
+    lookbackDays,
+    tickersCovered: holdingData.length,
+  };
+}
+
+/**
+ * Calculate annualized return (CAGR) from daily returns
+ */
+function calculateAnnualizedReturn(returns: number[]): number | null {
+  if (returns.length < MIN_LOOKBACK_DAYS) return null;
+
+  // Calculate cumulative return
+  let cumulative = 1;
+  for (const r of returns) {
+    cumulative *= (1 + r);
+  }
+
+  // Annualize: (1 + total_return)^(252/days) - 1
+  const totalReturn = cumulative - 1;
+  const years = returns.length / TRADING_DAYS_PER_YEAR;
+  const annualized = Math.pow(1 + totalReturn, 1 / years) - 1;
+
+  return annualized;
+}
+
+/**
+ * Calculate Sharpe ratio (assuming rf=0)
+ */
+function calculateSharpeRatio(returns: number[], annualVol: number | null): number | null {
+  if (returns.length < MIN_LOOKBACK_DAYS || annualVol === null || annualVol === 0) return null;
+
+  const annualReturn = calculateAnnualizedReturn(returns);
+  if (annualReturn === null) return null;
+
+  // Sharpe = (return - rf) / volatility
+  return (annualReturn - RISK_FREE_RATE) / annualVol;
+}
+
+/**
+ * Run Monte Carlo simulation using Geometric Brownian Motion (GBM)
+ * Uses portfolio-specific mu (mean return) and sigma (volatility)
+ */
+function runMonteCarloGBM(
+  currentValue: number,
+  dailyMean: number,
+  dailyVol: number,
+  numPaths: number,
+  horizonDays: number
+): { optimistic: number; baseCase: number; pessimistic: number } {
+  const finalValues: number[] = [];
+
+  // GBM: S(t+dt) = S(t) * exp((mu - 0.5*sigma^2)*dt + sigma*sqrt(dt)*Z)
+  // For daily steps, dt = 1/252, but we use daily parameters directly
+  const drift = dailyMean - 0.5 * dailyVol * dailyVol;
+
+  for (let sim = 0; sim < numPaths; sim++) {
+    let value = currentValue;
+
+    for (let day = 0; day < horizonDays; day++) {
+      // Box-Muller transform for normal random
+      const u1 = Math.random();
+      const u2 = Math.random();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+
+      // GBM step
+      const logReturn = drift + dailyVol * z;
+      value *= Math.exp(logReturn);
+    }
+
+    finalValues.push(value);
+  }
+
+  // Sort for percentile calculation
+  finalValues.sort((a, b) => a - b);
+
+  const percentile = (arr: number[], p: number): number => {
+    const idx = Math.floor(arr.length * p);
+    return Math.round(arr[Math.min(idx, arr.length - 1)]);
+  };
+
+  return {
+    pessimistic: percentile(finalValues, 0.1),   // 10th percentile
+    baseCase: percentile(finalValues, 0.5),      // 50th percentile (median)
+    optimistic: percentile(finalValues, 0.9),    // 90th percentile
+  };
+}
 
 export async function getRiskForecast(): Promise<RiskForecast> {
   const cacheKey = 'risk-forecast';
@@ -663,107 +812,137 @@ export async function getRiskForecast(): Promise<RiskForecast> {
   const holdings = portfolio.holdings;
   const currentValue = portfolio.totalAssets;
 
+  // Empty portfolio case
   if (holdings.length === 0 || currentValue <= 0) {
-    return {
-      expectedAnnualVol: null,
-      maxDrawdown1y: null,
-      monteCarloBands: null,
-      partial: true,
+    const result: RiskForecast = {
+      status: 'insufficient',
+      basis: {
+        lookbackDays: 0,
+        dataQuality: 'fallback',
+        tickersCovered: 0,
+        tickersTotal: 0,
+        note: 'No holdings in portfolio',
+      },
+      metrics: {
+        annualReturn: null,
+        annualVolatility: null,
+        maxDrawdown: null,
+        sharpeRatio: null,
+      },
+      scenarios: null,
+      currentValue: 0,
     };
+    return result;
   }
 
-  // Use gradual candle fetching
+  // Fetch candle data for all holdings
   const tickers = holdings.map(h => h.ticker);
-  const fetchResult = await getMultipleCandlesGradual(tickers, CORRELATION_TRADING_DAYS);
+  const fetchResult = await getMultipleCandlesGradual(tickers, TARGET_LOOKBACK_1Y);
   const candleData = fetchResult.data;
 
-  // Calculate portfolio returns from available data
-  let portfolioReturns = calculatePortfolioReturns(holdings, candleData, MIN_MONTE_CARLO_DAYS);
+  // Calculate portfolio returns with forward-fill
+  // Try 1Y first, then fall back to 6M, then 90D
+  let portfolioData = calculatePortfolioReturnsWithForwardFill(holdings, candleData, TARGET_LOOKBACK_1Y);
 
-  // Check if we have enough data
-  const hasEnoughData = portfolioReturns.length >= MIN_MONTE_CARLO_DAYS;
+  if (portfolioData.returns.length < MIN_LOOKBACK_DAYS) {
+    portfolioData = calculatePortfolioReturnsWithForwardFill(holdings, candleData, TARGET_LOOKBACK_6M);
+  }
 
-  let expectedAnnualVol: number | null = null;
-  let maxDrawdown1y: number | null = null;
-  let monteCarloBands: { p10: number; p50: number; p90: number } | null = null;
-  let partial = !fetchResult.allCached;
+  if (portfolioData.returns.length < MIN_LOOKBACK_DAYS) {
+    portfolioData = calculatePortfolioReturnsWithForwardFill(holdings, candleData, TARGET_LOOKBACK_90D);
+  }
+
+  const { returns: portfolioReturns, lookbackDays, tickersCovered } = portfolioData;
+  const hasEnoughData = portfolioReturns.length >= MIN_LOOKBACK_DAYS;
+
+  // Determine data quality
+  let dataQuality: 'full' | 'partial' | 'fallback';
+  let note: string | null = null;
+
+  if (!hasEnoughData) {
+    dataQuality = 'fallback';
+    if (fetchResult.message.includes('paid plan')) {
+      note = 'Historical data requires Finnhub paid plan. Showing placeholder.';
+    } else if (fetchResult.tickersPending.length > 0) {
+      note = `Caching price history (${fetchResult.tickersPending.length} tickers pending)`;
+    } else {
+      note = 'Insufficient historical data for analysis';
+    }
+  } else if (tickersCovered < holdings.length) {
+    dataQuality = 'partial';
+    note = `Based on ${tickersCovered} of ${holdings.length} holdings (${lookbackDays} trading days)`;
+  } else if (lookbackDays < TARGET_LOOKBACK_1Y) {
+    dataQuality = 'partial';
+    note = `Based on ${lookbackDays} trading days (~${Math.round(lookbackDays / 21)} months)`;
+  } else {
+    dataQuality = 'full';
+    note = `Based on ${lookbackDays} trading days of portfolio-weighted returns`;
+  }
+
+  // Calculate metrics
+  let annualReturn: number | null = null;
+  let annualVolatility: number | null = null;
+  let maxDrawdown: number | null = null;
+  let sharpeRatio: number | null = null;
+  let scenarios: RiskForecastScenarios | null = null;
 
   if (hasEnoughData) {
-    // Full analysis with actual portfolio data
-    expectedAnnualVol = calculateAnnualizedVolatility(portfolioReturns);
+    // Calculate annualized metrics from portfolio returns
+    annualVolatility = calculateAnnualizedVolatility(portfolioReturns);
+    annualReturn = calculateAnnualizedReturn(portfolioReturns);
+    sharpeRatio = calculateSharpeRatio(portfolioReturns, annualVolatility);
 
     // Calculate historical max drawdown
     const equityCurve: number[] = [100];
     for (const ret of portfolioReturns) {
       equityCurve.push(equityCurve[equityCurve.length - 1] * (1 + ret));
     }
-    maxDrawdown1y = calculateMaxDrawdown(equityCurve);
+    maxDrawdown = calculateMaxDrawdown(equityCurve);
 
-    // Monte Carlo simulation
-    const numSimulations = 500;
-    const tradingDaysPerYear = 252;
-
+    // Run Monte Carlo simulation with portfolio-specific parameters
     const dailyMean = portfolioReturns.reduce((a, b) => a + b, 0) / portfolioReturns.length;
-    const dailyVol = expectedAnnualVol ? expectedAnnualVol / Math.sqrt(252) : 0.01;
+    const dailyVol = annualVolatility ? annualVolatility / Math.sqrt(TRADING_DAYS_PER_YEAR) : 0.01;
 
-    const finalValues: number[] = [];
+    scenarios = runMonteCarloGBM(
+      currentValue,
+      dailyMean,
+      dailyVol,
+      MONTE_CARLO_SIMULATIONS,
+      TRADING_DAYS_PER_YEAR  // 1-year horizon
+    );
+  }
 
-    for (let sim = 0; sim < numSimulations; sim++) {
-      let value = currentValue;
-      for (let day = 0; day < tradingDaysPerYear; day++) {
-        const u1 = Math.random();
-        const u2 = Math.random();
-        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-        const dailyReturn = dailyMean + dailyVol * z;
-        value *= (1 + dailyReturn);
-      }
-      finalValues.push(value);
-    }
-
-    finalValues.sort((a, b) => a - b);
-
-    const percentile = (arr: number[], p: number) => {
-      const idx = Math.floor(arr.length * p);
-      return Math.round(arr[idx]);
-    };
-
-    monteCarloBands = {
-      p10: percentile(finalValues, 0.1),
-      p50: percentile(finalValues, 0.5),
-      p90: percentile(finalValues, 0.9),
-    };
+  // Determine status
+  let status: 'ready' | 'caching' | 'insufficient';
+  if (hasEnoughData) {
+    status = fetchResult.tickersPending.length > 0 ? 'caching' : 'ready';
+  } else if (fetchResult.tickersPending.length > 0) {
+    status = 'caching';
   } else {
-    // Fallback: use SPY volatility for basic scenario bands
-    expectedAnnualVol = SPY_ANNUAL_VOL;
-
-    // Simple scenario-based projection (no simulation)
-    const dailyVol = expectedAnnualVol / Math.sqrt(252);
-    const dailyMean = SPY_ANNUAL_RETURN / 252;
-
-    // Estimate bands based on normal distribution
-    // p10 = mean - 1.28 * std, p90 = mean + 1.28 * std
-    const annualMean = dailyMean * 252;
-    const annualStd = dailyVol * Math.sqrt(252);
-
-    monteCarloBands = {
-      p10: Math.round(currentValue * (1 + annualMean - 1.28 * annualStd)),
-      p50: Math.round(currentValue * (1 + annualMean)),
-      p90: Math.round(currentValue * (1 + annualMean + 1.28 * annualStd)),
-    };
-
-    partial = true;
+    status = 'insufficient';
   }
 
   const result: RiskForecast = {
-    expectedAnnualVol: expectedAnnualVol ? Math.round(expectedAnnualVol * 10000) / 10000 : null,
-    maxDrawdown1y: maxDrawdown1y ? Math.round(maxDrawdown1y * 10000) / 10000 : null,
-    monteCarloBands,
-    partial,
+    status,
+    basis: {
+      lookbackDays,
+      dataQuality,
+      tickersCovered,
+      tickersTotal: holdings.length,
+      note,
+    },
+    metrics: {
+      annualReturn: annualReturn !== null ? Math.round(annualReturn * 10000) / 10000 : null,
+      annualVolatility: annualVolatility !== null ? Math.round(annualVolatility * 10000) / 10000 : null,
+      maxDrawdown: maxDrawdown !== null ? Math.round(maxDrawdown * 10000) / 10000 : null,
+      sharpeRatio: sharpeRatio !== null ? Math.round(sharpeRatio * 100) / 100 : null,
+    },
+    scenarios,
+    currentValue: Math.round(currentValue * 100) / 100,
   };
 
-  // Longer cache if plan limitation (24h), otherwise short (5min) for still caching
-  const isPlanLimit = fetchResult.message.includes('paid plan');
-  const cacheTtl = hasEnoughData && fetchResult.allCached ? 86400 : (isPlanLimit ? 86400 : 300);
+  // Cache: 24h if full data, 5min if still caching
+  const cacheTtl = status === 'ready' && dataQuality === 'full' ? 86400 : 300;
   insightsCache.set(cacheKey, result, cacheTtl);
 
   return result;
