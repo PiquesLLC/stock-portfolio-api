@@ -9,11 +9,15 @@ datasource db {
 
 model Holding {
   id          String   @id @default(uuid())
-  ticker      String   @unique
+  ticker      String
   shares      Float
   averageCost Float
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@unique([userId, ticker])
 }
 
 model PortfolioSnapshot {
@@ -25,8 +29,30 @@ model PortfolioSnapshot {
   dailyPLPercent Float
   totalPL        Float
   totalPLPercent Float
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
 
   @@index([timestamp])
+  @@index([userId, timestamp])
+}
+
+model User {
+  id          String              @id @default(uuid())
+  username    String              @unique
+  displayName String
+  createdAt   DateTime            @default(now())
+  holdings    Holding[]
+  snapshots   PortfolioSnapshot[]
+  settings    UserSettings?
+}
+
+model UserSettings {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id])
+  cashBalance Float    @default(0)
+  marginDebt  Float    @default(0)
+  updatedAt   DateTime @updatedAt
 }
 
 model Settings {

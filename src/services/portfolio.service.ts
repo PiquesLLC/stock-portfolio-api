@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 
 export async function getHoldings(): Promise<Holding[]> {
   return prisma.holding.findMany({
+    where: { userId: null },
     orderBy: { ticker: 'asc' },
   });
 }
@@ -14,13 +15,22 @@ export async function getHoldings(): Promise<Holding[]> {
 export async function upsertHolding(input: HoldingInput): Promise<Holding> {
   const ticker = input.ticker.toUpperCase();
 
-  return prisma.holding.upsert({
-    where: { ticker },
-    update: {
-      shares: input.shares,
-      averageCost: input.averageCost,
-    },
-    create: {
+  const existing = await prisma.holding.findFirst({
+    where: { ticker, userId: null },
+  });
+
+  if (existing) {
+    return prisma.holding.update({
+      where: { id: existing.id },
+      data: {
+        shares: input.shares,
+        averageCost: input.averageCost,
+      },
+    });
+  }
+
+  return prisma.holding.create({
+    data: {
       ticker,
       shares: input.shares,
       averageCost: input.averageCost,
@@ -29,9 +39,12 @@ export async function upsertHolding(input: HoldingInput): Promise<Holding> {
 }
 
 export async function deleteHolding(ticker: string): Promise<void> {
-  await prisma.holding.delete({
-    where: { ticker: ticker.toUpperCase() },
+  const existing = await prisma.holding.findFirst({
+    where: { ticker: ticker.toUpperCase(), userId: null },
   });
+  if (existing) {
+    await prisma.holding.delete({ where: { id: existing.id } });
+  }
 }
 
 export async function getSettings(): Promise<Settings> {

@@ -28,6 +28,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   try {
     // Double-check with database (in case server restarted)
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
+      where: { userId: null },
       orderBy: { timestamp: 'desc' },
     });
 
@@ -103,6 +104,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
 
 export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
+    where: { userId: null },
     orderBy: { timestamp: 'asc' },
   });
 }
@@ -110,6 +112,7 @@ export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
 export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     where: {
+      userId: null,
       timestamp: {
         gte: startDate,
       },
@@ -120,6 +123,7 @@ export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnaps
 
 export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapshot[]> {
   const snapshots = await prisma.portfolioSnapshot.findMany({
+    where: { userId: null },
     orderBy: { timestamp: 'desc' },
     take: limit,
   });
@@ -128,18 +132,20 @@ export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapsh
 
 export async function getLatestSnapshot(): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
+    where: { userId: null },
     orderBy: { timestamp: 'desc' },
   });
 }
 
 export async function getSnapshotCount(): Promise<number> {
-  return prisma.portfolioSnapshot.count();
+  return prisma.portfolioSnapshot.count({ where: { userId: null } });
 }
 
 // Utility to clean up duplicate snapshots (for fixing existing data)
 export async function cleanupDuplicateSnapshots(): Promise<number> {
   // Get all snapshots
   const snapshots = await prisma.portfolioSnapshot.findMany({
+    where: { userId: null },
     orderBy: { timestamp: 'asc' },
   });
 

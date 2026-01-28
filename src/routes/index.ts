@@ -7,6 +7,8 @@ import settingsRoutes from './settings.routes';
 import insightsRoutes from './insights.routes';
 import goalsRoutes from './goals.routes';
 import intelligenceRoutes from './portfolioIntelligence.routes';
+import leaderboardRoutes from './leaderboard.routes';
+import usersRoutes from './users.routes';
 
 const router = Router();
 
@@ -18,5 +20,7 @@ router.use('/settings', settingsRoutes);
 router.use('/insights', insightsRoutes);
 router.use('/goals', goalsRoutes);
 router.use('/intelligence', intelligenceRoutes);
+router.use('/leaderboard', leaderboardRoutes);
+router.use('/users', usersRoutes);
 
 export default router;

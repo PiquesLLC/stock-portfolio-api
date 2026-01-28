@@ -441,3 +441,27 @@ export interface SymbolSearchResponse {
     advPending: string[];   // Tickers whose ADV is being fetched async
   };
 }
+
+// Leaderboard types
+export type LeaderboardWindow = '1D' | '1W' | '1M' | 'YTD' | '1Y';
+
+export interface LeaderboardEntry {
+  userId: string;
+  username: string;
+  displayName: string;
+  window: LeaderboardWindow;
+  returnPct: number | null;
+  returnDollar: number | null;
+  isEstimated: boolean;
+  basis: 'snapshots' | 'estimated' | 'none';
+  startDateUsed: string | null;
+  endDateUsed: string | null;
+  currentAssets: number | null;
+}
+
+export interface UserInfo {
+  id: string;
+  username: string;
+  displayName: string;
+  createdAt: string;
+}
