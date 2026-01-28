@@ -4,6 +4,8 @@ import {
   setBaseline,
   setBrokerLifetime,
   clearBrokerLifetime,
+  setYtdData,
+  clearYtdData,
   getPerformanceSummary,
 } from '../services/settings.service';
 import { updateSettings } from '../services/portfolio.service';
@@ -122,6 +124,55 @@ export async function clearBrokerLifetimeHandler(req: Request, res: Response): P
   } catch (error) {
     console.error('Error clearing broker lifetime:', error);
     res.status(500).json({ error: 'Failed to clear broker lifetime data' });
+  }
+}
+
+export async function getYtdHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const settings = await getSettings();
+    res.json({
+      ytdStartEquity: settings.ytdStartEquity ?? null,
+      ytdNetContributions: settings.ytdNetContributions ?? null,
+    });
+  } catch (error) {
+    console.error('Error fetching YTD settings:', error);
+    res.status(500).json({ error: 'Failed to fetch YTD settings' });
+  }
+}
+
+export async function setYtdHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { ytdStartEquity, netContributionsYTD } = req.body;
+
+    if (typeof ytdStartEquity !== 'number' || ytdStartEquity <= 0) {
+      res.status(400).json({ error: 'Invalid ytdStartEquity: must be a positive number' });
+      return;
+    }
+
+    if (netContributionsYTD !== undefined && typeof netContributionsYTD !== 'number') {
+      res.status(400).json({ error: 'Invalid netContributionsYTD: must be a number' });
+      return;
+    }
+
+    const settings = await setYtdData({ ytdStartEquity, netContributionsYTD });
+    res.json({
+      message: 'YTD data saved',
+      ytdStartEquity: settings.ytdStartEquity,
+      ytdNetContributions: settings.ytdNetContributions,
+    });
+  } catch (error) {
+    console.error('Error setting YTD data:', error);
+    res.status(500).json({ error: 'Failed to set YTD data' });
+  }
+}
+
+export async function clearYtdHandler(req: Request, res: Response): Promise<void> {
+  try {
+    await clearYtdData();
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error clearing YTD data:', error);
+    res.status(500).json({ error: 'Failed to clear YTD data' });
   }
 }
 
