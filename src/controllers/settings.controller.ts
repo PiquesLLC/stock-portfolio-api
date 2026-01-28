@@ -7,6 +7,7 @@ import {
   getPerformanceSummary,
 } from '../services/settings.service';
 import { updateSettings } from '../services/portfolio.service';
+import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapshot.service';
 
 export async function getSettingsHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -131,5 +132,23 @@ export async function getSummaryHandler(req: Request, res: Response): Promise<vo
   } catch (error) {
     console.error('Error fetching summary:', error);
     res.status(500).json({ error: 'Failed to fetch performance summary' });
+  }
+}
+
+export async function cleanupSnapshotsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const countBefore = await getSnapshotCount();
+    const deletedCount = await cleanupDuplicateSnapshots();
+    const countAfter = await getSnapshotCount();
+
+    res.json({
+      message: 'Snapshot cleanup completed',
+      snapshotsBefore: countBefore,
+      snapshotsDeleted: deletedCount,
+      snapshotsAfter: countAfter,
+    });
+  } catch (error) {
+    console.error('Error cleaning up snapshots:', error);
+    res.status(500).json({ error: 'Failed to cleanup snapshots' });
   }
 }

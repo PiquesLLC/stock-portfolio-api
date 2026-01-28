@@ -126,8 +126,9 @@ export interface Portfolio {
   cashBalance: number;
   marginDebt: number;
   holdingsValue: number;    // sum of all holdings market values
-  netEquity: number;        // holdingsValue + cashBalance - marginDebt
-  totalValue: number;       // same as netEquity (for backward compatibility)
+  totalAssets: number;      // holdingsValue + cashBalance (NO marginDebt - for tracking)
+  netEquity: number;        // totalAssets - marginDebt (for display only)
+  totalValue: number;       // same as totalAssets for snapshot compatibility
   totalCost: number;
   totalPL: number;
   totalPLPercent: number;

@@ -23,8 +23,9 @@ export async function setBaseline(input: BaselineInput): Promise<Settings> {
   const portfolio = await getPortfolio();
   const now = new Date();
 
-  // Set baseline based on current portfolio state
-  const baselineTotalValue = portfolio.totalValue;
+  // Set baseline based on current portfolio ASSETS (not net equity)
+  // This ensures margin debt changes don't affect historical performance tracking
+  const baselineTotalValue = portfolio.totalAssets;
   const baselineCashBalance = portfolio.cashBalance;
 
   const settings = await prisma.settings.upsert({
@@ -93,12 +94,12 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
   // Calculate holdings P/L (unrealized)
   const holdingsPL = {
     totalCost: portfolio.totalCost,
-    currentValue: portfolio.totalValue - portfolio.cashBalance, // Just holdings, not cash
+    currentValue: portfolio.holdingsValue, // Just holdings market value
     unrealizedPL: portfolio.totalPL,
     unrealizedPLPercent: portfolio.totalPLPercent,
   };
 
-  // Calculate since tracking start
+  // Calculate since tracking start (uses totalAssets - NO marginDebt)
   let sinceTracking: PerformanceSummary['sinceTracking'];
 
   if (settings.trackingStartDate && settings.baselineTotalValue !== null) {
@@ -106,7 +107,8 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
     const snapshots = await getSnapshotsAfter(settings.trackingStartDate);
 
     const startingValue = settings.baselineTotalValue;
-    const currentValue = portfolio.totalValue;
+    // Use totalAssets (not netEquity) so margin debt changes don't affect performance
+    const currentValue = portfolio.totalAssets;
     const absoluteReturn = currentValue - startingValue;
     const percentReturn = startingValue > 0 ? (absoluteReturn / startingValue) * 100 : 0;
 
@@ -124,7 +126,7 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
       hasBaseline: false,
       startDate: null,
       startingValue: null,
-      currentValue: portfolio.totalValue,
+      currentValue: portfolio.totalAssets, // Use assets for consistency
       absoluteReturn: null,
       percentReturn: null,
       snapshotCount: 0,

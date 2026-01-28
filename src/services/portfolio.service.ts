@@ -80,14 +80,18 @@ export async function getPortfolio(): Promise<Portfolio> {
   const marginDebt = settings.marginDebt ?? 0;
 
   if (holdings.length === 0) {
-    const netEquity = settings.cashBalance - marginDebt;
+    // totalAssets = holdings + cash (NO marginDebt - used for performance tracking)
+    const totalAssets = settings.cashBalance;
+    // netEquity = totalAssets - marginDebt (for display only)
+    const netEquity = totalAssets - marginDebt;
     return {
       holdings: [],
       cashBalance: settings.cashBalance,
       marginDebt,
       holdingsValue: 0,
+      totalAssets,
       netEquity,
-      totalValue: netEquity,
+      totalValue: totalAssets, // for snapshot compatibility (assets only)
       totalCost: 0,
       totalPL: 0,
       totalPLPercent: 0,
@@ -157,8 +161,10 @@ export async function getPortfolio(): Promise<Portfolio> {
   });
 
   // Calculate portfolio totals
-  // netEquity = holdingsValue + cashBalance - marginDebt
-  const netEquity = holdingsValue + settings.cashBalance - marginDebt;
+  // totalAssets = holdingsValue + cashBalance (NO marginDebt - for performance tracking)
+  const totalAssets = holdingsValue + settings.cashBalance;
+  // netEquity = totalAssets - marginDebt (for balance sheet display only)
+  const netEquity = totalAssets - marginDebt;
 
   // Total P/L is unrealized P/L from holdings (market value - cost basis)
   const totalPL = holdingsValue - totalCost;
@@ -173,8 +179,9 @@ export async function getPortfolio(): Promise<Portfolio> {
     cashBalance: settings.cashBalance,
     marginDebt,
     holdingsValue,
+    totalAssets,
     netEquity,
-    totalValue: netEquity, // backward compatibility
+    totalValue: totalAssets, // for snapshot compatibility (assets only, NO marginDebt)
     totalCost,
     totalPL,
     totalPLPercent,
