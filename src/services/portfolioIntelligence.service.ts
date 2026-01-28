@@ -12,7 +12,7 @@ export type IntelligenceWindow = '1d' | '5d' | '1m';
 
 export interface ContributorEntry {
   ticker: string;
-  contributionPercent: number;
+  percentReturn: number | null;
   contributionDollar: number;
 }
 
@@ -50,6 +50,7 @@ const MIN_BETA_DAYS = 60;
 interface HoldingContribution {
   ticker: string;
   contributionDollar: number;
+  percentReturn: number | null;
 }
 
 async function computeContributions(
@@ -57,10 +58,18 @@ async function computeContributions(
   window: IntelligenceWindow
 ): Promise<{ contributions: HoldingContribution[]; candleData: Map<string, HistoricalCandles> | null }> {
   if (window === '1d') {
-    const contributions = holdings.map(h => ({
-      ticker: h.ticker,
-      contributionDollar: Math.round(h.dayChange * 100) / 100,
-    }));
+    const contributions = holdings.map(h => {
+      // percentReturn = (currentPrice - previousClose) / previousClose * 100
+      // dayChangePercent is already this value from the quote
+      const percentReturn = (!h.priceUnavailable && h.currentPrice > 0)
+        ? Math.round(h.dayChangePercent * 10) / 10
+        : null;
+      return {
+        ticker: h.ticker,
+        contributionDollar: Math.round(h.dayChange * 100) / 100,
+        percentReturn,
+      };
+    });
     return { contributions, candleData: null };
   }
 
@@ -72,15 +81,17 @@ async function computeContributions(
   const contributions = holdings.map(h => {
     const candles = candleData.get(h.ticker);
     if (!candles || candles.partial || candles.closes.length < daysBack + 1) {
-      return { ticker: h.ticker, contributionDollar: 0 };
+      return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
     }
     const currentPrice = candles.closes[candles.closes.length - 1];
-    const pastPrice = candles.closes[candles.closes.length - 1 - daysBack];
-    if (pastPrice <= 0) return { ticker: h.ticker, contributionDollar: 0 };
-    const priceChange = currentPrice - pastPrice;
+    const referenceClose = candles.closes[candles.closes.length - 1 - daysBack];
+    if (referenceClose <= 0) return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
+    const priceChange = currentPrice - referenceClose;
+    const percentReturn = Math.round(((currentPrice - referenceClose) / referenceClose) * 1000) / 10;
     return {
       ticker: h.ticker,
       contributionDollar: Math.round(h.shares * priceChange * 100) / 100,
+      percentReturn,
     };
   });
 
@@ -91,15 +102,12 @@ function splitContributors(contributions: HoldingContribution[]): {
   contributors: ContributorEntry[];
   detractors: ContributorEntry[];
 } {
-  const totalAbsPL = contributions.reduce((sum, c) => sum + Math.abs(c.contributionDollar), 0);
   const sorted = [...contributions].sort((a, b) => b.contributionDollar - a.contributionDollar);
 
   const toEntry = (c: HoldingContribution): ContributorEntry => ({
     ticker: c.ticker,
     contributionDollar: c.contributionDollar,
-    contributionPercent: totalAbsPL !== 0
-      ? Math.round((c.contributionDollar / totalAbsPL) * 10000) / 100
-      : 0,
+    percentReturn: c.percentReturn,
   });
 
   const contributors = sorted.filter(c => c.contributionDollar > 0).slice(0, 5).map(toEntry);
