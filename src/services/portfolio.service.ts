@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { fetchPrices } from './market.service';
-import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings, SettingsUpdateInput } from '../types';
+import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
+import { getMarketSession } from '../utils/market-hours';
 
 const prisma = new PrismaClient();
 
@@ -78,6 +79,7 @@ export async function getPortfolio(): Promise<Portfolio> {
   const [holdings, settings] = await Promise.all([getHoldings(), getSettings()]);
 
   const marginDebt = settings.marginDebt ?? 0;
+  const session = getMarketSession();
 
   if (holdings.length === 0) {
     // totalAssets = holdings + cash (NO marginDebt - used for performance tracking)
@@ -99,22 +101,31 @@ export async function getPortfolio(): Promise<Portfolio> {
       dayChangePercent: 0,
       quotesStale: false,
       quotesUnavailableCount: 0,
+      quotesMeta: {
+        anyRepricing: false,
+        quoteTimestamp: Date.now(),
+        provider: 'polygon',
+      },
+      session,
     };
   }
 
   const tickers = holdings.map((h) => h.ticker);
-  const { quotes, staleCount, failedTickers } = await fetchPrices(tickers);
+  const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers);
 
   let holdingsValue = 0;
   let totalCost = 0;
   let dayChange = 0;
   let hasStaleQuotes = staleCount > 0;
+  let hasRepricingQuotes = repricingCount > 0;
   let unavailableCount = failedTickers.length;
 
   const holdingsWithQuotes: HoldingWithQuote[] = holdings.map((holding) => {
     const quote = quotes.get(holding.ticker);
     const priceUnavailable = !quote;
     const priceIsStale = quote?.isStale ?? false;
+    const isRepricing = quote?.isRepricing ?? priceUnavailable;
+    const quoteAgeSeconds = quote?.quoteAgeSeconds;
 
     // CRITICAL: Never use 0 as a fallback price
     // If we don't have a quote, mark as unavailable but don't calculate incorrect values
@@ -135,7 +146,7 @@ export async function getPortfolio(): Promise<Portfolio> {
 
     const previousValue = hasValidPrice ? holding.shares * previousClose : 0;
     const holdingDayChange = hasValidPrice ? currentValue - previousValue : 0;
-    const dayChangePercent = hasValidPrice && previousValue > 0
+    const holdingDayChangePercent = hasValidPrice && previousValue > 0
       ? (holdingDayChange / previousValue) * 100
       : 0;
 
@@ -154,9 +165,12 @@ export async function getPortfolio(): Promise<Portfolio> {
       profitLoss,
       profitLossPercent,
       dayChange: holdingDayChange,
-      dayChangePercent,
+      dayChangePercent: holdingDayChangePercent,
       priceUnavailable,
       priceIsStale,
+      isRepricing,
+      quoteAgeSeconds,
+      session: quote?.session,
     };
   });
 
@@ -174,6 +188,15 @@ export async function getPortfolio(): Promise<Portfolio> {
   const previousHoldingsValue = holdingsValue - dayChange;
   const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
 
+  // Build quotes metadata
+  const quotesMeta: QuotesMeta = {
+    anyRepricing: hasRepricingQuotes || unavailableCount > 0,
+    quoteTimestamp: Date.now(),
+    provider,
+    staleCount,
+    failedTickers: failedTickers.length > 0 ? failedTickers : undefined,
+  };
+
   return {
     holdings: holdingsWithQuotes,
     cashBalance: settings.cashBalance,
@@ -189,5 +212,7 @@ export async function getPortfolio(): Promise<Portfolio> {
     dayChangePercent,
     quotesStale: hasStaleQuotes,
     quotesUnavailableCount: unavailableCount,
+    quotesMeta,
+    session,
   };
 }

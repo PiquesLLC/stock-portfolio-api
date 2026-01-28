@@ -95,6 +95,8 @@ export interface PerformanceSummary {
   } | null;
 }
 
+export type MarketSession = 'PRE' | 'REG' | 'POST' | 'CLOSED';
+
 export interface Quote {
   ticker: string;
   currentPrice: number;
@@ -105,8 +107,12 @@ export interface Quote {
   open: number;
   previousClose: number;
   timestamp: number;
+  updatedAt?: number; // timestamp of the quote data
   isStale?: boolean;
-  staleAge?: number; // seconds since last fresh update
+  isRepricing?: boolean; // true if quote is being repriced (age > threshold or missing)
+  quoteAgeSeconds?: number; // seconds since last update
+  staleAge?: number; // seconds since last fresh update (legacy)
+  session?: MarketSession; // current market session
 }
 
 export interface HoldingWithQuote extends Holding {
@@ -119,6 +125,17 @@ export interface HoldingWithQuote extends Holding {
   dayChangePercent: number;
   priceUnavailable?: boolean;
   priceIsStale?: boolean;
+  isRepricing?: boolean;
+  quoteAgeSeconds?: number;
+  session?: MarketSession;
+}
+
+export interface QuotesMeta {
+  anyRepricing: boolean;
+  quoteTimestamp: number;
+  provider: string;
+  staleCount?: number;
+  failedTickers?: string[];
 }
 
 export interface Portfolio {
@@ -136,6 +153,9 @@ export interface Portfolio {
   dayChangePercent: number;
   quotesStale?: boolean;
   quotesUnavailableCount?: number;
+  quotesMeta?: QuotesMeta;
+  session?: MarketSession;  // current market session
+  paceProjection?: PaceProjection; // MTD-based pace projections
 }
 
 // Dividend types
@@ -211,6 +231,31 @@ export interface MetricsResponse {
   dataEndDate: string | null;
 }
 
+// Pace Projection types (MTD-based simple linear projections)
+export interface PaceProjection {
+  hasData: boolean;
+  mtdReturnPct: number | null;        // Month-to-date return percentage
+  paceMonthlyPct: number | null;      // Same as MTD (the month's current performance)
+  paceAnnualPct: number | null;       // Monthly * 12
+  horizonPct: {
+    '1y': number | null;
+    '2y': number | null;
+    '5y': number | null;
+    '10y': number | null;
+  };
+  horizonValue: {
+    '1y': number | null;
+    '2y': number | null;
+    '5y': number | null;
+    '10y': number | null;
+  };
+  baselineMonthDate: string | null;   // ISO date of baseline snapshot
+  baselineMonthAssets: number | null; // Asset value at start of month
+  currentAssets: number;              // Current total assets
+  daysIntoMonth: number;              // Days elapsed in current month
+  note: string | null;                // Any warning or info message
+}
+
 // Finnhub types
 export interface FinnhubQuote {
   c: number;
@@ -221,4 +266,117 @@ export interface FinnhubQuote {
   o: number;
   pc: number;
   t: number;
+}
+
+// Insights types
+export interface HealthScore {
+  overall: number; // 0-100
+  breakdown: {
+    concentration: number;  // 0-25
+    volatility: number;     // 0-25
+    drawdown: number;       // 0-25
+    diversification: number; // 0-25
+    margin: number;         // penalty points
+  };
+  reasons: string[];       // top 3 reasons
+  quickFixes: string[];    // top 2 actionable tips
+  partial: boolean;
+}
+
+export interface Attribution {
+  window: '1d' | '5d' | '1m';
+  topContributors: {
+    ticker: string;
+    contributionDollar: number;
+    contributionPct: number;
+  }[];
+  topDetractors: {
+    ticker: string;
+    contributionDollar: number;
+    contributionPct: number;
+  }[];
+  partial: boolean;
+}
+
+export interface LeakDetectorResult {
+  correlationClusters: {
+    tickers: string[];
+    avgCorrelation: number;
+  }[];
+  summaries: string[];
+  heatmapData: {
+    tickers: string[];
+    matrix: number[][];
+  } | null;
+  partial: boolean;
+}
+
+export interface RiskForecast {
+  expectedAnnualVol: number | null;
+  maxDrawdown1y: number | null;
+  monteCarloBands: {
+    p10: number;  // 10th percentile (pessimistic)
+    p50: number;  // 50th percentile (base)
+    p90: number;  // 90th percentile (optimistic)
+  } | null;
+  partial: boolean;
+}
+
+// Goal types
+export interface Goal {
+  id: string;
+  name: string;
+  targetValue: number;
+  monthlyContribution: number;
+  deadline: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface GoalInput {
+  name: string;
+  targetValue: number;
+  monthlyContribution?: number;
+  deadline?: string | null;
+}
+
+export interface TimeToGoalRange {
+  optimistic: number | null;  // months (10th percentile pace)
+  base: number | null;        // months (50th percentile pace)
+  pessimistic: number | null; // months (90th percentile pace)
+}
+
+export interface GoalWithProgress extends Goal {
+  currentProgress: number;              // 0-100
+  currentPortfolioValue: number;
+  timeToGoal: TimeToGoalRange;          // months to reach goal
+  projectedDate: {
+    optimistic: string | null;
+    base: string | null;
+    pessimistic: string | null;
+  };
+}
+
+// Symbol search types
+export interface SymbolSearchResult {
+  symbol: string;
+  description: string;
+  type: string;
+  primaryExchange: string;
+  popularityScore: number;  // Combined ranking score (higher = more relevant)
+  marketCapB?: number;      // Market cap in billions USD, if available
+  avgVolume?: number;       // Average daily volume, if available
+  isPopular?: boolean;      // True if this is a well-known popular ticker
+  isHeld?: boolean;         // True if user currently holds this ticker
+}
+
+export interface SymbolSearchResponse {
+  results: SymbolSearchResult[];
+  meta: {
+    query: string;
+    count: number;
+    partial: boolean;
+    cached: boolean;
+    advPending: string[];   // Tickers whose ADV is being fetched async
+  };
 }

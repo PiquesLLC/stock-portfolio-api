@@ -1,5 +1,16 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote } from '../services/market.service';
+import { fetchPrices, fetchQuote, searchTickers } from '../services/market.service';
+
+interface PriceResult {
+  price: number;
+  change: number;
+  changePercent: number;
+  previousClose: number;
+  isStale?: boolean;
+  isRepricing?: boolean;
+  quoteAgeSeconds?: number;
+  session?: string;
+}
 
 export async function getPrices(req: Request, res: Response): Promise<void> {
   try {
@@ -17,24 +28,31 @@ export async function getPrices(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { quotes, staleCount, failedTickers } = await fetchPrices(tickers);
+    const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers);
 
-    const result: Record<string, { price: number; change: number; changePercent: number; isStale?: boolean }> = {};
+    const result: Record<string, PriceResult> = {};
     for (const [ticker, quote] of quotes) {
       result[ticker] = {
         price: quote.currentPrice,
         change: quote.change,
         changePercent: quote.changePercent,
+        previousClose: quote.previousClose,
         isStale: quote.isStale,
+        isRepricing: quote.isRepricing,
+        quoteAgeSeconds: quote.quoteAgeSeconds,
+        session: quote.session,
       };
     }
 
-    // Include metadata about staleness
+    // Include metadata about quotes
     const response = {
       prices: result,
       meta: {
         staleCount,
+        repricingCount,
         failedTickers,
+        provider,
+        timestamp: Date.now(),
       },
     };
 
@@ -59,5 +77,31 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error('Error fetching quote:', error);
     res.status(500).json({ error: 'Failed to fetch quote' });
+  }
+}
+
+export async function searchSymbols(req: Request, res: Response): Promise<void> {
+  try {
+    const query = (req.query.q as string)?.trim();
+    const heldParam = req.query.held as string | undefined;
+
+    // Parse held tickers from comma-separated list
+    const heldTickers = heldParam
+      ? heldParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+      : [];
+
+    if (!query) {
+      res.json({
+        results: [],
+        meta: { query: '', count: 0, partial: false, cached: false, advPending: [] },
+      });
+      return;
+    }
+
+    const response = await searchTickers(query, heldTickers);
+    res.json(response);
+  } catch (error) {
+    console.error('Error searching symbols:', error);
+    res.status(500).json({ error: 'Failed to search symbols' });
   }
 }

@@ -10,6 +10,7 @@ import {
   getSP500Projections,
   getRealizedProjections,
   getMetrics,
+  getPaceProjection,
 } from '../services/projection.service';
 import { LookbackPeriod, ProjectionMode } from '../types';
 
@@ -21,7 +22,14 @@ export async function getPortfolioHandler(req: Request, res: Response): Promise<
     await createSnapshotIfNeeded();
 
     const portfolio = await getPortfolio();
-    res.json(portfolio);
+
+    // Calculate pace projections (uses totalAssets - assets only, no margin)
+    const paceProjection = await getPaceProjection(portfolio.totalAssets);
+
+    res.json({
+      ...portfolio,
+      paceProjection,
+    });
   } catch (error) {
     console.error('Error fetching portfolio:', error);
     res.status(500).json({ error: 'Failed to fetch portfolio' });

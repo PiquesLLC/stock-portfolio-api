@@ -4,6 +4,8 @@ import marketRoutes from './market.routes';
 import portfolioRoutes from './portfolio.routes';
 import dividendRoutes from './dividend.routes';
 import settingsRoutes from './settings.routes';
+import insightsRoutes from './insights.routes';
+import goalsRoutes from './goals.routes';
 
 const router = Router();
 
@@ -12,5 +14,7 @@ router.use('/market', marketRoutes);
 router.use('/portfolio', portfolioRoutes);
 router.use('/dividends', dividendRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/insights', insightsRoutes);
+router.use('/goals', goalsRoutes);
 
 export default router;

@@ -58,3 +58,13 @@ model DividendEvent {
   @@index([date])
   @@index([ticker])
 }
+
+model Goal {
+  id                  String    @id @default(uuid())
+  name                String
+  targetValue         Float
+  monthlyContribution Float     @default(0)
+  deadline            DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}

@@ -6,6 +6,7 @@ import {
   LookbackPeriod,
   ProjectionHorizons,
   PortfolioSnapshot,
+  PaceProjection,
 } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { getSnapshotsAfter, getAllSnapshots } from './snapshot.service';
@@ -337,4 +338,116 @@ export async function getMetrics(lookback: LookbackPeriod = '1y'): Promise<Metri
 // Legacy export for backwards compatibility during transition
 export async function getProjections(): Promise<RealizedProjectionResponse> {
   return getRealizedProjections('1y');
+}
+
+/**
+ * Calculate pace-based projections using month-to-date (MTD) performance.
+ * This is a simple linear projection based on current month's pacing.
+ *
+ * Uses ASSETS ONLY (holdings + cash) - margin debt is NOT included.
+ */
+export async function getPaceProjection(currentAssets: number): Promise<PaceProjection> {
+  const now = new Date();
+  const daysIntoMonth = now.getDate(); // 1-31
+
+  // Get first day of current month
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  firstOfMonth.setHours(0, 0, 0, 0);
+
+  // Get all snapshots from start of month
+  const monthSnapshots = await getSnapshotsAfter(firstOfMonth);
+
+  // Find baseline: first snapshot on or after first of month
+  let baselineSnapshot: PortfolioSnapshot | null = null;
+  if (monthSnapshots.length > 0) {
+    baselineSnapshot = monthSnapshots[0];
+  }
+
+  // If no baseline found, return empty projection
+  if (!baselineSnapshot || baselineSnapshot.totalValue <= 0) {
+    return {
+      hasData: false,
+      mtdReturnPct: null,
+      paceMonthlyPct: null,
+      paceAnnualPct: null,
+      horizonPct: { '1y': null, '2y': null, '5y': null, '10y': null },
+      horizonValue: { '1y': null, '2y': null, '5y': null, '10y': null },
+      baselineMonthDate: null,
+      baselineMonthAssets: null,
+      currentAssets,
+      daysIntoMonth,
+      note: 'Not enough data yet - no baseline snapshot for this month',
+    };
+  }
+
+  const baselineMonthAssets = baselineSnapshot.totalValue;
+
+  // Calculate MTD return
+  const mtdReturn = (currentAssets - baselineMonthAssets) / baselineMonthAssets;
+
+  // Safety check for NaN/Infinity
+  if (!isFinite(mtdReturn) || isNaN(mtdReturn)) {
+    return {
+      hasData: false,
+      mtdReturnPct: null,
+      paceMonthlyPct: null,
+      paceAnnualPct: null,
+      horizonPct: { '1y': null, '2y': null, '5y': null, '10y': null },
+      horizonValue: { '1y': null, '2y': null, '5y': null, '10y': null },
+      baselineMonthDate: baselineSnapshot.timestamp.toISOString(),
+      baselineMonthAssets,
+      currentAssets,
+      daysIntoMonth,
+      note: 'Calculation error - invalid return value',
+    };
+  }
+
+  // MTD return as percentage
+  const mtdReturnPct = mtdReturn * 100;
+
+  // Pace projections:
+  // paceMonthlyPct = mtdReturn (already the month's current performance to date)
+  // paceAnnualPct = paceMonthlyPct * 12 (simple linear annualization)
+  const paceMonthlyPct = mtdReturnPct;
+  const paceAnnualPct = paceMonthlyPct * 12;
+
+  // Compute horizon percentages (simple linear scaling)
+  const pace1yPct = paceAnnualPct;
+  const pace2yPct = paceAnnualPct * 2;
+  const pace5yPct = paceAnnualPct * 5;
+  const pace10yPct = paceAnnualPct * 10;
+
+  // Compute horizon values
+  const pace1yValue = currentAssets * (1 + pace1yPct / 100);
+  const pace2yValue = currentAssets * (1 + pace2yPct / 100);
+  const pace5yValue = currentAssets * (1 + pace5yPct / 100);
+  const pace10yValue = currentAssets * (1 + pace10yPct / 100);
+
+  // Safety: ensure no negative values
+  const safeValue = (v: number) => (isFinite(v) && !isNaN(v) && v >= 0) ? Math.round(v * 100) / 100 : null;
+  const safePct = (v: number) => (isFinite(v) && !isNaN(v)) ? Math.round(v * 100) / 100 : null;
+
+  return {
+    hasData: true,
+    mtdReturnPct: safePct(mtdReturnPct),
+    paceMonthlyPct: safePct(paceMonthlyPct),
+    paceAnnualPct: safePct(paceAnnualPct),
+    horizonPct: {
+      '1y': safePct(pace1yPct),
+      '2y': safePct(pace2yPct),
+      '5y': safePct(pace5yPct),
+      '10y': safePct(pace10yPct),
+    },
+    horizonValue: {
+      '1y': safeValue(pace1yValue),
+      '2y': safeValue(pace2yValue),
+      '5y': safeValue(pace5yValue),
+      '10y': safeValue(pace10yValue),
+    },
+    baselineMonthDate: baselineSnapshot.timestamp.toISOString(),
+    baselineMonthAssets: Math.round(baselineMonthAssets * 100) / 100,
+    currentAssets: Math.round(currentAssets * 100) / 100,
+    daysIntoMonth,
+    note: null,
+  };
 }
