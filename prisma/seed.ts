@@ -74,11 +74,19 @@ async function main() {
   await prisma.userSettings.deleteMany();
   await prisma.user.deleteMany();
 
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  ninetyDaysAgo.setHours(0, 0, 0, 0);
+
   for (const userData of DEMO_USERS) {
     const user = await prisma.user.create({
       data: {
         username: userData.username,
         displayName: userData.displayName,
+        trackingActive: true,
+        trackingStartAt: ninetyDaysAgo,
+        leaderboardEligible: true,
+        leaderboardEligibleAt: ninetyDaysAgo,
       },
     });
 
@@ -145,15 +153,19 @@ async function main() {
       const totalPL = currentValue - initialAssets;
       const totalPLPercent = initialAssets > 0 ? (totalPL / initialAssets) * 100 : 0;
 
+      const snapshotTotalValue = Math.round(currentValue * 100) / 100;
+      const snapshotNetEquity = Math.round((currentValue - marginDebt) * 100) / 100;
+
       await prisma.portfolioSnapshot.create({
         data: {
           timestamp: snapshotDate,
-          totalValue: Math.round(currentValue * 100) / 100,
+          totalValue: snapshotTotalValue,
           cashBalance,
           dailyPL: Math.round(dailyPL * 100) / 100,
           dailyPLPercent: Math.round(dailyPLPercent * 100) / 100,
           totalPL: Math.round(totalPL * 100) / 100,
           totalPLPercent: Math.round(totalPLPercent * 100) / 100,
+          netEquity: snapshotNetEquity,
           userId: user.id,
         },
       });

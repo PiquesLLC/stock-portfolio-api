@@ -454,11 +454,19 @@ export interface LeaderboardEntry {
   window: LeaderboardWindow;
   returnPct: number | null;
   returnDollar: number | null;
-  isEstimated: boolean;
-  basis: 'snapshots' | 'estimated' | 'none';
+  verified: boolean;
+  basis: 'verified' | 'none';
+  sinceStart: boolean;
+  trackingStartAt: string;
+  snapshotCount: number;
   startDateUsed: string | null;
   endDateUsed: string | null;
   currentAssets: number | null;
+}
+
+export interface LeaderboardResponse {
+  entries: LeaderboardEntry[];
+  lastUpdated: string;
 }
 
 export interface UserInfo {

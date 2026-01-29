@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { LeaderboardWindow, LeaderboardEntry } from '../types';
+import { LeaderboardWindow, LeaderboardEntry, LeaderboardResponse } from '../types';
 
 const prisma = new PrismaClient();
 
@@ -32,85 +32,75 @@ function getWindowStartDate(window: LeaderboardWindow): Date {
   }
 }
 
-function getWindowDays(window: LeaderboardWindow): number {
-  switch (window) {
-    case '1D': return 1;
-    case '1W': return 7;
-    case '1M': return 30;
-    case 'YTD': {
-      const now = new Date();
-      const jan1 = new Date(now.getFullYear(), 0, 1);
-      return Math.floor((now.getTime() - jan1.getTime()) / (1000 * 60 * 60 * 24));
-    }
-    case '1Y': return 365;
-  }
-}
-
-export async function getLeaderboard(window: LeaderboardWindow): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(window: LeaderboardWindow): Promise<LeaderboardResponse> {
   const users = await prisma.user.findMany({
-    include: { settings: true },
+    where: { leaderboardEligible: true },
   });
 
   const windowStart = getWindowStartDate(window);
-  const windowDays = getWindowDays(window);
   const entries: LeaderboardEntry[] = [];
 
   for (const user of users) {
-    const snapshots = await prisma.portfolioSnapshot.findMany({
-      where: {
-        userId: user.id,
-        timestamp: { gte: windowStart },
-      },
-      orderBy: { timestamp: 'asc' },
-    });
+    if (!user.trackingStartAt) continue;
 
-    // Also get the most recent snapshot before the window for the start reference
-    const startSnapshot = await prisma.portfolioSnapshot.findFirst({
+    const effectiveStart = user.trackingStartAt > windowStart ? user.trackingStartAt : windowStart;
+    const sinceStart = user.trackingStartAt > windowStart;
+
+    // Baseline = closest snapshot to effectiveStart
+    // Prefer the most recent snapshot at/before effectiveStart (anchors to window edge),
+    // fall back to first snapshot after effectiveStart if none exists before
+    let baseline = await prisma.portfolioSnapshot.findFirst({
       where: {
         userId: user.id,
-        timestamp: { lt: windowStart },
+        timestamp: { lte: effectiveStart },
       },
       orderBy: { timestamp: 'desc' },
     });
+    if (!baseline) {
+      baseline = await prisma.portfolioSnapshot.findFirst({
+        where: {
+          userId: user.id,
+          timestamp: { gte: effectiveStart },
+        },
+        orderBy: { timestamp: 'asc' },
+      });
+    }
 
-    // Get latest snapshot overall
-    const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
+    // Latest = most recent snapshot
+    const latest = await prisma.portfolioSnapshot.findFirst({
       where: { userId: user.id },
       orderBy: { timestamp: 'desc' },
     });
 
-    let returnPct: number | null = null;
-    let returnDollar: number | null = null;
-    let isEstimated = false;
-    let basis: 'snapshots' | 'estimated' | 'none' = 'none';
-    let startDateUsed: string | null = null;
-    let endDateUsed: string | null = null;
-    const currentAssets = latestSnapshot?.totalValue ?? null;
+    // Count snapshots for this user
+    const snapshotCount = await prisma.portfolioSnapshot.count({
+      where: { userId: user.id },
+    });
 
-    if (startSnapshot && latestSnapshot && startSnapshot.id !== latestSnapshot.id) {
-      // Have both start and end reference points
-      returnPct = ((latestSnapshot.totalValue - startSnapshot.totalValue) / startSnapshot.totalValue) * 100;
-      returnDollar = latestSnapshot.totalValue - startSnapshot.totalValue;
-      basis = 'snapshots';
-      startDateUsed = startSnapshot.timestamp.toISOString();
-      endDateUsed = latestSnapshot.timestamp.toISOString();
-    } else if (snapshots.length >= 2) {
-      // No pre-window snapshot, but have snapshots within window - estimate
-      const first = snapshots[0];
-      const last = snapshots[snapshots.length - 1];
-      const daysBetween = (last.timestamp.getTime() - first.timestamp.getTime()) / (1000 * 60 * 60 * 24);
-
-      if (daysBetween > 0 && first.totalValue > 0) {
-        const dailyReturn = Math.pow(last.totalValue / first.totalValue, 1 / daysBetween) - 1;
-        const estReturn = Math.pow(1 + dailyReturn, windowDays) - 1;
-        returnPct = estReturn * 100;
-        returnDollar = first.totalValue * estReturn;
-        isEstimated = true;
-        basis = 'estimated';
-        startDateUsed = first.timestamp.toISOString();
-        endDateUsed = last.timestamp.toISOString();
-      }
+    if (!baseline || !latest || baseline.id === latest.id) {
+      entries.push({
+        userId: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        window,
+        returnPct: null,
+        returnDollar: null,
+        verified: true,
+        basis: 'none',
+        sinceStart,
+        trackingStartAt: user.trackingStartAt.toISOString(),
+        snapshotCount,
+        startDateUsed: null,
+        endDateUsed: null,
+        currentAssets: latest?.totalValue ?? null,
+      });
+      continue;
     }
+
+    const returnPct = baseline.totalValue > 0
+      ? ((latest.totalValue - baseline.totalValue) / baseline.totalValue) * 100
+      : null;
+    const returnDollar = latest.totalValue - baseline.totalValue;
 
     entries.push({
       userId: user.id,
@@ -119,11 +109,14 @@ export async function getLeaderboard(window: LeaderboardWindow): Promise<Leaderb
       window,
       returnPct,
       returnDollar,
-      isEstimated,
-      basis,
-      startDateUsed,
-      endDateUsed,
-      currentAssets,
+      verified: true,
+      basis: 'verified',
+      sinceStart,
+      trackingStartAt: user.trackingStartAt.toISOString(),
+      snapshotCount,
+      startDateUsed: baseline.timestamp.toISOString(),
+      endDateUsed: latest.timestamp.toISOString(),
+      currentAssets: latest.totalValue,
     });
   }
 
@@ -135,5 +128,8 @@ export async function getLeaderboard(window: LeaderboardWindow): Promise<Leaderb
     return b.returnPct - a.returnPct;
   });
 
-  return entries;
+  return {
+    entries,
+    lastUpdated: new Date().toISOString(),
+  };
 }

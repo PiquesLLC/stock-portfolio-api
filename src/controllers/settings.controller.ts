@@ -7,6 +7,8 @@ import {
   setYtdData,
   clearYtdData,
   getPerformanceSummary,
+  activateTracking,
+  restartTracking,
 } from '../services/settings.service';
 import { updateSettings } from '../services/portfolio.service';
 import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapshot.service';
@@ -183,6 +185,32 @@ export async function getSummaryHandler(req: Request, res: Response): Promise<vo
   } catch (error) {
     console.error('Error fetching summary:', error);
     res.status(500).json({ error: 'Failed to fetch performance summary' });
+  }
+}
+
+export async function activateTrackingHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const settings = await activateTracking();
+    res.json({
+      message: 'Tracking activated',
+      trackingStartDate: settings.trackingStartDate,
+    });
+  } catch (error) {
+    console.error('Error activating tracking:', error);
+    res.status(500).json({ error: 'Failed to activate tracking' });
+  }
+}
+
+export async function restartTrackingHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const settings = await restartTracking();
+    res.json({
+      message: 'Tracking restarted',
+      trackingStartDate: settings.trackingStartDate,
+    });
+  } catch (error) {
+    console.error('Error restarting tracking:', error);
+    res.status(500).json({ error: 'Failed to restart tracking' });
   }
 }
 

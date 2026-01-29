@@ -83,6 +83,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
         dailyPLPercent,
         totalPL: portfolio.totalPL,
         totalPLPercent: portfolio.totalPLPercent,
+        netEquity: portfolio.totalAssets - portfolio.marginDebt,
       },
     });
 

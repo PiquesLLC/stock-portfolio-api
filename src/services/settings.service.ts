@@ -113,6 +113,41 @@ export async function clearYtdData(): Promise<Settings> {
   return settings as Settings;
 }
 
+export async function activateTracking(): Promise<Settings> {
+  const now = new Date();
+  const settings = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: {
+      trackingStartDate: now,
+    },
+    create: {
+      id: 'default',
+      cashBalance: 0,
+      trackingStartDate: now,
+    },
+  });
+  return settings as Settings;
+}
+
+export async function restartTracking(): Promise<Settings> {
+  const now = new Date();
+  const settings = await prisma.settings.upsert({
+    where: { id: 'default' },
+    update: {
+      trackingStartDate: now,
+      baselineTotalValue: null,
+      baselineCashBalance: null,
+      baselineType: null,
+    },
+    create: {
+      id: 'default',
+      cashBalance: 0,
+      trackingStartDate: now,
+    },
+  });
+  return settings as Settings;
+}
+
 export async function getPerformanceSummary(): Promise<PerformanceSummary> {
   const [settings, portfolio] = await Promise.all([
     getSettings(),

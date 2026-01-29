@@ -9,6 +9,8 @@ import {
   setYtdHandler,
   clearYtdHandler,
   cleanupSnapshotsHandler,
+  activateTrackingHandler,
+  restartTrackingHandler,
 } from '../controllers/settings.controller';
 
 const router = Router();
@@ -22,5 +24,7 @@ router.get('/ytd', getYtdHandler);
 router.post('/ytd', setYtdHandler);
 router.delete('/ytd', clearYtdHandler);
 router.post('/cleanup-snapshots', cleanupSnapshotsHandler);
+router.post('/tracking/activate', activateTrackingHandler);
+router.post('/tracking/restart', restartTrackingHandler);
 
 export default router;

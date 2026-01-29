@@ -13,8 +13,8 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const entries = await getLeaderboard(window as LeaderboardWindow);
-    res.json(entries);
+    const result = await getLeaderboard(window as LeaderboardWindow);
+    res.json(result);
   } catch (error) {
     console.error('Error fetching leaderboard:', error);
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
