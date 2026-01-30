@@ -142,8 +142,11 @@ export async function getPortfolio(): Promise<Portfolio> {
 
     // CRITICAL: Never use 0 as a fallback price
     // If we don't have a quote, mark as unavailable but don't calculate incorrect values
-    const currentPrice = quote?.currentPrice ?? 0;
-    const previousClose = quote?.previousClose ?? currentPrice;
+    // During extended hours, use extendedPrice if available (premarket/after-hours price)
+    const currentPrice = (quote?.extendedPrice && quote.extendedPrice > 0)
+      ? quote.extendedPrice
+      : (quote?.currentPrice ?? 0);
+    const previousClose = quote?.previousClose ?? (quote?.currentPrice ?? currentPrice);
 
     // Only calculate market values if we have a valid price
     const hasValidPrice = quote && currentPrice > 0;

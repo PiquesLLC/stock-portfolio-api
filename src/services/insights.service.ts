@@ -7,6 +7,7 @@ import {
   HistoricalCandles,
   getCacheStats,
   hasCachedCandles,
+  getBenchmarkReturns,
 } from '../utils/candle-cache';
 import {
   HealthScore,
@@ -703,6 +704,9 @@ export async function getLeakDetector(): Promise<LeakDetectorResult> {
       summaries: ['Need at least 2 holdings to analyze correlations'],
       heatmapData: null,
       partial: true,
+      spyCorrelation: null,
+      suggestedActions: [],
+      hiddenConcentration: false,
     };
   }
 
@@ -751,6 +755,9 @@ export async function getLeakDetector(): Promise<LeakDetectorResult> {
       summaries,
       heatmapData: null,
       partial: true,
+      spyCorrelation: null,
+      suggestedActions: [],
+      hiddenConcentration: false,
     };
 
     // Longer cache for plan limitation (24h), short for still caching (5 min)
@@ -873,6 +880,58 @@ export async function getLeakDetector(): Promise<LeakDetectorResult> {
     heatmapData.push(row);
   }
 
+  // Compute portfolio vs SPY correlation using weighted portfolio returns
+  let spyCorrelation: number | null = null;
+  const spyReturns = getBenchmarkReturns('SPY', CORRELATION_TRADING_DAYS);
+  if (spyReturns && spyReturns.length >= MIN_CORRELATION_DAYS && tickersWithData.length > 0) {
+    // Build weighted portfolio daily returns
+    const totalValue = sortedHoldings.reduce((s, h) => s + h.currentValue, 0);
+    const minLen = Math.min(spyReturns.length, ...tickersWithData.map(c => c.returns.length));
+    if (minLen >= MIN_CORRELATION_DAYS) {
+      const portfolioReturns: number[] = [];
+      for (let d = 0; d < minLen; d++) {
+        let dayReturn = 0;
+        for (const c of tickersWithData) {
+          const holding = sortedHoldings.find(h => h.ticker === c.ticker);
+          const weight = holding ? holding.currentValue / totalValue : 0;
+          if (d < c.returns.length) {
+            dayReturn += weight * c.returns[d];
+          }
+        }
+        portfolioReturns.push(dayReturn);
+      }
+      const trimmedSpy = spyReturns.slice(spyReturns.length - minLen);
+      const corr = calculateCorrelation(portfolioReturns, trimmedSpy);
+      if (corr !== null) {
+        spyCorrelation = Math.round(corr * 100) / 100;
+      }
+    }
+  }
+
+  // Compute hidden concentration: effective diversification < 50% of holding count
+  // "Effective" holdings = those not highly correlated with each other
+  let hiddenConcentration = false;
+  if (holdings.length >= 4 && correlationClusters.length > 0) {
+    const clusteredTickers = new Set(correlationClusters.flatMap(c => c.tickers));
+    const effectiveCount = holdings.length - clusteredTickers.size + correlationClusters.length;
+    hiddenConcentration = effectiveCount < holdings.length * 0.5;
+  }
+
+  // Generate suggested actions (factual observations, not advice)
+  const suggestedActions: string[] = [];
+  if (correlationClusters.length > 0) {
+    suggestedActions.push(`${correlationClusters.length} group(s) of correlated holdings reduce effective diversification.`);
+  }
+  if (hiddenConcentration) {
+    suggestedActions.push(`Effective diversification is less than half the number of holdings due to correlation overlap.`);
+  }
+  if (spyCorrelation !== null && Math.abs(spyCorrelation) > 0.85) {
+    suggestedActions.push(`Portfolio closely tracks the S&P 500 (${(spyCorrelation * 100).toFixed(0)}% correlation). Adding uncorrelated assets would increase diversification.`);
+  }
+  if (holdings.length < 5 && holdings.length > 0) {
+    suggestedActions.push(`Portfolio has only ${holdings.length} holding(s). Broader exposure could reduce single-stock risk.`);
+  }
+
   const result: LeakDetectorResult = {
     correlationClusters,
     summaries,
@@ -881,6 +940,9 @@ export async function getLeakDetector(): Promise<LeakDetectorResult> {
       matrix: heatmapData,
     } : null,
     partial: fetchResult.tickersPending.length > 0,
+    spyCorrelation,
+    suggestedActions,
+    hiddenConcentration,
   };
 
   // Full cache (24h) only if all data is complete

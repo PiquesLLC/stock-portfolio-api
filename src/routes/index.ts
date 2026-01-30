@@ -10,6 +10,8 @@ import intelligenceRoutes from './portfolioIntelligence.routes';
 import leaderboardRoutes from './leaderboard.routes';
 import usersRoutes from './users.routes';
 import socialRoutes from './social.routes';
+import transactionRoutes from './transaction.routes';
+import alertRoutes from './alert.routes';
 
 const router = Router();
 
@@ -24,5 +26,7 @@ router.use('/intelligence', intelligenceRoutes);
 router.use('/leaderboard', leaderboardRoutes);
 router.use('/users', usersRoutes);
 router.use('/social', socialRoutes);
+router.use('/transactions', transactionRoutes);
+router.use('/alerts', alertRoutes);
 
 export default router;

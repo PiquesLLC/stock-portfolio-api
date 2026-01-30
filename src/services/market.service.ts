@@ -156,7 +156,32 @@ export async function fetchPrice(ticker: string): Promise<Quote> {
 }
 
 export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
-  return getQuotes(tickers);
+  const result = await getQuotes(tickers);
+
+  // During extended hours, enrich all quotes with Yahoo's real-time extended prices
+  const session = getMarketSession();
+  if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
+    const enrichPromises = Array.from(result.quotes.entries()).map(async ([ticker, quote]) => {
+      quote.session = getMarketSessionForTicker(ticker);
+      const qSession = quote.session;
+      if (qSession === 'PRE' || qSession === 'POST' || qSession === 'CLOSED') {
+        try {
+          const yahoo = await fetchYahooExtendedPrice(ticker);
+          if (yahoo && Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
+            quote.regularClose = quote.currentPrice;
+            quote.extendedPrice = yahoo.price;
+            quote.extendedChange = yahoo.price - quote.currentPrice;
+            quote.extendedChangePercent = quote.currentPrice !== 0
+              ? ((yahoo.price - quote.currentPrice) / quote.currentPrice) * 100
+              : 0;
+          }
+        } catch { /* ignore individual failures */ }
+      }
+    });
+    await Promise.all(enrichPromises);
+  }
+
+  return result;
 }
 
 export async function fetchQuote(ticker: string): Promise<Quote> {

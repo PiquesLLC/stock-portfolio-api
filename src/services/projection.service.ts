@@ -11,10 +11,10 @@ import {
   CurrentPaceResponse,
   Portfolio,
 } from '../types';
-import { getPortfolio } from './portfolio.service';
-import { getSnapshotsAfter, getAllSnapshots, getBaselineSnapshot, getOldestSnapshot } from './snapshot.service';
+import { getPortfolio, getHoldings } from './portfolio.service';
+import { getSnapshotsAfter, getAllSnapshots, getBaselineSnapshot, getOldestSnapshot, reconstructPortfolioHistory } from './snapshot.service';
 import { getTotalDividendsBetween } from './dividend.service';
-import { getSettings } from './settings.service';
+
 import { getMultipleCandlesGradual } from '../utils/candle-cache';
 import { config } from '../config';
 
@@ -53,7 +53,7 @@ function getLookbackStartDate(lookback: LookbackPeriod): Date | null {
  */
 export async function getSP500Projections(): Promise<SP500ProjectionResponse> {
   const portfolio = await getPortfolio();
-  const currentValue = portfolio.totalValue;
+  const currentValue = portfolio.netEquity;
   const annualReturn = config.sp500CagrTotalReturn;
 
   // Monthly compounding: (1 + r)^(years*12) where r = monthly rate
@@ -101,7 +101,7 @@ function calculateRealizedMetrics(
     };
   }
 
-  const values = snapshots.map((s) => s.totalValue);
+  const values = snapshots.map((s) => s.netEquity ?? s.totalValue);
   const startValue = values[0];
   const endValue = values[values.length - 1];
 
@@ -234,7 +234,7 @@ export async function getRealizedProjections(
   lookback: LookbackPeriod = '1y'
 ): Promise<RealizedProjectionResponse> {
   const portfolio = await getPortfolio();
-  const currentValue = portfolio.totalValue;
+  const currentValue = portfolio.netEquity;
   const allSnapshots = await getAllSnapshots();
 
   // Determine what lookback to actually use
@@ -312,7 +312,7 @@ export async function getRealizedProjections(
  */
 export async function getMetrics(lookback: LookbackPeriod = '1y'): Promise<MetricsResponse> {
   const portfolio = await getPortfolio();
-  const currentValue = portfolio.totalValue;
+  const currentValue = portfolio.netEquity;
   const allSnapshots = await getAllSnapshots();
 
   const lookbackUsed = getBestAvailableLookback(allSnapshots, lookback);
@@ -369,7 +369,7 @@ export async function getPaceProjection(currentAssets: number): Promise<PaceProj
   }
 
   // If no baseline found, return empty projection
-  if (!baselineSnapshot || baselineSnapshot.totalValue <= 0) {
+  if (!baselineSnapshot || (baselineSnapshot.netEquity ?? baselineSnapshot.totalValue) <= 0) {
     return {
       hasData: false,
       mtdReturnPct: null,
@@ -385,7 +385,7 @@ export async function getPaceProjection(currentAssets: number): Promise<PaceProj
     };
   }
 
-  const baselineMonthAssets = baselineSnapshot.totalValue;
+  const baselineMonthAssets = (baselineSnapshot.netEquity ?? baselineSnapshot.totalValue);
 
   // Calculate MTD return
   const mtdReturn = (currentAssets - baselineMonthAssets) / baselineMonthAssets;
@@ -513,25 +513,29 @@ function getCurrentMonthNumber(): number {
 }
 
 async function computeYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
-  const currentAssets = portfolio.totalAssets;
-  const settings = await getSettings();
+  const currentAssets = portfolio.netEquity;
 
-  if (settings.ytdStartEquity === null) {
+  // Use reconstructed Yahoo data to get Jan 1 baseline (matches chart)
+  const ytdDays = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+  const holdings = await getHoldings();
+  const reconstructed = await reconstructPortfolioHistory(
+    holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt
+  );
+
+  if (reconstructed.length === 0) {
     return {
       window: 'YTD', windowLabel: WINDOW_LABELS['YTD'], dataStatus: 'no_data',
       snapshotCount: 0, dataStartDate: null, dataEndDate: null, daysCovered: 0,
       currentAssets, referenceAssets: null,
       windowReturnPct: null, annualizedPacePct: null, capped: false,
       projections: { '1y': null, '2y': null, '5y': null, '10y': null },
-      note: 'Enter Jan 1 equity to see YTD.',
+      note: 'No historical data available for YTD.',
       estimated: false, estimatedReason: null,
       trueYtdAvailable: false,
     };
   }
 
-  const startEquity = settings.ytdStartEquity;
-  const flows = settings.ytdNetContributions ?? 0;
-  const endEquity = portfolio.netEquity;
+  const startEquity = reconstructed[0].value;
 
   if (startEquity <= 0) {
     return {
@@ -546,8 +550,8 @@ async function computeYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
     };
   }
 
-  // Simple return: (end - start - flows) / start
-  const windowReturn = (endEquity - startEquity - flows) / startEquity;
+  // Simple return from reconstructed baseline
+  const windowReturn = (currentAssets - startEquity) / startEquity;
   const windowReturnPct = Math.round(windowReturn * 10000) / 100;
 
   // Linear annualization: windowReturn × (12 / currentMonthNumber)
@@ -579,7 +583,7 @@ async function computeYtd(portfolio: Portfolio): Promise<CurrentPaceResponse> {
     note: capped ? 'Capped for realism.' : null,
     estimated: false, estimatedReason: null,
     trueYtdAvailable: true,
-    ytdDetail: { startEquity, netContributions: flows },
+    ytdDetail: { startEquity, netContributions: 0 },
   };
 }
 
@@ -587,7 +591,7 @@ export async function getCurrentPaceProjection(
   window: PaceWindow = '1M',
 ): Promise<CurrentPaceResponse> {
   const portfolio = await getPortfolio();
-  const currentAssets = portfolio.totalAssets;
+  const currentAssets = portfolio.netEquity;
 
   // ---- YTD: simple return with linear annualization ----
   if (window === 'YTD') {
@@ -652,68 +656,33 @@ export async function getCurrentPaceProjection(
     };
   }
 
-  // ---- Non-1D windows: Linear pace pipeline ----
-  //
-  // Pipeline:
-  //   1. Find baseline snapshot for the selected window
-  //   2. windowReturn = (currentAssets - baselineAssets) / baselineAssets
-  //   3. annualizedPace = windowReturn × multiplier (12 for 1M, 2 for 6M, 1 for 1Y)
-  //   4. Clamp to [-90%, +50%]
-  //   5. projectedValue(Y) = currentAssets × (1 + annualizedPace)^Y
-  //
-  // If no baseline for requested window, estimate from best available
-  // using the estimation fallback: daily return × multiplier.
-
+  // ---- Non-1D windows: Use reconstructed Yahoo candle data (matches chart) ----
   const WINDOW_DAYS: Record<string, number> = { '1M': 30, '6M': 182, '1Y': 365 };
   const targetDays = WINDOW_DAYS[window] ?? 30;
-  const targetTime = new Date(Date.now() - targetDays * 24 * 60 * 60 * 1000);
 
-  const baselineSnap = await getBaselineSnapshot(targetTime);
-  const oldestSnap = await getOldestSnapshot();
-  if (!oldestSnap) {
-    return emptyResponse('no_data', `No snapshots available for ${WINDOW_LABELS[window]} window.`);
+  const holdings = await getHoldings();
+  const reconstructed = await reconstructPortfolioHistory(
+    holdings, portfolio.cashBalance, targetDays, portfolio.marginDebt
+  );
+
+  if (reconstructed.length === 0) {
+    return emptyResponse('no_data', `No historical data available for ${WINDOW_LABELS[window]} window.`);
   }
 
   const nowMs = Date.now();
-
-  let baselineAssets: number;
-  let baselineTimestamp: Date;
-  let isEstimated: boolean;
-  let estimatedReason: string | null;
-  let snapshotCount: number;
-
-  if (baselineSnap && baselineSnap.totalValue > 0) {
-    baselineAssets = baselineSnap.totalValue;
-    baselineTimestamp = baselineSnap.timestamp;
-    isEstimated = false;
-    estimatedReason = null;
-    const windowSnapshots = await getSnapshotsAfter(new Date(baselineSnap.timestamp));
-    snapshotCount = windowSnapshots.length;
-  } else {
-    // Estimation fallback: use daily return scaled linearly
-    baselineAssets = oldestSnap.totalValue;
-    baselineTimestamp = oldestSnap.timestamp;
-    isEstimated = true;
-    estimatedReason = `Estimated from today's return.`;
-    const windowSnapshots = await getSnapshotsAfter(new Date(oldestSnap.timestamp));
-    snapshotCount = windowSnapshots.length;
-  }
+  const baselineAssets = reconstructed[0].value;
+  const baselineTimestamp = new Date(reconstructed[0].time);
+  const snapshotCount = reconstructed.length;
 
   if (baselineAssets <= 0) {
-    return emptyResponse('insufficient', 'Baseline snapshot has zero value.');
+    return emptyResponse('insufficient', 'Baseline value is zero.');
   }
 
-  const actualSpanDays = Math.max(1, (nowMs - new Date(baselineTimestamp).getTime()) / (1000 * 60 * 60 * 24));
+  const actualSpanDays = Math.max(1, (nowMs - baselineTimestamp.getTime()) / (1000 * 60 * 60 * 24));
 
-  // Compute window return
+  // Compute window return from reconstructed data (same source as chart)
   let windowReturn: number;
-  if (!isEstimated) {
-    windowReturn = (currentAssets - baselineAssets) / baselineAssets;
-  } else {
-    // Use live daily return scaled to window days
-    const dailyReturn = portfolio.dayChangePercent / 100;
-    windowReturn = dailyReturn * targetDays;
-  }
+  windowReturn = (currentAssets - baselineAssets) / baselineAssets;
 
   if (!isFinite(windowReturn) || isNaN(windowReturn)) {
     windowReturn = 0;
@@ -730,10 +699,6 @@ export async function getCurrentPaceProjection(
 
   const projections = makeProjections(currentAssets, annualizedPace);
 
-  const notes: string[] = [];
-  if (isEstimated) notes.push(estimatedReason!);
-  if (capped) notes.push('Capped for realism.');
-
   return {
     window,
     windowLabel: WINDOW_LABELS[window],
@@ -748,8 +713,8 @@ export async function getCurrentPaceProjection(
     annualizedPacePct,
     capped,
     projections,
-    note: notes.length > 0 ? notes.join(' ') : null,
-    estimated: isEstimated,
-    estimatedReason,
+    note: capped ? 'Capped for realism.' : null,
+    estimated: false,
+    estimatedReason: null,
   };
 }

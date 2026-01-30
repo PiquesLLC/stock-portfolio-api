@@ -11,16 +11,16 @@ function randomNormal(mean: number, stdDev: number): number {
 }
 
 const DEMO_USERS = [
-  { username: 'alex_trades', displayName: 'Alex Chen' },
-  { username: 'sarah_invest', displayName: 'Sarah Johnson' },
-  { username: 'mike_portfolio', displayName: 'Mike Rivera' },
-  { username: 'jess_capital', displayName: 'Jessica Park' },
-  { username: 'david_stocks', displayName: 'David Kim' },
-  { username: 'emma_wealth', displayName: 'Emma Thompson' },
-  { username: 'ryan_markets', displayName: 'Ryan Garcia' },
-  { username: 'lisa_gains', displayName: 'Lisa Nguyen' },
-  { username: 'chris_alpha', displayName: 'Chris Anderson' },
-  { username: 'nina_bull', displayName: 'Nina Patel' },
+  { username: 'alex_trades', displayName: 'Alex Chen', region: 'NA' },
+  { username: 'sarah_invest', displayName: 'Sarah Johnson', region: 'NA' },
+  { username: 'mike_portfolio', displayName: 'Mike Rivera', region: 'NA' },
+  { username: 'jess_capital', displayName: 'Jessica Park', region: 'APAC' },
+  { username: 'david_stocks', displayName: 'David Kim', region: 'APAC' },
+  { username: 'emma_wealth', displayName: 'Emma Thompson', region: 'EU' },
+  { username: 'ryan_markets', displayName: 'Ryan Garcia', region: 'NA' },
+  { username: 'lisa_gains', displayName: 'Lisa Nguyen', region: 'APAC' },
+  { username: 'chris_alpha', displayName: 'Chris Anderson', region: 'EU' },
+  { username: 'nina_bull', displayName: 'Nina Patel', region: 'APAC' },
 ];
 
 const TICKER_POOL = [
@@ -72,6 +72,8 @@ async function main() {
   await prisma.portfolioSnapshot.deleteMany({ where: { userId: { not: null } } });
   await prisma.holding.deleteMany({ where: { userId: { not: null } } });
   await prisma.userSettings.deleteMany();
+  await prisma.activityEvent.deleteMany();
+  await prisma.follow.deleteMany();
   await prisma.user.deleteMany();
 
   const ninetyDaysAgo = new Date();
@@ -83,6 +85,7 @@ async function main() {
       data: {
         username: userData.username,
         displayName: userData.displayName,
+        region: userData.region,
         trackingActive: true,
         trackingStartAt: ninetyDaysAgo,
         leaderboardEligible: true,

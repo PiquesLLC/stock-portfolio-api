@@ -1,5 +1,20 @@
 import { PrismaClient } from '@prisma/client';
-import { LeaderboardWindow, LeaderboardEntry, LeaderboardResponse } from '../types';
+import { LeaderboardWindow, LeaderboardRegion, LeaderboardEntry, LeaderboardResponse } from '../types';
+import {
+  calculateTWR,
+  isSuspiciousReturn,
+  isSuspiciousSharpe,
+  dailyReturnsFromValues,
+  SnapshotPoint,
+  CashflowEvent,
+} from '../utils/finance-math';
+
+const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
+  world: null,
+  na: 'NA',
+  europe: 'EU',
+  apac: 'APAC',
+};
 
 const prisma = new PrismaClient();
 
@@ -32,9 +47,15 @@ function getWindowStartDate(window: LeaderboardWindow): Date {
   }
 }
 
-export async function getLeaderboard(window: LeaderboardWindow): Promise<LeaderboardResponse> {
+const NEW_USER_DAYS = 7;
+
+export async function getLeaderboard(window: LeaderboardWindow, region: LeaderboardRegion = 'world'): Promise<LeaderboardResponse> {
+  const regionFilter = REGION_DB_MAP[region];
   const users = await prisma.user.findMany({
-    where: { leaderboardEligible: true },
+    where: {
+      leaderboardEligible: true,
+      ...(regionFilter ? { region: regionFilter, showRegion: true } : {}),
+    },
   });
 
   const windowStart = getWindowStartDate(window);
@@ -46,86 +67,174 @@ export async function getLeaderboard(window: LeaderboardWindow): Promise<Leaderb
     const effectiveStart = user.trackingStartAt > windowStart ? user.trackingStartAt : windowStart;
     const sinceStart = user.trackingStartAt > windowStart;
 
-    // Baseline = closest snapshot to effectiveStart
-    // Prefer the most recent snapshot at/before effectiveStart (anchors to window edge),
-    // fall back to first snapshot after effectiveStart if none exists before
-    let baseline = await prisma.portfolioSnapshot.findFirst({
-      where: {
-        userId: user.id,
-        timestamp: { lte: effectiveStart },
-      },
+    // Is the user "new" (tracking started within 7 days)?
+    const daysSinceStart = (Date.now() - user.trackingStartAt.getTime()) / (1000 * 60 * 60 * 24);
+    const isNew = daysSinceStart <= NEW_USER_DAYS;
+
+    // Get all snapshots for TWR calculation (baseline + window)
+    const baselineSnapshot = await prisma.portfolioSnapshot.findFirst({
+      where: { userId: user.id, timestamp: { lte: effectiveStart } },
       orderBy: { timestamp: 'desc' },
     });
-    if (!baseline) {
-      baseline = await prisma.portfolioSnapshot.findFirst({
-        where: {
-          userId: user.id,
-          timestamp: { gte: effectiveStart },
-        },
-        orderBy: { timestamp: 'asc' },
-      });
+
+    const windowSnapshots = await prisma.portfolioSnapshot.findMany({
+      where: { userId: user.id, timestamp: { gte: effectiveStart } },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    const allSnapshotsRaw = baselineSnapshot
+      ? [baselineSnapshot, ...windowSnapshots]
+      : windowSnapshots;
+
+    // Deduplicate to one per calendar day (last snapshot of each day)
+    const dailyMap = new Map<string, typeof allSnapshotsRaw[0]>();
+    for (const s of allSnapshotsRaw) {
+      const dayKey = s.timestamp.toISOString().slice(0, 10);
+      dailyMap.set(dayKey, s);
     }
+    const allSnapshots = Array.from(dailyMap.values()).sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
 
-    // Latest = most recent snapshot
-    const latest = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: user.id },
-      orderBy: { timestamp: 'desc' },
-    });
+    const latest = allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1] : null;
+    const baseline = allSnapshots.length > 0 ? allSnapshots[0] : null;
 
-    // Count snapshots for this user
     const snapshotCount = await prisma.portfolioSnapshot.count({
       where: { userId: user.id },
     });
 
-    if (!baseline || !latest || baseline.id === latest.id) {
+    if (!baseline || !latest || allSnapshots.length < 2) {
       entries.push({
         userId: user.id,
         username: user.username,
         displayName: user.displayName,
+        region: user.region ?? null,
         window,
         returnPct: null,
         returnDollar: null,
+        twrPct: null,
         verified: true,
         basis: 'none',
         sinceStart,
+        isNew,
+        flagged: false,
+        flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(),
         snapshotCount,
         startDateUsed: null,
         endDateUsed: null,
-        currentAssets: latest?.totalValue ?? null,
+        currentAssets: latest ? (latest.netEquity ?? latest.totalValue) : null,
       });
       continue;
     }
 
-    const returnPct = baseline.totalValue > 0
-      ? ((latest.totalValue - baseline.totalValue) / baseline.totalValue) * 100
+    // Build snapshot points for TWR
+    const snapshotPoints: SnapshotPoint[] = allSnapshots.map(s => ({
+      date: s.timestamp,
+      value: s.netEquity ?? s.totalValue,
+    }));
+
+    // Get transactions (cashflows) for TWR
+    const transactions = await prisma.transaction.findMany({
+      where: { userId: user.id, date: { gte: effectiveStart } },
+      orderBy: { date: 'asc' },
+    });
+
+    const cashflows: CashflowEvent[] = transactions.map(t => ({
+      date: t.date,
+      amount: t.type === 'deposit' ? t.amount : -t.amount,
+    }));
+
+    // Calculate TWR
+    const twrRaw = calculateTWR(snapshotPoints, cashflows);
+    const twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
+
+    // Simple return for backwards compatibility
+    const baselineValue = baseline.netEquity ?? baseline.totalValue;
+    const latestValue = latest.netEquity ?? latest.totalValue;
+    const returnPct = baselineValue > 0
+      ? ((latestValue - baselineValue) / baselineValue) * 100
       : null;
-    const returnDollar = latest.totalValue - baseline.totalValue;
+    const returnDollar = latestValue - baselineValue;
+
+    // Anti-cheat checks
+    let flagged = false;
+    let flagReason: string | null = null;
+
+    // Check for suspicious single-day return
+    const values = snapshotPoints.map(s => s.value);
+    const dailyReturns = dailyReturnsFromValues(values);
+    if (dailyReturns.some(r => isSuspiciousReturn(r, 1))) {
+      flagged = true;
+      flagReason = 'Suspicious single-day return detected (>300%)';
+    }
+
+    // Check for suspicious Sharpe ratio
+    if (!flagged && dailyReturns.length >= 5) {
+      const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+      const annualizedMean = mean * 252;
+      const variance = dailyReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / dailyReturns.length;
+      const annualizedVol = Math.sqrt(variance) * Math.sqrt(252);
+      if (isSuspiciousSharpe(annualizedMean, annualizedVol)) {
+        flagged = true;
+        flagReason = 'Abnormally high risk-adjusted return (Sharpe > 5)';
+      }
+    }
 
     entries.push({
       userId: user.id,
       username: user.username,
       displayName: user.displayName,
+      region: user.region ?? null,
       window,
       returnPct,
       returnDollar,
+      twrPct,
       verified: true,
       basis: 'verified',
       sinceStart,
+      isNew,
+      flagged,
+      flagReason,
       trackingStartAt: user.trackingStartAt.toISOString(),
       snapshotCount,
       startDateUsed: baseline.timestamp.toISOString(),
       endDateUsed: latest.timestamp.toISOString(),
-      currentAssets: latest.totalValue,
+      currentAssets: latestValue,
     });
   }
 
-  // Sort by returnPct descending, nulls last
+  // Write to LeaderboardCache for fast reads
+  await Promise.all(entries.map(entry =>
+    prisma.leaderboardCache.upsert({
+      where: { userId_window: { userId: entry.userId, window } },
+      create: {
+        userId: entry.userId,
+        window,
+        twrPct: entry.twrPct,
+        flagged: entry.flagged,
+        flagReason: entry.flagReason,
+        isNew: entry.isNew,
+        computedAt: new Date(),
+      },
+      update: {
+        twrPct: entry.twrPct,
+        flagged: entry.flagged,
+        flagReason: entry.flagReason,
+        isNew: entry.isNew,
+        computedAt: new Date(),
+      },
+    }).catch(() => {}) // non-critical
+  ));
+
+  // Sort by TWR descending (fall back to returnPct), nulls last
   entries.sort((a, b) => {
-    if (a.returnPct === null && b.returnPct === null) return 0;
-    if (a.returnPct === null) return 1;
-    if (b.returnPct === null) return -1;
-    return b.returnPct - a.returnPct;
+    const aVal = a.twrPct ?? a.returnPct;
+    const bVal = b.twrPct ?? b.returnPct;
+    if (aVal === null && bVal === null) return 0;
+    if (aVal === null) return 1;
+    if (bVal === null) return -1;
+    return bVal - aVal;
   });
 
   return {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles } from '../services/market.service';
+import { getBenchmarkCandles } from '../utils/candle-cache';
 
 interface PriceResult {
   price: number;
@@ -133,5 +134,31 @@ export async function searchSymbols(req: Request, res: Response): Promise<void> 
   } catch (error) {
     console.error('Error searching symbols:', error);
     res.status(500).json({ error: 'Failed to search symbols' });
+  }
+}
+
+export async function getBenchmarkClosesHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    const validBenchmarks = ['SPY', 'QQQ', 'DIA'];
+    if (!ticker || !validBenchmarks.includes(ticker)) {
+      res.status(400).json({ error: `Invalid benchmark. Must be one of: ${validBenchmarks.join(', ')}` });
+      return;
+    }
+    const data = getBenchmarkCandles(ticker);
+    if (!data) {
+      res.json({ ticker, candles: [] });
+      return;
+    }
+    // Return paired date+close array
+    const candles = data.dates.map((date, i) => ({
+      date,
+      time: new Date(date).getTime(),
+      close: data.closes[i],
+    }));
+    res.json({ ticker, candles });
+  } catch (error) {
+    console.error('Error fetching benchmark closes:', error);
+    res.status(500).json({ error: 'Failed to fetch benchmark data' });
   }
 }

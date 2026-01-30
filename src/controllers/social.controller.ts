@@ -9,6 +9,7 @@ import {
   getFollowCounts,
 } from '../services/follow.service';
 import { getFeed, getUserActivity } from '../services/activity.service';
+import { getPerformanceComparison } from '../services/benchmark.service';
 
 const prisma = new PrismaClient();
 
@@ -103,6 +104,9 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
         profilePublic: true,
         trackingActive: true,
         leaderboardEligible: true,
+        region: true,
+        showRegion: true,
+        holdingsVisibility: true,
       },
     });
 
@@ -115,6 +119,16 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
     const viewerFollowing = viewerId ? await isFollowing(viewerId, userId) : false;
     const activity = user.profilePublic ? await getUserActivity(userId, 10) : [];
 
+    // Fetch performance stats for the profile (1M window, SPY benchmark)
+    let performance = null;
+    if (user.profilePublic) {
+      try {
+        performance = await getPerformanceComparison('1M', 'SPY', userId);
+      } catch {
+        // Performance data is optional
+      }
+    }
+
     res.json({
       ...user,
       createdAt: user.createdAt.toISOString(),
@@ -122,10 +136,40 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
       followingCount: counts.following,
       viewerIsFollowing: viewerFollowing,
       recentActivity: activity,
+      performance,
     });
   } catch (error) {
     console.error('Error getting profile:', error);
     res.status(500).json({ error: 'Failed to get profile' });
+  }
+}
+
+// PUT /users/:userId/region
+export async function updateRegionHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId } = req.params;
+    const { region, showRegion } = req.body;
+
+    const VALID_REGIONS = ['NA', 'EU', 'APAC'];
+    if (region !== undefined && region !== null && !VALID_REGIONS.includes(region)) {
+      res.status(400).json({ error: `Invalid region. Must be one of: ${VALID_REGIONS.join(', ')}` });
+      return;
+    }
+
+    const data: Record<string, unknown> = {};
+    if (region !== undefined) data.region = region;
+    if (typeof showRegion === 'boolean') data.showRegion = showRegion;
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, region: true, showRegion: true },
+    });
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating region:', error);
+    res.status(500).json({ error: 'Failed to update region' });
   }
 }
 

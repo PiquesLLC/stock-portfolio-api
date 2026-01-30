@@ -310,3 +310,118 @@ export function clearCandleCache(): void {
   keys.filter(k => k.startsWith('candles:')).forEach(k => candleCache.del(k));
   failedTickers.clear();
 }
+
+// ============================================================================
+// BENCHMARK CANDLE CACHING
+// ============================================================================
+
+import axios from 'axios';
+
+const BENCHMARK_TICKERS = ['SPY', 'QQQ', 'DIA'];
+const benchmarkCache = new NodeCache({ stdTTL: 86400 }); // 24h
+
+export interface BenchmarkCandles {
+  ticker: string;
+  closes: number[];
+  dates: string[];
+  returns: number[];
+  fetchedAt: number;
+}
+
+async function fetchBenchmarkFromYahoo(ticker: string): Promise<BenchmarkCandles | null> {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 400 * 24 * 60 * 60; // ~400 days for 252 trading days
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${from}&period2=${now}&interval=1d`;
+    const resp = await axios.get(url, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+
+    const result = resp.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+
+    const timestamps: number[] = result.timestamp;
+    const q = result.indicators.quote[0];
+    const closes: number[] = [];
+    const dates: string[] = [];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (q.close[i] != null) {
+        closes.push(q.close[i]);
+        dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
+      }
+    }
+
+    if (closes.length < 2) return null;
+
+    // Calculate daily returns
+    const returns: number[] = [];
+    for (let i = 1; i < closes.length; i++) {
+      if (closes[i - 1] > 0) {
+        returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+      }
+    }
+
+    return { ticker, closes, dates, returns, fetchedAt: Date.now() };
+  } catch (err) {
+    console.warn(`[BenchmarkCache] Failed to fetch ${ticker}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Fetch and cache benchmark candles for SPY, QQQ, DIA.
+ * Call on startup and periodically (every 6h).
+ */
+export async function ensureBenchmarksCached(): Promise<void> {
+  console.log('[BenchmarkCache] Fetching benchmarks: SPY, QQQ, DIA');
+  for (const ticker of BENCHMARK_TICKERS) {
+    const existing = benchmarkCache.get<BenchmarkCandles>(`benchmark:${ticker}`);
+    if (existing) continue;
+
+    const data = await fetchBenchmarkFromYahoo(ticker);
+    if (data) {
+      benchmarkCache.set(`benchmark:${ticker}`, data);
+      console.log(`[BenchmarkCache] Cached ${ticker}: ${data.closes.length} days`);
+    }
+  }
+}
+
+/**
+ * Get cached benchmark candles for a ticker.
+ */
+export function getBenchmarkCandles(ticker: string): BenchmarkCandles | null {
+  return benchmarkCache.get<BenchmarkCandles>(`benchmark:${ticker.toUpperCase()}`) ?? null;
+}
+
+/**
+ * Get benchmark daily returns for the last N trading days.
+ */
+export function getBenchmarkReturns(ticker: string, days: number): number[] | null {
+  const data = getBenchmarkCandles(ticker);
+  if (!data || data.returns.length === 0) return null;
+  return data.returns.slice(-days);
+}
+
+/**
+ * Get benchmark total return over the last N trading days.
+ * Returns as fraction (e.g., 0.05 = 5%).
+ */
+export function getBenchmarkTotalReturn(ticker: string, days: number): number | null {
+  const data = getBenchmarkCandles(ticker);
+  if (!data || data.closes.length < days + 1) return null;
+  const startClose = data.closes[data.closes.length - 1 - days];
+  const endClose = data.closes[data.closes.length - 1];
+  if (startClose <= 0) return null;
+  return (endClose - startClose) / startClose;
+}
+
+/**
+ * Get benchmark close prices for the last N trading days (including current).
+ */
+export function getBenchmarkCloses(ticker: string, days: number): number[] | null {
+  const data = getBenchmarkCandles(ticker);
+  if (!data || data.closes.length < days) return null;
+  return data.closes.slice(-days);
+}

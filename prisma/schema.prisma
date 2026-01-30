@@ -47,12 +47,17 @@ model User {
   leaderboardEligible   Boolean             @default(false)
   leaderboardEligibleAt DateTime?
   profilePublic         Boolean             @default(true)
+  region                String?
+  showRegion            Boolean             @default(true)
+  holdingsVisibility    String              @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
   holdings              Holding[]
   snapshots             PortfolioSnapshot[]
   settings              UserSettings?
   followers             Follow[]            @relation("following")
   following             Follow[]            @relation("follower")
   activityEvents        ActivityEvent[]
+  transactions          Transaction[]
+  alerts                Alert[]
 }
 
 model UserSettings {
@@ -146,4 +151,55 @@ model ActivityEvent {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  userId    String?
+  type      String   // 'deposit' | 'withdrawal'
+  amount    Float
+  date      DateTime
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+}
+
+model Alert {
+  id        String       @id @default(uuid())
+  userId    String?
+  type      String       // 'drawdown' | 'sector_exposure' | 'underperform_spy' | 'drag' | '52w_high' | '52w_low'
+  threshold Float?
+  enabled   Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  user      User?        @relation(fields: [userId], references: [id])
+  events    AlertEvent[]
+
+  @@index([userId])
+}
+
+model AlertEvent {
+  id        String   @id @default(uuid())
+  alertId   String
+  alert     Alert    @relation(fields: [alertId], references: [id])
+  message   String
+  data      String?  // JSON
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([alertId, createdAt])
+}
+
+model LeaderboardCache {
+  id         String   @id @default(uuid())
+  userId     String
+  window     String   // '1D' | '1W' | '1M' | 'YTD' | '1Y'
+  twrPct     Float?
+  flagged    Boolean  @default(false)
+  flagReason String?
+  isNew      Boolean  @default(false)
+  computedAt DateTime @default(now())
+
+  @@unique([userId, window])
+  @@index([window, twrPct])
 }

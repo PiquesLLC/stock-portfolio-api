@@ -22,6 +22,7 @@ export interface PortfolioSnapshot {
   dailyPLPercent: number;
   totalPL: number;
   totalPLPercent: number;
+  netEquity: number | null;
 }
 
 export type BaselineType = 'fresh_start' | 'existing_portfolio';
@@ -426,6 +427,9 @@ export interface LeakDetectorResult {
     matrix: number[][];
   } | null;
   partial: boolean;
+  spyCorrelation: number | null;
+  suggestedActions: string[];
+  hiddenConcentration: boolean;
 }
 
 export interface RiskForecastBasis {
@@ -556,17 +560,23 @@ export interface SymbolSearchResponse {
 
 // Leaderboard types
 export type LeaderboardWindow = '1D' | '1W' | '1M' | 'YTD' | '1Y';
+export type LeaderboardRegion = 'world' | 'na' | 'europe' | 'apac';
 
 export interface LeaderboardEntry {
   userId: string;
   username: string;
   displayName: string;
+  region: string | null;
   window: LeaderboardWindow;
   returnPct: number | null;
   returnDollar: number | null;
+  twrPct: number | null;
   verified: boolean;
   basis: 'verified' | 'none';
   sinceStart: boolean;
+  isNew: boolean;
+  flagged: boolean;
+  flagReason: string | null;
   trackingStartAt: string;
   snapshotCount: number;
   startDateUsed: string | null;

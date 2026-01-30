@@ -7,7 +7,7 @@ import {
   getHoldings,
 } from '../services/portfolio.service';
 import { createActivityEvent } from '../services/activity.service';
-import { createSnapshotIfNeeded, getAllSnapshots } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, getAllSnapshots, getChartSnapshots, reconstructPortfolioHistory, reconstructIntradayGap } from '../services/snapshot.service';
 import {
   getSP500Projections,
   getRealizedProjections,
@@ -16,6 +16,7 @@ import {
   getCurrentPaceProjection,
 } from '../services/projection.service';
 import { LookbackPeriod, ProjectionMode, PaceWindow } from '../types';
+import { getPerformanceComparison, PerformanceWindow } from '../services/benchmark.service';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -27,7 +28,7 @@ export async function getPortfolioHandler(req: Request, res: Response): Promise<
     const portfolio = await getPortfolio();
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
-    const paceProjection = await getPaceProjection(portfolio.totalAssets);
+    const paceProjection = await getPaceProjection(portfolio.netEquity);
 
     res.json({
       ...portfolio,
@@ -199,6 +200,110 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
   }
 }
 
+const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+
+export async function getChartHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const period = ((req.query.period as string) || '1D').toUpperCase();
+    if (!VALID_CHART_PERIODS.includes(period)) {
+      res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
+      return;
+    }
+
+    const portfolio = await getPortfolio();
+
+    if (period === '1D') {
+      const chartData = await getChartSnapshots(period);
+      const now = Date.now();
+
+      // Detect gaps > 30 min in snapshot data and fill with intraday candle reconstruction
+      const GAP_THRESHOLD_MS = 30 * 60 * 1000;
+      const holdings = await getHoldings();
+      if (holdings.length > 0 && chartData.points.length >= 2) {
+        const gaps: { startMs: number; endMs: number; insertAfterIdx: number }[] = [];
+        for (let i = 0; i < chartData.points.length - 1; i++) {
+          const dt = chartData.points[i + 1].time - chartData.points[i].time;
+          if (dt > GAP_THRESHOLD_MS) {
+            gaps.push({
+              startMs: chartData.points[i].time,
+              endMs: chartData.points[i + 1].time,
+              insertAfterIdx: i,
+            });
+          }
+        }
+        // Also check gap from last snapshot to now
+        if (chartData.points.length > 0) {
+          const lastTime = chartData.points[chartData.points.length - 1].time;
+          if (now - lastTime > GAP_THRESHOLD_MS) {
+            gaps.push({
+              startMs: lastTime,
+              endMs: now,
+              insertAfterIdx: chartData.points.length - 1,
+            });
+          }
+        }
+
+        if (gaps.length > 0) {
+          const fillResults = await Promise.all(
+            gaps.map(g =>
+              reconstructIntradayGap(
+                holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+                portfolio.cashBalance,
+                portfolio.marginDebt,
+                g.startMs,
+                g.endMs,
+              )
+            )
+          );
+          // Merge fill points into chartData (insert in reverse order to preserve indices)
+          for (let g = gaps.length - 1; g >= 0; g--) {
+            const fillPts = fillResults[g];
+            if (fillPts.length > 0) {
+              chartData.points.splice(gaps[g].insertAfterIdx + 1, 0, ...fillPts);
+            }
+          }
+        }
+      }
+
+      // Append live value
+      if (chartData.points.length === 0 || now - chartData.points[chartData.points.length - 1].time > 5000) {
+        chartData.points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+      }
+      if (chartData.periodStartValue === 0 && chartData.points.length > 0) {
+        chartData.periodStartValue = chartData.points[0].value;
+      }
+      res.json(chartData);
+      return;
+    }
+
+    // For all other periods: reconstruct from candle data (daily resolution)
+    const periodDaysMap: Record<string, number> = {
+      '1W': 7, '1M': 30, '3M': 90,
+      'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '1Y': 365, 'ALL': 365 * 5,
+    };
+    const periodDays = periodDaysMap[period] ?? 30;
+
+    const holdings = await getHoldings();
+    const reconstructed = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+
+    const now = Date.now();
+    let points = reconstructed;
+
+    // Append current live value
+    if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+      points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+    }
+
+    const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
+
+    res.json({ points, periodStartValue, period });
+  } catch (error) {
+    console.error('Error fetching chart data:', error);
+    res.status(500).json({ error: 'Failed to fetch chart data' });
+  }
+}
+
 const VALID_PACE_WINDOWS: PaceWindow[] = ['1D', '1M', '6M', '1Y', 'YTD'];
 
 export async function getCurrentPaceHandler(req: Request, res: Response): Promise<void> {
@@ -217,5 +322,31 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
   } catch (error) {
     console.error('Error calculating current pace:', error);
     res.status(500).json({ error: 'Failed to calculate current pace' });
+  }
+}
+
+const VALID_PERF_WINDOWS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const VALID_BENCHMARKS = ['SPY', 'QQQ', 'DIA'];
+
+export async function getPerformanceHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const window = ((req.query.window as string) || '1M').toUpperCase() as PerformanceWindow;
+    const benchmark = ((req.query.benchmark as string) || 'SPY').toUpperCase();
+    const userId = (req.query.userId as string) || undefined;
+
+    if (!VALID_PERF_WINDOWS.includes(window)) {
+      res.status(400).json({ error: `Invalid window. Must be one of: ${VALID_PERF_WINDOWS.join(', ')}` });
+      return;
+    }
+    if (!VALID_BENCHMARKS.includes(benchmark)) {
+      res.status(400).json({ error: `Invalid benchmark. Must be one of: ${VALID_BENCHMARKS.join(', ')}` });
+      return;
+    }
+
+    const result = await getPerformanceComparison(window, benchmark, userId || null);
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching performance:', error);
+    res.status(500).json({ error: 'Failed to fetch performance data' });
   }
 }

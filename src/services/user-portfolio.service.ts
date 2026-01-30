@@ -48,13 +48,17 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
 
   const enrichedHoldings = holdings.map((h) => {
     const quote = quotesResult.quotes.get(h.ticker);
-    const currentPrice = quote?.currentPrice ?? h.averageCost;
+    // During extended hours, prefer extendedPrice (premarket/after-hours)
+    const currentPrice = (quote?.extendedPrice && quote.extendedPrice > 0)
+      ? quote.extendedPrice
+      : (quote?.currentPrice ?? h.averageCost);
     const currentValue = currentPrice * h.shares;
     const cost = h.averageCost * h.shares;
     const pl = currentValue - cost;
     const plPct = cost > 0 ? (pl / cost) * 100 : 0;
-    const dc = quote ? (quote.change ?? 0) * h.shares : 0;
-    const dcPct = quote?.changePercent ?? 0;
+    const previousClose = quote?.previousClose ?? quote?.currentPrice ?? h.averageCost;
+    const dc = (currentPrice - previousClose) * h.shares;
+    const dcPct = previousClose > 0 ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
 
     holdingsValue += currentValue;
     totalCost += cost;

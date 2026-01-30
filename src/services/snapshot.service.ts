@@ -2,6 +2,10 @@ import { PrismaClient } from '@prisma/client';
 import { PortfolioSnapshot } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
+import axios from 'axios';
+import NodeCache from 'node-cache';
+
+const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 
 const prisma = new PrismaClient();
 
@@ -43,10 +47,13 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
 
     const portfolio = await getPortfolio();
 
-    // Don't create snapshot if quotes are unavailable - data would be misleading
-    if (portfolio.quotesUnavailableCount && portfolio.quotesUnavailableCount > 0) {
+    // Skip snapshot only if majority of quotes are unavailable
+    // (allows snapshots during premarket/after-hours when some tickers lack data)
+    const totalHoldings = portfolio.holdings.length;
+    const unavailable = portfolio.quotesUnavailableCount ?? 0;
+    if (totalHoldings > 0 && unavailable > totalHoldings * 0.5) {
       console.log(
-        `[Snapshot] Skipped - ${portfolio.quotesUnavailableCount} quotes unavailable`
+        `[Snapshot] Skipped - ${unavailable}/${totalHoldings} quotes unavailable (>50%)`
       );
       return null;
     }
@@ -221,6 +228,401 @@ export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
     select: { ticker: true, dayPL: true, dayPLPercent: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
   });
+}
+
+/**
+ * Reconstruct historical portfolio value from current holdings + candle data.
+ * Uses each holding's shares × historical close price, summed across all tickers.
+ * cashBalance is added as a constant since we don't track cash history.
+ */
+export async function reconstructPortfolioHistory(
+  holdings: { ticker: string; shares: number }[],
+  cashBalance: number,
+  periodDays: number,
+  marginDebt: number = 0,
+): Promise<{ time: number; value: number }[]> {
+  if (holdings.length === 0) return [];
+
+  // Fetch Yahoo candles for all holdings (with 24h cache)
+  const fetchYahoo = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
+    const cacheKey = `chart-candle:${ticker}`;
+    const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const from = now - Math.max(365, periodDays + 30) * 24 * 60 * 60;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
+      const resp = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const result = resp.data?.chart?.result?.[0];
+      if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+
+      const timestamps: number[] = result.timestamp;
+      const q = result.indicators.quote[0];
+      const dates: number[] = [];
+      const closes: number[] = [];
+
+      for (let i = 0; i < timestamps.length; i++) {
+        if (q.close[i] != null) {
+          dates.push(timestamps[i] * 1000);
+          closes.push(q.close[i]);
+        }
+      }
+
+      if (closes.length === 0) return null;
+      const data = { dates, closes };
+      chartCandleCache.set(cacheKey, data);
+      return data;
+    } catch (e) {
+      console.warn(`Yahoo candle fetch failed for ${ticker}:`, e instanceof Error ? e.message : e);
+      return null;
+    }
+  };
+
+  const candleResults = await Promise.all(holdings.map(h => fetchYahoo(h.ticker)));
+
+  // Build a map: ticker -> { dates[], closes[] }
+  const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
+  for (let i = 0; i < holdings.length; i++) {
+    const candles = candleResults[i];
+    if (!candles) continue;
+    tickerCandles.set(holdings[i].ticker, candles);
+  }
+
+  if (tickerCandles.size === 0) return [];
+
+  // Find all unique dates across all tickers, filtered to period
+  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const allDatesSet = new Set<number>();
+  for (const { dates } of tickerCandles.values()) {
+    for (const d of dates) {
+      if (d >= cutoffMs) allDatesSet.add(d);
+    }
+  }
+
+  const allDates = Array.from(allDatesSet).sort((a, b) => a - b);
+  if (allDates.length === 0) return [];
+
+  // For each date, compute portfolio value
+  // For each ticker, find the closest close price at or before that date
+  const points: { time: number; value: number }[] = [];
+
+  for (const dateMs of allDates) {
+    let totalValue = cashBalance - marginDebt;
+    let allFound = true;
+
+    for (const holding of holdings) {
+      const candles = tickerCandles.get(holding.ticker);
+      if (!candles) { allFound = false; continue; }
+
+      // Binary search for closest date <= dateMs
+      let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (candles.dates[mid] <= dateMs) {
+          bestIdx = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      if (bestIdx >= 0) {
+        totalValue += holding.shares * candles.closes[bestIdx];
+      } else {
+        allFound = false;
+      }
+    }
+
+    if (allFound || tickerCandles.size >= holdings.length * 0.5) {
+      points.push({ time: dateMs, value: totalValue });
+    }
+  }
+
+  return points;
+}
+
+// ---- User-specific snapshot functions ----
+
+const userSnapshotLocks = new Map<string, number>(); // userId -> lastSnapshotTime
+
+export async function createUserSnapshotIfNeeded(userId: string, totalAssets: number, cashBalance: number, dayChange: number, dayChangePercent: number, totalPL: number, totalPLPercent: number, netEquity: number): Promise<void> {
+  const now = Date.now();
+  const intervalMs = config.snapshotIntervalSeconds * 1000;
+
+  const lastTime = userSnapshotLocks.get(userId) ?? 0;
+  if (now - lastTime < intervalMs) return;
+
+  // Check DB
+  const latest = await prisma.portfolioSnapshot.findFirst({
+    where: { userId },
+    orderBy: { timestamp: 'desc' },
+  });
+
+  if (latest) {
+    const timeSince = now - new Date(latest.timestamp).getTime();
+    if (timeSince < intervalMs) {
+      userSnapshotLocks.set(userId, new Date(latest.timestamp).getTime());
+      return;
+    }
+  }
+
+  if (totalAssets < 100) return;
+
+  const snapshotTime = new Date();
+  await prisma.portfolioSnapshot.create({
+    data: {
+      timestamp: snapshotTime,
+      totalValue: totalAssets,
+      cashBalance,
+      dailyPL: dayChange,
+      dailyPLPercent: dayChangePercent,
+      totalPL,
+      totalPLPercent,
+      netEquity,
+      userId,
+    },
+  });
+
+  userSnapshotLocks.set(userId, snapshotTime.getTime());
+}
+
+export async function getUserChartSnapshots(userId: string, period: string): Promise<{
+  points: { time: number; value: number }[];
+  periodStartValue: number;
+  period: string;
+}> {
+  const now = new Date();
+  let startDate: Date;
+
+  switch (period) {
+    case '1D':
+      startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case '1W':
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+      break;
+    case '1M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 1);
+      break;
+    case '3M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 3);
+      break;
+    case 'YTD':
+      startDate = new Date(now.getFullYear(), 0, 1);
+      break;
+    case '1Y':
+      startDate = new Date(now);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+      break;
+    case 'ALL':
+    default: {
+      const oldest = await prisma.portfolioSnapshot.findFirst({
+        where: { userId },
+        orderBy: { timestamp: 'asc' },
+      });
+      startDate = oldest ? new Date(oldest.timestamp) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      break;
+    }
+  }
+
+  // Baseline
+  const baseline = await prisma.portfolioSnapshot.findFirst({
+    where: { userId, timestamp: { lte: startDate } },
+    orderBy: { timestamp: 'desc' },
+  });
+  const periodStartValue = baseline ? (baseline.netEquity ?? baseline.totalValue) : 0;
+
+  // Snapshots in range
+  const snapshots = await prisma.portfolioSnapshot.findMany({
+    where: { userId, timestamp: { gte: startDate } },
+    orderBy: { timestamp: 'asc' },
+  });
+
+  let points = snapshots.map(s => ({
+    time: new Date(s.timestamp).getTime(),
+    value: s.netEquity ?? s.totalValue,
+  }));
+
+  if (baseline) {
+    const baselineTime = new Date(baseline.timestamp).getTime();
+    if (points.length === 0 || baselineTime < points[0].time) {
+      points.unshift({ time: baselineTime, value: (baseline.netEquity ?? baseline.totalValue) });
+    }
+  }
+
+  // Downsample
+  if (points.length > 500) {
+    const step = Math.ceil(points.length / 500);
+    const downsampled = [points[0]];
+    for (let i = step; i < points.length - 1; i += step) {
+      downsampled.push(points[i]);
+    }
+    downsampled.push(points[points.length - 1]);
+    points = downsampled;
+  }
+
+  return { points, periodStartValue, period };
+}
+
+/**
+ * Reconstruct intraday portfolio values using Yahoo Finance 5-min candles.
+ * Used to fill gaps in the 1D chart when no snapshots exist (e.g. PC was asleep).
+ * Returns points for the gap period between gapStartMs and gapEndMs.
+ */
+export async function reconstructIntradayGap(
+  holdings: { ticker: string; shares: number }[],
+  cashBalance: number,
+  marginDebt: number,
+  gapStartMs: number,
+  gapEndMs: number,
+): Promise<{ time: number; value: number }[]> {
+  if (holdings.length === 0) return [];
+
+  const { fetchIntradayCandles } = await import('./market.service');
+
+  // Fetch intraday candles for all holdings in parallel
+  const results = await Promise.allSettled(
+    holdings.map(h => fetchIntradayCandles(h.ticker))
+  );
+
+  // Build ticker -> candles map (time in ms -> close price)
+  const tickerCandles = new Map<string, { timeMs: number; close: number }[]>();
+  for (let i = 0; i < holdings.length; i++) {
+    const result = results[i];
+    if (result.status !== 'fulfilled' || !result.value.length) continue;
+    tickerCandles.set(
+      holdings[i].ticker,
+      result.value.map(c => ({ timeMs: new Date(c.time).getTime(), close: c.close }))
+    );
+  }
+
+  if (tickerCandles.size === 0) return [];
+
+  // Collect all unique timestamps within the gap window from all tickers
+  const allTimesSet = new Set<number>();
+  for (const candles of tickerCandles.values()) {
+    for (const c of candles) {
+      if (c.timeMs > gapStartMs && c.timeMs < gapEndMs) {
+        allTimesSet.add(c.timeMs);
+      }
+    }
+  }
+
+  const allTimes = Array.from(allTimesSet).sort((a, b) => a - b);
+  if (allTimes.length === 0) return [];
+
+  // For each timestamp, compute portfolio value
+  const points: { time: number; value: number }[] = [];
+  for (const t of allTimes) {
+    let totalValue = cashBalance - marginDebt;
+    let tickersFound = 0;
+
+    for (const holding of holdings) {
+      const candles = tickerCandles.get(holding.ticker);
+      if (!candles || candles.length === 0) continue;
+
+      // Find closest candle at or before time t
+      let bestIdx = -1;
+      for (let j = candles.length - 1; j >= 0; j--) {
+        if (candles[j].timeMs <= t) { bestIdx = j; break; }
+      }
+      if (bestIdx >= 0) {
+        totalValue += holding.shares * candles[bestIdx].close;
+        tickersFound++;
+      }
+    }
+
+    // Only add point if we have data for most holdings
+    if (tickersFound >= holdings.length * 0.5) {
+      points.push({ time: t, value: totalValue });
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Get snapshots for chart display, filtered by period.
+ * Returns points + periodStartValue for reference line.
+ */
+export async function getChartSnapshots(period: string): Promise<{
+  points: { time: number; value: number }[];
+  periodStartValue: number;
+  period: string;
+}> {
+  const now = new Date();
+  let startDate: Date;
+
+  switch (period) {
+    case '1D': {
+      startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    }
+    case '1W':
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+      break;
+    case '1M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 1);
+      break;
+    case '3M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 3);
+      break;
+    case 'YTD':
+      startDate = new Date(now.getFullYear(), 0, 1);
+      break;
+    case '1Y':
+      startDate = new Date(now);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+      break;
+    case 'ALL':
+    default: {
+      const oldest = await getOldestSnapshot();
+      startDate = oldest ? new Date(oldest.timestamp) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      break;
+    }
+  }
+
+  // Get baseline (snapshot at or before start)
+  const baseline = await getBaselineSnapshot(startDate);
+  const periodStartValue = baseline ? (baseline.netEquity ?? baseline.totalValue) : 0;
+
+  // Get all snapshots in period
+  const snapshots = await getSnapshotsAfter(startDate);
+
+  let points = snapshots.map(s => ({
+    time: new Date(s.timestamp).getTime(),
+    value: s.netEquity ?? s.totalValue,
+  }));
+
+  // If baseline exists and is before our first point, prepend it
+  if (baseline) {
+    const baselineTime = new Date(baseline.timestamp).getTime();
+    if (points.length === 0 || baselineTime < points[0].time) {
+      points.unshift({ time: baselineTime, value: (baseline.netEquity ?? baseline.totalValue) });
+    }
+  }
+
+  // Downsample if too many points (max ~500)
+  if (points.length > 500) {
+    const step = Math.ceil(points.length / 500);
+    const downsampled = [points[0]];
+    for (let i = step; i < points.length - 1; i += step) {
+      downsampled.push(points[i]);
+    }
+    downsampled.push(points[points.length - 1]);
+    points = downsampled;
+  }
+
+  return { points, periodStartValue, period };
 }
 
 // Utility to clean up duplicate snapshots (for fixing existing data)
