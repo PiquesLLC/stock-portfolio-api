@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, searchTickers } from '../services/market.service';
+import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles } from '../services/market.service';
 
 interface PriceResult {
   price: number;
@@ -77,6 +77,36 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error('Error fetching quote:', error);
     res.status(500).json({ error: 'Failed to fetch quote' });
+  }
+}
+
+export async function getStockDetails(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+    const details = await fetchStockDetails(ticker);
+    res.json(details);
+  } catch (error) {
+    console.error('Error fetching stock details:', error);
+    res.status(500).json({ error: 'Failed to fetch stock details' });
+  }
+}
+
+export async function getIntraday(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+    const candles = await fetchIntradayCandles(ticker);
+    res.json({ ticker, candles });
+  } catch (error) {
+    console.error('Error fetching intraday data:', error);
+    res.status(500).json({ error: 'Failed to fetch intraday data' });
   }
 }
 

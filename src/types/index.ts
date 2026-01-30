@@ -122,6 +122,11 @@ export interface Quote {
   quoteAgeSeconds?: number; // seconds since last update
   staleAge?: number; // seconds since last fresh update (legacy)
   session?: MarketSession; // current market session
+  // Extended hours fields (from Yahoo Finance during pre/post/closed)
+  regularClose?: number;
+  extendedPrice?: number;
+  extendedChange?: number;
+  extendedChangePercent?: number;
 }
 
 export interface HoldingWithQuote extends Holding {
@@ -313,7 +318,73 @@ export interface FinnhubQuote {
   t: number;
 }
 
+// Stock Detail types
+export interface StockProfile {
+  ticker: string;
+  name: string;
+  description: string;
+  logo: string;
+  industry: string;
+  marketCapM: number;
+  ipoDate: string;
+  weburl: string;
+  country: string;
+  exchange: string;
+  phone: string;
+}
+
+export interface StockMetrics {
+  ticker: string;
+  peRatio: number | null;
+  week52High: number | null;
+  week52Low: number | null;
+  dividendYield: number | null;
+  avgVolume10D: number | null;
+  beta: number | null;
+  eps: number | null;
+}
+
+export interface StockDetailsResponse {
+  ticker: string;
+  quote: Quote;
+  profile: StockProfile | null;
+  metrics: StockMetrics | null;
+  candles: {
+    closes: number[];
+    dates: string[];
+    highs: number[];
+    lows: number[];
+    opens: number[];
+    volumes: number[];
+  } | null;
+}
+
 // Insights types
+
+/** Per-category evidence detail returned alongside the health score */
+export interface HealthCategoryDetail {
+  score: number;
+  maxScore: number;
+  calcBullets: string[];      // How we calculated this
+  evidenceBullets: string[];  // Concrete portfolio facts
+  drivers: { label: string; value: string; impact: string }[];
+  quickFixes: string[];
+}
+
+export interface HealthScoreDetails {
+  concentration: HealthCategoryDetail;
+  volatility: HealthCategoryDetail;
+  drawdown: HealthCategoryDetail;
+  diversification: HealthCategoryDetail;
+  margin: {
+    penalty: number;
+    calcBullets: string[];
+    evidenceBullets: string[];
+    drivers: { label: string; value: string; impact: string }[];
+    quickFixes: string[];
+  };
+}
+
 export interface HealthScore {
   overall: number; // 0-100
   breakdown: {
@@ -326,6 +397,7 @@ export interface HealthScore {
   reasons: string[];       // top 3 reasons
   quickFixes: string[];    // top 2 actionable tips
   partial: boolean;
+  details?: HealthScoreDetails;
 }
 
 export interface Attribution {
@@ -383,6 +455,44 @@ export interface RiskForecast {
   metrics: RiskForecastMetrics;
   scenarios: RiskForecastScenarios | null;
   currentValue: number;           // Portfolio value used as starting point
+}
+
+// Hero insight stats
+export interface HeroStats {
+  sectorDriver: {
+    sector: string | null;
+    percent: number;
+    label: string;
+  };
+  sectorDrag: {
+    sector: string | null;
+    percent: number;
+    label: string;
+  };
+  largestDrag: {
+    ticker: string | null;
+    lossDollar: number;
+    percent: number;
+    label: string;
+  };
+  largestDriver: {
+    ticker: string | null;
+    gainDollar: number;
+    percent: number;
+    label: string;
+  };
+  momentum: {
+    ticker: string | null;
+    streakDays: number;
+    streakPct: number;
+    label: string;
+  } | null;
+  deceleration: {
+    ticker: string | null;
+    streakDays: number;
+    streakPct: number;
+    label: string;
+  } | null;
 }
 
 // Goal types

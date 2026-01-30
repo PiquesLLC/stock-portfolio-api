@@ -46,9 +46,13 @@ model User {
   trackingStartAt       DateTime?
   leaderboardEligible   Boolean             @default(false)
   leaderboardEligibleAt DateTime?
+  profilePublic         Boolean             @default(true)
   holdings              Holding[]
   snapshots             PortfolioSnapshot[]
   settings              UserSettings?
+  followers             Follow[]            @relation("following")
+  following             Follow[]            @relation("follower")
+  activityEvents        ActivityEvent[]
 }
 
 model UserSettings {
@@ -83,6 +87,21 @@ model Settings {
   ytdNetContributions  Float?    // Deposits - withdrawals since Jan 1
 }
 
+model HoldingSnapshot {
+  id           String   @id @default(uuid())
+  snapshotId   String
+  ticker       String
+  shares       Float
+  price        Float
+  marketValue  Float
+  dayPL        Float
+  dayPLPercent Float
+  timestamp    DateTime @default(now())
+
+  @@index([ticker, timestamp])
+  @@index([snapshotId])
+}
+
 model DividendEvent {
   id        String   @id @default(uuid())
   ticker    String
@@ -102,4 +121,29 @@ model Goal {
   deadline            DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("follower", fields: [followerId], references: [id])
+  following   User     @relation("following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model ActivityEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // 'holding_added' | 'holding_removed' | 'holding_updated'
+  payload   String   // JSON string with event details
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }

@@ -4,7 +4,9 @@ import {
   upsertHolding,
   deleteHolding,
   updateCashBalance,
+  getHoldings,
 } from '../services/portfolio.service';
+import { createActivityEvent } from '../services/activity.service';
 import { createSnapshotIfNeeded, getAllSnapshots } from '../services/snapshot.service';
 import {
   getSP500Projections,
@@ -56,7 +58,31 @@ export async function addHolding(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Check if this is an update vs new add
+    const existingHoldings = await getHoldings();
+    const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
+
     const holding = await upsertHolding({ ticker, shares, averageCost });
+
+    // Fire activity event if a userId is provided
+    const userId = req.body.userId as string | undefined;
+    if (userId) {
+      if (existingHolding) {
+        createActivityEvent(userId, 'holding_updated', {
+          ticker: ticker.toUpperCase(),
+          shares,
+          previousShares: existingHolding.shares,
+          averageCost,
+        }).catch(() => {});
+      } else {
+        createActivityEvent(userId, 'holding_added', {
+          ticker: ticker.toUpperCase(),
+          shares,
+          averageCost,
+        }).catch(() => {});
+      }
+    }
+
     res.status(201).json(holding);
   } catch (error) {
     console.error('Error adding holding:', error);
@@ -74,6 +100,13 @@ export async function removeHolding(req: Request, res: Response): Promise<void> 
     }
 
     await deleteHolding(ticker);
+
+    // Fire activity event if userId provided in query
+    const userId = req.query.userId as string | undefined;
+    if (userId) {
+      createActivityEvent(userId, 'holding_removed', { ticker }).catch(() => {});
+    }
+
     res.status(204).send();
   } catch (error: any) {
     if (error?.code === 'P2025') {

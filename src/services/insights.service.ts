@@ -10,6 +10,8 @@ import {
 } from '../utils/candle-cache';
 import {
   HealthScore,
+  HealthScoreDetails,
+  HealthCategoryDetail,
   Attribution,
   LeakDetectorResult,
   RiskForecast,
@@ -189,6 +191,38 @@ function estimateSectorDiversification(holdings: HoldingWithQuote[]): {
 // HEALTH SCORE
 // ============================================================================
 
+/**
+ * Calculate max drawdown returning both the percentage and the peak/trough dates.
+ */
+function calculateMaxDrawdownWithDates(values: number[], timestamps?: Date[]): {
+  maxDD: number | null;
+  peakIdx: number;
+  troughIdx: number;
+} {
+  if (values.length < 2) return { maxDD: null, peakIdx: 0, troughIdx: 0 };
+
+  let peak = values[0];
+  let peakIdx = 0;
+  let maxDD = 0;
+  let ddPeakIdx = 0;
+  let ddTroughIdx = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > peak) {
+      peak = values[i];
+      peakIdx = i;
+    }
+    const dd = (peak - values[i]) / peak;
+    if (dd > maxDD) {
+      maxDD = dd;
+      ddPeakIdx = peakIdx;
+      ddTroughIdx = i;
+    }
+  }
+
+  return { maxDD, peakIdx: ddPeakIdx, troughIdx: ddTroughIdx };
+}
+
 export async function getHealthScore(): Promise<HealthScore> {
   const cacheKey = 'health-score';
   const cached = insightsCache.get<HealthScore>(cacheKey);
@@ -207,34 +241,91 @@ export async function getHealthScore(): Promise<HealthScore> {
   let diversificationScore = 25;
   let marginPenalty = 0;
 
-  // ---- CONCENTRATION ANALYSIS ----
+  // ============================================================
+  // CONCENTRATION DETAIL
+  // ============================================================
+  const concCalc: string[] = [
+    'Score starts at 25/25.',
+    'Penalise if largest holding > 25% of portfolio (up to -15 pts).',
+    'Penalise if top 3 holdings > 55% of portfolio (up to -10 pts).',
+  ];
+  const concEvidence: string[] = [];
+  const concDrivers: { label: string; value: string; impact: string }[] = [];
+  const concFixes: string[] = [];
+
   if (holdings.length > 0 && portfolio.holdingsValue > 0) {
     const sortedByValue = [...holdings].sort((a, b) => b.currentValue - a.currentValue);
     const top1Pct = (sortedByValue[0]?.currentValue || 0) / portfolio.holdingsValue * 100;
     const top3Value = sortedByValue.slice(0, 3).reduce((sum, h) => sum + h.currentValue, 0);
     const top3Pct = (top3Value / portfolio.holdingsValue) * 100;
+    const top5Value = sortedByValue.slice(0, 5).reduce((sum, h) => sum + h.currentValue, 0);
+    const top5Pct = (top5Value / portfolio.holdingsValue) * 100;
+
+    concEvidence.push(
+      `Largest holding: ${sortedByValue[0].ticker} at ${top1Pct.toFixed(1)}% ($${Math.round(sortedByValue[0].currentValue).toLocaleString()}).`,
+      `Top 3 holdings: ${sortedByValue.slice(0, 3).map(h => h.ticker).join(', ')} = ${top3Pct.toFixed(1)}%.`,
+      `Top 5 holdings: ${top5Pct.toFixed(1)}% of portfolio.`,
+      `Holdings value: $${Math.round(portfolio.holdingsValue).toLocaleString()}.`,
+    );
 
     if (top1Pct > 25) {
       const penalty = Math.min(15, (top1Pct - 25) * 0.5);
       concentrationScore -= penalty;
       reasons.push(`${sortedByValue[0].ticker} is ${top1Pct.toFixed(0)}% of portfolio (>25% threshold)`);
+      concDrivers.push({
+        label: `${sortedByValue[0].ticker} weight`,
+        value: `${top1Pct.toFixed(1)}%`,
+        impact: `-${penalty.toFixed(1)} pts (threshold 25%)`,
+      });
+      concFixes.push(`Consider trimming ${sortedByValue[0].ticker} to below 25% of portfolio.`);
       quickFixes.push(`Consider trimming ${sortedByValue[0].ticker} to reduce single-stock risk`);
+    } else {
+      concDrivers.push({
+        label: `${sortedByValue[0].ticker} weight`,
+        value: `${top1Pct.toFixed(1)}%`,
+        impact: 'Within 25% threshold — no penalty.',
+      });
     }
 
     if (top3Pct > 55) {
       const penalty = Math.min(10, (top3Pct - 55) * 0.3);
       concentrationScore -= penalty;
+      concDrivers.push({
+        label: 'Top 3 weight',
+        value: `${top3Pct.toFixed(1)}%`,
+        impact: `-${penalty.toFixed(1)} pts (threshold 55%)`,
+      });
       if (reasons.length === 0) {
         reasons.push(`Top 3 holdings are ${top3Pct.toFixed(0)}% of portfolio (>55% threshold)`);
       }
+      concFixes.push('Reduce top-3 concentration below 55% by adding new positions.');
+    } else {
+      concDrivers.push({
+        label: 'Top 3 weight',
+        value: `${top3Pct.toFixed(1)}%`,
+        impact: 'Within 55% threshold — no penalty.',
+      });
     }
   } else if (holdings.length === 0) {
     concentrationScore = 0;
+    concEvidence.push('No holdings in portfolio.');
     reasons.push('No holdings in portfolio');
     quickFixes.push('Add holdings to build a diversified portfolio');
   }
 
-  // ---- VOLATILITY ANALYSIS ----
+  // ============================================================
+  // VOLATILITY DETAIL
+  // ============================================================
+  const volCalc: string[] = [
+    'Score starts at 25/25.',
+    'Computed from annualized standard deviation of daily portfolio snapshot returns.',
+    '>40% annualized → 5/25, >25% → 15/25, >15% → 20/25, ≤15% → 25/25.',
+  ];
+  const volEvidence: string[] = [];
+  const volDrivers: { label: string; value: string; impact: string }[] = [];
+  const volFixes: string[] = [];
+
+  let computedVol: number | null = null;
   if (snapshots.length >= 30) {
     const values = snapshots.map(s => s.totalValue);
     const returns: number[] = [];
@@ -244,86 +335,252 @@ export async function getHealthScore(): Promise<HealthScore> {
       }
     }
 
-    const vol = calculateAnnualizedVolatility(returns);
-    if (vol !== null) {
-      if (vol > 0.4) {
+    computedVol = calculateAnnualizedVolatility(returns);
+    volEvidence.push(`Snapshots used: ${snapshots.length} (${returns.length} daily returns).`);
+    if (snapshots.length > 0) {
+      const oldest = snapshots[0].timestamp;
+      const newest = snapshots[snapshots.length - 1].timestamp;
+      volEvidence.push(`Date range: ${oldest.toISOString().slice(0, 10)} to ${newest.toISOString().slice(0, 10)}.`);
+    }
+
+    if (computedVol !== null) {
+      const volPct = (computedVol * 100).toFixed(1);
+      volEvidence.push(`Portfolio annualized volatility: ${volPct}%.`);
+
+      if (computedVol > 0.4) {
         volatilityScore = 5;
-        reasons.push(`Very high volatility (${(vol * 100).toFixed(0)}% annualized)`);
+        reasons.push(`Very high volatility (${(computedVol * 100).toFixed(0)}% annualized)`);
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 5/25 (>40% threshold).' });
+        volFixes.push('Add lower-volatility assets (bonds, dividend stocks, or broad-market ETFs).');
         quickFixes.push('Add lower-volatility assets like bonds or dividend stocks');
-      } else if (vol > 0.25) {
+      } else if (computedVol > 0.25) {
         volatilityScore = 15;
-        reasons.push(`Elevated volatility (${(vol * 100).toFixed(0)}% annualized)`);
-      } else if (vol > 0.15) {
+        reasons.push(`Elevated volatility (${(computedVol * 100).toFixed(0)}% annualized)`);
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 15/25 (>25% threshold).' });
+        volFixes.push('Consider adding lower-vol assets to bring portfolio vol below 25%.');
+      } else if (computedVol > 0.15) {
         volatilityScore = 20;
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 20/25 (>15% threshold).' });
+      } else {
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Full score — below 15% threshold.' });
       }
     }
+  } else {
+    volEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for volatility analysis).`);
+    volDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data — default score 25/25.' });
   }
 
-  // ---- DRAWDOWN ANALYSIS ----
+  // ============================================================
+  // DRAWDOWN DETAIL
+  // ============================================================
+  const ddCalc: string[] = [
+    'Score starts at 25/25.',
+    'Max drawdown = largest peak-to-trough decline in portfolio snapshot history.',
+    '>20% → 5/25, >10% → 15/25, >5% → 20/25, ≤5% → 25/25.',
+  ];
+  const ddEvidence: string[] = [];
+  const ddDrivers: { label: string; value: string; impact: string }[] = [];
+  const ddFixes: string[] = [];
+
   if (snapshots.length >= 30) {
     const values = snapshots.map(s => s.totalValue);
-    const maxDD = calculateMaxDrawdown(values);
+    const { maxDD, peakIdx, troughIdx } = calculateMaxDrawdownWithDates(values);
+
+    ddEvidence.push(`Snapshots analysed: ${snapshots.length}.`);
+    if (snapshots.length > 0) {
+      ddEvidence.push(`Period: ${snapshots[0].timestamp.toISOString().slice(0, 10)} to ${snapshots[snapshots.length - 1].timestamp.toISOString().slice(0, 10)}.`);
+    }
 
     if (maxDD !== null) {
+      const ddPct = (maxDD * 100).toFixed(1);
+      const peakDate = snapshots[peakIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
+      const troughDate = snapshots[troughIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
+      ddEvidence.push(`Max drawdown: -${ddPct}% (peak ${peakDate} → trough ${troughDate}).`);
+      ddEvidence.push(`Peak value: $${Math.round(values[peakIdx]).toLocaleString()}, trough value: $${Math.round(values[troughIdx]).toLocaleString()}.`);
+
       if (maxDD > 0.2) {
         drawdownScore = 5;
+        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 5/25 (>20% threshold).' });
         if (!reasons.some(r => r.includes('drawdown'))) {
           reasons.push(`Historical max drawdown of ${(maxDD * 100).toFixed(0)}%`);
         }
+        ddFixes.push('Consider adding defensive positions to limit future drawdowns.');
       } else if (maxDD > 0.1) {
         drawdownScore = 15;
+        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 15/25 (>10% threshold).' });
       } else if (maxDD > 0.05) {
         drawdownScore = 20;
+        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 20/25 (>5% threshold).' });
+      } else {
+        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Full score — below 5% threshold.' });
       }
     }
+  } else {
+    ddEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for drawdown analysis).`);
+    ddDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data — default score 25/25.' });
   }
 
-  // ---- DIVERSIFICATION ANALYSIS ----
+  // ============================================================
+  // DIVERSIFICATION DETAIL
+  // ============================================================
+  const divCalc: string[] = [
+    '15+ holdings → 25/25, 10–14 → 22, 7–9 → 18, 5–6 → 15, 3–4 → 10, <3 → 5.',
+    'Also penalised if sector concentration is extreme (HHI of weights).',
+  ];
+  const divEvidence: string[] = [];
+  const divDrivers: { label: string; value: string; impact: string }[] = [];
+  const divFixes: string[] = [];
+
+  // Compute HHI and sector stats
+  const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
+  const hhi = totalValue > 0
+    ? holdings.reduce((sum, h) => sum + Math.pow(h.currentValue / totalValue, 2), 0)
+    : 0;
+  const sectorValues = new Map<string, number>();
+  for (const h of holdings) {
+    const sector = getSector(h.ticker);
+    sectorValues.set(sector, (sectorValues.get(sector) || 0) + h.currentValue);
+  }
+  const sectorsSorted = Array.from(sectorValues.entries())
+    .map(([sector, val]) => ({ sector, pct: totalValue > 0 ? (val / totalValue) * 100 : 0 }))
+    .sort((a, b) => b.pct - a.pct);
+
+  divEvidence.push(`Number of holdings: ${holdings.length}.`);
+  divEvidence.push(`Number of sectors: ${sectorValues.size}.`);
+  divEvidence.push(`HHI (Herfindahl index): ${hhi.toFixed(4)} (lower is better; 1/${holdings.length || 1} = ${holdings.length > 0 ? (1 / holdings.length).toFixed(4) : 'N/A'} is ideal).`);
+  if (sectorsSorted.length > 0) {
+    divEvidence.push(`Largest sector: ${sectorsSorted[0].sector} at ${sectorsSorted[0].pct.toFixed(1)}%.`);
+    divEvidence.push(`Sectors: ${sectorsSorted.map(s => `${s.sector} ${s.pct.toFixed(1)}%`).join(', ')}.`);
+  }
+
   if (holdings.length >= 15) {
     diversificationScore = 25;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: 'Full score (≥15 holdings).' });
   } else if (holdings.length >= 10) {
     diversificationScore = 22;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '22/25 (10–14 holdings).' });
   } else if (holdings.length >= 7) {
     diversificationScore = 18;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '18/25 (7–9 holdings).' });
   } else if (holdings.length >= 5) {
     diversificationScore = 15;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '15/25 (5–6 holdings).' });
+    divFixes.push('Adding 2–3 more positions from underrepresented sectors would improve this score.');
   } else if (holdings.length >= 3) {
     diversificationScore = 10;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '10/25 (3–4 holdings).' });
     if (!reasons.some(r => r.includes('diversif'))) {
       reasons.push('Limited diversification with only ' + holdings.length + ' holdings');
       quickFixes.push('Consider adding more uncorrelated assets');
     }
+    divFixes.push('Consider adding more uncorrelated assets from different sectors.');
   } else {
     diversificationScore = 5;
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '5/25 (<3 holdings).' });
     reasons.push('Very limited diversification');
+    divFixes.push('Build a diversified portfolio with at least 7–10 holdings across multiple sectors.');
   }
 
-  // ---- MARGIN PENALTY ----
+  if (sectorsSorted.length > 0 && sectorsSorted[0].pct > 50) {
+    divDrivers.push({ label: `${sectorsSorted[0].sector} sector`, value: `${sectorsSorted[0].pct.toFixed(1)}%`, impact: 'Over 50% in one sector — consider rebalancing.' });
+  }
+
+  // ============================================================
+  // MARGIN PENALTY DETAIL
+  // ============================================================
+  const marginCalc: string[] = [
+    'Penalty = min(15, marginRatio × 30).',
+    'marginRatio = marginDebt / totalAssets.',
+  ];
+  const marginEvidence: string[] = [];
+  const marginDrivers: { label: string; value: string; impact: string }[] = [];
+  const marginFixes: string[] = [];
+
   if (portfolio.marginDebt > 0 && portfolio.totalAssets > 0) {
     const marginRatio = portfolio.marginDebt / portfolio.totalAssets;
     marginPenalty = Math.min(15, marginRatio * 30);
 
+    marginEvidence.push(`Margin debt: $${Math.round(portfolio.marginDebt).toLocaleString()}.`);
+    marginEvidence.push(`Total assets: $${Math.round(portfolio.totalAssets).toLocaleString()}.`);
+    marginEvidence.push(`Margin ratio: ${(marginRatio * 100).toFixed(1)}%.`);
+    marginEvidence.push(`Penalty: -${marginPenalty.toFixed(1)} points.`);
+
+    marginDrivers.push({
+      label: 'Margin ratio',
+      value: `${(marginRatio * 100).toFixed(1)}%`,
+      impact: `-${marginPenalty.toFixed(1)} pts`,
+    });
+
     if (marginRatio > 0.1) {
       reasons.push(`Using ${(marginRatio * 100).toFixed(0)}% margin (increases risk)`);
       quickFixes.push('Consider reducing margin debt to lower risk');
+      marginFixes.push('Reducing margin debt would directly improve your health score.');
     }
+  } else {
+    marginEvidence.push('No margin debt — no penalty applied.');
   }
 
+  // ============================================================
+  // ASSEMBLE RESULT
+  // ============================================================
   const rawScore = concentrationScore + volatilityScore + drawdownScore + diversificationScore;
   const overall = Math.max(0, Math.min(100, Math.round(rawScore - marginPenalty)));
+
+  const details: HealthScoreDetails = {
+    concentration: {
+      score: Math.max(0, Math.round(concentrationScore)),
+      maxScore: 25,
+      calcBullets: concCalc,
+      evidenceBullets: concEvidence,
+      drivers: concDrivers,
+      quickFixes: concFixes,
+    },
+    volatility: {
+      score: Math.max(0, Math.round(volatilityScore)),
+      maxScore: 25,
+      calcBullets: volCalc,
+      evidenceBullets: volEvidence,
+      drivers: volDrivers,
+      quickFixes: volFixes,
+    },
+    drawdown: {
+      score: Math.max(0, Math.round(drawdownScore)),
+      maxScore: 25,
+      calcBullets: ddCalc,
+      evidenceBullets: ddEvidence,
+      drivers: ddDrivers,
+      quickFixes: ddFixes,
+    },
+    diversification: {
+      score: Math.max(0, Math.round(diversificationScore)),
+      maxScore: 25,
+      calcBullets: divCalc,
+      evidenceBullets: divEvidence,
+      drivers: divDrivers,
+      quickFixes: divFixes,
+    },
+    margin: {
+      penalty: Math.round(marginPenalty),
+      calcBullets: marginCalc,
+      evidenceBullets: marginEvidence,
+      drivers: marginDrivers,
+      quickFixes: marginFixes,
+    },
+  };
 
   const result: HealthScore = {
     overall,
     breakdown: {
-      concentration: Math.max(0, Math.round(concentrationScore)),
-      volatility: Math.max(0, Math.round(volatilityScore)),
-      drawdown: Math.max(0, Math.round(drawdownScore)),
-      diversification: Math.max(0, Math.round(diversificationScore)),
-      margin: Math.round(marginPenalty),
+      concentration: details.concentration.score,
+      volatility: details.volatility.score,
+      drawdown: details.drawdown.score,
+      diversification: details.diversification.score,
+      margin: details.margin.penalty,
     },
     reasons: reasons.slice(0, 3),
     quickFixes: quickFixes.slice(0, 2),
     partial: holdings.length === 0,
+    details,
   };
 
   // Short cache (5 minutes) since health score depends on current prices

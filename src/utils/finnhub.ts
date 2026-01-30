@@ -420,8 +420,9 @@ const TYPE_PRIORITY: Record<string, number> = {
   'Preferred Stock': 40,
 };
 
-// Exchange priority (US exchanges first)
+// Exchange priority (US exchanges first, then international)
 const EXCHANGE_PRIORITY: Record<string, number> = {
+  // US exchanges
   'NEW YORK STOCK EXCHANGE': 100,
   'NYSE': 100,
   'NASDAQ': 95,
@@ -429,6 +430,25 @@ const EXCHANGE_PRIORITY: Record<string, number> = {
   'AMEX': 85,
   'BATS': 80,
   'NYSE AMERICAN': 75,
+  // Canadian
+  'TORONTO STOCK EXCHANGE': 60,
+  'TSX': 60,
+  'TSX VENTURE EXCHANGE': 55,
+  'TSX-V': 55,
+  // UK
+  'LONDON STOCK EXCHANGE': 55,
+  'LSE': 55,
+  // Europe
+  'EURONEXT': 50,
+  'PARIS': 50,
+  'AMSTERDAM': 50,
+  'XETRA': 45,
+  'FRANKFURT': 45,
+  // Asia-Pacific
+  'TOKYO STOCK EXCHANGE': 40,
+  'HONG KONG STOCK EXCHANGE': 40,
+  'AUSTRALIAN SECURITIES EXCHANGE': 35,
+  'ASX': 35,
 };
 
 /**
@@ -621,11 +641,6 @@ export async function queueAdvFetches(tickers: string[]): Promise<void> {
   for (const ticker of tickers) {
     const upperTicker = ticker.toUpperCase();
 
-    // Skip international tickers (they have dots like AAPL.MX)
-    if (upperTicker.includes('.')) {
-      continue;
-    }
-
     // Skip if already cached, failed, or queued
     if (
       advCache.has(`adv:${upperTicker}`) ||
@@ -812,7 +827,8 @@ function compareSearchResults(
 function calculateDisplayScore(
   bucket: MatchBucket,
   popularityValue: number,
-  isHeld: boolean
+  isHeld: boolean,
+  type?: string
 ): number {
   // Base score from bucket (100-700 range, inverted so higher = better)
   const bucketScore = (8 - bucket) * 100;
@@ -825,10 +841,62 @@ function calculateDisplayScore(
     popularityScore = Math.min(200, Math.max(0, (logPop - 6) * 33)); // 0-200
   }
 
+  // Commodity/crypto bonus - these have no market cap data but are highly relevant
+  if (type === 'Commodity' || type === 'Crypto') {
+    popularityScore = Math.max(popularityScore, 150);
+  }
+
   // Held ticker bonus
   const heldBonus = isHeld ? 25 : 0;
 
   return Math.round(bucketScore + popularityScore + heldBonus);
+}
+
+// Commodity futures and crypto tickers (Yahoo Finance compatible)
+const COMMODITY_CRYPTO_MAP: { symbol: string; description: string; type: string; keywords: string[] }[] = [
+  // Commodities
+  { symbol: 'GC=F', description: 'Gold Futures', type: 'Commodity', keywords: ['gold', 'gc', 'xau'] },
+  { symbol: 'SI=F', description: 'Silver Futures', type: 'Commodity', keywords: ['silver', 'si', 'xag'] },
+  { symbol: 'CL=F', description: 'Crude Oil WTI Futures', type: 'Commodity', keywords: ['oil', 'crude', 'wti', 'cl', 'petroleum'] },
+  { symbol: 'BZ=F', description: 'Brent Crude Oil Futures', type: 'Commodity', keywords: ['brent', 'bz'] },
+  { symbol: 'NG=F', description: 'Natural Gas Futures', type: 'Commodity', keywords: ['natural gas', 'ng', 'natgas'] },
+  { symbol: 'HG=F', description: 'Copper Futures', type: 'Commodity', keywords: ['copper', 'hg'] },
+  { symbol: 'PL=F', description: 'Platinum Futures', type: 'Commodity', keywords: ['platinum', 'pl'] },
+  { symbol: 'PA=F', description: 'Palladium Futures', type: 'Commodity', keywords: ['palladium', 'pa'] },
+  { symbol: 'ZC=F', description: 'Corn Futures', type: 'Commodity', keywords: ['corn', 'zc'] },
+  { symbol: 'ZW=F', description: 'Wheat Futures', type: 'Commodity', keywords: ['wheat', 'zw'] },
+  { symbol: 'ZS=F', description: 'Soybean Futures', type: 'Commodity', keywords: ['soybean', 'soy', 'zs'] },
+  // Crypto
+  { symbol: 'BTC-USD', description: 'Bitcoin USD', type: 'Crypto', keywords: ['bitcoin', 'btc'] },
+  { symbol: 'ETH-USD', description: 'Ethereum USD', type: 'Crypto', keywords: ['ethereum', 'eth', 'ether'] },
+  { symbol: 'SOL-USD', description: 'Solana USD', type: 'Crypto', keywords: ['solana', 'sol'] },
+  { symbol: 'XRP-USD', description: 'XRP USD', type: 'Crypto', keywords: ['xrp', 'ripple'] },
+  { symbol: 'DOGE-USD', description: 'Dogecoin USD', type: 'Crypto', keywords: ['doge', 'dogecoin'] },
+  { symbol: 'ADA-USD', description: 'Cardano USD', type: 'Crypto', keywords: ['cardano', 'ada'] },
+  { symbol: 'AVAX-USD', description: 'Avalanche USD', type: 'Crypto', keywords: ['avalanche', 'avax'] },
+  { symbol: 'DOT-USD', description: 'Polkadot USD', type: 'Crypto', keywords: ['polkadot', 'dot'] },
+  { symbol: 'LINK-USD', description: 'Chainlink USD', type: 'Crypto', keywords: ['chainlink', 'link'] },
+  { symbol: 'MATIC-USD', description: 'Polygon USD', type: 'Crypto', keywords: ['polygon', 'matic'] },
+];
+
+function matchCommoditiesAndCrypto(query: string): { symbol: string; description: string; type: string; primaryExchange: string }[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+
+  // Match if query matches symbol prefix, description, or keywords
+  return COMMODITY_CRYPTO_MAP
+    .filter(item => {
+      const symbolMatch = item.symbol.toLowerCase().startsWith(q) || item.symbol.toLowerCase().replace(/[=-]/g, '').startsWith(q);
+      const descMatch = item.description.toLowerCase().includes(q);
+      const keywordMatch = item.keywords.some(kw => kw.startsWith(q) || q.startsWith(kw));
+      return symbolMatch || descMatch || keywordMatch;
+    })
+    .map(item => ({
+      symbol: item.symbol,
+      description: item.description,
+      type: item.type,
+      primaryExchange: item.type === 'Crypto' ? 'Crypto' : 'Futures',
+    }));
 }
 
 /**
@@ -837,7 +905,7 @@ function calculateDisplayScore(
  * Ranking algorithm (Robinhood-style):
  * 1. Bucket by match type: exact ticker > exact name > prefix ticker > prefix name > substring
  * 2. Within each bucket, sort by popularity (marketCap > avgVolume) descending
- * 3. Tie-break by US exchange priority, then alphabetically
+ * 3. Tie-break by exchange priority, then alphabetically
  *
  * Returns normalized results sorted by relevance
  */
@@ -890,23 +958,24 @@ export async function searchSymbols(
       const data = response.data;
 
       if (!data.result || data.result.length === 0) {
-        searchCache.set(cacheKey, []);
-        return { results: [], partial: false, cached: false, advPending: [] };
-      }
+        rawResults = [];
+        searchCache.set(cacheKey, rawResults);
+      } else {
 
-      // Filter results - keep US equities/ETFs and relevant matches
-      const usEquityTypes = new Set(['Common Stock', 'ETP', 'ETF', 'REIT', 'ADR']);
-      const usExchanges = new Set(Object.keys(EXCHANGE_PRIORITY));
+      // Filter results - keep equities/ETFs from known exchanges
+      const allowedTypes = new Set(['Common Stock', 'ETP', 'ETF', 'REIT', 'ADR', 'Equity', 'Unit']);
+      const knownExchanges = new Set(Object.keys(EXCHANGE_PRIORITY));
       const upperQuery = normalizedQuery.toUpperCase();
 
       rawResults = data.result
         .filter(item => {
-          const hasUsExchange = item.primary_exchange && usExchanges.has(item.primary_exchange.toUpperCase());
-          const isCommonType = usEquityTypes.has(item.type);
+          const exchangeUpper = item.primary_exchange?.toUpperCase() || '';
+          const hasKnownExchange = knownExchanges.has(exchangeUpper);
+          const isAllowedType = allowedTypes.has(item.type);
           const symbolMatches = item.symbol.toUpperCase().includes(upperQuery);
           const nameMatches = item.description.toUpperCase().includes(upperQuery);
-          // Keep if it has a match or is a US equity type
-          return (isCommonType || hasUsExchange) && (symbolMatches || nameMatches);
+          // Keep if it's an allowed type or from a known exchange, and matches query
+          return (isAllowedType || hasKnownExchange) && (symbolMatches || nameMatches);
         })
         .slice(0, 30) // Keep more for re-ranking
         .map(item => ({
@@ -918,6 +987,7 @@ export async function searchSymbols(
 
       // Cache raw results
       searchCache.set(cacheKey, rawResults);
+      }
     } catch (error) {
       if (error instanceof AxiosError && error.response?.status === 429) {
         rateLimitedUntil = now + 60000;
@@ -939,18 +1009,36 @@ export async function searchSymbols(
     }
   }
 
+  // Inject commodity and crypto tickers (not in Finnhub search)
+  const commodityMatches = matchCommoditiesAndCrypto(normalizedQuery);
+  for (const item of commodityMatches) {
+    if (!existingSymbols.has(item.symbol.toUpperCase())) {
+      rawResults.push(item);
+      existingSymbols.add(item.symbol.toUpperCase());
+    }
+  }
+
   // Sort results using bucket-based ranking
   const sortedRaw = [...rawResults].sort((a, b) =>
     compareSearchResults(a, b, normalizedQuery)
   );
 
+  // Limit same-base-symbol variants to top 3 (e.g., GOLD, GOLD.TO, GOLD.JK but not 10 GOLD.xx)
+  const baseSymbolCount = new Map<string, number>();
+  const deduped = sortedRaw.filter(item => {
+    const base = item.symbol.split('.')[0].split('=')[0].split('-')[0];
+    const count = baseSymbolCount.get(base) || 0;
+    baseSymbolCount.set(base, count + 1);
+    return count < 3;
+  });
+
   // Enhance results with popularity data and scores
-  const enhancedResults: SymbolSearchResult[] = sortedRaw.map(item => {
+  const enhancedResults: SymbolSearchResult[] = deduped.map(item => {
     const popData = getPopularityData(item.symbol);
     const isHeld = heldSet.has(item.symbol.toUpperCase());
     const bucket = getMatchBucket(item.symbol, item.description, normalizedQuery);
     const popularityValue = getPopularityValue(item.symbol);
-    const popularityScore = calculateDisplayScore(bucket, popularityValue, isHeld);
+    const popularityScore = calculateDisplayScore(bucket, popularityValue, isHeld, item.type);
 
     return {
       symbol: item.symbol,
@@ -970,7 +1058,7 @@ export async function searchSymbols(
 
   // Queue ADV fetches for US tickers that don't have popularity data
   const tickersNeedingData = results
-    .filter(r => !r.marketCapB && !r.avgVolume && !r.symbol.includes('.'))
+    .filter(r => !r.marketCapB && !r.avgVolume)
     .map(r => r.symbol);
 
   const advPending = tickersNeedingData.filter(t => isAdvPending(t));
@@ -991,4 +1079,82 @@ export function clearAdvCache(): void {
   advCache.flushAll();
   advFailedCache.flushAll();
   advFetchQueue.clear();
+}
+
+// ============================================================================
+// STOCK PROFILE & METRICS (for stock detail page)
+// ============================================================================
+
+const profileCache = new NodeCache({ stdTTL: 86400 }); // 24h
+const metricsCache = new NodeCache({ stdTTL: 86400 }); // 24h
+
+export interface FinnhubProfile {
+  country: string;
+  currency: string;
+  exchange: string;
+  finnhubIndustry: string;
+  ipo: string;
+  logo: string;
+  marketCapitalization: number;
+  name: string;
+  phone: string;
+  shareOutstanding: number;
+  ticker: string;
+  weburl: string;
+}
+
+export async function getStockProfile(ticker: string): Promise<FinnhubProfile | null> {
+  const cacheKey = `profile:${ticker.toUpperCase()}`;
+  const cached = profileCache.get<FinnhubProfile>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const { finnhubQueue } = await import('./finnhub-queue');
+    const data = await finnhubQueue.request<FinnhubProfile>('/stock/profile2', {
+      symbol: ticker.toUpperCase(),
+    });
+    if (data && data.name) {
+      profileCache.set(cacheKey, data);
+      return data;
+    }
+    return null;
+  } catch (err) {
+    console.error(`[StockProfile] Failed to fetch profile for ${ticker}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+export interface FinnhubMetricData {
+  metric: {
+    '52WeekHigh'?: number;
+    '52WeekLow'?: number;
+    '10DayAverageTradingVolume'?: number;
+    beta?: number;
+    peBasicExclExtraTTM?: number;
+    dividendYieldIndicatedAnnual?: number;
+    epsBasicExclExtraItemsTTM?: number;
+    [key: string]: unknown;
+  };
+}
+
+export async function getStockMetrics(ticker: string): Promise<FinnhubMetricData | null> {
+  const cacheKey = `metrics:${ticker.toUpperCase()}`;
+  const cached = metricsCache.get<FinnhubMetricData>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const { finnhubQueue } = await import('./finnhub-queue');
+    const data = await finnhubQueue.request<FinnhubMetricData>('/stock/metric', {
+      symbol: ticker.toUpperCase(),
+      metric: 'all',
+    });
+    if (data && data.metric) {
+      metricsCache.set(cacheKey, data);
+      return data;
+    }
+    return null;
+  } catch (err) {
+    console.error(`[StockMetrics] Failed to fetch metrics for ${ticker}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
 }

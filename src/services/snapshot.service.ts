@@ -87,6 +87,22 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
       },
     });
 
+    // Store per-holding stats for momentum tracking
+    if (portfolio.holdings.length > 0) {
+      await prisma.holdingSnapshot.createMany({
+        data: portfolio.holdings.map(h => ({
+          snapshotId: snapshot.id,
+          ticker: h.ticker,
+          shares: h.shares,
+          price: h.currentPrice,
+          marketValue: h.currentValue,
+          dayPL: h.dayChange,
+          dayPLPercent: h.dayChangePercent,
+          timestamp: snapshotTime,
+        })),
+      });
+    }
+
     // Update in-memory timestamp
     lastSnapshotTime = snapshotTime.getTime();
 
@@ -94,7 +110,8 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
       `[Snapshot] Created at ${snapshotTime.toISOString()} | ` +
       `totalAssets: $${portfolio.totalAssets.toFixed(2)} | ` +
       `cashBalance: $${portfolio.cashBalance.toFixed(2)} | ` +
-      `totalPL: $${portfolio.totalPL.toFixed(2)} (${portfolio.totalPLPercent.toFixed(2)}%)`
+      `totalPL: $${portfolio.totalPL.toFixed(2)} (${portfolio.totalPLPercent.toFixed(2)}%) | ` +
+      `holdingSnapshots: ${portfolio.holdings.length}`
     );
 
     return snapshot;
@@ -162,6 +179,46 @@ export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSn
 export async function getOldestSnapshot(): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
     where: { userId: null },
+    orderBy: { timestamp: 'asc' },
+  });
+}
+
+/**
+ * Get per-holding snapshots for the last N distinct calendar days.
+ * Returns rows ordered by timestamp ascending.
+ */
+export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
+  ticker: string;
+  dayPL: number;
+  dayPLPercent: number;
+  timestamp: Date;
+}[]> {
+  // Get distinct snapshot days (by date, not time)
+  const allSnapshots = await prisma.holdingSnapshot.findMany({
+    orderBy: { timestamp: 'desc' },
+    select: { timestamp: true },
+    distinct: ['snapshotId'],
+  });
+
+  // Extract unique calendar dates
+  const seenDates = new Set<string>();
+  const cutoffDates: string[] = [];
+  for (const s of allSnapshots) {
+    const dateStr = s.timestamp.toISOString().slice(0, 10);
+    if (!seenDates.has(dateStr)) {
+      seenDates.add(dateStr);
+      cutoffDates.push(dateStr);
+      if (cutoffDates.length >= days) break;
+    }
+  }
+
+  if (cutoffDates.length === 0) return [];
+
+  const oldestDate = new Date(cutoffDates[cutoffDates.length - 1]);
+
+  return prisma.holdingSnapshot.findMany({
+    where: { timestamp: { gte: oldestDate } },
+    select: { ticker: true, dayPL: true, dayPLPercent: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
   });
 }
