@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
+import { fetchMarketNews } from '../services/news.service';
 
 interface PriceResult {
   price: number;
@@ -154,6 +155,17 @@ export async function searchSymbols(req: Request, res: Response): Promise<void> 
   } catch (error) {
     console.error('Error searching symbols:', error);
     res.status(500).json({ error: 'Failed to search symbols' });
+  }
+}
+
+export async function getMarketNews(req: Request, res: Response): Promise<void> {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const news = await fetchMarketNews(limit);
+    res.json(news);
+  } catch (error) {
+    console.error('Error fetching market news:', error);
+    res.status(500).json({ error: 'Failed to fetch news' });
   }
 }
 
