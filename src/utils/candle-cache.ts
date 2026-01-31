@@ -418,6 +418,40 @@ export function getBenchmarkTotalReturn(ticker: string, days: number): number | 
 }
 
 /**
+ * Get benchmark total return from a specific start date.
+ * Finds the closest trading day on or after the given date.
+ * Returns as fraction (e.g., 0.05 = 5%).
+ */
+export function getBenchmarkTotalReturnFromDate(ticker: string, startDate: Date): number | null {
+  const data = getBenchmarkCandles(ticker);
+  if (!data || data.closes.length < 2) return null;
+
+  const startStr = startDate.toISOString().slice(0, 10);
+
+  // Find the closest trading day on or after startDate
+  let startIdx = -1;
+  for (let i = 0; i < data.dates.length; i++) {
+    if (data.dates[i] >= startStr) {
+      startIdx = i;
+      break;
+    }
+  }
+
+  // If startDate is before all data, use first available
+  if (startIdx === -1) return null;
+
+  // For YTD/period start, we want the LAST close BEFORE the window
+  // (the close on Dec 31 for YTD, or the close the day before the window start)
+  // Use the day before startIdx if available
+  const baseIdx = startIdx > 0 ? startIdx - 1 : startIdx;
+
+  const startClose = data.closes[baseIdx];
+  const endClose = data.closes[data.closes.length - 1];
+  if (startClose <= 0) return null;
+  return (endClose - startClose) / startClose;
+}
+
+/**
  * Get benchmark close prices for the last N trading days (including current).
  */
 export function getBenchmarkCloses(ticker: string, days: number): number[] | null {

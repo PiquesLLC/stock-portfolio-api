@@ -220,11 +220,24 @@ export async function getChartHandler(req: Request, res: Response): Promise<void
       const holdings = await getHoldings();
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
-      // This naturally excludes deleted holdings — no spike/drop artifacts.
+      // After hours, Yahoo range=1d still returns the last trading session's data.
       let points = await reconstructPortfolioHistoryHiRes(
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
         portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
       );
+
+      // If Yahoo returned insufficient data, fall back to last 24h of snapshots
+      if (points.length < 5) {
+        const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+        const snapshots = await getAllSnapshots();
+        const recentSnapshots = snapshots.filter(s => s.timestamp.getTime() >= cutoff.getTime());
+        if (recentSnapshots.length >= 2) {
+          points = recentSnapshots.map(s => ({
+            time: s.timestamp.getTime(),
+            value: s.netEquity ?? s.totalValue,
+          }));
+        }
+      }
 
       // Append live value
       if (points.length === 0 || now - points[points.length - 1].time > 5000) {

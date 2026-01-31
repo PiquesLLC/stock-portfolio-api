@@ -16,7 +16,7 @@ import {
   SnapshotPoint,
   CashflowEvent,
 } from '../utils/finance-math';
-import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkCloses } from '../utils/candle-cache';
+import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses } from '../utils/candle-cache';
 import { reconstructPortfolioHistory } from './snapshot.service';
 
 const prisma = new PrismaClient();
@@ -186,15 +186,21 @@ export async function getPerformanceComparison(
     mwrPct = xirr !== null ? Math.round(xirr * 10000) / 100 : null;
   }
 
-  // Benchmark return
-  const benchmarkReturnRaw = getBenchmarkTotalReturn(benchmarkTicker, tradingDays);
+  // Benchmark return — use date-based lookup for accuracy
+  const benchmarkReturnRaw = getBenchmarkTotalReturnFromDate(benchmarkTicker, windowStart)
+    ?? getBenchmarkTotalReturn(benchmarkTicker, tradingDays);
   const benchmarkReturnPct = benchmarkReturnRaw !== null
     ? Math.round(benchmarkReturnRaw * 10000) / 100
     : null;
 
-  // Alpha
-  const alphaPct = (twrPct !== null && benchmarkReturnPct !== null)
-    ? Math.round((twrPct - benchmarkReturnPct) * 100) / 100
+  // Simple return (matches what the portfolio chart displays)
+  const simpleReturnPct = snapshotPoints.length >= 2
+    ? Math.round(((snapshotPoints[snapshotPoints.length - 1].value - snapshotPoints[0].value) / snapshotPoints[0].value) * 10000) / 100
+    : null;
+
+  // Alpha — use simple return for consistency with chart display
+  const alphaPct = (simpleReturnPct !== null && benchmarkReturnPct !== null)
+    ? Math.round((simpleReturnPct - benchmarkReturnPct) * 100) / 100
     : null;
 
   // Risk metrics from portfolio daily returns

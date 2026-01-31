@@ -7,6 +7,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Read-only mode: block all non-GET requests (for remote viewers)
+if (process.env.READ_ONLY === 'true') {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      res.status(403).json({ error: 'Read-only mode: modifications are disabled' });
+      return;
+    }
+    next();
+  });
+}
+
 app.use('/', routes);
 
 app.use((req, res) => {
