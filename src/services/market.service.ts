@@ -14,7 +14,7 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
 
   try {
     const now = Math.floor(Date.now() / 1000);
-    const from = now - 365 * 24 * 60 * 60; // 1 year
+    const from = now - 2 * 365 * 24 * 60 * 60; // 2 years (for SMA 200 support)
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
     const resp = await axios.get(url, {
       timeout: 10000,
@@ -101,6 +101,56 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
     return candles;
   } catch (err) {
     console.warn(`Yahoo intraday fetch failed for ${upperTicker}:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourly candles
+
+/**
+ * Fetch hourly candles from Yahoo Finance for a given range.
+ * Used for 1W (15m interval, 5d range) and 1M (60m interval, 1mo range).
+ */
+export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): Promise<IntradayCandle[]> {
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `yahoo-hourly:${upperTicker}:${period}`;
+  const cached = yahooHourlyCache.get<IntradayCandle[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const params = period === '1W'
+      ? 'interval=15m&range=5d&includePrePost=true'
+      : 'interval=60m&range=1mo&includePrePost=true';
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?${params}`;
+    const resp = await axios.get(url, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+
+    const result = resp.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
+
+    const timestamps: number[] = result.timestamp;
+    const q = result.indicators.quote[0];
+    const candles: IntradayCandle[] = [];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (q.close[i] != null) {
+        candles.push({
+          time: new Date(timestamps[i] * 1000).toISOString(),
+          open: q.open?.[i] ?? q.close[i],
+          high: q.high?.[i] ?? q.close[i],
+          low: q.low?.[i] ?? q.close[i],
+          close: q.close[i],
+          volume: q.volume?.[i] ?? 0,
+        });
+      }
+    }
+
+    yahooHourlyCache.set(cacheKey, candles);
+    return candles;
+  } catch (err) {
+    console.warn(`Yahoo hourly fetch failed for ${upperTicker} (${period}):`, err instanceof Error ? err.message : err);
     return [];
   }
 }

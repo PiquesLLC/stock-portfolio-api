@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles } from '../services/market.service';
+import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 
 interface PriceResult {
@@ -108,6 +108,26 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error('Error fetching intraday data:', error);
     res.status(500).json({ error: 'Failed to fetch intraday data' });
+  }
+}
+
+export async function getHourlyCandles(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    const period = req.query.period as string;
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+    if (period !== '1W' && period !== '1M') {
+      res.status(400).json({ error: 'Period must be 1W or 1M' });
+      return;
+    }
+    const candles = await fetchHourlyCandles(ticker, period);
+    res.json({ ticker, candles });
+  } catch (error) {
+    console.error('Error fetching hourly candles:', error);
+    res.status(500).json({ error: 'Failed to fetch hourly data' });
   }
 }
 
