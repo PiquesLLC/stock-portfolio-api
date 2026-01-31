@@ -7,7 +7,8 @@ import {
   getHoldings,
 } from '../services/portfolio.service';
 import { createActivityEvent } from '../services/activity.service';
-import { createSnapshotIfNeeded, getAllSnapshots, getChartSnapshots, reconstructPortfolioHistory, reconstructIntradayGap } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+
 import {
   getSP500Projections,
   getRealizedProjections,
@@ -213,82 +214,56 @@ export async function getChartHandler(req: Request, res: Response): Promise<void
     const portfolio = await getPortfolio();
 
     if (period === '1D') {
-      const chartData = await getChartSnapshots(period);
       const now = Date.now();
-
-      // Detect gaps > 30 min in snapshot data and fill with intraday candle reconstruction
-      const GAP_THRESHOLD_MS = 30 * 60 * 1000;
+      const liveValue = portfolio.totalAssets - portfolio.marginDebt;
+      const previousCloseValue = liveValue - portfolio.dayChange;
       const holdings = await getHoldings();
-      if (holdings.length > 0 && chartData.points.length >= 2) {
-        const gaps: { startMs: number; endMs: number; insertAfterIdx: number }[] = [];
-        for (let i = 0; i < chartData.points.length - 1; i++) {
-          const dt = chartData.points[i + 1].time - chartData.points[i].time;
-          if (dt > GAP_THRESHOLD_MS) {
-            gaps.push({
-              startMs: chartData.points[i].time,
-              endMs: chartData.points[i + 1].time,
-              insertAfterIdx: i,
-            });
-          }
-        }
-        // Also check gap from last snapshot to now
-        if (chartData.points.length > 0) {
-          const lastTime = chartData.points[chartData.points.length - 1].time;
-          if (now - lastTime > GAP_THRESHOLD_MS) {
-            gaps.push({
-              startMs: lastTime,
-              endMs: now,
-              insertAfterIdx: chartData.points.length - 1,
-            });
-          }
-        }
 
-        if (gaps.length > 0) {
-          const fillResults = await Promise.all(
-            gaps.map(g =>
-              reconstructIntradayGap(
-                holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-                portfolio.cashBalance,
-                portfolio.marginDebt,
-                g.startMs,
-                g.endMs,
-              )
-            )
-          );
-          // Merge fill points into chartData (insert in reverse order to preserve indices)
-          for (let g = gaps.length - 1; g >= 0; g--) {
-            const fillPts = fillResults[g];
-            if (fillPts.length > 0) {
-              chartData.points.splice(gaps[g].insertAfterIdx + 1, 0, ...fillPts);
-            }
-          }
-        }
-      }
+      // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
+      // This naturally excludes deleted holdings — no spike/drop artifacts.
+      let points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
+      );
 
       // Append live value
-      if (chartData.points.length === 0 || now - chartData.points[chartData.points.length - 1].time > 5000) {
-        chartData.points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+      if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+        points.push({ time: now, value: liveValue });
       }
-      if (chartData.periodStartValue === 0 && chartData.points.length > 0) {
-        chartData.periodStartValue = chartData.points[0].value;
-      }
-      res.json(chartData);
+
+      const periodStartValue = previousCloseValue || (points.length > 0 ? points[0].value : liveValue);
+
+      res.json({ points, periodStartValue, period: '1D' });
       return;
     }
 
-    // For all other periods: reconstruct from candle data (daily resolution)
-    const periodDaysMap: Record<string, number> = {
-      '1W': 7, '1M': 30, '3M': 90,
-      'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
-      '1Y': 365, 'ALL': 365 * 5,
-    };
-    const periodDays = periodDaysMap[period] ?? 30;
-
     const holdings = await getHoldings();
-    const reconstructed = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
-
     const now = Date.now();
-    let points = reconstructed;
+    let points: { time: number; value: number }[];
+
+    // Use high-resolution data for short periods (like Robinhood)
+    if (period === '1W') {
+      // 15-min candles for 5 days → ~130 points per ticker
+      points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
+      );
+    } else if (period === '1M') {
+      // 1-hour candles for 1 month → ~150 points per ticker
+      points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
+      );
+    } else {
+      // 3M+ use daily candles (already enough density)
+      const periodDaysMap: Record<string, number> = {
+        '3M': 90,
+        'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+        '1Y': 365, 'ALL': 365 * 5,
+      };
+      const periodDays = periodDaysMap[period] ?? 30;
+      points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+    }
 
     // Append current live value
     if (points.length === 0 || now - points[points.length - 1].time > 5000) {

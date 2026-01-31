@@ -6,6 +6,7 @@ import axios from 'axios';
 import NodeCache from 'node-cache';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
+const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
 
 const prisma = new PrismaClient();
 
@@ -309,11 +310,11 @@ export async function reconstructPortfolioHistory(
 
   for (const dateMs of allDates) {
     let totalValue = cashBalance - marginDebt;
-    let allFound = true;
+    let tickersWithPrice = 0;
 
     for (const holding of holdings) {
       const candles = tickerCandles.get(holding.ticker);
-      if (!candles) { allFound = false; continue; }
+      if (!candles) continue; // Yahoo failed for this ticker entirely — skip
 
       // Binary search for closest date <= dateMs
       let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
@@ -329,12 +330,111 @@ export async function reconstructPortfolioHistory(
 
       if (bestIdx >= 0) {
         totalValue += holding.shares * candles.closes[bestIdx];
-      } else {
-        allFound = false;
+        tickersWithPrice++;
       }
     }
 
-    if (allFound || tickerCandles.size >= holdings.length * 0.5) {
+    // Include point if all available tickers have price data at this date
+    if (tickersWithPrice >= tickerCandles.size) {
+      points.push({ time: dateMs, value: totalValue });
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Reconstruct portfolio history using higher-resolution Yahoo candles.
+ * For 1W: 15-min intervals. For 1M: 1-hour intervals.
+ * This produces far more data points than daily candles, matching Robinhood's chart density.
+ */
+export async function reconstructPortfolioHistoryHiRes(
+  holdings: { ticker: string; shares: number }[],
+  cashBalance: number,
+  marginDebt: number,
+  yahooRange: string,   // e.g. '5d', '1mo'
+  yahooInterval: string, // e.g. '15m', '1h'
+): Promise<{ time: number; value: number }[]> {
+  if (holdings.length === 0) return [];
+
+  const fetchYahooHiRes = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
+    const cacheKey = `hires:${ticker}:${yahooRange}:${yahooInterval}`;
+    const cached = hiresCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${yahooRange}&interval=${yahooInterval}&includePrePost=true`;
+      const resp = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const result = resp.data?.chart?.result?.[0];
+      if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+
+      const timestamps: number[] = result.timestamp;
+      const q = result.indicators.quote[0];
+      const dates: number[] = [];
+      const closes: number[] = [];
+
+      for (let i = 0; i < timestamps.length; i++) {
+        if (q.close[i] != null) {
+          dates.push(timestamps[i] * 1000);
+          closes.push(q.close[i]);
+        }
+      }
+
+      if (closes.length === 0) return null;
+      const data = { dates, closes };
+      hiresCache.set(cacheKey, data);
+      return data;
+    } catch (e) {
+      console.warn(`Yahoo hires fetch failed for ${ticker}:`, e instanceof Error ? e.message : e);
+      return null;
+    }
+  };
+
+  const candleResults = await Promise.all(holdings.map(h => fetchYahooHiRes(h.ticker)));
+
+  const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
+  for (let i = 0; i < holdings.length; i++) {
+    const candles = candleResults[i];
+    if (!candles) continue;
+    tickerCandles.set(holdings[i].ticker, candles);
+  }
+
+  if (tickerCandles.size === 0) return [];
+
+  // Collect all unique timestamps across all tickers
+  const allDatesSet = new Set<number>();
+  for (const { dates } of tickerCandles.values()) {
+    for (const d of dates) allDatesSet.add(d);
+  }
+
+  const allDates = Array.from(allDatesSet).sort((a, b) => a - b);
+  if (allDates.length === 0) return [];
+
+  const points: { time: number; value: number }[] = [];
+
+  for (const dateMs of allDates) {
+    let totalValue = cashBalance - marginDebt;
+    let tickersWithPrice = 0;
+
+    for (const holding of holdings) {
+      const candles = tickerCandles.get(holding.ticker);
+      if (!candles) continue;
+
+      // Binary search for closest date <= dateMs
+      let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (candles.dates[mid] <= dateMs) { bestIdx = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+
+      if (bestIdx >= 0) {
+        totalValue += holding.shares * candles.closes[bestIdx];
+        tickersWithPrice++;
+      }
+    }
+
+    if (tickersWithPrice >= tickerCandles.size) {
       points.push({ time: dateMs, value: totalValue });
     }
   }
@@ -537,8 +637,8 @@ export async function reconstructIntradayGap(
       }
     }
 
-    // Only add point if we have data for most holdings
-    if (tickersFound >= holdings.length * 0.5) {
+    // Include point if all tickers with available candle data have a price here
+    if (tickersFound >= tickerCandles.size && tickerCandles.size > 0) {
       points.push({ time: t, value: totalValue });
     }
   }
