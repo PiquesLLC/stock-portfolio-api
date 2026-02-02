@@ -439,6 +439,34 @@ export async function reconstructPortfolioHistoryHiRes(
     }
   }
 
+  // Filter outlier points — if a point deviates more than 5% from its neighbors,
+  // it's likely a bad after-hours quote. Replace with interpolated value.
+  if (points.length >= 3) {
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1].value;
+      const curr = points[i].value;
+      const next = points[i + 1].value;
+      const neighborAvg = (prev + next) / 2;
+      if (neighborAvg > 0) {
+        const deviation = Math.abs(curr - neighborAvg) / neighborAvg;
+        if (deviation > 0.05) {
+          points[i].value = neighborAvg;
+        }
+      }
+    }
+    // Check last point against its predecessor
+    if (points.length >= 2) {
+      const last = points[points.length - 1];
+      const secondLast = points[points.length - 2];
+      if (secondLast.value > 0) {
+        const deviation = Math.abs(last.value - secondLast.value) / secondLast.value;
+        if (deviation > 0.05) {
+          points[points.length - 1].value = secondLast.value;
+        }
+      }
+    }
+  }
+
   return points;
 }
 
