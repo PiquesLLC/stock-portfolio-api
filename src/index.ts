@@ -2,6 +2,8 @@ import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded } from './services/snapshot.service';
+import { syncAllHeldTickers } from './services/dividend-fetch.service';
+import { postDividendsForDate } from './services/dividend-post.service';
 
 const server = app.listen(config.port, () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
@@ -25,6 +27,18 @@ const server = app.listen(config.port, () => {
       }
     });
   }, SNAPSHOT_INTERVAL_MS);
+
+  // Dividend sync — fetch dividend events from Yahoo Finance on startup + every 6 hours
+  syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));
+  setInterval(() => {
+    syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Error:', err));
+  }, 6 * 60 * 60 * 1000);
+
+  // Dividend posting — check for payable dividends every hour
+  postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
+  setInterval(() => {
+    postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
+  }, 60 * 60 * 1000);
 });
 
 process.on('SIGTERM', () => {

@@ -177,15 +177,46 @@ export interface Portfolio {
 export interface DividendEvent {
   id: string;
   ticker: string;
-  amount: number;
-  date: Date;
+  exDate: Date;
+  recordDate: Date | null;
+  payDate: Date;
+  amountPerShare: number;
+  currency: string;
+  dividendType: string;
+  source: string;
+  status: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
-export interface DividendInput {
+export interface DividendEventInput {
   ticker: string;
-  amount: number;
-  date: string; // ISO date string
+  exDate: string;
+  payDate: string;
+  amountPerShare: number;
+  recordDate?: string;
+  dividendType?: string;
+  source?: string;
+}
+
+export interface DividendCredit {
+  id: string;
+  userId: string | null;
+  ticker: string;
+  dividendEventId: string;
+  sharesEligible: number;
+  amountGross: number;
+  currency: string;
+  creditedAt: Date;
+  status: string;
+  createdAt: Date;
+  dividendEvent?: DividendEvent;
+}
+
+export interface DividendSummary {
+  totalYTD: number;
+  totalAllTime: number;
+  byTicker: { ticker: string; total: number; count: number }[];
 }
 
 // New Projection types

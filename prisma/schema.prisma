@@ -58,6 +58,7 @@ model User {
   activityEvents        ActivityEvent[]
   transactions          Transaction[]
   alerts                Alert[]
+  dividendCredits       DividendCredit[]
 }
 
 model UserSettings {
@@ -108,13 +109,42 @@ model HoldingSnapshot {
 }
 
 model DividendEvent {
-  id        String   @id @default(uuid())
-  ticker    String
-  amount    Float
-  date      DateTime
-  createdAt DateTime @default(now())
+  id              String           @id @default(uuid())
+  ticker          String
+  exDate          DateTime
+  recordDate      DateTime?
+  payDate         DateTime
+  amountPerShare  Float
+  currency        String           @default("USD")
+  dividendType    String           @default("regular")
+  source          String           @default("yahoo")
+  status          String           @default("confirmed")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  credits         DividendCredit[]
 
-  @@index([date])
+  @@unique([ticker, exDate, amountPerShare])
+  @@index([ticker])
+  @@index([payDate])
+  @@index([exDate])
+}
+
+model DividendCredit {
+  id              String        @id @default(uuid())
+  userId          String?
+  ticker          String
+  dividendEventId String
+  dividendEvent   DividendEvent @relation(fields: [dividendEventId], references: [id])
+  sharesEligible  Float
+  amountGross     Float
+  currency        String        @default("USD")
+  creditedAt      DateTime
+  status          String        @default("posted")
+  createdAt       DateTime      @default(now())
+  user            User?         @relation(fields: [userId], references: [id])
+
+  @@unique([userId, dividendEventId])
+  @@index([userId])
   @@index([ticker])
 }
 
