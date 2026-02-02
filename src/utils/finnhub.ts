@@ -191,23 +191,19 @@ export async function getQuotes(tickers: string[]): Promise<QuotesResult> {
   let staleCount = 0;
   let repricingCount = 0;
 
-  const promises = tickers.map(async (ticker) => {
+  // Fetch sequentially with small delay to avoid burst rate limiting.
+  // Cached quotes return instantly (no delay needed).
+  for (const ticker of tickers) {
     try {
       const quote = await getQuote(ticker);
       quotes.set(ticker.toUpperCase(), quote);
-      if (quote.isStale) {
-        staleCount++;
-      }
-      if (quote.isRepricing) {
-        repricingCount++;
-      }
+      if (quote.isStale) staleCount++;
+      if (quote.isRepricing) repricingCount++;
     } catch (error) {
       console.error(`Failed to fetch quote for ${ticker}:`, error);
       failedTickers.push(ticker.toUpperCase());
     }
-  });
-
-  await Promise.all(promises);
+  }
 
   return { quotes, staleCount, repricingCount, failedTickers, provider: 'finnhub' };
 }
