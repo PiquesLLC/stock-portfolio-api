@@ -20,6 +20,7 @@ export const insightsCache = new NodeCache({ stdTTL: 86400 });
 
 // Track rate limit state
 let rateLimitedUntil: number = 0;
+let searchRateLimitedUntil: number = 0; // Separate rate limit for search so background jobs don't block it
 
 // Retry configuration
 const MAX_RETRIES = 2;
@@ -941,60 +942,102 @@ export async function searchSymbols(
   const now = Date.now();
 
   if (!rawResults) {
-    // Check rate limit
-    if (now < rateLimitedUntil) {
-      return { results: [], partial: true, cached: false, advPending: [] };
+    // Try Finnhub first, fall back to Polygon if rate-limited
+    let usedFallback = false;
+
+    if (now < rateLimitedUntil && now < searchRateLimitedUntil) {
+      // Both Finnhub limits hit — go straight to Polygon
+      usedFallback = true;
+    } else if (now >= searchRateLimitedUntil) {
+      try {
+        const response = await axios.get<FinnhubSearchResult>(`${FINNHUB_BASE_URL}/search`, {
+          params: {
+            q: query.toUpperCase(),
+            token: config.finnhubApiKey,
+          },
+          timeout: 5000,
+        });
+
+        const data = response.data;
+
+        if (!data.result || data.result.length === 0) {
+          rawResults = [];
+          searchCache.set(cacheKey, rawResults);
+        } else {
+
+        // Filter results - keep equities/ETFs from known exchanges
+        const allowedTypes = new Set(['Common Stock', 'ETP', 'ETF', 'REIT', 'ADR', 'Equity', 'Unit']);
+        const knownExchanges = new Set(Object.keys(EXCHANGE_PRIORITY));
+        const upperQuery = normalizedQuery.toUpperCase();
+
+        rawResults = data.result
+          .filter(item => {
+            const exchangeUpper = item.primary_exchange?.toUpperCase() || '';
+            const hasKnownExchange = knownExchanges.has(exchangeUpper);
+            const isAllowedType = allowedTypes.has(item.type);
+            const symbolMatches = item.symbol.toUpperCase().includes(upperQuery);
+            const nameMatches = item.description.toUpperCase().includes(upperQuery);
+            // Keep if it's an allowed type or from a known exchange, and matches query
+            return (isAllowedType || hasKnownExchange) && (symbolMatches || nameMatches);
+          })
+          .slice(0, 30) // Keep more for re-ranking
+          .map(item => ({
+            symbol: item.symbol,
+            description: item.description,
+            type: item.type,
+            primaryExchange: item.primary_exchange || '',
+          }));
+
+        // Cache raw results
+        searchCache.set(cacheKey, rawResults);
+        }
+      } catch (error) {
+        if (error instanceof AxiosError && error.response?.status === 429) {
+          searchRateLimitedUntil = now + 60000;
+          console.warn('Finnhub rate limited for symbol search, falling back to Polygon');
+          usedFallback = true;
+        } else {
+          console.error('Symbol search error:', error);
+          usedFallback = true;
+        }
+      }
+    } else {
+      usedFallback = true;
     }
 
-    try {
-      const response = await axios.get<FinnhubSearchResult>(`${FINNHUB_BASE_URL}/search`, {
-        params: {
-          q: query.toUpperCase(),
-          token: config.finnhubApiKey,
-        },
-        timeout: 5000,
-      });
-
-      const data = response.data;
-
-      if (!data.result || data.result.length === 0) {
-        rawResults = [];
-        searchCache.set(cacheKey, rawResults);
-      } else {
-
-      // Filter results - keep equities/ETFs from known exchanges
-      const allowedTypes = new Set(['Common Stock', 'ETP', 'ETF', 'REIT', 'ADR', 'Equity', 'Unit']);
-      const knownExchanges = new Set(Object.keys(EXCHANGE_PRIORITY));
-      const upperQuery = normalizedQuery.toUpperCase();
-
-      rawResults = data.result
-        .filter(item => {
-          const exchangeUpper = item.primary_exchange?.toUpperCase() || '';
-          const hasKnownExchange = knownExchanges.has(exchangeUpper);
-          const isAllowedType = allowedTypes.has(item.type);
-          const symbolMatches = item.symbol.toUpperCase().includes(upperQuery);
-          const nameMatches = item.description.toUpperCase().includes(upperQuery);
-          // Keep if it's an allowed type or from a known exchange, and matches query
-          return (isAllowedType || hasKnownExchange) && (symbolMatches || nameMatches);
-        })
-        .slice(0, 30) // Keep more for re-ranking
-        .map(item => ({
-          symbol: item.symbol,
-          description: item.description,
-          type: item.type,
-          primaryExchange: item.primary_exchange || '',
-        }));
-
-      // Cache raw results
-      searchCache.set(cacheKey, rawResults);
+    // Polygon fallback
+    if (usedFallback && !rawResults) {
+      try {
+        const polygonKey = process.env.POLYGON_API_KEY;
+        if (polygonKey) {
+          const resp = await axios.get('https://api.polygon.io/v3/reference/tickers', {
+            params: {
+              search: query.toUpperCase(),
+              active: true,
+              limit: 20,
+              apiKey: polygonKey,
+            },
+            timeout: 5000,
+          });
+          const polygonTypeMap: Record<string, string> = {
+            CS: 'Common Stock', ETF: 'ETF', ETS: 'ETF', ADRC: 'ADR',
+            UNIT: 'Unit', RIGHT: 'Right', PFD: 'Preferred',
+          };
+          rawResults = (resp.data.results || []).map((r: any) => ({
+            symbol: r.ticker,
+            description: r.name,
+            type: polygonTypeMap[r.type] || r.type || '',
+            primaryExchange: r.primary_exchange || '',
+          }));
+          searchCache.set(cacheKey, rawResults);
+        }
+      } catch (error) {
+        console.error('Polygon search fallback error:', error);
+        return { results: [], partial: true, cached: false, advPending: [] };
       }
-    } catch (error) {
-      if (error instanceof AxiosError && error.response?.status === 429) {
-        rateLimitedUntil = now + 60000;
-        console.warn('Finnhub rate limited for symbol search');
-      } else {
-        console.error('Symbol search error:', error);
-      }
+    }
+
+    if (!rawResults) {
       return { results: [], partial: true, cached: false, advPending: [] };
     }
   }
