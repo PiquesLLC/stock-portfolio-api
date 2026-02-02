@@ -106,6 +106,39 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
 }
 
 /**
+ * Backfill all missed dividend postings for events with payDate in the past.
+ * Iterates each unique past payDate and calls postDividendsForDate.
+ * Idempotent — safe to run multiple times.
+ */
+export async function backfillMissedDividends(): Promise<{ totalPosted: number; totalSkipped: number; datesProcessed: number }> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Find all distinct past payDates that have unposted events
+  const pastEvents = await prisma.dividendEvent.findMany({
+    where: {
+      payDate: { lt: today },
+      status: { in: ['confirmed', 'preliminary'] },
+    },
+    select: { payDate: true },
+    distinct: ['payDate'],
+    orderBy: { payDate: 'asc' },
+  });
+
+  let totalPosted = 0;
+  let totalSkipped = 0;
+
+  for (const { payDate } of pastEvents) {
+    const { posted, skipped } = await postDividendsForDate(payDate);
+    totalPosted += posted;
+    totalSkipped += skipped;
+  }
+
+  console.log(`[Dividend Backfill] Processed ${pastEvents.length} dates: ${totalPosted} posted, ${totalSkipped} skipped`);
+  return { totalPosted, totalSkipped, datesProcessed: pastEvents.length };
+}
+
+/**
  * Get dividend summary for a user.
  */
 export async function getDividendSummary(userId?: string | null): Promise<{

@@ -5,7 +5,7 @@ import {
   getUpcomingDividendEvents,
   deleteDividendEvent,
 } from '../services/dividend.service';
-import { getDividendSummary, getDividendCredits } from '../services/dividend-post.service';
+import { getDividendSummary, getDividendCredits, backfillMissedDividends } from '../services/dividend-post.service';
 import { syncDividendEventsForTicker, syncAllHeldTickers } from '../services/dividend-fetch.service';
 
 // --- Events ---
@@ -126,5 +126,15 @@ export async function syncHandler(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error('Error syncing dividends:', error);
     res.status(500).json({ error: 'Failed to sync dividends' });
+  }
+}
+
+export async function backfillHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await backfillMissedDividends();
+    res.json(result);
+  } catch (error) {
+    console.error('Error backfilling dividends:', error);
+    res.status(500).json({ error: 'Failed to backfill dividends' });
   }
 }

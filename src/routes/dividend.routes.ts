@@ -7,6 +7,7 @@ import {
   getCreditsHandler,
   getSummaryHandler,
   syncHandler,
+  backfillHandler,
 } from '../controllers/dividend.controller';
 
 const router = Router();
@@ -25,6 +26,9 @@ router.get('/summary', getSummaryHandler);
 
 // Sync (trigger manual fetch from Yahoo)
 router.post('/sync', syncHandler);
+
+// Backfill missed dividend postings
+router.post('/backfill', backfillHandler);
 
 // Backward compat: GET / returns events, POST / adds event
 router.get('/', getEventsHandler);
