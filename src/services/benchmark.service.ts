@@ -27,6 +27,7 @@ export interface PerformanceData {
   window: PerformanceWindow;
   benchmarkTicker: string;
   // Portfolio metrics
+  simpleReturnPct: number | null; // matches chart display (reconstructed from candles)
   twrPct: number | null;
   mwrPct: number | null;
   // Benchmark
@@ -112,7 +113,16 @@ export async function getPerformanceComparison(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
   );
 
-  let snapshotPoints: SnapshotPoint[] = allSnapshots.map(s => ({
+  // Filter out snapshots where netEquity is null (totalValue includes cost basis,
+  // not actual equity). Only filter if SOME snapshots have netEquity — if none do,
+  // totalValue is all we have and is likely correct for that user.
+  const hasAnyNetEquity = allSnapshots.some(s => s.netEquity !== null && Number(s.netEquity) > 0);
+  const reliableSnapshots = hasAnyNetEquity
+    ? allSnapshots.filter(s => s.netEquity !== null && Number(s.netEquity) > 0)
+    : allSnapshots;
+  const effectiveSnapshots = reliableSnapshots.length >= 2 ? reliableSnapshots : allSnapshots;
+
+  let snapshotPoints: SnapshotPoint[] = effectiveSnapshots.map(s => ({
     date: s.timestamp,
     value: s.netEquity ?? s.totalValue,
   }));
@@ -193,12 +203,12 @@ export async function getPerformanceComparison(
     ? Math.round(benchmarkReturnRaw * 10000) / 100
     : null;
 
-  // Simple return (matches what the portfolio chart displays)
+  // Simple return from snapshot data (API-side approximation; UI overrides with chart data)
   const simpleReturnPct = snapshotPoints.length >= 2
     ? Math.round(((snapshotPoints[snapshotPoints.length - 1].value - snapshotPoints[0].value) / snapshotPoints[0].value) * 10000) / 100
     : null;
 
-  // Alpha — use simple return for consistency with chart display
+  // Alpha — computed from simpleReturnPct; UI may override with chart-derived values
   const alphaPct = (simpleReturnPct !== null && benchmarkReturnPct !== null)
     ? Math.round((simpleReturnPct - benchmarkReturnPct) * 100) / 100
     : null;
@@ -227,6 +237,7 @@ export async function getPerformanceComparison(
   return {
     window,
     benchmarkTicker,
+    simpleReturnPct,
     twrPct,
     mwrPct,
     benchmarkReturnPct,
