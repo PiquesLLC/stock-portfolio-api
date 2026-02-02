@@ -14,7 +14,7 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
 
   try {
     const now = Math.floor(Date.now() / 1000);
-    const from = now - 2 * 365 * 24 * 60 * 60; // 2 years (for SMA 200 support)
+    const from = now - 10 * 365 * 24 * 60 * 60; // 10 years for MAX chart view
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
     const resp = await axios.get(url, {
       timeout: 10000,
@@ -332,7 +332,7 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
     fetchQuote(upperTicker).catch(() => null),
     getStockProfile(upperTicker),
     getStockMetrics(upperTicker),
-    getHistoricalCandles(upperTicker, 1).catch(() => null),
+    getHistoricalCandles(upperTicker, 5).catch(() => null),
   ]);
 
   // Fallback to Yahoo Finance quote if Finnhub failed
