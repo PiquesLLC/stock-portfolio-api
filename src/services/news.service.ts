@@ -16,6 +16,47 @@ export interface MarketNewsItem {
 
 const newsCache = new NodeCache({ stdTTL: 150 }); // 2.5 min
 
+// Keywords that indicate non-market lifestyle/personal finance articles
+const LIFESTYLE_KEYWORDS = [
+  'engagement ring', 'wedding', 'marriage', 'divorce', 'dating',
+  'vacation', 'travel tips', 'holiday gift', 'gift guide',
+  'recipe', 'diet', 'weight loss', 'fitness',
+  'celebrity', 'kardashian', 'royal family',
+  'horoscope', 'zodiac', 'astrology',
+  'parenting', 'relationship advice',
+  'side hustle', 'make money fast', 'get rich',
+  'credit score hack', 'budget hack',
+  'best credit card', 'best savings account', // generic listicles
+  'streaming', 'netflix', 'what to watch',
+  'super bowl commercial', 'halftime show',
+];
+
+const LIFESTYLE_PATTERN = new RegExp(LIFESTYLE_KEYWORDS.join('|'), 'i');
+
+function isMarketRelevant(item: MarketNewsItem): boolean {
+  const text = `${item.headline} ${item.summary}`.toLowerCase();
+
+  // Exclude lifestyle content
+  if (LIFESTYLE_PATTERN.test(text)) return false;
+
+  // Include if it mentions markets, stocks, economy, companies, etc.
+  const marketKeywords = /stock|market|trade|invest|economy|fed|inflation|gdp|earnings|revenue|profit|ipo|merger|acquisition|sec|nasdaq|dow|s&p|bond|yield|rate|tariff|oil|gold|crypto|bitcoin|etf/i;
+
+  // If headline has market keywords, include it
+  if (marketKeywords.test(item.headline)) return true;
+
+  // If from financial sources and not lifestyle, include it
+  const financialSources = ['reuters', 'bloomberg', 'wsj', 'cnbc', 'financial times', 'barron'];
+  const sourceLower = item.source.toLowerCase();
+  if (financialSources.some(s => sourceLower.includes(s))) return true;
+
+  // Check if summary has strong market signals
+  if (marketKeywords.test(item.summary)) return true;
+
+  // Default: exclude uncertain content
+  return false;
+}
+
 export async function fetchMarketNews(limit = 20): Promise<MarketNewsItem[]> {
   const cached = newsCache.get<MarketNewsItem[]>('market-news');
   if (cached) return cached.slice(0, limit);
@@ -25,7 +66,7 @@ export async function fetchMarketNews(limit = 20): Promise<MarketNewsItem[]> {
     timeout: 8000,
   });
 
-  const items = resp.data || [];
+  const items = (resp.data || []).filter(isMarketRelevant);
   newsCache.set('market-news', items);
   return items.slice(0, limit);
 }

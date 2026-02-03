@@ -421,6 +421,9 @@ export function getBenchmarkTotalReturn(ticker: string, days: number): number | 
  * Get benchmark total return from a specific start date.
  * Finds the closest trading day on or after the given date.
  * Returns as fraction (e.g., 0.05 = 5%).
+ *
+ * NOTE: This uses cached historical data. For real-time accuracy,
+ * use getBenchmarkReturnWithQuote() which combines candles + live quote.
  */
 export function getBenchmarkTotalReturnFromDate(ticker: string, startDate: Date): number | null {
   const data = getBenchmarkCandles(ticker);
@@ -428,7 +431,7 @@ export function getBenchmarkTotalReturnFromDate(ticker: string, startDate: Date)
 
   const startStr = startDate.toISOString().slice(0, 10);
 
-  // Find the closest trading day on or after startDate
+  // Find the first close ON or AFTER the cutoff date (matches chart behavior)
   let startIdx = -1;
   for (let i = 0; i < data.dates.length; i++) {
     if (data.dates[i] >= startStr) {
@@ -440,15 +443,47 @@ export function getBenchmarkTotalReturnFromDate(ticker: string, startDate: Date)
   // If startDate is before all data, use first available
   if (startIdx === -1) return null;
 
-  // For YTD/period start, we want the LAST close BEFORE the window
-  // (the close on Dec 31 for YTD, or the close the day before the window start)
-  // Use the day before startIdx if available
-  const baseIdx = startIdx > 0 ? startIdx - 1 : startIdx;
-
-  const startClose = data.closes[baseIdx];
+  const startClose = data.closes[startIdx];
   const endClose = data.closes[data.closes.length - 1];
   if (startClose <= 0) return null;
   return (endClose - startClose) / startClose;
+}
+
+/**
+ * Get benchmark return with real-time accuracy by combining cached candles + live quote.
+ * This matches how the stock chart calculates period returns.
+ *
+ * @param ticker - Benchmark ticker (SPY, QQQ, DIA)
+ * @param startDate - Window start date
+ * @param currentPrice - Live quote price for the benchmark
+ * @returns Return as fraction (e.g., 0.05 = 5%), or null if insufficient data
+ */
+export function getBenchmarkReturnWithQuote(
+  ticker: string,
+  startDate: Date,
+  currentPrice: number
+): number | null {
+  const data = getBenchmarkCandles(ticker);
+  if (!data || data.closes.length < 2) return null;
+
+  const startStr = startDate.toISOString().slice(0, 10);
+
+  // Find the first close ON or AFTER the cutoff date (matches chart behavior)
+  let startIdx = -1;
+  for (let i = 0; i < data.dates.length; i++) {
+    if (data.dates[i] >= startStr) {
+      startIdx = i;
+      break;
+    }
+  }
+
+  if (startIdx === -1) return null;
+
+  const startClose = data.closes[startIdx];
+  if (startClose <= 0) return null;
+
+  // Use live price for end value instead of cached close
+  return (currentPrice - startClose) / startClose;
 }
 
 /**

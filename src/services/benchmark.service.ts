@@ -16,8 +16,10 @@ import {
   SnapshotPoint,
   CashflowEvent,
 } from '../utils/finance-math';
-import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses } from '../utils/candle-cache';
+import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses, getBenchmarkReturnWithQuote } from '../utils/candle-cache';
 import { reconstructPortfolioHistory } from './snapshot.service';
+import { getQuote } from '../utils/finnhub';
+import { getPortfolio } from './portfolio.service';
 
 const prisma = new PrismaClient();
 
@@ -79,6 +81,52 @@ export async function getPerformanceComparison(
   const windowStart = getWindowStartDate(window);
   const tradingDays = getWindowTradingDays(window);
 
+  // Special handling for 1D: use live portfolio data instead of snapshots
+  // This ensures accuracy by using the same dayChange calculation as the chart
+  if (window === '1D') {
+    try {
+      const portfolio = await getPortfolio();
+      const portfolioReturnPct = Math.round(portfolio.dayChangePercent * 100) / 100;
+
+      // Get benchmark return from live quote
+      let benchmarkReturnPct: number | null = null;
+      try {
+        const benchmarkQuote = await getQuote(benchmarkTicker);
+        if (benchmarkQuote.changePercent != null) {
+          benchmarkReturnPct = Math.round(benchmarkQuote.changePercent * 100) / 100;
+        }
+      } catch (err) {
+        console.warn(`[Benchmark] Failed to get quote for ${benchmarkTicker}:`, err);
+      }
+
+      const alphaPct = benchmarkReturnPct !== null
+        ? Math.round((portfolioReturnPct - benchmarkReturnPct) * 100) / 100
+        : null;
+
+      return {
+        window,
+        benchmarkTicker,
+        simpleReturnPct: portfolioReturnPct,
+        twrPct: portfolioReturnPct, // For 1D, TWR equals simple return
+        mwrPct: null,
+        benchmarkReturnPct,
+        alphaPct,
+        beta: null,
+        correlation: null,
+        volatilityPct: null,
+        maxDrawdownPct: portfolioReturnPct < 0 ? Math.abs(portfolioReturnPct) : 0,
+        bestDay: { date: new Date().toISOString().slice(0, 10), returnPct: portfolioReturnPct },
+        worstDay: { date: new Date().toISOString().slice(0, 10), returnPct: portfolioReturnPct },
+        snapshotCount: 2, // Set to 2 so UI doesn't show "not enough data"
+        dataStartDate: new Date().toISOString(),
+        dataEndDate: new Date().toISOString(),
+      };
+    } catch (err) {
+      console.warn('[Benchmark] Failed to get live portfolio for 1D, falling back to snapshots:', err);
+      // Fall through to snapshot-based calculation
+    }
+  }
+
   // Get portfolio snapshots for this window
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: {
@@ -127,39 +175,36 @@ export async function getPerformanceComparison(
     value: s.netEquity ?? s.totalValue,
   }));
 
-  // Check if snapshot history covers the requested window adequately.
-  // If snapshots cover less than 50% of the window, fall back to candle-based reconstruction.
+  // ALWAYS prefer candle-based reconstruction for metrics accuracy.
+  // Snapshots are taken at arbitrary times throughout the day, causing inaccurate
+  // day-over-day comparisons. Candles represent market close values which is what
+  // users expect when viewing "best day", "worst day", etc.
   const windowDays = getWindowDays(window);
-  const snapshotSpanDays = snapshotPoints.length >= 2
-    ? (snapshotPoints[snapshotPoints.length - 1].date.getTime() - snapshotPoints[0].date.getTime()) / 86400000
-    : 0;
 
-  if (snapshotSpanDays < windowDays * 0.5 && windowDays > 1) {
-    // Fetch current holdings to reconstruct history from candles
-    const holdings = await prisma.holding.findMany({
-      where: { userId: userId ?? undefined },
+  // Fetch current holdings to reconstruct history from candles
+  const holdings = await prisma.holding.findMany({
+    where: { userId: userId ?? undefined },
+  });
+
+  if (holdings.length > 0 && windowDays > 1) {
+    const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
+      where: { userId: userId ?? null },
+      orderBy: { timestamp: 'desc' },
     });
+    const cashBalance = latestSnapshot?.cashBalance ?? 0;
 
-    if (holdings.length > 0) {
-      const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
-        where: { userId: userId ?? null },
-        orderBy: { timestamp: 'desc' },
-      });
-      const cashBalance = latestSnapshot?.cashBalance ?? 0;
+    const reconstructed = await reconstructPortfolioHistory(
+      holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+      cashBalance,
+      windowDays,
+      0,
+    );
 
-      const reconstructed = await reconstructPortfolioHistory(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        cashBalance,
-        windowDays,
-        0,
-      );
-
-      if (reconstructed.length >= 2) {
-        snapshotPoints = reconstructed.map(p => ({
-          date: new Date(p.time),
-          value: p.value,
-        }));
-      }
+    if (reconstructed.length >= 2) {
+      snapshotPoints = reconstructed.map(p => ({
+        date: new Date(p.time),
+        value: p.value,
+      }));
     }
   }
 
@@ -196,12 +241,36 @@ export async function getPerformanceComparison(
     mwrPct = xirr !== null ? Math.round(xirr * 10000) / 100 : null;
   }
 
-  // Benchmark return — use date-based lookup for accuracy
-  const benchmarkReturnRaw = getBenchmarkTotalReturnFromDate(benchmarkTicker, windowStart)
-    ?? getBenchmarkTotalReturn(benchmarkTicker, tradingDays);
-  const benchmarkReturnPct = benchmarkReturnRaw !== null
-    ? Math.round(benchmarkReturnRaw * 10000) / 100
-    : null;
+  // Benchmark return — always use real-time quote for accuracy
+  let benchmarkReturnPct: number | null = null;
+
+  try {
+    const quote = await getQuote(benchmarkTicker);
+
+    if (window === '1D') {
+      // For 1D, use the quote's built-in day change
+      if (quote.changePercent != null) {
+        benchmarkReturnPct = Math.round(quote.changePercent * 100) / 100;
+      }
+    } else {
+      // For all other windows, use live price + historical start price (matches chart calculation)
+      const returnRaw = getBenchmarkReturnWithQuote(benchmarkTicker, windowStart, quote.currentPrice);
+      if (returnRaw !== null) {
+        benchmarkReturnPct = Math.round(returnRaw * 10000) / 100;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Benchmark] Failed to get real-time quote for ${benchmarkTicker}:`, err);
+  }
+
+  // Fallback to historical cache only if quote failed
+  if (benchmarkReturnPct === null) {
+    const benchmarkReturnRaw = getBenchmarkTotalReturnFromDate(benchmarkTicker, windowStart)
+      ?? getBenchmarkTotalReturn(benchmarkTicker, tradingDays);
+    benchmarkReturnPct = benchmarkReturnRaw !== null
+      ? Math.round(benchmarkReturnRaw * 10000) / 100
+      : null;
+  }
 
   // Simple return from snapshot data (API-side approximation; UI overrides with chart data)
   const simpleReturnPct = snapshotPoints.length >= 2
