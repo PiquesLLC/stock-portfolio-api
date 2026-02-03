@@ -5,6 +5,7 @@ import {
   getLeakDetector,
   getRiskForecast,
 } from '../services/insights.service';
+import { getIncomeInsights, IncomeWindow } from '../services/income-insights.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -70,6 +71,38 @@ export async function getRiskForecastHandler(req: Request, res: Response): Promi
       maxDrawdown1y: null,
       monteCarloBands: null,
       partial: true,
+    });
+  }
+}
+
+const VALID_INCOME_WINDOWS = ['today', '5d', '1m'] as const;
+
+export async function getIncomeInsightsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const windowParam = req.query.window as string | undefined;
+    let window: IncomeWindow = 'today';
+
+    if (windowParam && VALID_INCOME_WINDOWS.includes(windowParam as IncomeWindow)) {
+      window = windowParam as IncomeWindow;
+    }
+
+    const incomeInsights = await getIncomeInsights(window);
+    res.json(incomeInsights);
+  } catch (error) {
+    console.error('Error getting income insights:', error);
+    res.status(500).json({
+      error: 'Failed to get income insights',
+      healthScore: { overall: 0, breakdown: { stability: 0, growth: 0, coverage: 0, diversification: 0 }, grade: 'Poor' },
+      keyDrivers: [],
+      liveIntelligence: { window: 'today', statement: 'Data unavailable', amountInWindow: 0 },
+      signals: {
+        cashFlow: { annualIncome: 0, monthlyIncome: 0, dailyIncome: 0, projectedNextMonth: 0 },
+        momentum: { yoyChangePct: null, holdingsRaisedPayout: [], trend: 'unknown' },
+        reliability: { classification: 'stable', monthlyStdDev: null, consecutiveMonths: 0 },
+      },
+      contributors: [],
+      concentration: { top1Percent: 0, top3Percent: 0, top1Ticker: null, top3Tickers: [], isConcentrated: false },
+      timeline: [],
     });
   }
 }

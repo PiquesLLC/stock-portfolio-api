@@ -7,6 +7,13 @@ import {
 } from '../services/dividend.service';
 import { getDividendSummary, getDividendCredits, backfillMissedDividends } from '../services/dividend-post.service';
 import { syncDividendEventsForTicker, syncAllHeldTickers } from '../services/dividend-fetch.service';
+import {
+  getReinvestments,
+  getDividendTimeline,
+  reinvestDividend,
+  getDripSettings,
+  updateDripSettings,
+} from '../services/drip.service';
 
 // --- Events ---
 
@@ -136,5 +143,86 @@ export async function backfillHandler(req: Request, res: Response): Promise<void
   } catch (error) {
     console.error('Error backfilling dividends:', error);
     res.status(500).json({ error: 'Failed to backfill dividends' });
+  }
+}
+
+// --- DRIP (Dividend Reinvestment) ---
+
+export async function getReinvestmentsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId, ticker } = req.query;
+    const reinvestments = await getReinvestments(
+      userId as string | undefined ?? null,
+      ticker as string | undefined
+    );
+    res.json(reinvestments);
+  } catch (error) {
+    console.error('Error fetching reinvestments:', error);
+    res.status(500).json({ error: 'Failed to fetch reinvestments' });
+  }
+}
+
+export async function getTimelineHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const timeline = await getDividendTimeline(id);
+    res.json(timeline);
+  } catch (error: any) {
+    if (error?.message === 'Dividend credit not found') {
+      res.status(404).json({ error: 'Dividend credit not found' });
+      return;
+    }
+    console.error('Error fetching dividend timeline:', error);
+    res.status(500).json({ error: 'Failed to fetch dividend timeline' });
+  }
+}
+
+export async function reinvestHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+    const result = await reinvestDividend(id, userId ?? null);
+    res.json(result);
+  } catch (error: any) {
+    if (error?.message === 'Dividend credit not found') {
+      res.status(404).json({ error: 'Dividend credit not found' });
+      return;
+    }
+    if (error?.message === 'Dividend already reinvested') {
+      res.status(400).json({ error: 'Dividend already reinvested' });
+      return;
+    }
+    if (error?.message?.includes('No holding found')) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error('Error reinvesting dividend:', error);
+    res.status(500).json({ error: 'Failed to reinvest dividend' });
+  }
+}
+
+export async function getDripSettingsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId } = req.query;
+    const settings = await getDripSettings(userId as string | undefined ?? null);
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching DRIP settings:', error);
+    res.status(500).json({ error: 'Failed to fetch DRIP settings' });
+  }
+}
+
+export async function updateDripSettingsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId, enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ error: 'enabled must be a boolean' });
+      return;
+    }
+    await updateDripSettings(userId ?? null, enabled);
+    res.json({ enabled });
+  } catch (error) {
+    console.error('Error updating DRIP settings:', error);
+    res.status(500).json({ error: 'Failed to update DRIP settings' });
   }
 }

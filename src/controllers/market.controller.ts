@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews } from '../services/news.service';
+import { getETFHoldings } from '../utils/yahoo-finance';
 
 interface PriceResult {
   price: number;
@@ -192,5 +193,26 @@ export async function getBenchmarkClosesHandler(req: Request, res: Response): Pr
   } catch (error) {
     console.error('Error fetching benchmark closes:', error);
     res.status(500).json({ error: 'Failed to fetch benchmark data' });
+  }
+}
+
+export async function getETFHoldingsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+
+    const holdings = await getETFHoldings(ticker);
+    if (!holdings) {
+      res.status(404).json({ error: 'Holdings data not available for this ticker' });
+      return;
+    }
+
+    res.json(holdings);
+  } catch (error) {
+    console.error('Error fetching ETF holdings:', error);
+    res.status(500).json({ error: 'Failed to fetch ETF holdings' });
   }
 }

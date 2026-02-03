@@ -5,6 +5,7 @@
  */
 
 import { PrismaClient, Prisma } from '@prisma/client';
+import { isDripEnabled, reinvestDividend } from './drip.service';
 
 const prisma = new PrismaClient();
 
@@ -87,6 +88,26 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
 
         posted++;
         console.log(`[Dividend Post] Credited $${amountGross} to ${holding.userId ?? 'default'} for ${event.ticker} (${sharesEligible} shares × $${event.amountPerShare})`);
+
+        // Auto-reinvest if DRIP is enabled
+        try {
+          const dripEnabled = await isDripEnabled(holding.userId ?? null);
+          if (dripEnabled) {
+            // Get the credit we just created to get its ID
+            const newCredit = await prisma.dividendCredit.findFirst({
+              where: {
+                userId: holding.userId ?? null,
+                dividendEventId: event.id,
+              },
+            });
+            if (newCredit) {
+              await reinvestDividend(newCredit.id, holding.userId ?? null);
+              console.log(`[DRIP] Auto-reinvested dividend for ${event.ticker}`);
+            }
+          }
+        } catch (dripErr) {
+          console.warn(`[DRIP] Auto-reinvest failed for ${event.ticker}:`, dripErr instanceof Error ? dripErr.message : dripErr);
+        }
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           // Unique constraint violation — already posted, skip silently
@@ -193,6 +214,7 @@ export async function getDividendCredits(userId?: string | null, ticker?: string
     },
     include: {
       dividendEvent: true,
+      reinvestment: true,
     },
     orderBy: { creditedAt: 'desc' },
   });

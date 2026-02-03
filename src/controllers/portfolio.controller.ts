@@ -8,6 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { createActivityEvent } from '../services/activity.service';
 import { createSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+import { addTransaction } from '../services/transaction.service';
 
 import {
   getSP500Projections,
@@ -43,7 +44,7 @@ export async function getPortfolioHandler(req: Request, res: Response): Promise<
 
 export async function addHolding(req: Request, res: Response): Promise<void> {
   try {
-    const { ticker, shares, averageCost } = req.body;
+    const { ticker, shares, averageCost, skipTransaction } = req.body;
 
     if (!ticker || typeof ticker !== 'string') {
       res.status(400).json({ error: 'Missing or invalid ticker' });
@@ -65,6 +66,25 @@ export async function addHolding(req: Request, res: Response): Promise<void> {
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
     const holding = await upsertHolding({ ticker, shares, averageCost });
+
+    // Auto-create transaction for TWR tracking (unless skipTransaction is set)
+    // This ensures adding/removing stocks doesn't artificially inflate returns
+    if (!skipTransaction) {
+      const newCostBasis = shares * averageCost;
+      const oldCostBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
+      const costBasisDiff = newCostBasis - oldCostBasis;
+
+      if (Math.abs(costBasisDiff) >= 0.01) {
+        const transactionType = costBasisDiff > 0 ? 'deposit' : 'withdrawal';
+        await addTransaction({
+          type: transactionType,
+          amount: Math.abs(costBasisDiff),
+          date: new Date().toISOString(),
+          userId: req.body.userId ?? undefined,
+        });
+        console.log(`[Holding] Auto-created ${transactionType} of $${Math.abs(costBasisDiff).toFixed(2)} for ${ticker.toUpperCase()} change`);
+      }
+    }
 
     // Fire activity event if a userId is provided
     const userId = req.body.userId as string | undefined;
@@ -95,13 +115,31 @@ export async function addHolding(req: Request, res: Response): Promise<void> {
 export async function removeHolding(req: Request, res: Response): Promise<void> {
   try {
     const ticker = req.params.ticker?.toUpperCase();
+    const skipTransaction = req.query.skipTransaction === 'true';
 
     if (!ticker) {
       res.status(400).json({ error: 'Missing ticker parameter' });
       return;
     }
 
+    // Get the holding before deletion to know the cost basis
+    const existingHoldings = await getHoldings();
+    const existingHolding = existingHoldings.find(h => h.ticker === ticker);
+    const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
+
     await deleteHolding(ticker);
+
+    // Auto-create withdrawal transaction for TWR tracking
+    if (!skipTransaction && costBasis >= 0.01) {
+      const userId = req.query.userId as string | undefined;
+      await addTransaction({
+        type: 'withdrawal',
+        amount: costBasis,
+        date: new Date().toISOString(),
+        userId,
+      });
+      console.log(`[Holding] Auto-created withdrawal of $${costBasis.toFixed(2)} for removing ${ticker}`);
+    }
 
     // Fire activity event if userId provided in query
     const userId = req.query.userId as string | undefined;

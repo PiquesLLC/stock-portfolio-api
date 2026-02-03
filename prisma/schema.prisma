@@ -38,27 +38,29 @@ model PortfolioSnapshot {
 }
 
 model User {
-  id                    String              @id @default(uuid())
-  username              String              @unique
-  displayName           String
-  createdAt             DateTime            @default(now())
-  trackingActive        Boolean             @default(false)
-  trackingStartAt       DateTime?
-  leaderboardEligible   Boolean             @default(false)
-  leaderboardEligibleAt DateTime?
-  profilePublic         Boolean             @default(true)
-  region                String?
-  showRegion            Boolean             @default(true)
-  holdingsVisibility    String              @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
-  holdings              Holding[]
-  snapshots             PortfolioSnapshot[]
-  settings              UserSettings?
-  followers             Follow[]            @relation("following")
-  following             Follow[]            @relation("follower")
-  activityEvents        ActivityEvent[]
-  transactions          Transaction[]
-  alerts                Alert[]
-  dividendCredits       DividendCredit[]
+  id                     String                 @id @default(uuid())
+  username               String                 @unique
+  displayName            String
+  createdAt              DateTime               @default(now())
+  trackingActive         Boolean                @default(false)
+  trackingStartAt        DateTime?
+  leaderboardEligible    Boolean                @default(false)
+  leaderboardEligibleAt  DateTime?
+  profilePublic          Boolean                @default(true)
+  region                 String?
+  showRegion             Boolean                @default(true)
+  holdingsVisibility     String                 @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
+  holdings               Holding[]
+  snapshots              PortfolioSnapshot[]
+  settings               UserSettings?
+  followers              Follow[]               @relation("following")
+  following              Follow[]               @relation("follower")
+  activityEvents         ActivityEvent[]
+  transactions           Transaction[]
+  alerts                 Alert[]
+  dividendCredits        DividendCredit[]
+  lots                   Lot[]
+  dividendReinvestments  DividendReinvestment[]
 }
 
 model UserSettings {
@@ -67,6 +69,7 @@ model UserSettings {
   user        User     @relation(fields: [userId], references: [id])
   cashBalance Float    @default(0)
   marginDebt  Float    @default(0)
+  dripEnabled Boolean  @default(false)
   updatedAt   DateTime @updatedAt
 }
 
@@ -91,6 +94,9 @@ model Settings {
   // Optional YTD tracking (user-provided for True YTD calculation)
   ytdStartEquity      Float?    // Net equity on Jan 1
   ytdNetContributions  Float?    // Deposits - withdrawals since Jan 1
+
+  // Dividend Reinvestment Plan (DRIP) settings
+  dripEnabled Boolean @default(false)
 }
 
 model HoldingSnapshot {
@@ -130,21 +136,58 @@ model DividendEvent {
 }
 
 model DividendCredit {
-  id              String        @id @default(uuid())
+  id              String                 @id @default(uuid())
   userId          String?
   ticker          String
   dividendEventId String
-  dividendEvent   DividendEvent @relation(fields: [dividendEventId], references: [id])
+  dividendEvent   DividendEvent          @relation(fields: [dividendEventId], references: [id])
   sharesEligible  Float
   amountGross     Float
-  currency        String        @default("USD")
+  currency        String                 @default("USD")
   creditedAt      DateTime
-  status          String        @default("posted")
-  createdAt       DateTime      @default(now())
-  user            User?         @relation(fields: [userId], references: [id])
+  status          String                 @default("posted")
+  createdAt       DateTime               @default(now())
+  user            User?                  @relation(fields: [userId], references: [id])
+  reinvestment    DividendReinvestment?
 
   @@unique([userId, dividendEventId])
   @@index([userId])
+  @@index([ticker])
+}
+
+model DividendReinvestment {
+  id               String         @id @default(uuid())
+  userId           String?
+  dividendCreditId String         @unique
+  dividendCredit   DividendCredit @relation(fields: [dividendCreditId], references: [id])
+  ticker           String
+  sharesPurchased  Float
+  pricePerShare    Float
+  totalAmount      Float
+  fillDate         DateTime
+  status           String         @default("completed")
+  createdAt        DateTime       @default(now())
+  user             User?          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([ticker])
+}
+
+model Lot {
+  id            String   @id @default(uuid())
+  userId        String?
+  ticker        String
+  shares        Float
+  costPerShare  Float
+  totalCost     Float
+  acquiredAt    DateTime
+  source        String   @default("manual")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, ticker])
   @@index([ticker])
 }
 

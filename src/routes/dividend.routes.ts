@@ -8,6 +8,11 @@ import {
   getSummaryHandler,
   syncHandler,
   backfillHandler,
+  getReinvestmentsHandler,
+  getTimelineHandler,
+  reinvestHandler,
+  getDripSettingsHandler,
+  updateDripSettingsHandler,
 } from '../controllers/dividend.controller';
 
 const router = Router();
@@ -20,9 +25,18 @@ router.delete('/events/:id', removeEvent);
 
 // Credits (posted dividends)
 router.get('/credits', getCreditsHandler);
+router.get('/credits/:id/timeline', getTimelineHandler);
+router.post('/credits/:id/reinvest', reinvestHandler);
+
+// Reinvestments
+router.get('/reinvestments', getReinvestmentsHandler);
 
 // Summary
 router.get('/summary', getSummaryHandler);
+
+// DRIP Settings
+router.get('/drip', getDripSettingsHandler);
+router.put('/drip', updateDripSettingsHandler);
 
 // Sync (trigger manual fetch from Yahoo)
 router.post('/sync', syncHandler);
