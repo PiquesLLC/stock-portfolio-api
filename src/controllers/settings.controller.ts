@@ -17,8 +17,8 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
   try {
     const settings = await getSettings();
     res.json({
-      cashBalance: settings.cashBalance,
-      marginDebt: settings.marginDebt ?? 0,
+      cashBalance: Math.round(settings.cashBalance * 100) / 100,
+      marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
     });
   } catch (error) {
     console.error('Error fetching settings:', error);
@@ -46,10 +46,12 @@ export async function updateSettingsHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const settings = await updateSettings({ cashBalance, marginDebt });
+    const roundedCash = cashBalance !== undefined ? Math.round(cashBalance * 100) / 100 : undefined;
+    const roundedMargin = marginDebt !== undefined ? Math.round(marginDebt * 100) / 100 : undefined;
+    const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin });
     res.json({
-      cashBalance: settings.cashBalance,
-      marginDebt: settings.marginDebt ?? 0,
+      cashBalance: Math.round(settings.cashBalance * 100) / 100,
+      marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
     });
   } catch (error) {
     console.error('Error updating settings:', error);
