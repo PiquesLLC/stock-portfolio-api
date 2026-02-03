@@ -112,6 +112,10 @@ export async function getPortfolio(): Promise<Portfolio> {
       totalPLPercent: 0,
       dayChange: 0,
       dayChangePercent: 0,
+      regularDayChange: 0,
+      regularDayChangePercent: 0,
+      afterHoursChange: 0,
+      afterHoursChangePercent: 0,
       quotesStale: false,
       quotesUnavailableCount: 0,
       quotesMeta: {
@@ -127,8 +131,11 @@ export async function getPortfolio(): Promise<Portfolio> {
   const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers);
 
   let holdingsValue = 0;
+  let regularHoldingsValue = 0;
   let totalCost = 0;
   let dayChange = 0;
+  let regularDayChange = 0;
+  let afterHoursChange = 0;
   let hasStaleQuotes = staleCount > 0;
   let hasRepricingQuotes = repricingCount > 0;
   let unavailableCount = failedTickers.length;
@@ -170,6 +177,13 @@ export async function getPortfolio(): Promise<Portfolio> {
     if (hasValidPrice) {
       holdingsValue += currentValue;
       dayChange += holdingDayChange;
+
+      // Separate regular-hours vs after-hours change
+      const regClose = quote?.regularClose ?? currentPrice;
+      const regValue = holding.shares * regClose;
+      regularHoldingsValue += regValue;
+      regularDayChange += regValue - previousValue;
+      afterHoursChange += currentValue - regValue;
     }
     totalCost += holdingTotalCost;
 
@@ -204,6 +218,10 @@ export async function getPortfolio(): Promise<Portfolio> {
   const previousHoldingsValue = holdingsValue - dayChange;
   const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
 
+  // Regular-hours and after-hours change percents
+  const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
+  const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
+
   // Build quotes metadata
   const quotesMeta: QuotesMeta = {
     anyRepricing: hasRepricingQuotes || unavailableCount > 0,
@@ -226,6 +244,10 @@ export async function getPortfolio(): Promise<Portfolio> {
     totalPLPercent,
     dayChange,
     dayChangePercent,
+    regularDayChange,
+    regularDayChangePercent,
+    afterHoursChange,
+    afterHoursChangePercent,
     quotesStale: hasStaleQuotes,
     quotesUnavailableCount: unavailableCount,
     quotesMeta,

@@ -35,6 +35,10 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
       totalPLPercent: 0,
       dayChange: 0,
       dayChangePercent: 0,
+      regularDayChange: 0,
+      regularDayChangePercent: 0,
+      afterHoursChange: 0,
+      afterHoursChangePercent: 0,
     };
   }
 
@@ -43,8 +47,11 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
   const session = getMarketSession();
 
   let holdingsValue = 0;
+  let regularHoldingsValue = 0;
   let totalCost = 0;
   let dayChange = 0;
+  let regularDayChange = 0;
+  let afterHoursChange = 0;
 
   const enrichedHoldings = holdings.map((h) => {
     const quote = quotesResult.quotes.get(h.ticker);
@@ -59,6 +66,12 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     const previousClose = quote?.previousClose ?? quote?.currentPrice ?? h.averageCost;
     const dc = (currentPrice - previousClose) * h.shares;
     const dcPct = previousClose > 0 ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
+
+    const regClose = quote?.regularClose ?? currentPrice;
+    const regValue = regClose * h.shares;
+    regularHoldingsValue += regValue;
+    regularDayChange += regValue - (previousClose * h.shares);
+    afterHoursChange += currentValue - regValue;
 
     holdingsValue += currentValue;
     totalCost += cost;
@@ -102,6 +115,10 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     totalPLPercent,
     dayChange,
     dayChangePercent,
+    regularDayChange,
+    regularDayChangePercent: (holdingsValue - dayChange) > 0 ? (regularDayChange / (holdingsValue - dayChange)) * 100 : 0,
+    afterHoursChange,
+    afterHoursChangePercent: regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0,
     session,
     quotesMeta: {
       anyRepricing: quotesResult.repricingCount > 0,
