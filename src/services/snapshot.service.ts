@@ -69,6 +69,19 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
       return null;
     }
 
+    // Skip if sudden large drop AND any quotes unavailable (likely data issue)
+    // A 25% drop in 2 minutes is almost certainly bad data, not a real market move
+    if (latestSnapshot && unavailable > 0) {
+      const prevValue = latestSnapshot.netEquity ?? latestSnapshot.totalValue;
+      const dropPercent = ((prevValue - portfolio.totalAssets) / prevValue) * 100;
+      if (dropPercent > 25) {
+        console.log(
+          `[Snapshot] Skipped - ${dropPercent.toFixed(1)}% sudden drop with ${unavailable} unavailable quotes (likely bad data)`
+        );
+        return null;
+      }
+    }
+
     const previousSnapshot = latestSnapshot;
 
     let dailyPL = 0;
