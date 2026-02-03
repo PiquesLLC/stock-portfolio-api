@@ -267,11 +267,27 @@ export async function getChartHandler(req: Request, res: Response): Promise<void
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
         portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
       );
+    } else if (period === 'YTD') {
+      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+      if (ytdDays <= 90) {
+        // Under 90 days: use 1-hour candles for smooth chart like 1M
+        // Yahoo only accepts specific range values: 1mo, 3mo, 6mo, etc.
+        const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+        points = await reconstructPortfolioHistoryHiRes(
+          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+          portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
+        );
+        // Trim to only include data from Jan 1st of current year
+        const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+        points = points.filter(p => p.time >= ytdStart);
+      } else {
+        // Over 90 days: daily candles are dense enough
+        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+      }
     } else {
       // 3M+ use daily candles (already enough density)
       const periodDaysMap: Record<string, number> = {
         '3M': 90,
-        'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
         '1Y': 365, 'ALL': 365 * 5,
       };
       const periodDays = periodDaysMap[period] ?? 30;
