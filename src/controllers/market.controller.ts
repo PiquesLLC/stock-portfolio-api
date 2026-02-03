@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews } from '../services/news.service';
-import { getETFHoldings } from '../utils/yahoo-finance';
+import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
 
 interface PriceResult {
   price: number;
@@ -214,5 +214,26 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
   } catch (error) {
     console.error('Error fetching ETF holdings:', error);
     res.status(500).json({ error: 'Failed to fetch ETF holdings' });
+  }
+}
+
+export async function getAssetAboutHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+
+    const about = await getAssetAbout(ticker);
+    if (!about) {
+      res.status(404).json({ error: 'About data not available for this ticker' });
+      return;
+    }
+
+    res.json(about);
+  } catch (error) {
+    console.error('Error fetching asset about:', error);
+    res.status(500).json({ error: 'Failed to fetch asset about data' });
   }
 }

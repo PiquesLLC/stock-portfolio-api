@@ -382,6 +382,22 @@ export interface StockMetrics {
   eps: number | null;
 }
 
+export interface AssetAbout {
+  description: string;
+  sector: string;
+  industry: string;
+  // ETF-specific fields
+  category: string | null;
+  fundFamily: string | null;
+  legalType: string | null;
+  totalAssets: number | null;
+  numberOfHoldings: number | null;
+  inceptionDate: string | null;
+  // Stock-specific fields
+  fullTimeEmployees: number | null;
+  headquarters: string | null;
+}
+
 export interface StockDetailsResponse {
   ticker: string;
   quote: Quote;
