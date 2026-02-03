@@ -2,6 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import { Settings, BaselineInput, BrokerLifetimeInput, YtdInput, PerformanceSummary } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { getSnapshotsAfter } from './snapshot.service';
+import { getTransactions } from './transaction.service';
+import { calculateTWR, SnapshotPoint, CashflowEvent } from '../utils/finance-math';
 
 const prisma = new PrismaClient();
 
@@ -175,6 +177,29 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
     const absoluteReturn = currentValue - startingValue;
     const percentReturn = startingValue > 0 ? (absoluteReturn / startingValue) * 100 : 0;
 
+    // Fetch transactions and calculate TWR
+    const transactions = await getTransactions(null, settings.trackingStartDate);
+
+    // Convert snapshots to SnapshotPoint format for TWR calculation
+    const snapshotPoints: SnapshotPoint[] = [
+      // Include starting point
+      { date: settings.trackingStartDate, value: startingValue },
+      ...snapshots.map(s => ({
+        date: new Date(s.timestamp),
+        value: s.totalValue, // totalValue = totalAssets in snapshots
+      })),
+    ];
+
+    // Convert transactions to cashflow format
+    const cashflows: CashflowEvent[] = transactions.map(t => ({
+      date: new Date(t.date),
+      amount: t.type === 'deposit' ? t.amount : -t.amount,
+    }));
+
+    // Calculate TWR (returns as decimal, e.g., 0.15 for 15%)
+    const twrDecimal = calculateTWR(snapshotPoints, cashflows);
+    const twrPercent = twrDecimal !== null ? twrDecimal * 100 : null;
+
     sinceTracking = {
       hasBaseline: true,
       startDate: settings.trackingStartDate.toISOString(),
@@ -182,6 +207,8 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
       currentValue,
       absoluteReturn,
       percentReturn,
+      twrPercent,
+      transactionCount: transactions.length,
       snapshotCount: snapshots.length,
     };
   } else {
@@ -192,6 +219,8 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
       currentValue: portfolio.totalAssets, // Use assets for consistency
       absoluteReturn: null,
       percentReturn: null,
+      twrPercent: null,
+      transactionCount: 0,
       snapshotCount: 0,
     };
   }

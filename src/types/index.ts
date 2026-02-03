@@ -81,6 +81,8 @@ export interface PerformanceSummary {
     currentValue: number;
     absoluteReturn: number | null;
     percentReturn: number | null;
+    twrPercent: number | null;       // Time-weighted return (accounts for deposits/withdrawals)
+    transactionCount: number;        // Number of cash flow transactions
     snapshotCount: number;
   };
 
