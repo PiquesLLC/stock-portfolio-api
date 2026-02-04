@@ -4,6 +4,7 @@ import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded } from './services/snapshot.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
+import { evaluatePriceAlerts } from './services/priceAlert.service';
 
 const server = app.listen(config.port, () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
@@ -39,6 +40,14 @@ const server = app.listen(config.port, () => {
   setInterval(() => {
     postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
   }, 60 * 60 * 1000);
+
+  // Price alert evaluation — check every 60 seconds
+  console.log('[Price Alert Scheduler] Running every 60s');
+  setInterval(() => {
+    evaluatePriceAlerts().catch(err =>
+      console.error('[Price Alerts] Error:', err.message)
+    );
+  }, 60000);
 });
 
 process.on('SIGTERM', () => {

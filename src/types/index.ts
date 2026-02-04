@@ -648,3 +648,52 @@ export interface UserInfo {
   displayName: string;
   createdAt: string;
 }
+
+// Price Alert types
+export type PriceAlertCondition = 'above' | 'below' | 'pct_up' | 'pct_down';
+
+export interface PriceAlert {
+  id: string;
+  userId: string | null;
+  ticker: string;
+  condition: PriceAlertCondition;
+  targetPrice: number | null;
+  percentChange: number | null;
+  referencePrice: number | null;
+  enabled: boolean;
+  triggered: boolean;
+  triggeredAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  events?: PriceAlertEvent[];
+}
+
+export interface PriceAlertEvent {
+  id: string;
+  priceAlertId: string;
+  triggerPrice: number;
+  message: string;
+  read: boolean;
+  createdAt: Date;
+  priceAlert?: {
+    ticker: string;
+    condition: PriceAlertCondition;
+    targetPrice: number | null;
+    percentChange: number | null;
+  };
+}
+
+export interface CreatePriceAlertInput {
+  ticker: string;
+  condition: PriceAlertCondition;
+  targetPrice?: number;
+  percentChange?: number;
+  referencePrice?: number;
+  userId?: string;
+}
+
+export interface UpdatePriceAlertInput {
+  targetPrice?: number;
+  percentChange?: number;
+  enabled?: boolean;
+}

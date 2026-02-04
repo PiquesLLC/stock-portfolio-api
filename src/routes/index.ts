@@ -12,6 +12,7 @@ import usersRoutes from './users.routes';
 import socialRoutes from './social.routes';
 import transactionRoutes from './transaction.routes';
 import alertRoutes from './alert.routes';
+import priceAlertRoutes from './priceAlert.routes';
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use('/users', usersRoutes);
 router.use('/social', socialRoutes);
 router.use('/transactions', transactionRoutes);
 router.use('/alerts', alertRoutes);
+router.use('/price-alerts', priceAlertRoutes);
 
 export default router;

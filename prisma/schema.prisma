@@ -276,3 +276,34 @@ model LeaderboardCache {
   @@unique([userId, window])
   @@index([window, twrPct])
 }
+
+model PriceAlert {
+  id             String            @id @default(uuid())
+  userId         String?
+  ticker         String
+  condition      String            // 'above' | 'below' | 'pct_up' | 'pct_down'
+  targetPrice    Float?            // For above/below
+  percentChange  Float?            // For pct_up/pct_down
+  referencePrice Float?            // Price when created (for % alerts)
+  enabled        Boolean           @default(true)
+  triggered      Boolean           @default(false)
+  triggeredAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  events         PriceAlertEvent[]
+
+  @@index([ticker])
+  @@index([enabled, triggered])
+}
+
+model PriceAlertEvent {
+  id           String     @id @default(uuid())
+  priceAlertId String
+  priceAlert   PriceAlert @relation(fields: [priceAlertId], references: [id], onDelete: Cascade)
+  triggerPrice Float
+  message      String
+  read         Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  @@index([priceAlertId])
+}
