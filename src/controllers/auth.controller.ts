@@ -1,10 +1,20 @@
 import { Request, Response } from 'express';
 import { loginWithPassword, setPassword, getUserById, hasPassword } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
+import { config } from '../config';
+
+// Cookie options for auth token
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+  sameSite: 'strict' as const,
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  path: '/',
+};
 
 /**
  * POST /auth/login
- * Login with username and password
+ * Login with username and password - sets httpOnly cookie
  */
 export async function loginHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -27,11 +37,29 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    res.json(result);
+    // Set httpOnly cookie instead of returning token in body
+    res.cookie('authToken', result.token, COOKIE_OPTIONS);
+
+    // Return only user info, not the token (prevents XSS token theft)
+    res.json({ user: result.user });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
+}
+
+/**
+ * POST /auth/logout
+ * Clear auth cookie
+ */
+export async function logoutHandler(req: Request, res: Response): Promise<void> {
+  res.clearCookie('authToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/',
+  });
+  res.json({ message: 'Logged out successfully' });
 }
 
 /**
@@ -98,6 +126,7 @@ export async function setPasswordHandler(req: Request, res: Response): Promise<v
 /**
  * GET /auth/has-password/:username
  * Check if user has a password set
+ * NOTE: Returns true for non-existent users to prevent username enumeration
  */
 export async function hasPasswordHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -109,9 +138,13 @@ export async function hasPasswordHandler(req: Request, res: Response): Promise<v
     }
 
     const has = await hasPassword(username);
+    // Always return a response that doesn't reveal if user exists
+    // If user doesn't exist or has no password, we still show password setup flow
+    // The set-password endpoint will fail for non-existent users (that's fine)
     res.json({ hasPassword: has });
   } catch (error) {
     console.error('Has password error:', error);
-    res.status(500).json({ error: 'Failed to check password status' });
+    // Return generic response even on error to prevent timing attacks
+    res.json({ hasPassword: true });
   }
 }

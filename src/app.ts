@@ -1,11 +1,50 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import routes from './routes';
+import { config } from './config';
+import { apiLimiter } from './middleware/rateLimiter';
 
 const app = express();
 
-app.use(cors());
+// Security headers (CSP, X-Frame-Options, etc.)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"], // Tailwind needs inline styles
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", ...config.allowedOrigins],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'", "https:"], // For HLS streams
+      frameSrc: ["'none'"],
+    },
+  },
+}));
+
+// CORS configuration - locked down to specific origins
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman) in dev only
+    if (!origin && config.nodeEnv === 'development') {
+      return callback(null, true);
+    }
+    if (origin && config.allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error(`CORS not allowed for origin: ${origin}`));
+  },
+  credentials: true, // Required for cookies
+}));
+
+app.use(cookieParser());
 app.use(express.json());
+
+// Global rate limiting - 100 requests per minute
+app.use(apiLimiter);
 
 // Read-only mode: block all non-GET requests (for remote viewers)
 if (process.env.READ_ONLY === 'true') {

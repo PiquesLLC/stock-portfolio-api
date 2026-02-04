@@ -10,18 +10,27 @@ import {
 } from '../services/follow.service';
 import { getFeed, getUserActivity } from '../services/activity.service';
 import { getPerformanceComparison } from '../services/benchmark.service';
+import { AuthRequest } from '../types/auth';
 
 const prisma = new PrismaClient();
 
 // POST /users/:userId/follow
-export async function followHandler(req: Request, res: Response): Promise<void> {
+// Uses authenticated user as follower (no body required)
+export async function followHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
-    const { followerId } = req.body;
+    const followerId = req.user?.userId;
+
     if (!followerId) {
-      res.status(400).json({ error: 'followerId is required' });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
+
+    if (followerId === userId) {
+      res.status(400).json({ error: 'Cannot follow yourself' });
+      return;
+    }
+
     await followUser(followerId, userId);
     res.json({ ok: true });
   } catch (error: unknown) {
@@ -31,14 +40,17 @@ export async function followHandler(req: Request, res: Response): Promise<void> 
 }
 
 // DELETE /users/:userId/follow
-export async function unfollowHandler(req: Request, res: Response): Promise<void> {
+// Uses authenticated user as follower (no body required)
+export async function unfollowHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
-    const { followerId } = req.body;
+    const followerId = req.user?.userId;
+
     if (!followerId) {
-      res.status(400).json({ error: 'followerId is required' });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
+
     await unfollowUser(followerId, userId);
     res.json({ ok: true });
   } catch (error) {
@@ -89,10 +101,11 @@ export async function getFollowingHandler(req: Request, res: Response): Promise<
 }
 
 // GET /users/:userId/profile
-export async function getProfileHandler(req: Request, res: Response): Promise<void> {
+// IDOR Protection: Private profiles can only be viewed by owner
+export async function getProfileHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
-    const viewerId = req.query.viewerId as string | undefined;
+    const viewerId = req.user?.userId; // Get from auth context
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -115,13 +128,21 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
       return;
     }
 
+    const isOwner = viewerId === userId;
+
+    // IDOR Protection: If profile is private and viewer is not owner, deny access
+    if (!user.profilePublic && !isOwner) {
+      res.status(403).json({ error: 'This profile is private' });
+      return;
+    }
+
     const counts = await getFollowCounts(userId);
     const viewerFollowing = viewerId ? await isFollowing(viewerId, userId) : false;
     const activity = user.profilePublic ? await getUserActivity(userId, 10) : [];
 
     // Fetch performance stats for the profile (1M window, SPY benchmark)
     let performance = null;
-    if (user.profilePublic) {
+    if (user.profilePublic || isOwner) {
       try {
         performance = await getPerformanceComparison('1M', 'SPY', userId);
       } catch {
@@ -145,9 +166,18 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
 }
 
 // PUT /users/:userId/region
-export async function updateRegionHandler(req: Request, res: Response): Promise<void> {
+// IDOR Protection: Only owner can update their region
+export async function updateRegionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const authUserId = req.user?.userId;
+
+    // Verify ownership
+    if (!authUserId || authUserId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
+      return;
+    }
+
     const { region, showRegion } = req.body;
 
     const VALID_REGIONS = ['NA', 'EU', 'APAC'];
@@ -174,9 +204,17 @@ export async function updateRegionHandler(req: Request, res: Response): Promise<
 }
 
 // GET /users/:userId/settings
-export async function getUserSettingsHandler(req: Request, res: Response): Promise<void> {
+// IDOR Protection: Only the owner can view their own settings
+export async function getUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const viewerId = req.user?.userId;
+
+    // Only allow users to view their own settings
+    if (!viewerId || viewerId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only view your own settings.' });
+      return;
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -218,9 +256,18 @@ export async function getUserSettingsHandler(req: Request, res: Response): Promi
 }
 
 // PUT /users/:userId/settings
-export async function updateUserSettingsHandler(req: Request, res: Response): Promise<void> {
+// IDOR Protection: Only owner can update their settings
+export async function updateUserSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const authUserId = req.user?.userId;
+
+    // Verify ownership
+    if (!authUserId || authUserId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
+      return;
+    }
+
     const {
       displayName,
       profilePublic,

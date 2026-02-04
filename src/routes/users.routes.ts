@@ -16,15 +16,15 @@ import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Public endpoints
-router.get('/', getUsersHandler);
-router.get('/:userId/portfolio', optionalAuth, getUserPortfolioHandler);
+// Public endpoints (optionalAuth for privacy-respecting endpoints)
+router.get('/', optionalAuth, getUsersHandler); // Only shows public profiles
+router.get('/:userId/portfolio', optionalAuth, getUserPortfolioHandler); // Respects profilePublic
 router.get('/:userId/chart', optionalAuth, getUserChartHandler);
-router.get('/:userId/profile', optionalAuth, getProfileHandler);
+router.get('/:userId/profile', optionalAuth, getProfileHandler); // Respects profilePublic
 router.get('/:userId/is-following', optionalAuth, isFollowingHandler);
 router.get('/:userId/followers', getFollowersHandler);
 router.get('/:userId/following', getFollowingHandler);
-router.get('/:userId/settings', optionalAuth, getUserSettingsHandler);
+router.get('/:userId/settings', requireAuth, getUserSettingsHandler); // Owner only
 router.get('/:userId/intelligence', optionalAuth, getUserIntelligenceHandler);
 
 // Protected endpoints (require authentication)

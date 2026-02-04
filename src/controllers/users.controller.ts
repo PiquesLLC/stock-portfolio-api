@@ -1,20 +1,26 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructIntradayGap } from '../services/snapshot.service';
+import { AuthRequest } from '../types/auth';
 
 const prisma = new PrismaClient();
 
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
 
-export async function getUsersHandler(req: Request, res: Response): Promise<void> {
+/**
+ * GET /users
+ * Returns only users with public profiles to prevent enumeration
+ * Does NOT expose username (only displayName) to prevent login enumeration
+ */
+export async function getUsersHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const users = await prisma.user.findMany({
+      where: { profilePublic: true }, // Only show public profiles
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
-        username: true,
-        displayName: true,
+        displayName: true, // Exclude username to prevent enumeration
         createdAt: true,
       },
     });
@@ -25,14 +31,33 @@ export async function getUsersHandler(req: Request, res: Response): Promise<void
   }
 }
 
-export async function getUserPortfolioHandler(req: Request, res: Response): Promise<void> {
+export async function getUserPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
-    const viewerId = req.query.viewerId as string | undefined;
+    const viewerId = req.user?.userId; // Get viewer from auth context
+
+    // First check if user exists and their privacy settings
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profilePublic: true, holdingsVisibility: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // IDOR Protection: If profile is private and viewer is not the owner, deny access
+    const isOwner = viewerId === userId;
+    if (!targetUser.profilePublic && !isOwner) {
+      res.status(403).json({ error: 'This profile is private' });
+      return;
+    }
+
     const portfolio = await getUserPortfolio(userId);
 
     if (!portfolio) {
-      res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
 
@@ -49,9 +74,8 @@ export async function getUserPortfolioHandler(req: Request, res: Response): Prom
     ).catch(e => console.error('User snapshot error:', e));
 
     // Apply holdings visibility filter for non-owner viewers
-    if (viewerId && viewerId !== userId) {
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { holdingsVisibility: true } });
-      const vis = user?.holdingsVisibility ?? 'all';
+    if (!isOwner) {
+      const vis = targetUser.holdingsVisibility ?? 'all';
       if (vis === 'hidden') {
         portfolio.holdings = [];
       } else if (vis === 'top5') {
@@ -82,9 +106,18 @@ export async function getUserPortfolioHandler(req: Request, res: Response): Prom
   }
 }
 
-export async function updateHoldingsVisibilityHandler(req: Request, res: Response): Promise<void> {
+// IDOR Protection: Only owner can update their holdings visibility
+export async function updateHoldingsVisibilityHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const authUserId = req.user?.userId;
+
+    // Verify ownership
+    if (!authUserId || authUserId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
+      return;
+    }
+
     const { holdingsVisibility } = req.body;
     const valid = ['all', 'top5', 'sectors', 'hidden'];
     if (!valid.includes(holdingsVisibility)) {
@@ -99,7 +132,7 @@ export async function updateHoldingsVisibilityHandler(req: Request, res: Respons
   }
 }
 
-export async function getUserChartHandler(req: Request, res: Response): Promise<void> {
+export async function getUserChartHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
     const period = ((req.query.period as string) || '1D').toUpperCase();
@@ -116,48 +149,33 @@ export async function getUserChartHandler(req: Request, res: Response): Promise<
     }
 
     if (period === '1D') {
-      const chartData = await getUserChartSnapshots(userId, period);
       const now = Date.now();
-
-      // Detect gaps > 30 min and fill with intraday candle reconstruction
-      const GAP_THRESHOLD_MS = 30 * 60 * 1000;
+      const liveValue = portfolio.totalAssets - portfolio.marginDebt;
+      const previousCloseValue = liveValue - portfolio.dayChange;
       const holdings = await prisma.holding.findMany({ where: { userId } });
-      if (holdings.length > 0 && chartData.points.length >= 2) {
-        const gaps: { startMs: number; endMs: number; insertAfterIdx: number }[] = [];
-        for (let i = 0; i < chartData.points.length - 1; i++) {
-          const dt = chartData.points[i + 1].time - chartData.points[i].time;
-          if (dt > GAP_THRESHOLD_MS) {
-            gaps.push({ startMs: chartData.points[i].time, endMs: chartData.points[i + 1].time, insertAfterIdx: i });
-          }
-        }
-        if (chartData.points.length > 0) {
-          const lastTime = chartData.points[chartData.points.length - 1].time;
-          if (now - lastTime > GAP_THRESHOLD_MS) {
-            gaps.push({ startMs: lastTime, endMs: now, insertAfterIdx: chartData.points.length - 1 });
-          }
-        }
-        if (gaps.length > 0) {
-          const fillResults = await Promise.all(
-            gaps.map(g => reconstructIntradayGap(
-              holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-              portfolio.cashBalance, portfolio.marginDebt, g.startMs, g.endMs,
-            ))
-          );
-          for (let g = gaps.length - 1; g >= 0; g--) {
-            if (fillResults[g].length > 0) {
-              chartData.points.splice(gaps[g].insertAfterIdx + 1, 0, ...fillResults[g]);
-            }
-          }
+
+      // Reconstruct 1D from Yahoo 5-min intraday candles (same as main portfolio chart)
+      let points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
+      );
+
+      // If Yahoo returned insufficient data, fall back to snapshots
+      if (points.length < 5) {
+        const chartData = await getUserChartSnapshots(userId, period);
+        if (chartData.points.length >= 2) {
+          points = chartData.points;
         }
       }
 
-      if (chartData.points.length === 0 || now - chartData.points[chartData.points.length - 1].time > 5000) {
-        chartData.points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+      // Append live value
+      if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+        points.push({ time: now, value: liveValue });
       }
-      if (chartData.periodStartValue === 0 && chartData.points.length > 0) {
-        chartData.periodStartValue = chartData.points[0].value;
-      }
-      res.json(chartData);
+
+      const periodStartValue = previousCloseValue || (points.length > 0 ? points[0].value : liveValue);
+
+      res.json({ points, periodStartValue, period: '1D' });
       return;
     }
 

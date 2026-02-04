@@ -6,8 +6,9 @@ import {
   updateCashBalance,
   getHoldings,
 } from '../services/portfolio.service';
+import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent } from '../services/activity.service';
-import { createSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -19,15 +20,39 @@ import {
 } from '../services/projection.service';
 import { LookbackPeriod, ProjectionMode, PaceWindow } from '../types';
 import { getPerformanceComparison, PerformanceWindow } from '../services/benchmark.service';
+import { AuthRequest } from '../types/auth';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
 
-export async function getPortfolioHandler(req: Request, res: Response): Promise<void> {
+export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    await createSnapshotIfNeeded();
+    const userId = req.query.userId as string | undefined;
 
-    const portfolio = await getPortfolio();
+    let portfolio;
+    if (userId) {
+      // User-specific portfolio
+      portfolio = await getUserPortfolio(userId);
+      if (!portfolio) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      // Create user snapshot in background
+      createUserSnapshotIfNeeded(
+        userId,
+        portfolio.totalAssets,
+        portfolio.cashBalance,
+        portfolio.dayChange,
+        portfolio.dayChangePercent,
+        portfolio.totalPL,
+        portfolio.totalPLPercent,
+        portfolio.netEquity,
+      ).catch(e => console.error('User snapshot error:', e));
+    } else {
+      // Legacy: default portfolio (will be deprecated)
+      await createSnapshotIfNeeded();
+      portfolio = await getPortfolio();
+    }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
     const paceProjection = await getPaceProjection(portfolio.netEquity);
@@ -42,7 +67,7 @@ export async function getPortfolioHandler(req: Request, res: Response): Promise<
   }
 }
 
-export async function addHolding(req: Request, res: Response): Promise<void> {
+export async function addHolding(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { ticker, shares, averageCost, skipTransaction } = req.body;
 
@@ -112,7 +137,7 @@ export async function addHolding(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function removeHolding(req: Request, res: Response): Promise<void> {
+export async function removeHolding(req: AuthRequest, res: Response): Promise<void> {
   try {
     const ticker = req.params.ticker?.toUpperCase();
     const skipTransaction = req.query.skipTransaction === 'true';
@@ -158,7 +183,7 @@ export async function removeHolding(req: Request, res: Response): Promise<void> 
   }
 }
 
-export async function setCashBalance(req: Request, res: Response): Promise<void> {
+export async function setCashBalance(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { cashBalance } = req.body;
 
@@ -241,12 +266,22 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
 
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
 
-export async function getChartHandler(req: Request, res: Response): Promise<void> {
+// Import user chart handler for delegation
+import { getUserChartHandler } from './users.controller';
+
+export async function getChartHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.query.userId as string | undefined;
     const period = ((req.query.period as string) || '1D').toUpperCase();
     if (!VALID_CHART_PERIODS.includes(period)) {
       res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
       return;
+    }
+
+    // If userId provided, delegate to user chart handler
+    if (userId) {
+      req.params = { ...req.params, userId };
+      return getUserChartHandler(req, res);
     }
 
     const portfolio = await getPortfolio();

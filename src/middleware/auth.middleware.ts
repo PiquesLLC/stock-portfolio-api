@@ -4,23 +4,43 @@ import { config } from '../config';
 import { AuthRequest, JwtPayload } from '../types/auth';
 
 /**
+ * Extract token from httpOnly cookie (primary) or Authorization header (fallback for API clients)
+ */
+function extractToken(req: AuthRequest): string | null {
+  // Primary: httpOnly cookie
+  if (req.cookies?.authToken) {
+    return req.cookies.authToken;
+  }
+
+  // Fallback: Authorization header (for API clients, mobile apps, etc.)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  return null;
+}
+
+/**
  * Required auth middleware - rejects request if no valid token present
  */
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
+  const token = extractToken(req);
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     res.status(401).json({ error: 'Authorization required' });
     return;
   }
-
-  const token = authHeader.slice(7);
 
   try {
     const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
     req.user = payload;
     next();
   } catch (err) {
+    // Clear invalid cookie if present
+    if (req.cookies?.authToken) {
+      res.clearCookie('authToken', { httpOnly: true, sameSite: 'strict', path: '/' });
+    }
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
@@ -29,15 +49,18 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
  * Optional auth middleware - extracts user if token present, continues regardless
  */
 export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
+  const token = extractToken(req);
 
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  if (token) {
     try {
-      const token = authHeader.slice(7);
       const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
       req.user = payload;
     } catch {
       // Invalid token - continue without user context
+      // Clear invalid cookie if present
+      if (req.cookies?.authToken) {
+        res.clearCookie('authToken', { httpOnly: true, sameSite: 'strict', path: '/' });
+      }
     }
   }
 

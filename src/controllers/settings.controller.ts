@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { PrismaClient } from '@prisma/client';
 import {
   getSettings,
   setBaseline,
@@ -13,13 +14,27 @@ import {
 import { updateSettings } from '../services/portfolio.service';
 import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapshot.service';
 
+const prisma = new PrismaClient();
+
 export async function getSettingsHandler(req: Request, res: Response): Promise<void> {
   try {
-    const settings = await getSettings();
-    res.json({
-      cashBalance: Math.round(settings.cashBalance * 100) / 100,
-      marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
-    });
+    const userId = req.query.userId as string | undefined;
+
+    if (userId) {
+      // User-specific settings from UserSettings
+      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+      res.json({
+        cashBalance: Math.round((userSettings?.cashBalance ?? 0) * 100) / 100,
+        marginDebt: Math.round((userSettings?.marginDebt ?? 0) * 100) / 100,
+      });
+    } else {
+      // Legacy: global settings
+      const settings = await getSettings();
+      res.json({
+        cashBalance: Math.round(settings.cashBalance * 100) / 100,
+        marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
+      });
+    }
   } catch (error) {
     console.error('Error fetching settings:', error);
     res.status(500).json({ error: 'Failed to fetch settings' });
@@ -28,6 +43,7 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
 
 export async function updateSettingsHandler(req: Request, res: Response): Promise<void> {
   try {
+    const userId = req.query.userId as string | undefined;
     const { cashBalance, marginDebt } = req.body;
 
     // Validate inputs if provided
@@ -48,11 +64,31 @@ export async function updateSettingsHandler(req: Request, res: Response): Promis
 
     const roundedCash = cashBalance !== undefined ? Math.round(cashBalance * 100) / 100 : undefined;
     const roundedMargin = marginDebt !== undefined ? Math.round(marginDebt * 100) / 100 : undefined;
-    const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin });
-    res.json({
-      cashBalance: Math.round(settings.cashBalance * 100) / 100,
-      marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
-    });
+
+    if (userId) {
+      // User-specific settings
+      const updateData: Record<string, number> = {};
+      if (roundedCash !== undefined) updateData.cashBalance = roundedCash;
+      if (roundedMargin !== undefined) updateData.marginDebt = roundedMargin;
+
+      const userSettings = await prisma.userSettings.upsert({
+        where: { userId },
+        update: updateData,
+        create: { userId, cashBalance: roundedCash ?? 0, marginDebt: roundedMargin ?? 0 },
+      });
+
+      res.json({
+        cashBalance: Math.round(userSettings.cashBalance * 100) / 100,
+        marginDebt: Math.round((userSettings.marginDebt ?? 0) * 100) / 100,
+      });
+    } else {
+      // Legacy: global settings
+      const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin });
+      res.json({
+        cashBalance: Math.round(settings.cashBalance * 100) / 100,
+        marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
+      });
+    }
   } catch (error) {
     console.error('Error updating settings:', error);
     res.status(500).json({ error: 'Failed to update settings' });

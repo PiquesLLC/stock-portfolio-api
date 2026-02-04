@@ -2,6 +2,25 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// CRITICAL: Required environment variables
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) {
+  console.error('FATAL: JWT_SECRET environment variable is required');
+  console.error('Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+// In production, also require API keys
+if (process.env.NODE_ENV === 'production') {
+  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY'];
+  for (const key of requiredKeys) {
+    if (!process.env[key]) {
+      console.error(`FATAL: Missing required env var for production: ${key}`);
+      process.exit(1);
+    }
+  }
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -19,6 +38,9 @@ export const config = {
   riskFreeRate: parseFloat(process.env.RISK_FREE_RATE || '0.02'), // 2% default
 
   // JWT Authentication
-  jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
+  jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+
+  // CORS - allowed origins for API requests
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173').split(','),
 };

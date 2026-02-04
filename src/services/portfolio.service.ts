@@ -59,6 +59,17 @@ export async function getSettings(): Promise<Settings> {
     });
   }
 
+  // Ensure UserSettings is in sync with global Settings
+  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
+  const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+  if (!userSettings || userSettings.cashBalance !== settings.cashBalance || userSettings.marginDebt !== settings.marginDebt) {
+    await prisma.userSettings.upsert({
+      where: { userId },
+      update: { cashBalance: settings.cashBalance, marginDebt: settings.marginDebt ?? 0 },
+      create: { userId, cashBalance: settings.cashBalance, marginDebt: settings.marginDebt ?? 0 },
+    });
+  }
+
   return settings as Settings;
 }
 
@@ -68,6 +79,15 @@ export async function updateCashBalance(cashBalance: number): Promise<Settings> 
     update: { cashBalance },
     create: { id: 'default', cashBalance, marginDebt: 0 },
   });
+
+  // Sync to the user's UserSettings so user profile matches main portfolio
+  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
+  await prisma.userSettings.upsert({
+    where: { userId },
+    update: { cashBalance },
+    create: { userId, cashBalance, marginDebt: 0 },
+  });
+
   return result as Settings;
 }
 
@@ -86,6 +106,15 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
     update: updateData,
     create: { id: 'default', cashBalance: input.cashBalance ?? 0, marginDebt: input.marginDebt ?? 0 },
   });
+
+  // Sync to the user's UserSettings so user profile matches main portfolio
+  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
+  await prisma.userSettings.upsert({
+    where: { userId },
+    update: updateData,
+    create: { userId, cashBalance: input.cashBalance ?? 0, marginDebt: input.marginDebt ?? 0 },
+  });
+
   return result as Settings;
 }
 
