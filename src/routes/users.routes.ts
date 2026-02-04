@@ -12,22 +12,26 @@ import {
   updateUserSettingsHandler,
 } from '../controllers/social.controller';
 import { getUserIntelligenceHandler } from '../controllers/portfolioIntelligence.controller';
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
+// Public endpoints
 router.get('/', getUsersHandler);
-router.get('/:userId/portfolio', getUserPortfolioHandler);
-router.get('/:userId/chart', getUserChartHandler);
-router.get('/:userId/profile', getProfileHandler);
-router.post('/:userId/follow', followHandler);
-router.delete('/:userId/follow', unfollowHandler);
-router.get('/:userId/is-following', isFollowingHandler);
+router.get('/:userId/portfolio', optionalAuth, getUserPortfolioHandler);
+router.get('/:userId/chart', optionalAuth, getUserChartHandler);
+router.get('/:userId/profile', optionalAuth, getProfileHandler);
+router.get('/:userId/is-following', optionalAuth, isFollowingHandler);
 router.get('/:userId/followers', getFollowersHandler);
 router.get('/:userId/following', getFollowingHandler);
-router.put('/:userId/region', updateRegionHandler);
-router.put('/:userId/holdings-visibility', updateHoldingsVisibilityHandler);
-router.get('/:userId/settings', getUserSettingsHandler);
-router.put('/:userId/settings', updateUserSettingsHandler);
-router.get('/:userId/intelligence', getUserIntelligenceHandler);
+router.get('/:userId/settings', optionalAuth, getUserSettingsHandler);
+router.get('/:userId/intelligence', optionalAuth, getUserIntelligenceHandler);
+
+// Protected endpoints (require authentication)
+router.post('/:userId/follow', requireAuth, followHandler);
+router.delete('/:userId/follow', requireAuth, unfollowHandler);
+router.put('/:userId/region', requireAuth, updateRegionHandler);
+router.put('/:userId/holdings-visibility', requireAuth, updateHoldingsVisibilityHandler);
+router.put('/:userId/settings', requireAuth, updateUserSettingsHandler);
 
 export default router;

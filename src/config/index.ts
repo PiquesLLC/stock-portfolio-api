@@ -17,4 +17,8 @@ export const config = {
   // Projection settings
   sp500CagrTotalReturn: parseFloat(process.env.SP500_CAGR_TOTAL_RETURN || '0.10'), // 10% default
   riskFreeRate: parseFloat(process.env.RISK_FREE_RATE || '0.02'), // 2% default
+
+  // JWT Authentication
+  jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
 };

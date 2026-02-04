@@ -4,11 +4,12 @@ import {
   addTransactionHandler,
   deleteTransactionHandler,
 } from '../controllers/transaction.controller';
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/', getTransactionsHandler);
-router.post('/', addTransactionHandler);
-router.delete('/:id', deleteTransactionHandler);
+router.get('/', optionalAuth, getTransactionsHandler);
+router.post('/', requireAuth, addTransactionHandler);
+router.delete('/:id', requireAuth, deleteTransactionHandler);
 
 export default router;

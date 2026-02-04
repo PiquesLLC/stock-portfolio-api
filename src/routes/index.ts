@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import authRoutes from './auth.routes';
 import healthRoutes from './health.routes';
 import marketRoutes from './market.routes';
 import portfolioRoutes from './portfolio.routes';
@@ -18,6 +19,7 @@ import milestoneRoutes from './milestone.routes';
 
 const router = Router();
 
+router.use('/auth', authRoutes);
 router.use('/health', healthRoutes);
 router.use('/market', marketRoutes);
 router.use('/portfolio', portfolioRoutes);

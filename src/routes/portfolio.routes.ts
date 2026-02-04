@@ -12,13 +12,14 @@ import {
   getPerformanceHandler,
 } from '../controllers/portfolio.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/', getPortfolioHandler);
-router.post('/holdings', addHolding);
-router.delete('/holdings/:ticker', removeHolding);
-router.put('/cash', setCashBalance);
+router.get('/', optionalAuth, getPortfolioHandler);
+router.post('/holdings', requireAuth, addHolding);
+router.delete('/holdings/:ticker', requireAuth, removeHolding);
+router.put('/cash', requireAuth, setCashBalance);
 router.get('/history', getHistory);
 router.get('/history/chart', getChartHandler);
 router.get('/projections', getProjectionsHandler);
