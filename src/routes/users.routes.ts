@@ -8,6 +8,8 @@ import {
   getFollowingHandler,
   getProfileHandler,
   updateRegionHandler,
+  getUserSettingsHandler,
+  updateUserSettingsHandler,
 } from '../controllers/social.controller';
 import { getUserIntelligenceHandler } from '../controllers/portfolioIntelligence.controller';
 
@@ -24,6 +26,8 @@ router.get('/:userId/followers', getFollowersHandler);
 router.get('/:userId/following', getFollowingHandler);
 router.put('/:userId/region', updateRegionHandler);
 router.put('/:userId/holdings-visibility', updateHoldingsVisibilityHandler);
+router.get('/:userId/settings', getUserSettingsHandler);
+router.put('/:userId/settings', updateUserSettingsHandler);
 router.get('/:userId/intelligence', getUserIntelligenceHandler);
 
 export default router;

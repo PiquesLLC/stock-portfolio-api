@@ -173,6 +173,127 @@ export async function updateRegionHandler(req: Request, res: Response): Promise<
   }
 }
 
+// GET /users/:userId/settings
+export async function getUserSettingsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        profilePublic: true,
+        region: true,
+        showRegion: true,
+        holdingsVisibility: true,
+        settings: {
+          select: {
+            dripEnabled: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      profilePublic: user.profilePublic,
+      region: user.region,
+      showRegion: user.showRegion,
+      holdingsVisibility: user.holdingsVisibility,
+      dripEnabled: user.settings?.dripEnabled ?? false,
+    });
+  } catch (error) {
+    console.error('Error getting user settings:', error);
+    res.status(500).json({ error: 'Failed to get user settings' });
+  }
+}
+
+// PUT /users/:userId/settings
+export async function updateUserSettingsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { userId } = req.params;
+    const {
+      displayName,
+      profilePublic,
+      region,
+      showRegion,
+      holdingsVisibility,
+      dripEnabled,
+    } = req.body;
+
+    // Validate inputs
+    const VALID_REGIONS = ['NA', 'EU', 'APAC', null];
+    if (region !== undefined && !VALID_REGIONS.includes(region)) {
+      res.status(400).json({ error: `Invalid region. Must be one of: NA, EU, APAC, or null` });
+      return;
+    }
+
+    const VALID_VISIBILITY = ['all', 'top5', 'sectors', 'hidden'];
+    if (holdingsVisibility !== undefined && !VALID_VISIBILITY.includes(holdingsVisibility)) {
+      res.status(400).json({ error: `Invalid holdingsVisibility. Must be one of: ${VALID_VISIBILITY.join(', ')}` });
+      return;
+    }
+
+    // Build update data for User model
+    const userData: Record<string, unknown> = {};
+    if (displayName !== undefined) userData.displayName = displayName;
+    if (profilePublic !== undefined) userData.profilePublic = profilePublic;
+    if (region !== undefined) userData.region = region;
+    if (showRegion !== undefined) userData.showRegion = showRegion;
+    if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
+
+    // Update User
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: userData,
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        profilePublic: true,
+        region: true,
+        showRegion: true,
+        holdingsVisibility: true,
+      },
+    });
+
+    // Update UserSettings if dripEnabled is provided
+    let dripEnabledResult = false;
+    if (dripEnabled !== undefined) {
+      const userSettings = await prisma.userSettings.upsert({
+        where: { userId },
+        update: { dripEnabled },
+        create: { userId, dripEnabled },
+        select: { dripEnabled: true },
+      });
+      dripEnabledResult = userSettings.dripEnabled;
+    } else {
+      const existing = await prisma.userSettings.findUnique({
+        where: { userId },
+        select: { dripEnabled: true },
+      });
+      dripEnabledResult = existing?.dripEnabled ?? false;
+    }
+
+    res.json({
+      ...user,
+      dripEnabled: dripEnabledResult,
+    });
+  } catch (error) {
+    console.error('Error updating user settings:', error);
+    res.status(500).json({ error: 'Failed to update user settings' });
+  }
+}
+
 // GET /feed?userId=X&before=ISO
 export async function getFeedHandler(req: Request, res: Response): Promise<void> {
   try {
