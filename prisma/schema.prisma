@@ -278,19 +278,22 @@ model LeaderboardCache {
 }
 
 model PriceAlert {
-  id             String            @id @default(uuid())
-  userId         String?
-  ticker         String
-  condition      String            // 'above' | 'below' | 'pct_up' | 'pct_down'
-  targetPrice    Float?            // For above/below
-  percentChange  Float?            // For pct_up/pct_down
-  referencePrice Float?            // Price when created (for % alerts)
-  enabled        Boolean           @default(true)
-  triggered      Boolean           @default(false)
-  triggeredAt    DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  events         PriceAlertEvent[]
+  id                 String            @id @default(uuid())
+  userId             String?
+  ticker             String
+  condition          String            // 'above' | 'below' | 'pct_up' | 'pct_down'
+  targetPrice        Float?            // For above/below
+  percentChange      Float?            // For pct_up/pct_down
+  referencePrice     Float?            // Price when created (for % alerts)
+  referencePriceType String?           // 'current' | 'open' | 'avgCost'
+  repeatAlert        Boolean           @default(false)
+  expiresAt          DateTime?
+  enabled            Boolean           @default(true)
+  triggered          Boolean           @default(false)
+  triggeredAt        DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  events             PriceAlertEvent[]
 
   @@index([ticker])
   @@index([enabled, triggered])
@@ -306,4 +309,58 @@ model PriceAlertEvent {
   createdAt    DateTime   @default(now())
 
   @@index([priceAlertId])
+}
+
+// Analyst price target and rating tracking
+model AnalystSnapshot {
+  id              String   @id @default(uuid())
+  ticker          String   @unique
+  targetHigh      Float?
+  targetLow       Float?
+  targetMean      Float?
+  targetMedian    Float?
+  strongBuy       Int?
+  buy             Int?
+  hold            Int?
+  sell            Int?
+  strongSell      Int?
+  lastUpdated     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([ticker])
+}
+
+model AnalystEvent {
+  id          String   @id @default(uuid())
+  ticker      String
+  eventType   String   // 'target_change' | 'rating_change'
+  message     String
+  oldValue    String?  // JSON string of old data
+  newValue    String?  // JSON string of new data
+  changePct   Float?   // For target changes
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([ticker])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// Milestone events for 52-week and all-time high/low alerts
+model MilestoneEvent {
+  id            String   @id @default(uuid())
+  userId        String
+  ticker        String
+  eventType     String   // '52w_high' | '52w_low' | 'ath' | 'atl'
+  message       String
+  currentPrice  Float
+  thresholdPrice Float   // The 52w high/low or ATH/ATL price
+  isNewRecord   Boolean  @default(false) // True if it's a NEW high/low, not just at the level
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([ticker])
+  @@index([read])
+  @@index([createdAt])
 }

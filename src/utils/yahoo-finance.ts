@@ -818,6 +818,185 @@ async function fetchWikipediaDescription(companyName: string): Promise<string | 
   }
 }
 
+// ============================================================================
+// 52-WEEK HIGH/LOW DATA
+// ============================================================================
+
+export interface Week52Range {
+  week52High: number;
+  week52Low: number;
+  currentPrice: number;
+}
+
+const week52Cache = new NodeCache({ stdTTL: 3600 }); // 1 hour cache
+
+/**
+ * Fetch 52-week high and low from Yahoo Finance chart API
+ * Uses 1 year of daily candles to calculate accurate 52-week range
+ */
+export async function get52WeekRange(ticker: string): Promise<Week52Range | null> {
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `52w:${upperTicker}`;
+
+  // Check cache first
+  const cached = week52Cache.get<Week52Range>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
+      params: {
+        interval: '1d',
+        range: '1y',
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      timeout: 10000,
+    });
+
+    const result = response.data.chart.result?.[0];
+    if (!result) {
+      console.error(`[Yahoo 52W] No data found for ${upperTicker}`);
+      return null;
+    }
+
+    const meta = result.meta;
+    const quotes = result.indicators.quote[0];
+
+    if (!quotes.high || !quotes.low) {
+      console.error(`[Yahoo 52W] No price data for ${upperTicker}`);
+      return null;
+    }
+
+    // Calculate 52-week high from daily highs
+    const validHighs = quotes.high.filter((h): h is number => h !== null && h > 0);
+    const validLows = quotes.low.filter((l): l is number => l !== null && l > 0);
+
+    if (validHighs.length === 0 || validLows.length === 0) {
+      console.error(`[Yahoo 52W] Insufficient data for ${upperTicker}`);
+      return null;
+    }
+
+    const week52High = Math.max(...validHighs);
+    const week52Low = Math.min(...validLows);
+    const currentPrice = meta.regularMarketPrice;
+
+    const rangeData: Week52Range = {
+      week52High,
+      week52Low,
+      currentPrice,
+    };
+
+    week52Cache.set(cacheKey, rangeData);
+    console.log(`[Yahoo 52W] ${upperTicker}: High=$${week52High.toFixed(2)}, Low=$${week52Low.toFixed(2)}, Current=$${currentPrice.toFixed(2)}`);
+
+    return rangeData;
+  } catch (error) {
+    console.error(`[Yahoo 52W] Failed to fetch ${upperTicker}:`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+/**
+ * Fetch 52-week ranges for multiple tickers in parallel
+ */
+export async function get52WeekRanges(tickers: string[]): Promise<Map<string, Week52Range>> {
+  const results = new Map<string, Week52Range>();
+
+  const promises = tickers.map(async (ticker) => {
+    const range = await get52WeekRange(ticker);
+    if (range) {
+      results.set(ticker.toUpperCase(), range);
+    }
+  });
+
+  await Promise.all(promises);
+  return results;
+}
+
+// ============================================================================
+// ALL-TIME HIGH/LOW DATA
+// ============================================================================
+
+export interface AllTimeRange {
+  allTimeHigh: number;
+  allTimeLow: number;
+  currentPrice: number;
+}
+
+const allTimeCache = new NodeCache({ stdTTL: 86400 }); // 24 hour cache
+
+/**
+ * Fetch all-time high and low from Yahoo Finance chart API
+ * Uses max range (up to 50 years of data)
+ */
+export async function getAllTimeRange(ticker: string): Promise<AllTimeRange | null> {
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `alltime:${upperTicker}`;
+
+  // Check cache first
+  const cached = allTimeCache.get<AllTimeRange>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
+      params: {
+        interval: '1wk', // Weekly candles for max range
+        range: 'max',
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      timeout: 15000,
+    });
+
+    const result = response.data.chart.result?.[0];
+    if (!result) {
+      console.error(`[Yahoo AllTime] No data found for ${upperTicker}`);
+      return null;
+    }
+
+    const meta = result.meta;
+    const quotes = result.indicators.quote[0];
+
+    if (!quotes.high || !quotes.low) {
+      console.error(`[Yahoo AllTime] No price data for ${upperTicker}`);
+      return null;
+    }
+
+    // Calculate all-time high from weekly highs
+    const validHighs = quotes.high.filter((h): h is number => h !== null && h > 0);
+    const validLows = quotes.low.filter((l): l is number => l !== null && l > 0);
+
+    if (validHighs.length === 0 || validLows.length === 0) {
+      console.error(`[Yahoo AllTime] Insufficient data for ${upperTicker}`);
+      return null;
+    }
+
+    const allTimeHigh = Math.max(...validHighs);
+    const allTimeLow = Math.min(...validLows);
+    const currentPrice = meta.regularMarketPrice;
+
+    const rangeData: AllTimeRange = {
+      allTimeHigh,
+      allTimeLow,
+      currentPrice,
+    };
+
+    allTimeCache.set(cacheKey, rangeData);
+    console.log(`[Yahoo AllTime] ${upperTicker}: High=$${allTimeHigh.toFixed(2)}, Low=$${allTimeLow.toFixed(2)}`);
+
+    return rangeData;
+  } catch (error) {
+    console.error(`[Yahoo AllTime] Failed to fetch ${upperTicker}:`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 export async function getAssetAbout(ticker: string): Promise<AssetAbout | null> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `about:${upperTicker}`;

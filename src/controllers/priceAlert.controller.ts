@@ -43,7 +43,7 @@ export async function getPriceAlertHandler(req: Request, res: Response): Promise
 // POST /price-alerts
 export async function createPriceAlertHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { ticker, condition, targetPrice, percentChange, referencePrice, userId } = req.body;
+    const { ticker, condition, targetPrice, percentChange, referencePrice, referencePriceType, repeatAlert, expiresAt, userId } = req.body;
 
     if (!ticker || !condition) {
       res.status(400).json({ error: 'ticker and condition are required' });
@@ -62,6 +62,9 @@ export async function createPriceAlertHandler(req: Request, res: Response): Prom
       targetPrice,
       percentChange,
       referencePrice,
+      referencePriceType,
+      repeatAlert,
+      expiresAt,
       userId,
     });
 

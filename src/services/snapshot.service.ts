@@ -33,7 +33,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   try {
     // Double-check with database (in case server restarted)
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: null },
+      where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
       orderBy: { timestamp: 'desc' },
     });
 
@@ -143,7 +143,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
 
 export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
-    where: { userId: null },
+    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'asc' },
   });
 }
@@ -151,7 +151,7 @@ export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
 export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     where: {
-      userId: null,
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
       timestamp: {
         gte: startDate,
       },
@@ -162,7 +162,7 @@ export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnaps
 
 export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapshot[]> {
   const snapshots = await prisma.portfolioSnapshot.findMany({
-    where: { userId: null },
+    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'desc' },
     take: limit,
   });
@@ -171,13 +171,13 @@ export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapsh
 
 export async function getLatestSnapshot(): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
-    where: { userId: null },
+    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'desc' },
   });
 }
 
 export async function getSnapshotCount(): Promise<number> {
-  return prisma.portfolioSnapshot.count({ where: { userId: null } });
+  return prisma.portfolioSnapshot.count({ where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' } });
 }
 
 /**
@@ -187,7 +187,7 @@ export async function getSnapshotCount(): Promise<number> {
 export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
     where: {
-      userId: null,
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
       timestamp: { lte: targetTime },
     },
     orderBy: { timestamp: 'desc' },
@@ -199,7 +199,7 @@ export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSn
  */
 export async function getOldestSnapshot(): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
-    where: { userId: null },
+    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'asc' },
   });
 }
@@ -770,7 +770,7 @@ export async function getChartSnapshots(period: string): Promise<{
 export async function cleanupDuplicateSnapshots(): Promise<number> {
   // Get all snapshots
   const snapshots = await prisma.portfolioSnapshot.findMany({
-    where: { userId: null },
+    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'asc' },
   });
 

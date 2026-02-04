@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-const ALERT_TYPES = ['drawdown', 'sector_exposure', 'underperform_spy', '52w_high', '52w_low'] as const;
+const ALERT_TYPES = ['drawdown', 'sector_exposure', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
 type AlertType = typeof ALERT_TYPES[number];
 
 const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
@@ -11,6 +11,8 @@ const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
   { type: 'underperform_spy', threshold: 7 },  // Alert after 7 consecutive days underperforming SPY
   { type: '52w_high', threshold: null },
   { type: '52w_low', threshold: null },
+  { type: 'ath', threshold: null },            // All-time high
+  { type: 'atl', threshold: null },            // All-time low
 ];
 
 export async function ensureDefaultAlerts(userId: string): Promise<void> {

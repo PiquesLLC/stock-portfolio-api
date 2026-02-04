@@ -5,6 +5,20 @@ import { createSnapshotIfNeeded } from './services/snapshot.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
+import { checkAnalystUpdates } from './services/analyst.service';
+import { checkMilestoneAlerts } from './services/milestone.service';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+// Helper to get all unique tickers from holdings
+async function getAllHeldTickers(): Promise<string[]> {
+  const holdings = await prisma.holding.findMany({
+    select: { ticker: true },
+    distinct: ['ticker'],
+  });
+  return holdings.map(h => h.ticker);
+}
 
 const server = app.listen(config.port, () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
@@ -48,6 +62,40 @@ const server = app.listen(config.port, () => {
       console.error('[Price Alerts] Error:', err.message)
     );
   }, 60000);
+
+  // Analyst updates — check once per day (every 24 hours)
+  // Also run on startup after a short delay
+  console.log('[Analyst Scheduler] Running every 24 hours');
+  setTimeout(async () => {
+    try {
+      const tickers = await getAllHeldTickers();
+      await checkAnalystUpdates(tickers);
+    } catch (err: any) {
+      console.error('[Analyst Scheduler] Startup check failed:', err.message);
+    }
+  }, 30000); // 30 second delay after startup
+
+  setInterval(async () => {
+    try {
+      const tickers = await getAllHeldTickers();
+      await checkAnalystUpdates(tickers);
+    } catch (err: any) {
+      console.error('[Analyst Scheduler] Error:', err.message);
+    }
+  }, 24 * 60 * 60 * 1000); // Every 24 hours
+
+  // Milestone alerts (52w high/low, ATH/ATL) — using Yahoo Finance for accurate 52w data
+  console.log('[Milestone Scheduler] Running every 30 minutes');
+  setTimeout(() => {
+    checkMilestoneAlerts().catch(err =>
+      console.error('[Milestone Scheduler] Startup check failed:', err.message)
+    );
+  }, 45000);
+  setInterval(() => {
+    checkMilestoneAlerts().catch(err =>
+      console.error('[Milestone Scheduler] Error:', err.message)
+    );
+  }, 30 * 60 * 1000);
 });
 
 process.on('SIGTERM', () => {

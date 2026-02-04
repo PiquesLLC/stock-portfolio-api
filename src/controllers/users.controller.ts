@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { getUserPortfolio } from '../services/user-portfolio.service';
-import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructIntradayGap } from '../services/snapshot.service';
+import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructIntradayGap } from '../services/snapshot.service';
 
 const prisma = new PrismaClient();
 
@@ -162,18 +162,45 @@ export async function getUserChartHandler(req: Request, res: Response): Promise<
     }
 
     // For other periods: reconstruct from candle data
-    const periodDaysMap: Record<string, number> = {
-      '1W': 7, '1M': 30, '3M': 90,
-      'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
-      '1Y': 365, 'ALL': 365 * 5,
-    };
-    const periodDays = periodDaysMap[period] ?? 30;
-
     const holdings = await prisma.holding.findMany({ where: { userId } });
-    const reconstructed = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
-
     const now = Date.now();
-    let points = reconstructed;
+    let points: { time: number; value: number }[];
+
+    // Use high-resolution data for short periods (like main portfolio)
+    if (period === '1W') {
+      // 15-min candles for 5 days
+      points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
+      );
+    } else if (period === '1M') {
+      // 1-hour candles for 1 month
+      points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
+      );
+    } else if (period === 'YTD') {
+      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+      if (ytdDays <= 90) {
+        const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+        points = await reconstructPortfolioHistoryHiRes(
+          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+          portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
+        );
+        const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+        points = points.filter(p => p.time >= ytdStart);
+      } else {
+        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+      }
+    } else {
+      // 3M+ use daily candles
+      const periodDaysMap: Record<string, number> = {
+        '3M': 90, '1Y': 365, 'ALL': 365 * 5,
+      };
+      const periodDays = periodDaysMap[period] ?? 30;
+      points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+    }
+
     if (points.length === 0 || now - points[points.length - 1].time > 5000) {
       points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
     }

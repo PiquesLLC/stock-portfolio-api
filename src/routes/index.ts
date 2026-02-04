@@ -13,6 +13,8 @@ import socialRoutes from './social.routes';
 import transactionRoutes from './transaction.routes';
 import alertRoutes from './alert.routes';
 import priceAlertRoutes from './priceAlert.routes';
+import analystRoutes from './analyst.routes';
+import milestoneRoutes from './milestone.routes';
 
 const router = Router();
 
@@ -30,5 +32,7 @@ router.use('/social', socialRoutes);
 router.use('/transactions', transactionRoutes);
 router.use('/alerts', alertRoutes);
 router.use('/price-alerts', priceAlertRoutes);
+router.use('/analyst', analystRoutes);
+router.use('/milestones', milestoneRoutes);
 
 export default router;
