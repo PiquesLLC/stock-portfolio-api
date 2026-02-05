@@ -1232,10 +1232,12 @@ export async function getRiskForecast(): Promise<RiskForecast> {
   }
 
   // Determine status
+  // If paid plan is required, don't show as "caching" since it won't complete
+  const paidPlanRequired = fetchResult.message.includes('paid plan');
   let status: 'ready' | 'caching' | 'insufficient';
   if (hasEnoughData) {
-    status = fetchResult.tickersPending.length > 0 ? 'caching' : 'ready';
-  } else if (fetchResult.tickersPending.length > 0) {
+    status = (fetchResult.tickersPending.length > 0 && !paidPlanRequired) ? 'caching' : 'ready';
+  } else if (fetchResult.tickersPending.length > 0 && !paidPlanRequired) {
     status = 'caching';
   } else {
     status = 'insufficient';
