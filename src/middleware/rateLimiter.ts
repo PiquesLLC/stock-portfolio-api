@@ -51,16 +51,18 @@ export const mutationLimiter = rateLimit({
 
 /**
  * Global API rate limiter - general protection
- * 300 requests per minute (higher for dev, background tasks consume quota)
+ * Higher limits in dev to support pre-fetching and background tasks
  */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 100 : 300, // Higher limit in dev
+  max: process.env.NODE_ENV === 'production' ? 200 : 1000, // Much higher in dev
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health';
+    // Skip rate limiting for health checks and GET requests in development
+    if (req.path === '/health') return true;
+    if (process.env.NODE_ENV !== 'production' && req.method === 'GET') return true;
+    return false;
   },
 });
