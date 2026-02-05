@@ -44,11 +44,11 @@ export const signupLimiter = rateLimit({
 
 /**
  * Global API rate limiter - general protection
- * 100 requests per minute
+ * 300 requests per minute (higher for dev, background tasks consume quota)
  */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
+  max: process.env.NODE_ENV === 'production' ? 100 : 300, // Higher limit in dev
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
