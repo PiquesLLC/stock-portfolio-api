@@ -41,6 +41,10 @@ export const config = {
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
 
+  // Alpha Vantage API
+  alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || '',
+  alphaVantageDailyLimit: parseInt(process.env.AV_DAILY_LIMIT || '25', 10),
+
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174').split(','),
 };

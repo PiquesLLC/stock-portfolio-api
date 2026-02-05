@@ -47,8 +47,15 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
     const userId = req.query.userId as string | undefined;
     const { cashBalance, marginDebt } = req.body;
 
+    console.log('[Settings Debug] updateSettings called:');
+    console.log('[Settings Debug]   userId from query:', userId);
+    console.log('[Settings Debug]   req.user?.userId:', req.user?.userId);
+    console.log('[Settings Debug]   cashBalance:', cashBalance);
+    console.log('[Settings Debug]   marginDebt:', marginDebt);
+
     // SECURITY: Verify ownership - user can only update their own settings
     if (userId && req.user?.userId !== userId) {
+      console.log('[Settings Debug] ACCESS DENIED - userId mismatch');
       res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
       return;
     }
@@ -74,14 +81,22 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
 
     if (userId) {
       // User-specific settings
+      console.log('[Settings Debug] Using USER-SPECIFIC path for userId:', userId);
       const updateData: Record<string, number> = {};
       if (roundedCash !== undefined) updateData.cashBalance = roundedCash;
       if (roundedMargin !== undefined) updateData.marginDebt = roundedMargin;
+
+      console.log('[Settings Debug] Update data:', updateData);
 
       const userSettings = await prisma.userSettings.upsert({
         where: { userId },
         update: updateData,
         create: { userId, cashBalance: roundedCash ?? 0, marginDebt: roundedMargin ?? 0 },
+      });
+
+      console.log('[Settings Debug] Updated userSettings:', {
+        cashBalance: userSettings.cashBalance,
+        marginDebt: userSettings.marginDebt
       });
 
       res.json({

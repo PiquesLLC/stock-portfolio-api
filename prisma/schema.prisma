@@ -347,6 +347,49 @@ model AnalystEvent {
   @@index([createdAt])
 }
 
+// Alpha Vantage fundamentals cache — one row per ticker, stores parsed JSON
+model FundamentalsCache {
+  id              String   @id @default(uuid())
+  ticker          String   @unique
+  overviewJson    String?
+  incomeJson      String?
+  balanceJson     String?
+  cashFlowJson    String?
+  earningsJson    String?
+  lastFetchedAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([ticker])
+  @@index([lastFetchedAt])
+}
+
+// Economic indicator cache — one row per indicator type
+model EconomicIndicatorCache {
+  id              String   @id @default(uuid())
+  indicator       String   @unique
+  name            String
+  unit            String
+  latestValue     Float?
+  latestDate      String?
+  historyJson     String   @default("[]")
+  lastFetchedAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([indicator])
+}
+
+// Track Alpha Vantage daily API usage for budget management
+model AVDailyUsage {
+  id          String   @id @default(uuid())
+  date        String   @unique
+  callCount   Int      @default(0)
+  tickers     String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 // Milestone events for 52-week and all-time high/low alerts
 model MilestoneEvent {
   id            String   @id @default(uuid())

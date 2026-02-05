@@ -16,6 +16,7 @@ import alertRoutes from './alert.routes';
 import priceAlertRoutes from './priceAlert.routes';
 import analystRoutes from './analyst.routes';
 import milestoneRoutes from './milestone.routes';
+import fundamentalsRoutes from './fundamentals.routes';
 
 const router = Router();
 
@@ -36,5 +37,6 @@ router.use('/alerts', alertRoutes);
 router.use('/price-alerts', priceAlertRoutes);
 router.use('/analyst', analystRoutes);
 router.use('/milestones', milestoneRoutes);
+router.use('/fundamentals', fundamentalsRoutes);
 
 export default router;

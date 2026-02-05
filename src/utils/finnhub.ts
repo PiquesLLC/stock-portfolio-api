@@ -550,31 +550,100 @@ function getPopularityData(ticker: string): { marketCapB?: number; avgVolume?: n
  * Popular ticker descriptions for supplemental matching
  */
 const POPULAR_TICKER_DESCRIPTIONS: Record<string, { description: string; type: string }> = {
+  // Mega cap tech
   'AAPL': { description: 'APPLE INC', type: 'Common Stock' },
   'MSFT': { description: 'MICROSOFT CORP', type: 'Common Stock' },
   'NVDA': { description: 'NVIDIA CORP', type: 'Common Stock' },
   'GOOGL': { description: 'ALPHABET INC', type: 'Common Stock' },
+  'GOOG': { description: 'ALPHABET INC', type: 'Common Stock' },
   'AMZN': { description: 'AMAZON.COM INC', type: 'Common Stock' },
   'META': { description: 'META PLATFORMS INC', type: 'Common Stock' },
   'TSLA': { description: 'TESLA INC', type: 'Common Stock' },
   'AVGO': { description: 'BROADCOM INC', type: 'Common Stock' },
-  'SPY': { description: 'SPDR S&P 500 ETF TRUST', type: 'ETP' },
-  'QQQ': { description: 'INVESCO QQQ TRUST', type: 'ETP' },
   'AMD': { description: 'ADVANCED MICRO DEVICES', type: 'Common Stock' },
   'NFLX': { description: 'NETFLIX INC', type: 'Common Stock' },
   'INTC': { description: 'INTEL CORP', type: 'Common Stock' },
+  // Consumer staples
+  'KO': { description: 'COCA-COLA CO', type: 'Common Stock' },
+  'PEP': { description: 'PEPSICO INC', type: 'Common Stock' },
+  'WMT': { description: 'WALMART INC', type: 'Common Stock' },
+  'PG': { description: 'PROCTER & GAMBLE CO', type: 'Common Stock' },
+  'COST': { description: 'COSTCO WHOLESALE CORP', type: 'Common Stock' },
+  'MCD': { description: 'MCDONALDS CORP', type: 'Common Stock' },
+  'SBUX': { description: 'STARBUCKS CORP', type: 'Common Stock' },
+  // Finance
+  'BRK.A': { description: 'BERKSHIRE HATHAWAY INC', type: 'Common Stock' },
+  'BRK.B': { description: 'BERKSHIRE HATHAWAY INC', type: 'Common Stock' },
+  'JPM': { description: 'JPMORGAN CHASE & CO', type: 'Common Stock' },
+  'V': { description: 'VISA INC', type: 'Common Stock' },
+  'MA': { description: 'MASTERCARD INC', type: 'Common Stock' },
+  'BAC': { description: 'BANK OF AMERICA CORP', type: 'Common Stock' },
+  'GS': { description: 'GOLDMAN SACHS GROUP INC', type: 'Common Stock' },
+  // Healthcare
+  'JNJ': { description: 'JOHNSON & JOHNSON', type: 'Common Stock' },
+  'UNH': { description: 'UNITEDHEALTH GROUP INC', type: 'Common Stock' },
+  'LLY': { description: 'ELI LILLY AND CO', type: 'Common Stock' },
+  'PFE': { description: 'PFIZER INC', type: 'Common Stock' },
+  'MRK': { description: 'MERCK & CO INC', type: 'Common Stock' },
+  'ABBV': { description: 'ABBVIE INC', type: 'Common Stock' },
+  // Energy
+  'XOM': { description: 'EXXON MOBIL CORP', type: 'Common Stock' },
+  'CVX': { description: 'CHEVRON CORP', type: 'Common Stock' },
+  // Industrial
+  'CAT': { description: 'CATERPILLAR INC', type: 'Common Stock' },
+  'BA': { description: 'BOEING CO', type: 'Common Stock' },
+  'GE': { description: 'GENERAL ELECTRIC CO', type: 'Common Stock' },
+  'HON': { description: 'HONEYWELL INTERNATIONAL INC', type: 'Common Stock' },
+  // Entertainment & Media
   'DIS': { description: 'WALT DISNEY CO', type: 'Common Stock' },
+  'CMCSA': { description: 'COMCAST CORP', type: 'Common Stock' },
+  // Tech & Software
+  'CRM': { description: 'SALESFORCE INC', type: 'Common Stock' },
+  'ORCL': { description: 'ORACLE CORP', type: 'Common Stock' },
+  'ADBE': { description: 'ADOBE INC', type: 'Common Stock' },
+  'IBM': { description: 'INTERNATIONAL BUSINESS MACHINES', type: 'Common Stock' },
+  'CSCO': { description: 'CISCO SYSTEMS INC', type: 'Common Stock' },
+  // Fintech & Payments
   'PYPL': { description: 'PAYPAL HOLDINGS INC', type: 'Common Stock' },
+  'SQ': { description: 'BLOCK INC', type: 'Common Stock' },
+  // Rideshare & Delivery
   'UBER': { description: 'UBER TECHNOLOGIES INC', type: 'Common Stock' },
+  'LYFT': { description: 'LYFT INC', type: 'Common Stock' },
+  'DASH': { description: 'DOORDASH INC', type: 'Common Stock' },
+  // Retail meme stocks
   'COIN': { description: 'COINBASE GLOBAL INC', type: 'Common Stock' },
   'PLTR': { description: 'PALANTIR TECHNOLOGIES INC', type: 'Common Stock' },
   'GME': { description: 'GAMESTOP CORP', type: 'Common Stock' },
   'AMC': { description: 'AMC ENTERTAINMENT HOLDINGS', type: 'Common Stock' },
+  'RIVN': { description: 'RIVIAN AUTOMOTIVE INC', type: 'Common Stock' },
+  'LCID': { description: 'LUCID GROUP INC', type: 'Common Stock' },
+  // Semiconductors
+  'TSM': { description: 'TAIWAN SEMICONDUCTOR MFG', type: 'Common Stock' },
+  'QCOM': { description: 'QUALCOMM INC', type: 'Common Stock' },
+  'MU': { description: 'MICRON TECHNOLOGY INC', type: 'Common Stock' },
+  'ASML': { description: 'ASML HOLDING NV', type: 'Common Stock' },
+  // Major ETFs
+  'SPY': { description: 'SPDR S&P 500 ETF TRUST', type: 'ETP' },
+  'QQQ': { description: 'INVESCO QQQ TRUST', type: 'ETP' },
+  'DIA': { description: 'SPDR DOW JONES INDUSTRIAL AVG ETF', type: 'ETP' },
+  'IWM': { description: 'ISHARES RUSSELL 2000 ETF', type: 'ETP' },
+  'VOO': { description: 'VANGUARD S&P 500 ETF', type: 'ETP' },
+  'VTI': { description: 'VANGUARD TOTAL STOCK MARKET ETF', type: 'ETP' },
+  'ARKK': { description: 'ARK INNOVATION ETF', type: 'ETP' },
+  'XLF': { description: 'FINANCIAL SELECT SECTOR SPDR', type: 'ETP' },
+  'XLE': { description: 'ENERGY SELECT SECTOR SPDR', type: 'ETP' },
+  'XLK': { description: 'TECHNOLOGY SELECT SECTOR SPDR', type: 'ETP' },
+  'GLD': { description: 'SPDR GOLD SHARES', type: 'ETP' },
+  'SLV': { description: 'ISHARES SILVER TRUST', type: 'ETP' },
+  'USO': { description: 'UNITED STATES OIL FUND', type: 'ETP' },
+  'TLT': { description: 'ISHARES 20+ YEAR TREASURY BOND ETF', type: 'ETP' },
+  'VNQ': { description: 'VANGUARD REAL ESTATE ETF', type: 'ETP' },
+  'SCHD': { description: 'SCHWAB US DIVIDEND EQUITY ETF', type: 'ETP' },
 };
 
 /**
  * Get supplemental popular tickers that match query but might not be in Finnhub results
- * Only returns tickers where symbol starts with query (prefix match)
+ * Returns tickers where symbol matches query (exact or prefix) OR name contains query
  */
 function getSupplementalPopularTickers(query: string): Array<{
   symbol: string;
@@ -590,10 +659,15 @@ function getSupplementalPopularTickers(query: string): Array<{
     primaryExchange: string;
   }> = [];
 
-  // Check all popular tickers for prefix matches
+  // Check all popular tickers for matches
   for (const [ticker, data] of Object.entries(POPULAR_TICKER_DESCRIPTIONS)) {
-    // Only add if ticker starts with query (prefix match)
-    if (ticker.startsWith(upperQuery) && ticker !== upperQuery) {
+    const upperDesc = data.description.toUpperCase();
+    // Include if: exact ticker match, ticker starts with query, or name contains query
+    const isExactMatch = ticker === upperQuery;
+    const isPrefixMatch = ticker.startsWith(upperQuery);
+    const isNameMatch = upperDesc.includes(upperQuery);
+
+    if (isExactMatch || isPrefixMatch || isNameMatch) {
       results.push({
         symbol: ticker,
         description: data.description,

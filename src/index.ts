@@ -8,6 +8,8 @@ import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
 import { PrismaClient } from '@prisma/client';
+import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
+import { rotateTickerFundamentals } from './services/fundamentals.service';
 
 const prisma = new PrismaClient();
 
@@ -83,6 +85,51 @@ const server = app.listen(config.port, () => {
       console.error('[Analyst Scheduler] Error:', err.message);
     }
   }, 24 * 60 * 60 * 1000); // Every 24 hours
+
+  // Alpha Vantage: Economic indicators — refresh daily (5 API calls)
+  console.log('[AV Economic] Running daily');
+  setTimeout(() => {
+    refreshEconomicIndicators().catch(err =>
+      console.error('[AV Economic] Startup refresh failed:', (err as Error).message)
+    );
+  }, 60000); // 60s delay
+  setInterval(() => {
+    refreshEconomicIndicators().catch(err =>
+      console.error('[AV Economic] Error:', (err as Error).message)
+    );
+  }, 24 * 60 * 60 * 1000);
+
+  // World Bank: International economic indicators — refresh daily (6 API calls, no key needed)
+  console.log('[WB International] Running daily');
+  setTimeout(() => {
+    refreshInternationalIndicators().catch(err =>
+      console.error('[WB International] Startup refresh failed:', (err as Error).message)
+    );
+  }, 90000); // 90s delay
+  setInterval(() => {
+    refreshInternationalIndicators().catch(err =>
+      console.error('[WB International] Error:', (err as Error).message)
+    );
+  }, 24 * 60 * 60 * 1000);
+
+  // Alpha Vantage: Fundamentals rotation — refresh oldest tickers every 6 hours (4 API calls per ticker)
+  console.log('[AV Fundamentals] Rotating every 6 hours');
+  setTimeout(async () => {
+    try {
+      const tickers = await getAllHeldTickers();
+      await rotateTickerFundamentals(tickers);
+    } catch (err) {
+      console.error('[AV Fundamentals] Startup rotation failed:', (err as Error).message);
+    }
+  }, 120000); // 120s delay
+  setInterval(async () => {
+    try {
+      const tickers = await getAllHeldTickers();
+      await rotateTickerFundamentals(tickers);
+    } catch (err) {
+      console.error('[AV Fundamentals] Rotation error:', (err as Error).message);
+    }
+  }, 6 * 60 * 60 * 1000);
 
   // Milestone alerts (52w high/low, ATH/ATL) — using Yahoo Finance for accurate 52w data
   console.log('[Milestone Scheduler] Running every 30 minutes');
