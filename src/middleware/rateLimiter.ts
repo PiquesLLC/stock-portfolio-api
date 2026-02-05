@@ -1,20 +1,15 @@
 import rateLimit from 'express-rate-limit';
 
 /**
- * Login rate limiter - strict limits to prevent brute force
- * 5 attempts per 15 minutes per IP/username combination
+ * Login rate limiter - prevent brute force
+ * 10 attempts per 15 minutes in production, 50 in dev
  */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window
+  max: process.env.NODE_ENV === 'production' ? 10 : 50,
   message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Rate limit by both IP and username to prevent distributed attacks
-  keyGenerator: (req) => {
-    const username = req.body?.username || '';
-    return `${req.ip}-${username}`;
-  },
   skipSuccessfulRequests: true, // Don't count successful logins
 });
 
