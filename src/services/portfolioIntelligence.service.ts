@@ -187,7 +187,7 @@ function splitContributors(contributions: HoldingContribution[]): {
 // SECTOR EXPOSURE
 // ============================================================================
 
-function computeSectorExposure(holdings: HoldingWithQuote[]): SectorExposureEntry[] {
+export function computeSectorExposure(holdings: HoldingWithQuote[]): SectorExposureEntry[] {
   const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   if (totalValue === 0) return [];
 

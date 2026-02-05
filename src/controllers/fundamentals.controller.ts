@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getEconomicDashboard, getInternationalEconomicDashboard } from '../services/economic.service';
+import { getPortfolioMacroImpact } from '../services/portfolioMacroImpact.service';
 import { getCompanyFundamentals } from '../services/fundamentals.service';
 import { getEarningsData } from '../services/earnings.service';
 import { getDailyStats } from '../utils/alpha-vantage';
@@ -34,6 +35,17 @@ export async function getAVStatusHandler(req: Request, res: Response): Promise<v
   } catch (error) {
     console.error('Error fetching AV status:', error);
     res.status(500).json({ error: 'Failed to fetch Alpha Vantage status' });
+  }
+}
+
+// GET /fundamentals/economic/portfolio-impact
+export async function getPortfolioMacroImpactHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const impact = await getPortfolioMacroImpact();
+    res.json(impact);
+  } catch (error) {
+    console.error('Error computing portfolio macro impact:', error);
+    res.status(500).json({ error: 'Failed to compute macro impact insights' });
   }
 }
 
