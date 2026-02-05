@@ -123,3 +123,66 @@ export async function hasPassword(username: string): Promise<boolean> {
   });
   return !!user?.passwordHash;
 }
+
+/**
+ * Check if a username is already taken
+ */
+export async function usernameExists(username: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+  return !!user;
+}
+
+/**
+ * Create a new user account with password
+ */
+export async function signup(
+  username: string,
+  displayName: string,
+  password: string
+): Promise<LoginResponse | null> {
+  // Check if username already exists
+  const existing = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+
+  if (existing) {
+    return null;
+  }
+
+  const passwordHash = await hashPassword(password);
+
+  const user = await prisma.user.create({
+    data: {
+      username,
+      displayName,
+      passwordHash,
+      profilePublic: true,
+    },
+    select: { id: true, username: true, displayName: true },
+  });
+
+  // Also create UserSettings for the new user
+  await prisma.userSettings.create({
+    data: {
+      userId: user.id,
+      cashBalance: 0,
+      marginDebt: 0,
+      dripEnabled: false,
+    },
+  });
+
+  const token = generateToken({ userId: user.id, username: user.username });
+
+  return {
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+    },
+  };
+}

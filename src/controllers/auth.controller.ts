@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { loginWithPassword, setPassword, getUserById, hasPassword } from '../services/auth.service';
+import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 
@@ -146,5 +146,89 @@ export async function hasPasswordHandler(req: Request, res: Response): Promise<v
     console.error('Has password error:', error);
     // Return generic response even on error to prevent timing attacks
     res.json({ hasPassword: true });
+  }
+}
+
+/**
+ * POST /auth/signup
+ * Create a new user account
+ */
+export async function signupHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { username, displayName, password } = req.body;
+
+    if (!username || typeof username !== 'string') {
+      res.status(400).json({ error: 'Username is required' });
+      return;
+    }
+
+    if (!displayName || typeof displayName !== 'string') {
+      res.status(400).json({ error: 'Display name is required' });
+      return;
+    }
+
+    if (!password || typeof password !== 'string') {
+      res.status(400).json({ error: 'Password is required' });
+      return;
+    }
+
+    // Validate username format (alphanumeric, underscores, 3-20 chars)
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+      res.status(400).json({ error: 'Username must be 3-20 characters and contain only letters, numbers, and underscores' });
+      return;
+    }
+
+    if (displayName.length < 1 || displayName.length > 50) {
+      res.status(400).json({ error: 'Display name must be 1-50 characters' });
+      return;
+    }
+
+    if (password.length < 6) {
+      res.status(400).json({ error: 'Password must be at least 6 characters' });
+      return;
+    }
+
+    // Check if username already exists
+    const exists = await usernameExists(username);
+    if (exists) {
+      res.status(409).json({ error: 'Username is already taken' });
+      return;
+    }
+
+    const result = await signup(username, displayName, password);
+
+    if (!result) {
+      res.status(500).json({ error: 'Failed to create account' });
+      return;
+    }
+
+    // Set httpOnly cookie (auto-login after signup)
+    res.cookie('authToken', result.token, COOKIE_OPTIONS);
+
+    res.status(201).json({ user: result.user });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ error: 'Failed to create account' });
+  }
+}
+
+/**
+ * GET /auth/check-username/:username
+ * Check if a username is available (for real-time validation during signup)
+ */
+export async function checkUsernameHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      res.status(400).json({ error: 'Username is required' });
+      return;
+    }
+
+    const exists = await usernameExists(username);
+    res.json({ available: !exists });
+  } catch (error) {
+    console.error('Check username error:', error);
+    res.status(500).json({ error: 'Failed to check username' });
   }
 }

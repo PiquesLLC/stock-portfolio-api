@@ -31,6 +31,18 @@ export const setPasswordLimiter = rateLimit({
 });
 
 /**
+ * Signup rate limiter
+ * 5 signups per hour per IP
+ */
+export const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { error: 'Too many signup attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * 100 requests per minute
  */
