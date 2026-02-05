@@ -7,6 +7,50 @@ import {
 } from '../utils/candle-cache';
 import { HoldingWithQuote, HeroStats } from '../types';
 import { getSector } from '../utils/sectors';
+import axios from 'axios';
+import NodeCache from 'node-cache';
+
+// Yahoo Finance candle cache for fallback
+const yahooCache = new NodeCache({ stdTTL: 3600 }); // 1 hour cache
+
+async function fetchYahooCandlesFallback(ticker: string): Promise<{ closes: number[]; dates: string[] } | null> {
+  const cacheKey = `yahoo-intel:${ticker}`;
+  const cached = yahooCache.get<{ closes: number[]; dates: string[] }>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 60 * 24 * 60 * 60; // 60 days back
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
+    const resp = await axios.get(url, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+
+    const result = resp.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+
+    const timestamps: number[] = result.timestamp;
+    const q = result.indicators.quote[0];
+    const closes: number[] = [];
+    const dates: string[] = [];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (q.close[i] != null) {
+        closes.push(q.close[i]);
+        dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
+      }
+    }
+
+    if (closes.length === 0) return null;
+
+    const data = { closes, dates };
+    yahooCache.set(cacheKey, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 // Types
 export type IntelligenceWindow = '1d' | '5d' | '1m';
@@ -81,13 +125,32 @@ async function computeContributions(
   const candleData = fetchResult.data;
   const daysBack = window === '5d' ? 5 : 22;
 
-  const contributions = holdings.map(h => {
+  // Check if Finnhub data is mostly empty (paid plan limitation)
+  const finnhubHasData = Array.from(candleData.values()).some(c => c && !c.partial && c.closes.length >= daysBack + 1);
+
+  // Build contributions - use Yahoo as fallback when Finnhub is unavailable
+  const contributionPromises = holdings.map(async h => {
     const candles = candleData.get(h.ticker);
-    if (!candles || candles.partial || candles.closes.length < daysBack + 1) {
+    let closes: number[] | null = null;
+
+    // Try Finnhub first
+    if (candles && !candles.partial && candles.closes.length >= daysBack + 1) {
+      closes = candles.closes;
+    }
+    // Fallback to Yahoo if Finnhub doesn't have data
+    else if (!finnhubHasData) {
+      const yahooData = await fetchYahooCandlesFallback(h.ticker);
+      if (yahooData && yahooData.closes.length >= daysBack + 1) {
+        closes = yahooData.closes;
+      }
+    }
+
+    if (!closes || closes.length < daysBack + 1) {
       return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
     }
-    const currentPrice = candles.closes[candles.closes.length - 1];
-    const referenceClose = candles.closes[candles.closes.length - 1 - daysBack];
+
+    const currentPrice = closes[closes.length - 1];
+    const referenceClose = closes[closes.length - 1 - daysBack];
     if (referenceClose <= 0) return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
     const priceChange = currentPrice - referenceClose;
     const percentReturn = Math.round(((currentPrice - referenceClose) / referenceClose) * 1000) / 10;
@@ -98,6 +161,7 @@ async function computeContributions(
     };
   });
 
+  const contributions = await Promise.all(contributionPromises);
   return { contributions, candleData };
 }
 
