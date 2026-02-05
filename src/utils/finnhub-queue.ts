@@ -13,7 +13,7 @@ import axios, { AxiosError } from 'axios';
 import { config } from '../config';
 
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
-const MIN_REQUEST_DELAY_MS = 1200; // 1.2s between requests (50/min safe margin)
+const MIN_REQUEST_DELAY_MS = 1000; // 1s between requests (60/min limit)
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 2000;
 
