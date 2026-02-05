@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getStockDetails, getIntraday, getHourlyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getETFHoldingsHandler, getAssetAboutHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getETFHoldingsHandler, getAssetAboutHandler } from '../controllers/market.controller';
 
 const router = Router();
 
 router.get('/search', searchSymbols);
 router.get('/prices', getPrices);
 router.get('/quote/:ticker', getQuote);
+router.get('/fast-quote/:ticker', getFastQuote);
 router.get('/stock/:ticker/details', getStockDetails);
 router.get('/stock/:ticker/intraday', getIntraday);
 router.get('/stock/:ticker/hourly', getHourlyCandles);

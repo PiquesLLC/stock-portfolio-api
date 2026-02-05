@@ -324,6 +324,14 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
   }
 }
 
+/**
+ * Fast quote fetch using Yahoo Finance directly - no queue, no rate limits.
+ * Used for progressive loading to show price immediately.
+ */
+export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
+  return fetchYahooQuote(ticker);
+}
+
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 

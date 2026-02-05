@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
+import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
@@ -79,6 +79,31 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
     res.json(quote);
   } catch (error) {
     console.error('Error fetching quote:', error);
+    res.status(500).json({ error: 'Failed to fetch quote' });
+  }
+}
+
+/**
+ * Fast quote endpoint using Yahoo Finance directly - no queue delays.
+ * Used for progressive loading to show price immediately.
+ */
+export async function getFastQuote(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+
+    const quote = await fetchFastQuote(ticker);
+    if (!quote) {
+      res.status(404).json({ error: `No quote data available for ${ticker}` });
+      return;
+    }
+    res.json(quote);
+  } catch (error) {
+    console.error('Error fetching fast quote:', error);
     res.status(500).json({ error: 'Failed to fetch quote' });
   }
 }
