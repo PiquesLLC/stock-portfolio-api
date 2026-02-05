@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists } from '../services/auth.service';
+import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 
@@ -240,5 +240,52 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
   } catch (error) {
     console.error('Check username error:', error);
     res.status(500).json({ error: 'Failed to check username' });
+  }
+}
+
+/**
+ * POST /auth/change-password
+ * Change password for authenticated user (requires current password)
+ */
+export async function changePasswordHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || typeof currentPassword !== 'string') {
+      res.status(400).json({ error: 'Current password is required' });
+      return;
+    }
+
+    if (!newPassword || typeof newPassword !== 'string') {
+      res.status(400).json({ error: 'New password is required' });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
+      return;
+    }
+
+    const result = await changePassword(req.user.userId, currentPassword, newPassword);
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Failed to change password' });
   }
 }

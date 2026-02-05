@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler } from '../controllers/auth.controller';
+import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { loginLimiter, setPasswordLimiter, signupLimiter } from '../middleware/rateLimiter';
+import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -25,5 +25,8 @@ router.post('/signup', signupLimiter, signupHandler);
 
 // GET /auth/check-username/:username - Check if username is available
 router.get('/check-username/:username', checkUsernameHandler);
+
+// POST /auth/change-password - Change password (requires auth)
+router.post('/change-password', mutationLimiter, requireAuth, changePasswordHandler);
 
 export default router;

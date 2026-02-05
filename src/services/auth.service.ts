@@ -125,6 +125,38 @@ export async function hasPassword(username: string): Promise<boolean> {
 }
 
 /**
+ * Change password for authenticated user (requires current password verification)
+ */
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { passwordHash: true },
+  });
+
+  if (!user || !user.passwordHash) {
+    return { success: false, error: 'User not found' };
+  }
+
+  const isValid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!isValid) {
+    return { success: false, error: 'Current password is incorrect' };
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash },
+  });
+
+  return { success: true };
+}
+
+/**
  * Check if a username is already taken
  */
 export async function usernameExists(username: string): Promise<boolean> {
