@@ -111,18 +111,18 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       }
     }
 
-    // Fire activity event if a userId is provided
-    const userId = req.body.userId as string | undefined;
-    if (userId) {
+    // Fire activity event using authenticated user ID (prevents spoofing)
+    const authUserId = req.user?.userId;
+    if (authUserId) {
       if (existingHolding) {
-        createActivityEvent(userId, 'holding_updated', {
+        createActivityEvent(authUserId, 'holding_updated', {
           ticker: ticker.toUpperCase(),
           shares,
           previousShares: existingHolding.shares,
           averageCost,
         }).catch(() => {});
       } else {
-        createActivityEvent(userId, 'holding_added', {
+        createActivityEvent(authUserId, 'holding_added', {
           ticker: ticker.toUpperCase(),
           shares,
           averageCost,
@@ -166,10 +166,10 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       console.log(`[Holding] Auto-created withdrawal of $${costBasis.toFixed(2)} for removing ${ticker}`);
     }
 
-    // Fire activity event if userId provided in query
-    const userId = req.query.userId as string | undefined;
-    if (userId) {
-      createActivityEvent(userId, 'holding_removed', { ticker }).catch(() => {});
+    // Fire activity event using authenticated user ID (prevents spoofing)
+    const authUserId = req.user?.userId;
+    if (authUserId) {
+      createActivityEvent(authUserId, 'holding_removed', { ticker }).catch(() => {});
     }
 
     res.status(204).send();

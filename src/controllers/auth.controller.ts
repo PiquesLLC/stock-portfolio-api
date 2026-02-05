@@ -104,8 +104,13 @@ export async function setPasswordHandler(req: Request, res: Response): Promise<v
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
       return;
     }
 
@@ -183,8 +188,13 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
       return;
     }
 

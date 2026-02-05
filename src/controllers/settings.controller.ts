@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { AuthRequest } from '../types/auth';
 import {
   getSettings,
   setBaseline,
@@ -41,10 +42,16 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
   }
 }
 
-export async function updateSettingsHandler(req: Request, res: Response): Promise<void> {
+export async function updateSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.query.userId as string | undefined;
     const { cashBalance, marginDebt } = req.body;
+
+    // SECURITY: Verify ownership - user can only update their own settings
+    if (userId && req.user?.userId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
+      return;
+    }
 
     // Validate inputs if provided
     if (cashBalance !== undefined && (typeof cashBalance !== 'number' || cashBalance < 0)) {

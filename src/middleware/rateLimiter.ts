@@ -43,6 +43,18 @@ export const signupLimiter = rateLimit({
 });
 
 /**
+ * Mutation rate limiter - protect POST/PUT/DELETE endpoints
+ * 30 mutations per minute per IP
+ */
+export const mutationLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 mutations per minute
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * 300 requests per minute (higher for dev, background tasks consume quota)
  */
