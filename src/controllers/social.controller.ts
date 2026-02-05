@@ -226,6 +226,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
         region: true,
         showRegion: true,
         holdingsVisibility: true,
+        createdAt: true,
         settings: {
           select: {
             dripEnabled: true,
@@ -248,6 +249,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       showRegion: user.showRegion,
       holdingsVisibility: user.holdingsVisibility,
       dripEnabled: user.settings?.dripEnabled ?? false,
+      createdAt: user.createdAt.toISOString(),
     });
   } catch (error) {
     console.error('Error getting user settings:', error);

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler } from '../controllers/auth.controller';
+import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler, deleteAccountHandler } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter } from '../middleware/rateLimiter';
 
@@ -28,5 +28,8 @@ router.get('/check-username/:username', apiLimiter, checkUsernameHandler);
 
 // POST /auth/change-password - Change password (requires auth)
 router.post('/change-password', mutationLimiter, requireAuth, changePasswordHandler);
+
+// DELETE /auth/delete-account - Permanently delete account (requires auth + password)
+router.delete('/delete-account', mutationLimiter, requireAuth, deleteAccountHandler);
 
 export default router;

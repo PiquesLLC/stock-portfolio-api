@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
-import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword } from '../services/auth.service';
+import { PrismaClient } from '@prisma/client';
+import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword, verifyPassword } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
+
+const prisma = new PrismaClient();
 
 // Cookie options for auth token
 const COOKIE_OPTIONS = {
@@ -287,5 +290,79 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ error: 'Failed to change password' });
+  }
+}
+
+/**
+ * DELETE /auth/delete-account
+ * Permanently delete user account (requires password confirmation)
+ */
+export async function deleteAccountHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { password } = req.body;
+
+    if (!password || typeof password !== 'string') {
+      res.status(400).json({ error: 'Password is required to confirm account deletion' });
+      return;
+    }
+
+    // Get user to verify password
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user || !user.passwordHash) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Verify password
+    const passwordValid = await verifyPassword(password, user.passwordHash);
+    if (!passwordValid) {
+      res.status(401).json({ error: 'Incorrect password' });
+      return;
+    }
+
+    // Delete all user data in order (respecting foreign keys)
+    await prisma.$transaction(async (tx) => {
+      // Delete activity events
+      await tx.activityEvent.deleteMany({ where: { userId: user.id } });
+
+      // Delete follows (both directions)
+      await tx.follow.deleteMany({ where: { followerId: user.id } });
+      await tx.follow.deleteMany({ where: { followingId: user.id } });
+
+      // Delete alert events first (foreign key to alerts)
+      await tx.alertEvent.deleteMany({ where: { alert: { userId: user.id } } });
+
+      // Delete alerts
+      await tx.alert.deleteMany({ where: { userId: user.id } });
+
+      // Delete holdings
+      await tx.holding.deleteMany({ where: { userId: user.id } });
+
+      // Delete snapshots
+      await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
+
+      // Delete user settings
+      await tx.userSettings.deleteMany({ where: { userId: user.id } });
+
+      // Finally delete the user
+      await tx.user.delete({ where: { id: user.id } });
+    });
+
+    // Clear the auth cookie
+    res.clearCookie('authToken', { path: '/' });
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 }
