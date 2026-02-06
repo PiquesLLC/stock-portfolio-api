@@ -17,6 +17,7 @@ import priceAlertRoutes from './priceAlert.routes';
 import analystRoutes from './analyst.routes';
 import milestoneRoutes from './milestone.routes';
 import fundamentalsRoutes from './fundamentals.routes';
+import nalaRoutes from './nala.routes';
 
 const router = Router();
 
@@ -38,5 +39,6 @@ router.use('/price-alerts', priceAlertRoutes);
 router.use('/analyst', analystRoutes);
 router.use('/milestones', milestoneRoutes);
 router.use('/fundamentals', fundamentalsRoutes);
+router.use('/nala', nalaRoutes);
 
 export default router;

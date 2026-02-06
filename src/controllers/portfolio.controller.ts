@@ -7,7 +7,7 @@ import {
   getHoldings,
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
-import { createActivityEvent } from '../services/activity.service';
+import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
 import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { addTransaction } from '../services/transaction.service';
 
@@ -425,5 +425,25 @@ export async function getPerformanceHandler(req: Request, res: Response): Promis
   } catch (error) {
     console.error('Error fetching performance:', error);
     res.status(500).json({ error: 'Failed to fetch performance data' });
+  }
+}
+
+export async function getTickerActivity(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const events = await getUserActivityByTicker(userId, ticker);
+    res.json(events);
+  } catch (error) {
+    console.error('Error fetching ticker activity:', error);
+    res.status(500).json({ error: 'Failed to fetch ticker activity' });
   }
 }

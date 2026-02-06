@@ -11,7 +11,8 @@ import {
 export async function getAnalystEventsHandler(req: Request, res: Response): Promise<void> {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const events = await getAnalystEvents(limit);
+    const ticker = req.query.ticker as string | undefined;
+    const events = await getAnalystEvents(limit, ticker);
     res.json(events);
   } catch (error) {
     console.error('Error getting analyst events:', error);

@@ -1,8 +1,10 @@
 import { Request, Response } from 'express';
 import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
-import { fetchMarketNews } from '../services/news.service';
+import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
+import { getAIEvents } from '../services/perplexity-events.service';
+import { askStockQuestion } from '../services/perplexity-qa.service';
 
 interface PriceResult {
   price: number;
@@ -195,6 +197,19 @@ export async function getMarketNews(req: Request, res: Response): Promise<void> 
   }
 }
 
+export async function getTickerNews(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 50);
+    const news = await fetchTickerNews(ticker, limit);
+    res.json(news);
+  } catch (error) {
+    console.error('Error fetching ticker news:', error);
+    res.status(500).json({ error: 'Failed to fetch ticker news' });
+  }
+}
+
 export async function getBenchmarkClosesHandler(req: Request, res: Response): Promise<void> {
   try {
     const ticker = req.params.ticker?.toUpperCase();
@@ -242,6 +257,19 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
   }
 }
 
+export async function getAIEventsHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
+    const days = Math.min(parseInt(req.query.days as string) || 90, 7300); // up to ~20 years for MAX
+    const result = await getAIEvents(ticker, days);
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching AI events:', error);
+    res.status(500).json({ error: 'Failed to fetch AI events' });
+  }
+}
+
 export async function getAssetAboutHandler(req: Request, res: Response): Promise<void> {
   try {
     const ticker = req.params.ticker?.toUpperCase();
@@ -260,5 +288,32 @@ export async function getAssetAboutHandler(req: Request, res: Response): Promise
   } catch (error) {
     console.error('Error fetching asset about:', error);
     res.status(500).json({ error: 'Failed to fetch asset about data' });
+  }
+}
+
+export async function askStockQuestionHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
+
+    const { question } = req.body;
+    if (!question || typeof question !== 'string' || question.trim().length === 0) {
+      res.status(400).json({ error: 'Question is required' });
+      return;
+    }
+    if (question.length > 500) {
+      res.status(400).json({ error: 'Question too long (max 500 characters)' });
+      return;
+    }
+
+    const result = await askStockQuestion(ticker, question.trim());
+    res.json(result);
+  } catch (error: any) {
+    if (error.response?.status === 429) {
+      res.status(429).json({ error: 'Rate limited. Please wait a moment.' });
+      return;
+    }
+    console.error('Error in stock Q&A:', error);
+    res.status(500).json({ error: 'Failed to get answer' });
   }
 }

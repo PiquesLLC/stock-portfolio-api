@@ -10,6 +10,7 @@ import {
   getCurrentPaceHandler,
   getChartHandler,
   getPerformanceHandler,
+  getTickerActivity,
 } from '../controllers/portfolio.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
@@ -27,5 +28,6 @@ router.get('/projections/current-pace', getCurrentPaceHandler);
 router.get('/metrics', getMetricsHandler);
 router.get('/summary', getSummaryHandler);
 router.get('/performance', getPerformanceHandler);
+router.get('/activity/:ticker', requireAuth, getTickerActivity);
 
 export default router;

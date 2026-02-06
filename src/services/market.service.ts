@@ -335,21 +335,21 @@ export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 
-  // Fetch all data in parallel — quote can fail for some tickers on Finnhub
-  const [quoteResult, profileRaw, metricsRaw, candlesRaw] = await Promise.all([
-    fetchQuote(upperTicker).catch(() => null),
-    getStockProfile(upperTicker),
-    getStockMetrics(upperTicker),
-    getHistoricalCandles(upperTicker, 5).catch(() => null),
+  // Use Yahoo for quote + candles (fast, no queue), Finnhub only for profile + metrics
+  const [quote, profileRaw, metricsRaw, candles] = await Promise.all([
+    fetchYahooQuote(upperTicker).catch(() => null),
+    getStockProfile(upperTicker).catch(() => null),
+    getStockMetrics(upperTicker).catch(() => null),
+    fetchYahooCandles(upperTicker).catch(() => null),
   ]);
 
-  // Fallback to Yahoo Finance quote if Finnhub failed
-  let quote = quoteResult;
   if (!quote) {
-    quote = await fetchYahooQuote(upperTicker);
-    if (!quote) {
+    // Last resort: try Finnhub quote through the queue
+    const finnhubQuote = await fetchQuote(upperTicker).catch(() => null);
+    if (!finnhubQuote) {
       throw new Error(`No quote data available for ${upperTicker}`);
     }
+    return { ticker: upperTicker, quote: finnhubQuote, profile: null, metrics: null, candles };
   }
 
   // Map profile
@@ -384,22 +384,6 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
       beta: m.beta ?? null,
       eps: m.epsBasicExclExtraItemsTTM ?? null,
     };
-  }
-
-  // Map candles — try Finnhub first, fallback to Yahoo Finance
-  let candles: StockDetailsResponse['candles'] = null;
-  if (candlesRaw && candlesRaw.closes.length > 0) {
-    candles = {
-      closes: candlesRaw.closes,
-      dates: candlesRaw.dates.map(d => d.toISOString().slice(0, 10)),
-      highs: [],
-      lows: [],
-      opens: [],
-      volumes: [],
-    };
-  } else {
-    // Fallback to Yahoo Finance for historical data
-    candles = await fetchYahooCandles(upperTicker);
   }
 
   return { ticker: upperTicker, quote, profile, metrics, candles };

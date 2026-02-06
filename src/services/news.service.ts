@@ -57,6 +57,26 @@ function isMarketRelevant(item: MarketNewsItem): boolean {
   return false;
 }
 
+const tickerNewsCache = new NodeCache({ stdTTL: 300 }); // 5 min
+
+export async function fetchTickerNews(ticker: string, limit = 30): Promise<MarketNewsItem[]> {
+  const upper = ticker.toUpperCase();
+  const cached = tickerNewsCache.get<MarketNewsItem[]>(`news-${upper}`);
+  if (cached) return cached.slice(0, limit);
+
+  // Finnhub company news: last 30 days
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const resp = await axios.get<MarketNewsItem[]>('https://finnhub.io/api/v1/company-news', {
+    params: { symbol: upper, from, to, token: config.finnhubApiKey },
+    timeout: 8000,
+  });
+
+  const items = (resp.data || []).slice(0, 50);
+  tickerNewsCache.set(`news-${upper}`, items);
+  return items.slice(0, limit);
+}
+
 export async function fetchMarketNews(limit = 20): Promise<MarketNewsItem[]> {
   const cached = newsCache.get<MarketNewsItem[]>('market-news');
   if (cached) return cached.slice(0, limit);

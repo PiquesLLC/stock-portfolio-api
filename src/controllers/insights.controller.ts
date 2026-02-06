@@ -6,6 +6,8 @@ import {
   getRiskForecast,
 } from '../services/insights.service';
 import { getIncomeInsights, IncomeWindow } from '../services/income-insights.service';
+import { getPortfolioBriefing } from '../services/perplexity-briefing.service';
+import { getBehaviorInsights } from '../services/perplexity-behavior.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -103,6 +105,41 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
       contributors: [],
       concentration: { top1Percent: 0, top3Percent: 0, top1Ticker: null, top3Tickers: [], isConcentrated: false },
       timeline: [],
+    });
+  }
+}
+
+export async function getBriefingHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const briefing = await getPortfolioBriefing();
+    res.json(briefing);
+  } catch (error) {
+    console.error('Error getting portfolio briefing:', error);
+    res.status(500).json({
+      error: 'Failed to generate briefing',
+      generatedAt: new Date().toISOString(),
+      headline: 'Briefing temporarily unavailable.',
+      sections: [],
+      holdingCount: 0,
+      cached: false,
+    });
+  }
+}
+
+export async function getBehaviorHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const behavior = await getBehaviorInsights();
+    res.json(behavior);
+  } catch (error) {
+    console.error('Error getting behavior insights:', error);
+    res.status(500).json({
+      error: 'Failed to generate behavior insights',
+      generatedAt: new Date().toISOString(),
+      summary: 'Behavior insights temporarily unavailable.',
+      insights: [],
+      activityCount: 0,
+      holdingCount: 0,
+      cached: false,
     });
   }
 }

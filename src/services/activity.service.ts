@@ -75,6 +75,39 @@ export async function getFeed(
     }));
 }
 
+export async function getUserActivityByTicker(
+  userId: string,
+  ticker: string,
+  limit = 100
+): Promise<ActivityEventResponse[]> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true, displayName: true },
+  });
+  if (!user) return [];
+
+  const events = await prisma.$queryRaw<
+    { id: string; userId: string; type: string; payload: string; createdAt: Date }[]
+  >`
+    SELECT id, "userId", type, payload, "createdAt"
+    FROM "ActivityEvent"
+    WHERE "userId" = ${userId}
+      AND JSON_EXTRACT(payload, '$.ticker') = ${ticker.toUpperCase()}
+    ORDER BY "createdAt" DESC
+    LIMIT ${limit}
+  `;
+
+  return events.map((e) => ({
+    id: e.id,
+    userId,
+    username: user.username,
+    displayName: user.displayName,
+    type: e.type as ActivityType,
+    payload: JSON.parse(e.payload) as ActivityPayload,
+    createdAt: new Date(e.createdAt).toISOString(),
+  }));
+}
+
 export async function getUserActivity(
   userId: string,
   limit = 20

@@ -37,7 +37,11 @@ interface AnalystData {
   strongSell: number | null;
 }
 
+// Track if price-target endpoint is accessible (free tier returns 403)
+let priceTargetDisabled = false;
+
 async function fetchPriceTarget(ticker: string): Promise<FinnhubPriceTarget | null> {
+  if (priceTargetDisabled) return null;
   try {
     const response = await axios.get<FinnhubPriceTarget>(`${FINNHUB_BASE_URL}/stock/price-target`, {
       params: { symbol: ticker.toUpperCase(), token: config.finnhubApiKey },
@@ -48,13 +52,19 @@ async function fetchPriceTarget(ticker: string): Promise<FinnhubPriceTarget | nu
       return null;
     }
     return response.data;
-  } catch (error) {
-    console.error(`[Analyst] Failed to fetch price target for ${ticker}:`, error);
+  } catch (error: any) {
+    if (error?.response?.status === 403) {
+      console.warn(`[Analyst] Price target endpoint requires premium plan — disabling for this session`);
+      priceTargetDisabled = true;
+    }
     return null;
   }
 }
 
+let recommendationsDisabled = false;
+
 async function fetchRecommendations(ticker: string): Promise<FinnhubRecommendation | null> {
+  if (recommendationsDisabled) return null;
   try {
     const response = await axios.get<FinnhubRecommendation[]>(`${FINNHUB_BASE_URL}/stock/recommendation`, {
       params: { symbol: ticker.toUpperCase(), token: config.finnhubApiKey },
@@ -65,8 +75,11 @@ async function fetchRecommendations(ticker: string): Promise<FinnhubRecommendati
       return response.data[0];
     }
     return null;
-  } catch (error) {
-    console.error(`[Analyst] Failed to fetch recommendations for ${ticker}:`, error);
+  } catch (error: any) {
+    if (error?.response?.status === 403) {
+      console.warn(`[Analyst] Recommendations endpoint requires premium plan — disabling for this session`);
+      recommendationsDisabled = true;
+    }
     return null;
   }
 }
@@ -222,8 +235,9 @@ export async function checkAnalystUpdates(tickers: string[]): Promise<void> {
   console.log(`[Analyst] Finished checking analyst updates`);
 }
 
-export async function getAnalystEvents(limit = 50): Promise<any[]> {
+export async function getAnalystEvents(limit = 50, ticker?: string): Promise<any[]> {
   return prisma.analystEvent.findMany({
+    where: ticker ? { ticker: ticker.toUpperCase() } : undefined,
     orderBy: { createdAt: 'desc' },
     take: limit,
   });

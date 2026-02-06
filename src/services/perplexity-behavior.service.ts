@@ -1,0 +1,152 @@
+import NodeCache from 'node-cache';
+import { callPerplexity, extractJson } from '../utils/perplexity';
+import { getPortfolio } from './portfolio.service';
+import { getUserActivity } from './activity.service';
+
+// Cache behavior insights for 1 hour
+const behaviorCache = new NodeCache({ stdTTL: 3600 });
+
+const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+export interface BehaviorInsight {
+  category: 'concentration' | 'timing' | 'sizing' | 'diversification' | 'general';
+  title: string;
+  observation: string;
+  suggestion: string;
+  severity: 'info' | 'warning' | 'positive';
+}
+
+export interface BehaviorInsightsResponse {
+  generatedAt: string;
+  summary: string;
+  insights: BehaviorInsight[];
+  activityCount: number;
+  holdingCount: number;
+  cached: boolean;
+}
+
+const SYSTEM_PROMPT = `You are a behavioral finance coach for a retail investor. Analyze their portfolio composition and activity history.
+Return ONLY valid JSON:
+{
+  "summary": "One paragraph overall assessment of their investing behavior and portfolio health",
+  "insights": [
+    {
+      "category": "concentration|timing|sizing|diversification|general",
+      "title": "Short title (5-8 words)",
+      "observation": "What you observe in their portfolio/behavior (1-2 sentences)",
+      "suggestion": "Constructive, educational suggestion (1-2 sentences)",
+      "severity": "info|warning|positive"
+    }
+  ]
+}
+Provide 4-6 insights. Be constructive, not judgmental. Use plain language.
+Focus on: position sizing, concentration risk, sector diversification, cost-basis efficiency,
+activity frequency (too much trading vs buy-and-hold), and unrealized gain/loss management.
+For "positive" severity, highlight good habits. For "warning", flag potential risks. For "info", offer educational tips.`;
+
+export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
+  const cacheKey = 'behavior-insights';
+  const cached = behaviorCache.get<BehaviorInsightsResponse>(cacheKey);
+  if (cached) return { ...cached, cached: true };
+
+  const [portfolio, activity] = await Promise.all([
+    getPortfolio(),
+    getUserActivity(DEFAULT_USER_ID, 50),
+  ]);
+
+  if (portfolio.holdings.length === 0) {
+    return {
+      generatedAt: new Date().toISOString(),
+      summary: 'Add holdings to your portfolio to receive behavior insights.',
+      insights: [],
+      activityCount: 0,
+      holdingCount: 0,
+      cached: false,
+    };
+  }
+
+  // Build holdings summary with weights
+  const holdingsSummary = portfolio.holdings
+    .sort((a, b) => b.currentValue - a.currentValue)
+    .map(h => {
+      const weight = portfolio.holdingsValue > 0
+        ? ((h.currentValue / portfolio.holdingsValue) * 100).toFixed(1)
+        : '0';
+      return `${h.ticker}: ${weight}% of portfolio, ${h.shares} shares at $${h.averageCost.toFixed(2)} avg cost, ` +
+        `current $${h.currentPrice.toFixed(2)}, P/L ${h.profitLossPercent >= 0 ? '+' : ''}${h.profitLossPercent.toFixed(1)}%`;
+    })
+    .join('\n');
+
+  // Build activity summary
+  const activitySummary = activity.length > 0
+    ? activity.slice(0, 30).map(a => {
+        const dateStr = new Date(a.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        if (a.type === 'holding_added') return `${dateStr}: Added ${a.payload.ticker} (${a.payload.shares} shares at $${a.payload.averageCost?.toFixed(2)})`;
+        if (a.type === 'holding_removed') return `${dateStr}: Removed ${a.payload.ticker}`;
+        if (a.type === 'holding_updated') return `${dateStr}: Updated ${a.payload.ticker} (${a.payload.previousShares} → ${a.payload.shares} shares)`;
+        return `${dateStr}: ${a.type} ${a.payload.ticker}`;
+      }).join('\n')
+    : 'No recent activity recorded.';
+
+  const userMessage =
+    `Portfolio (${portfolio.holdings.length} positions, total $${portfolio.holdingsValue.toFixed(0)}, ` +
+    `cash $${portfolio.cashBalance.toFixed(0)}, margin $${portfolio.marginDebt.toFixed(0)}):\n\n` +
+    `${holdingsSummary}\n\n` +
+    `Recent Activity:\n${activitySummary}\n\n` +
+    `Analyze my portfolio behavior and provide educational insights.`;
+
+  try {
+    const resp = await callPerplexity([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userMessage },
+    ], { timeout: 60000 });
+
+    if (!resp || !resp.content) {
+      return {
+        generatedAt: new Date().toISOString(),
+        summary: 'Unable to generate behavior insights at this time.',
+        insights: [],
+        activityCount: activity.length,
+        holdingCount: portfolio.holdings.length,
+        cached: false,
+      };
+    }
+
+    const jsonStr = extractJson(resp.content);
+    const parsed = JSON.parse(jsonStr);
+
+    const validCategories = ['concentration', 'timing', 'sizing', 'diversification', 'general'];
+    const validSeverities = ['info', 'warning', 'positive'];
+
+    const result: BehaviorInsightsResponse = {
+      generatedAt: new Date().toISOString(),
+      summary: String(parsed.summary || '').slice(0, 500),
+      insights: (parsed.insights || []).slice(0, 8).map((i: any) => ({
+        category: validCategories.includes(i.category) ? i.category : 'general',
+        title: String(i.title || '').slice(0, 100),
+        observation: String(i.observation || '').slice(0, 300),
+        suggestion: String(i.suggestion || '').slice(0, 300),
+        severity: validSeverities.includes(i.severity) ? i.severity : 'info',
+      })),
+      activityCount: activity.length,
+      holdingCount: portfolio.holdings.length,
+      cached: false,
+    };
+
+    if (result.insights.length > 0) {
+      behaviorCache.set(cacheKey, result);
+    }
+    console.log(`[Perplexity Behavior] Generated ${result.insights.length} insights for ${portfolio.holdings.length} holdings`);
+    return result;
+  } catch (error: any) {
+    console.error('[Perplexity Behavior] Error:', error.message);
+    return {
+      generatedAt: new Date().toISOString(),
+      summary: 'Behavior insights temporarily unavailable.',
+      insights: [],
+      activityCount: activity.length,
+      holdingCount: portfolio.holdings.length,
+      cached: false,
+    };
+  }
+}
