@@ -1,8 +1,8 @@
 import NodeCache from 'node-cache';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 
-// Cache AI events for 2 hours per ticker+days combo
-const aiEventsCache = new NodeCache({ stdTTL: 7200 });
+// Cache AI events for 10 minutes per ticker+days combo
+const aiEventsCache = new NodeCache({ stdTTL: 600 });
 
 export interface AIEvent {
   date: string; // YYYY-MM-DD
@@ -58,7 +58,7 @@ export async function getAIEvents(ticker: string, days = 90): Promise<AIEventsRe
 
   const userMessage = isMax
     ? `Find the 15-20 most significant earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events in the entire trading history of ${upper}. Focus on events that moved the stock price significantly. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`
-    : `Find all earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events for ${upper} between ${startDate} and ${endDate}. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`;
+    : `Find the most RECENT earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events for ${upper} from ${startDate} to ${endDate} (today). IMPORTANT: Only include events that actually occurred or were announced AFTER ${startDate}. Do NOT include any events from before ${startDate}. Prioritize the most recent events first. Today's date is ${endDate}. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`;
 
   try {
     const resp = await callPerplexity([
