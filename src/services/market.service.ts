@@ -157,6 +157,76 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): P
 
 const yahooQuoteCache = new NodeCache({ stdTTL: 10 }); // 10s cache for live Yahoo quotes
 
+// Hardcoded ETF reference data for common ETFs where Finnhub free tier returns nulls.
+// Values are approximate as of early 2026 — better than showing nothing.
+// TODO: Replace with paid API data before public release.
+interface ETFRefData {
+  aumB?: number;       // Assets under management in billions
+  expenseRatio?: number; // Annual expense ratio as percentage (e.g. 0.09 = 0.09%)
+  peRatio?: number;
+  dividendYield?: number;
+  beta?: number;
+}
+
+const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
+  // S&P 500 trackers
+  SPY:  { aumB: 550, expenseRatio: 0.0945, peRatio: 23.5, dividendYield: 1.2, beta: 1.0 },
+  VOO:  { aumB: 430, expenseRatio: 0.03,   peRatio: 23.5, dividendYield: 1.2, beta: 1.0 },
+  IVV:  { aumB: 500, expenseRatio: 0.03,   peRatio: 23.5, dividendYield: 1.2, beta: 1.0 },
+  // Total market
+  VTI:  { aumB: 420, expenseRatio: 0.03,   peRatio: 22.0, dividendYield: 1.2, beta: 1.0 },
+  ITOT: { aumB: 55,  expenseRatio: 0.03,   peRatio: 22.0, dividendYield: 1.2, beta: 1.0 },
+  // Nasdaq 100
+  QQQ:  { aumB: 300, expenseRatio: 0.20,   peRatio: 32.0, dividendYield: 0.5, beta: 1.15 },
+  QQQM: { aumB: 30,  expenseRatio: 0.15,   peRatio: 32.0, dividendYield: 0.5, beta: 1.15 },
+  // Dow Jones
+  DIA:  { aumB: 35,  expenseRatio: 0.16,   peRatio: 19.0, dividendYield: 1.6, beta: 0.95 },
+  // Dividend-focused
+  SCHD: { aumB: 60,  expenseRatio: 0.06,   dividendYield: 3.3, beta: 0.85 },
+  VYM:  { aumB: 55,  expenseRatio: 0.06,   dividendYield: 2.7, beta: 0.85 },
+  DVY:  { aumB: 20,  expenseRatio: 0.38,   dividendYield: 3.5, beta: 0.80 },
+  HDV:  { aumB: 10,  expenseRatio: 0.08,   dividendYield: 3.2, beta: 0.80 },
+  // Sector ETFs
+  XLK:  { aumB: 65,  expenseRatio: 0.09,   peRatio: 30.0, beta: 1.15 },
+  XLF:  { aumB: 45,  expenseRatio: 0.09,   peRatio: 15.0, beta: 1.10 },
+  XLE:  { aumB: 35,  expenseRatio: 0.09,   peRatio: 12.0, dividendYield: 3.0, beta: 1.20 },
+  XLV:  { aumB: 40,  expenseRatio: 0.09,   peRatio: 18.0, dividendYield: 1.5, beta: 0.75 },
+  XLI:  { aumB: 18,  expenseRatio: 0.09,   peRatio: 20.0, beta: 1.05 },
+  XLC:  { aumB: 18,  expenseRatio: 0.09,   peRatio: 20.0, beta: 1.10 },
+  VGT:  { aumB: 70,  expenseRatio: 0.10,   peRatio: 30.0, beta: 1.15 },
+  // Growth / Innovation
+  ARKK: { aumB: 6,   expenseRatio: 0.75,   beta: 1.80 },
+  VUG:  { aumB: 120, expenseRatio: 0.04,   peRatio: 32.0, beta: 1.15 },
+  IWF:  { aumB: 90,  expenseRatio: 0.19,   peRatio: 30.0, beta: 1.10 },
+  // Value
+  VTV:  { aumB: 120, expenseRatio: 0.04,   peRatio: 16.0, dividendYield: 2.2, beta: 0.90 },
+  IWD:  { aumB: 55,  expenseRatio: 0.19,   peRatio: 16.0, dividendYield: 1.8, beta: 0.90 },
+  // Small Cap
+  IWM:  { aumB: 60,  expenseRatio: 0.19,   peRatio: 15.0, beta: 1.20 },
+  VB:   { aumB: 50,  expenseRatio: 0.05,   peRatio: 16.0, beta: 1.15 },
+  // International
+  VXUS: { aumB: 65,  expenseRatio: 0.07,   peRatio: 14.0, dividendYield: 3.0, beta: 0.85 },
+  EFA:  { aumB: 55,  expenseRatio: 0.32,   peRatio: 14.0, dividendYield: 2.8, beta: 0.85 },
+  EEM:  { aumB: 18,  expenseRatio: 0.68,   peRatio: 12.0, dividendYield: 2.5, beta: 0.95 },
+  VWO:  { aumB: 75,  expenseRatio: 0.08,   peRatio: 12.0, dividendYield: 2.8, beta: 0.90 },
+  // Bonds
+  AGG:  { aumB: 100, expenseRatio: 0.03,   dividendYield: 4.2, beta: 0.05 },
+  BND:  { aumB: 105, expenseRatio: 0.03,   dividendYield: 4.2, beta: 0.05 },
+  TLT:  { aumB: 55,  expenseRatio: 0.15,   dividendYield: 4.0, beta: 0.10 },
+  SHY:  { aumB: 25,  expenseRatio: 0.15,   dividendYield: 4.5, beta: 0.02 },
+  // Commodities
+  GLD:  { aumB: 65,  expenseRatio: 0.40 },
+  SLV:  { aumB: 12,  expenseRatio: 0.50 },
+  IAU:  { aumB: 30,  expenseRatio: 0.25 },
+  // Real Estate
+  VNQ:  { aumB: 35,  expenseRatio: 0.12,   peRatio: 35.0, dividendYield: 3.5, beta: 0.90 },
+  XLRE: { aumB: 6,   expenseRatio: 0.09,   dividendYield: 3.2, beta: 0.85 },
+  // Leveraged (no PE/yield — too volatile)
+  TQQQ: { aumB: 25,  expenseRatio: 0.86,   beta: 3.0 },
+  SQQQ: { aumB: 5,   expenseRatio: 0.95,   beta: -3.0 },
+  SPXL: { aumB: 4,   expenseRatio: 0.91,   beta: 3.0 },
+};
+
 /**
  * Fetch extended hours price from Yahoo Finance.
  * Returns { price, marketState } or null if unavailable.
@@ -383,7 +453,35 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
       avgVolume10D: m['10DayAverageTradingVolume'] ?? null,
       beta: m.beta ?? null,
       eps: m.epsBasicExclExtraItemsTTM ?? null,
+      expenseRatio: null,
+      aumB: null,
     };
+  }
+
+  // Enrich with hardcoded ETF reference data where Finnhub returns nulls
+  const etfRef = ETF_REFERENCE_DATA[upperTicker];
+  if (etfRef) {
+    if (!metrics) {
+      metrics = {
+        ticker: upperTicker,
+        peRatio: etfRef.peRatio ?? null,
+        week52High: null,
+        week52Low: null,
+        dividendYield: etfRef.dividendYield ?? null,
+        avgVolume10D: null,
+        beta: etfRef.beta ?? null,
+        eps: null,
+        expenseRatio: etfRef.expenseRatio ?? null,
+        aumB: etfRef.aumB ?? null,
+      };
+    } else {
+      // Fill in nulls with ETF reference data
+      if (metrics.peRatio === null && etfRef.peRatio != null) metrics.peRatio = etfRef.peRatio;
+      if (metrics.dividendYield === null && etfRef.dividendYield != null) metrics.dividendYield = etfRef.dividendYield;
+      if (metrics.beta === null && etfRef.beta != null) metrics.beta = etfRef.beta;
+      metrics.expenseRatio = etfRef.expenseRatio ?? null;
+      metrics.aumB = etfRef.aumB ?? null;
+    }
   }
 
   return { ticker: upperTicker, quote, profile, metrics, candles };

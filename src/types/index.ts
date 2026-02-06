@@ -380,6 +380,8 @@ export interface StockMetrics {
   avgVolume10D: number | null;
   beta: number | null;
   eps: number | null;
+  expenseRatio: number | null;
+  aumB: number | null;
 }
 
 export interface AssetAbout {
