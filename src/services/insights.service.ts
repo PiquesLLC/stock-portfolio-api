@@ -636,12 +636,14 @@ export async function getAttribution(window: AttributionWindow = '1d'): Promise<
 
     contributions = holdings.map(h => {
       const candles = candleData.get(h.ticker);
-      if (!candles || candles.partial || candles.closes.length < daysBack + 1) {
+      if (!candles || candles.closes.length < 2) {
         return { ticker: h.ticker, contributionDollar: 0, contributionPct: 0 };
       }
 
+      // Use available data: go back daysBack if possible, otherwise use earliest available
+      const availableBack = Math.min(daysBack, candles.closes.length - 1);
       const currentPrice = candles.closes[candles.closes.length - 1];
-      const pastPrice = candles.closes[candles.closes.length - 1 - daysBack];
+      const pastPrice = candles.closes[candles.closes.length - 1 - availableBack];
 
       if (pastPrice <= 0) {
         return { ticker: h.ticker, contributionDollar: 0, contributionPct: 0 };
