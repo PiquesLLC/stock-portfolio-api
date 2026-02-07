@@ -8,6 +8,7 @@ import {
 import { getIncomeInsights, IncomeWindow } from '../services/income-insights.service';
 import { getPortfolioBriefing } from '../services/perplexity-briefing.service';
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
+import { getDailyReport } from '../services/perplexity-daily-report.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -139,6 +140,24 @@ export async function getBehaviorHandler(req: Request, res: Response): Promise<v
       insights: [],
       activityCount: 0,
       holdingCount: 0,
+      cached: false,
+    });
+  }
+}
+
+export async function getDailyReportHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const report = await getDailyReport();
+    res.json(report);
+  } catch (error) {
+    console.error('Daily report error:', error);
+    res.status(500).json({
+      generatedAt: new Date().toISOString(),
+      greeting: 'Good morning!',
+      marketOverview: 'Unable to generate market overview at this time.',
+      portfolioSummary: 'Unable to generate portfolio summary at this time.',
+      topStories: [],
+      watchToday: [],
       cached: false,
     });
   }

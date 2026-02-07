@@ -608,6 +608,8 @@ export async function getAttribution(window: AttributionWindow = '1d'): Promise<
       window,
       topContributors: [],
       topDetractors: [],
+      winnersCount: 0,
+      losersCount: 0,
       partial: true,
     };
   }
@@ -675,10 +677,15 @@ export async function getAttribution(window: AttributionWindow = '1d'): Promise<
     .slice(-5)
     .reverse();
 
+  const winnersCount = contributions.filter(c => c.contributionDollar > 0).length;
+  const losersCount = contributions.filter(c => c.contributionDollar < 0).length;
+
   const result: Attribution = {
     window,
     topContributors,
     topDetractors,
+    winnersCount,
+    losersCount,
     partial: false,
   };
 

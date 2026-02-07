@@ -7,6 +7,7 @@ import {
   getIncomeInsightsHandler,
   getBriefingHandler,
   getBehaviorHandler,
+  getDailyReportHandler,
 } from '../controllers/insights.controller';
 
 const router = Router();
@@ -18,5 +19,6 @@ router.get('/risk-forecast', getRiskForecastHandler);
 router.get('/income', getIncomeInsightsHandler);
 router.get('/briefing', getBriefingHandler);
 router.get('/behavior', getBehaviorHandler);
+router.get('/daily-report', getDailyReportHandler);
 
 export default router;

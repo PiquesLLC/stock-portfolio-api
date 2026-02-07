@@ -468,6 +468,8 @@ export interface Attribution {
     contributionDollar: number;
     contributionPct: number;
   }[];
+  winnersCount: number;
+  losersCount: number;
   partial: boolean;
 }
 
