@@ -56,9 +56,12 @@ export async function getAIEvents(ticker: string, days = 90): Promise<AIEventsRe
     ? '1990-01-01'
     : new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
+  // Scale event count based on time range
+  const eventCount = isMax ? 40 : days >= 1000 ? 30 : days >= 365 ? 20 : 15;
+
   const userMessage = isMax
-    ? `Find the 15-20 most significant earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events in the entire trading history of ${upper}. Focus on events that moved the stock price significantly. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`
-    : `Find the most RECENT earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events for ${upper} from ${startDate} to ${endDate} (today). IMPORTANT: Only include events that actually occurred or were announced AFTER ${startDate}. Do NOT include any events from before ${startDate}. Prioritize the most recent events first. Today's date is ${endDate}. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`;
+    ? `Find ${eventCount} significant earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events across the ENTIRE trading history of ${upper}, going back to its IPO. IMPORTANT: Spread events evenly across all decades — include events from the 2000s, 2010s, and 2020s, not just recent years. For each decade the stock has been public, include at least 5-8 events. Focus on events that moved the stock price significantly. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`
+    : `Find up to ${eventCount} earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events for ${upper} from ${startDate} to ${endDate} (today). IMPORTANT: Only include events that actually occurred or were announced AFTER ${startDate}. Do NOT include any events from before ${startDate}. Spread events across the entire date range, not just the most recent months. Today's date is ${endDate}. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`;
 
   try {
     const resp = await callPerplexity([
@@ -111,9 +114,10 @@ export async function getAIEvents(ticker: string, days = 90): Promise<AIEventsRe
     }
 
     const result: AIEventsResponse = { ticker: upper, events: validEvents };
-    // Only cache non-empty results
+    // Only cache non-empty results — longer TTL for historical data
     if (validEvents.length > 0) {
-      aiEventsCache.set(cacheKey, result);
+      const ttl = isMax ? 3600 : days >= 365 ? 1800 : 600; // 1hr for MAX, 30min for 1Y+, 10min default
+      aiEventsCache.set(cacheKey, result, ttl);
     }
     console.log(`[Perplexity] ${upper}: ${validEvents.length}/${rawEvents.length} events (${isMax ? 'MAX' : `${startDate} to ${endDate}`}), ${resp.citations.length} citations`);
     return result;

@@ -37,7 +37,7 @@ export interface EarningsResponse {
 }
 
 function parseQuarterly(raw: AVQuarterlyEarning[]): ParsedQuarterlyEarning[] {
-  return raw.slice(0, 16).map(q => {
+  return raw.map(q => {
     const reported = parseAVNumber(q.reportedEPS);
     const estimated = parseAVNumber(q.estimatedEPS);
     const surprise = parseAVNumber(q.surprise);
@@ -100,7 +100,7 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       : empty;
 
     const quarterly = parseQuarterly(raw.quarterlyEarnings || []);
-    const annual: ParsedAnnualEarning[] = (raw.annualEarnings || []).slice(0, 10).map(a => ({
+    const annual: ParsedAnnualEarning[] = (raw.annualEarnings || []).map(a => ({
       fiscalDateEnding: a.fiscalDateEnding,
       reportedEPS: parseAVNumber(a.reportedEPS),
     }));
