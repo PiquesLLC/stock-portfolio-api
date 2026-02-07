@@ -6,7 +6,7 @@ import {
   getRiskForecast,
 } from '../services/insights.service';
 import { getIncomeInsights, IncomeWindow } from '../services/income-insights.service';
-import { getPortfolioBriefing } from '../services/perplexity-briefing.service';
+import { getPortfolioBriefing, explainBriefingSection } from '../services/perplexity-briefing.service';
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
 import { getDailyReport } from '../services/perplexity-daily-report.service';
 
@@ -160,5 +160,20 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
       watchToday: [],
       cached: false,
     });
+  }
+}
+
+export async function explainBriefingHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const { title, body } = req.body;
+    if (!title || !body) {
+      res.status(400).json({ error: 'title and body are required' });
+      return;
+    }
+    const result = await explainBriefingSection(title, body);
+    res.json(result);
+  } catch (error: any) {
+    console.error('[Briefing Explain] Error:', error.message);
+    res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
   }
 }

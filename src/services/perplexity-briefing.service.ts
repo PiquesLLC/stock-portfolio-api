@@ -114,3 +114,46 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     };
   }
 }
+
+// --- Briefing Section Deep Dive ---
+
+const explainCache = new NodeCache({ stdTTL: 3600 }); // 1hr cache
+
+export interface BriefingExplainResponse {
+  explanation: string;
+  citations: string[];
+  cached: boolean;
+}
+
+const EXPLAIN_SYSTEM_PROMPT = `You are a financial news analyst providing detailed context to a retail investor.
+The user will give you a brief summary from their portfolio briefing. Your job is to explain the FULL context:
+- What happened and why (the news, events, policy changes, earnings, etc.)
+- How it affects the companies mentioned
+- Any broader market implications
+Write 3-5 detailed paragraphs in plain language. Be specific about dates, numbers, and events.
+Do NOT recommend buying or selling. Do NOT give investment advice. Just explain the situation thoroughly.`;
+
+export async function explainBriefingSection(title: string, body: string): Promise<BriefingExplainResponse> {
+  const cacheKey = `briefing-explain-${title.toLowerCase().replace(/\s+/g, '-').slice(0, 50)}`;
+  const cached = explainCache.get<BriefingExplainResponse>(cacheKey);
+  if (cached) return { ...cached, cached: true };
+
+  const resp = await callPerplexity([
+    { role: 'system', content: EXPLAIN_SYSTEM_PROMPT },
+    { role: 'user', content: `Briefing section: "${title}"\n\nSummary: ${body}\n\nPlease provide the full detailed context and explanation.` },
+  ], { timeout: 30000 });
+
+  if (!resp || !resp.content) {
+    return { explanation: 'Unable to load detailed explanation at this time.', citations: [], cached: false };
+  }
+
+  const result: BriefingExplainResponse = {
+    explanation: resp.content,
+    citations: resp.citations || [],
+    cached: false,
+  };
+
+  explainCache.set(cacheKey, result);
+  console.log(`[Perplexity Briefing Explain] Generated explanation for "${title}"`);
+  return result;
+}
