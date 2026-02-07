@@ -7,29 +7,41 @@ const briefingCache = new NodeCache({ stdTTL: 1800 });
 
 export interface BriefingSection {
   title: string;
+  takeaway: string;
   body: string;
   sentiment?: 'positive' | 'neutral' | 'negative';
 }
 
 export interface PortfolioBriefingResponse {
   generatedAt: string;
+  verdict: string;
   headline: string;
   sections: BriefingSection[];
   holdingCount: number;
   cached: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a concise portfolio analyst writing a weekly briefing for a retail investor.
+const SYSTEM_PROMPT = `You are a senior portfolio analyst explaining a weekly briefing to a retail investor in Slack — not writing a report.
 Return ONLY valid JSON with this structure:
 {
-  "headline": "One sentence portfolio summary with key number",
+  "verdict": "One calm sentence framing the week's theme (e.g. 'This week was about stability, not momentum.')",
+  "headline": "One sentence portfolio summary with one key number",
   "sections": [
-    { "title": "Section Title", "body": "2-3 sentences of analysis", "sentiment": "positive|neutral|negative" }
+    { "title": "Plain-English Headline", "takeaway": "One sentence the user should remember", "body": "2-3 sentences of analysis", "sentiment": "positive|neutral|negative" }
   ]
 }
-Write 3-5 sections. Be specific about company names and events. Use plain language, no jargon.
-Focus on: overall portfolio movement, which holdings drove gains/losses and WHY (news, earnings, market trends),
-any upcoming catalysts to watch. Do NOT repeat raw numbers the user already sees — add insight and context.`;
+Rules:
+- Write 3-5 sections
+- 1 idea per paragraph, 2-3 sentences max
+- Only include numbers when they change interpretation
+- Prefer "because" over "while"
+- Be specific about company names and events
+- Use plain language, no jargon or parentheticals
+- The title should be a clear headline — if a user reads only titles, they understand the week
+- The takeaway is a single memorable sentence summarizing the section
+- Focus on: what drove gains/losses and WHY, upcoming catalysts to watch
+- Do NOT repeat raw numbers the user already sees — add insight and context
+- Do NOT recommend buying or selling`;
 
 export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse> {
   const cacheKey = 'portfolio-briefing';
@@ -41,6 +53,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
   if (portfolio.holdings.length === 0) {
     return {
       generatedAt: new Date().toISOString(),
+      verdict: '',
       headline: 'Add holdings to your portfolio to receive a weekly briefing.',
       sections: [],
       holdingCount: 0,
@@ -76,6 +89,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     if (!resp || !resp.content) {
       return {
         generatedAt: new Date().toISOString(),
+        verdict: '',
         headline: 'Unable to generate briefing at this time.',
         sections: [],
         holdingCount: portfolio.holdings.length,
@@ -88,9 +102,11 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
 
     const result: PortfolioBriefingResponse = {
       generatedAt: new Date().toISOString(),
+      verdict: String(parsed.verdict || '').slice(0, 200),
       headline: String(parsed.headline || '').slice(0, 200),
       sections: (parsed.sections || []).map((s: any) => ({
         title: String(s.title || '').slice(0, 100),
+        takeaway: String(s.takeaway || '').slice(0, 200),
         body: String(s.body || '').slice(0, 1000),
         sentiment: ['positive', 'neutral', 'negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
       })),
@@ -107,6 +123,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     console.error('[Perplexity Briefing] Error:', error.message);
     return {
       generatedAt: new Date().toISOString(),
+      verdict: '',
       headline: 'Briefing temporarily unavailable.',
       sections: [],
       holdingCount: portfolio.holdings.length,
@@ -125,13 +142,23 @@ export interface BriefingExplainResponse {
   cached: boolean;
 }
 
-const EXPLAIN_SYSTEM_PROMPT = `You are a financial news analyst providing detailed context to a retail investor.
-The user will give you a brief summary from their portfolio briefing. Your job is to explain the FULL context:
-- What happened and why (the news, events, policy changes, earnings, etc.)
+const EXPLAIN_SYSTEM_PROMPT = `You are a senior financial analyst explaining context to a retail investor — like a knowledgeable colleague in Slack, not a research report.
+
+The user will give you a brief summary from their portfolio briefing. Explain the full context:
+- What happened and why (news, events, policy changes, earnings)
 - How it affects the companies mentioned
 - Any broader market implications
-Write 3-5 detailed paragraphs in plain language. Be specific about dates, numbers, and events.
-Do NOT recommend buying or selling. Do NOT give investment advice. Just explain the situation thoroughly.`;
+
+Writing rules (non-negotiable):
+- 1 idea per paragraph
+- 2-3 sentences max per paragraph
+- Only include numbers when they change interpretation
+- No parentheticals, no inline citations like [1] or [2]
+- Prefer "because" over "while"
+- Write 4-6 short paragraphs
+- Be specific about dates and events
+- Do NOT recommend buying or selling
+- Do NOT give investment advice`;
 
 export async function explainBriefingSection(title: string, body: string): Promise<BriefingExplainResponse> {
   const cacheKey = `briefing-explain-${title.toLowerCase().replace(/\s+/g, '-').slice(0, 50)}`;

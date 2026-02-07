@@ -119,6 +119,7 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
     res.status(500).json({
       error: 'Failed to generate briefing',
       generatedAt: new Date().toISOString(),
+      verdict: '',
       headline: 'Briefing temporarily unavailable.',
       sections: [],
       holdingCount: 0,
