@@ -1,38 +1,47 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword, verifyPassword } from '../services/auth.service';
+import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword, verifyPassword, rotateRefreshToken, revokeAllRefreshTokens } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
+import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, deleteAccountSchema, formatZodError } from '../validators/auth.validators';
 
 const prisma = new PrismaClient();
 
-// Cookie options for auth token
-const COOKIE_OPTIONS = {
+// Cookie options for access token
+const ACCESS_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+  secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  maxAge: 15 * 60 * 1000, // 15 minutes
   path: '/',
 };
 
+// Cookie options for refresh token
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+  path: '/auth/refresh',
+};
+
+function clearAllAuthCookies(res: Response): void {
+  res.clearCookie('authToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
+  res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/auth/refresh' });
+}
+
 /**
  * POST /auth/login
- * Login with username and password - sets httpOnly cookie
  */
 export async function loginHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { username, password } = req.body;
-
-    if (!username || typeof username !== 'string') {
-      res.status(400).json({ error: 'Username is required' });
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    if (!password || typeof password !== 'string') {
-      res.status(400).json({ error: 'Password is required' });
-      return;
-    }
-
+    const { username, password } = parsed.data;
     const result = await loginWithPassword(username, password);
 
     if (!result) {
@@ -40,10 +49,8 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Set httpOnly cookie instead of returning token in body
-    res.cookie('authToken', result.token, COOKIE_OPTIONS);
-
-    // Return only user info, not the token (prevents XSS token theft)
+    res.cookie('authToken', result.token, ACCESS_COOKIE_OPTIONS);
+    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
     res.json({ user: result.user });
   } catch (error) {
     console.error('Login error:', error);
@@ -53,21 +60,29 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
 
 /**
  * POST /auth/logout
- * Clear auth cookie
  */
-export async function logoutHandler(req: Request, res: Response): Promise<void> {
-  res.clearCookie('authToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    path: '/',
-  });
+export async function logoutHandler(req: AuthRequest, res: Response): Promise<void> {
+  if (req.cookies?.refreshToken) {
+    try {
+      const authToken = req.cookies?.authToken;
+      if (authToken) {
+        const jwt = await import('jsonwebtoken');
+        const decoded = jwt.default.decode(authToken) as { userId?: string } | null;
+        if (decoded?.userId) {
+          await revokeAllRefreshTokens(decoded.userId);
+        }
+      }
+    } catch {
+      // Best effort
+    }
+  }
+
+  clearAllAuthCookies(res);
   res.json({ message: 'Logged out successfully' });
 }
 
 /**
  * GET /auth/me
- * Get current authenticated user
  */
 export async function meHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -91,32 +106,16 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
 
 /**
  * POST /auth/set-password
- * Set password for an existing user (for initial setup)
  */
 export async function setPasswordHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { username, password } = req.body;
-
-    if (!username || typeof username !== 'string') {
-      res.status(400).json({ error: 'Username is required' });
+    const parsed = setPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    if (!password || typeof password !== 'string') {
-      res.status(400).json({ error: 'Password is required' });
-      return;
-    }
-
-    if (password.length < 8) {
-      res.status(400).json({ error: 'Password must be at least 8 characters' });
-      return;
-    }
-
-    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
-      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
-      return;
-    }
-
+    const { username, password } = parsed.data;
     const success = await setPassword(username, password);
 
     if (!success) {
@@ -133,8 +132,6 @@ export async function setPasswordHandler(req: Request, res: Response): Promise<v
 
 /**
  * GET /auth/has-password/:username
- * Check if user has a password set
- * NOTE: Returns true for non-existent users to prevent username enumeration
  */
 export async function hasPasswordHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -146,62 +143,26 @@ export async function hasPasswordHandler(req: Request, res: Response): Promise<v
     }
 
     const has = await hasPassword(username);
-    // Always return a response that doesn't reveal if user exists
-    // If user doesn't exist or has no password, we still show password setup flow
-    // The set-password endpoint will fail for non-existent users (that's fine)
     res.json({ hasPassword: has });
   } catch (error) {
     console.error('Has password error:', error);
-    // Return generic response even on error to prevent timing attacks
     res.json({ hasPassword: true });
   }
 }
 
 /**
  * POST /auth/signup
- * Create a new user account
  */
 export async function signupHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { username, displayName, password } = req.body;
-
-    if (!username || typeof username !== 'string') {
-      res.status(400).json({ error: 'Username is required' });
+    const parsed = signupSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    if (!displayName || typeof displayName !== 'string') {
-      res.status(400).json({ error: 'Display name is required' });
-      return;
-    }
+    const { username, displayName, password } = parsed.data;
 
-    if (!password || typeof password !== 'string') {
-      res.status(400).json({ error: 'Password is required' });
-      return;
-    }
-
-    // Validate username format (alphanumeric, underscores, 3-20 chars)
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
-      res.status(400).json({ error: 'Username must be 3-20 characters and contain only letters, numbers, and underscores' });
-      return;
-    }
-
-    if (displayName.length < 1 || displayName.length > 50) {
-      res.status(400).json({ error: 'Display name must be 1-50 characters' });
-      return;
-    }
-
-    if (password.length < 8) {
-      res.status(400).json({ error: 'Password must be at least 8 characters' });
-      return;
-    }
-
-    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
-      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
-      return;
-    }
-
-    // Check if username already exists
     const exists = await usernameExists(username);
     if (exists) {
       res.status(409).json({ error: 'Username is already taken' });
@@ -215,9 +176,8 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Set httpOnly cookie (auto-login after signup)
-    res.cookie('authToken', result.token, COOKIE_OPTIONS);
-
+    res.cookie('authToken', result.token, ACCESS_COOKIE_OPTIONS);
+    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
     res.status(201).json({ user: result.user });
   } catch (error) {
     console.error('Signup error:', error);
@@ -227,7 +187,6 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
 
 /**
  * GET /auth/check-username/:username
- * Check if a username is available (for real-time validation during signup)
  */
 export async function checkUsernameHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -248,7 +207,6 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
 
 /**
  * POST /auth/change-password
- * Change password for authenticated user (requires current password)
  */
 export async function changePasswordHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -257,28 +215,13 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const { currentPassword, newPassword } = req.body;
-
-    if (!currentPassword || typeof currentPassword !== 'string') {
-      res.status(400).json({ error: 'Current password is required' });
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    if (!newPassword || typeof newPassword !== 'string') {
-      res.status(400).json({ error: 'New password is required' });
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      res.status(400).json({ error: 'Password must be at least 8 characters' });
-      return;
-    }
-
-    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      res.status(400).json({ error: 'Password must include uppercase, lowercase, and a number' });
-      return;
-    }
-
+    const { currentPassword, newPassword } = parsed.data;
     const result = await changePassword(req.user.userId, currentPassword, newPassword);
 
     if (!result.success) {
@@ -286,6 +229,7 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
+    await revokeAllRefreshTokens(req.user.userId);
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     console.error('Change password error:', error);
@@ -295,7 +239,6 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
 
 /**
  * DELETE /auth/delete-account
- * Permanently delete user account (requires password confirmation)
  */
 export async function deleteAccountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -304,14 +247,14 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       return;
     }
 
-    const { password } = req.body;
-
-    if (!password || typeof password !== 'string') {
-      res.status(400).json({ error: 'Password is required to confirm account deletion' });
+    const parsed = deleteAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    // Get user to verify password
+    const { password } = parsed.data;
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { id: true, passwordHash: true },
@@ -322,47 +265,58 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       return;
     }
 
-    // Verify password
     const passwordValid = await verifyPassword(password, user.passwordHash);
     if (!passwordValid) {
       res.status(401).json({ error: 'Incorrect password' });
       return;
     }
 
-    // Delete all user data in order (respecting foreign keys)
     await prisma.$transaction(async (tx) => {
-      // Delete activity events
+      await tx.refreshToken.deleteMany({ where: { userId: user.id } });
       await tx.activityEvent.deleteMany({ where: { userId: user.id } });
-
-      // Delete follows (both directions)
       await tx.follow.deleteMany({ where: { followerId: user.id } });
       await tx.follow.deleteMany({ where: { followingId: user.id } });
-
-      // Delete alert events first (foreign key to alerts)
       await tx.alertEvent.deleteMany({ where: { alert: { userId: user.id } } });
-
-      // Delete alerts
       await tx.alert.deleteMany({ where: { userId: user.id } });
-
-      // Delete holdings
       await tx.holding.deleteMany({ where: { userId: user.id } });
-
-      // Delete snapshots
       await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
-
-      // Delete user settings
       await tx.userSettings.deleteMany({ where: { userId: user.id } });
-
-      // Finally delete the user
       await tx.user.delete({ where: { id: user.id } });
     });
 
-    // Clear the auth cookie
-    res.clearCookie('authToken', { path: '/' });
-
+    clearAllAuthCookies(res);
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
     console.error('Delete account error:', error);
     res.status(500).json({ error: 'Failed to delete account' });
+  }
+}
+
+/**
+ * POST /auth/refresh
+ */
+export async function refreshHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const token = req.cookies?.refreshToken || req.body?.refreshToken;
+
+    if (!token || typeof token !== 'string') {
+      res.status(401).json({ error: 'Refresh token is required', code: 'NO_TOKEN' });
+      return;
+    }
+
+    const result = await rotateRefreshToken(token);
+
+    if (!result) {
+      clearAllAuthCookies(res);
+      res.status(401).json({ error: 'Invalid or expired refresh token', code: 'TOKEN_INVALID' });
+      return;
+    }
+
+    res.cookie('authToken', result.accessToken, ACCESS_COOKIE_OPTIONS);
+    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    res.json({ message: 'Token refreshed successfully' });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(500).json({ error: 'Failed to refresh token' });
   }
 }

@@ -62,6 +62,21 @@ model User {
   dividendCredits        DividendCredit[]
   lots                   Lot[]
   dividendReinvestments  DividendReinvestment[]
+  refreshTokens          RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model UserSettings {

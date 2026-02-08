@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
-import jwt, { SignOptions, Secret } from 'jsonwebtoken';
+import jwt, { SignOptions, Secret, TokenExpiredError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse } from '../types/auth';
 
@@ -23,13 +24,83 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 /**
- * Generate a JWT token for a user
+ * Generate a short-lived access token (15 minutes by default)
+ */
+export function generateAccessToken(payload: JwtPayload): string {
+  const secret: Secret = config.jwtSecret;
+  // 15 minutes in seconds
+  const options: SignOptions = { expiresIn: 15 * 60 };
+  return jwt.sign(payload, secret, options);
+}
+
+/**
+ * Generate a JWT token for a user (backward-compatible, uses legacy 7d expiry)
  */
 export function generateToken(payload: JwtPayload): string {
   const secret: Secret = config.jwtSecret;
-  // 7 days in seconds
   const options: SignOptions = { expiresIn: 60 * 60 * 24 * 7 };
   return jwt.sign(payload, secret, options);
+}
+
+/**
+ * Generate a cryptographically random refresh token and store it in the database
+ */
+export async function generateRefreshToken(userId: string): Promise<string> {
+  const token = crypto.randomBytes(64).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + config.refreshTokenExpiresInDays);
+
+  await prisma.refreshToken.create({
+    data: { token, userId, expiresAt },
+  });
+
+  return token;
+}
+
+/**
+ * Rotate a refresh token: revoke the old one and issue a new one.
+ * Returns null if the provided token is invalid, expired, or already revoked.
+ */
+export async function rotateRefreshToken(
+  oldToken: string
+): Promise<{ accessToken: string; refreshToken: string; payload: JwtPayload } | null> {
+  const stored = await prisma.refreshToken.findUnique({
+    where: { token: oldToken },
+    include: { user: { select: { id: true, username: true } } },
+  });
+
+  if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    // If a revoked token is reused, revoke the entire family for safety
+    if (stored?.revokedAt) {
+      await prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    return null;
+  }
+
+  // Revoke the old token
+  await prisma.refreshToken.update({
+    where: { id: stored.id },
+    data: { revokedAt: new Date() },
+  });
+
+  const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+  const accessToken = generateAccessToken(payload);
+  const refreshToken = await generateRefreshToken(stored.userId);
+
+  return { accessToken, refreshToken, payload };
+}
+
+/**
+ * Revoke all refresh tokens for a user (e.g., on logout or password change)
+ */
+export async function revokeAllRefreshTokens(userId: string): Promise<void> {
+  await prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
 }
 
 /**
@@ -40,6 +111,24 @@ export function verifyToken(token: string): JwtPayload | null {
     return jwt.verify(token, config.jwtSecret) as JwtPayload;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Verify a token and distinguish between expired and invalid.
+ * Returns { payload, expired } where payload is null if truly invalid.
+ */
+export function verifyTokenDetailed(token: string): { payload: JwtPayload | null; expired: boolean } {
+  try {
+    const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    return { payload, expired: false };
+  } catch (err) {
+    if (err instanceof TokenExpiredError) {
+      // Decode without verifying expiry to get the payload
+      const decoded = jwt.decode(token) as JwtPayload | null;
+      return { payload: decoded, expired: true };
+    }
+    return { payload: null, expired: false };
   }
 }
 
@@ -69,10 +158,12 @@ export async function loginWithPassword(
     return null;
   }
 
-  const token = generateToken({ userId: user.id, username: user.username });
+  const token = generateAccessToken({ userId: user.id, username: user.username });
+  const refreshToken = await generateRefreshToken(user.id);
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       username: user.username,
@@ -207,10 +298,12 @@ export async function signup(
     },
   });
 
-  const token = generateToken({ userId: user.id, username: user.username });
+  const token = generateAccessToken({ userId: user.id, username: user.username });
+  const refreshToken = await generateRefreshToken(user.id);
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       username: user.username,

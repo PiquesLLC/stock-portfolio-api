@@ -40,6 +40,7 @@ export const config = {
   // JWT Authentication
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  refreshTokenExpiresInDays: parseInt(process.env.REFRESH_TOKEN_EXPIRES_IN_DAYS || '30', 10),
 
   // Alpha Vantage API
   alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || '',
@@ -50,4 +51,36 @@ export const config = {
 
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174').split(','),
+
+  // Rate limiting
+  rateLimit: {
+    login: {
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      maxAttempts: process.env.NODE_ENV === 'production' ? 10 : 50,
+    },
+    setPassword: {
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      maxAttempts: 3,
+    },
+    signup: {
+      windowMs: 60 * 60 * 1000, // 1 hour
+      maxAttempts: 5,
+    },
+    mutation: {
+      windowMs: 60 * 1000, // 1 minute
+      maxAttempts: 30,
+    },
+    api: {
+      windowMs: 60 * 1000, // 1 minute
+      maxAttempts: process.env.NODE_ENV === 'production' ? 200 : 1000,
+    },
+  },
+
+  // Cookie options for auth token clearing
+  clearCookieOptions: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict' as const,
+    path: '/',
+  },
 };

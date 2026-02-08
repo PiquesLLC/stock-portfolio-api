@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler, deleteAccountHandler } from '../controllers/auth.controller';
+import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler, deleteAccountHandler, refreshHandler } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter } from '../middleware/rateLimiter';
 
@@ -8,8 +8,11 @@ const router = Router();
 // POST /auth/login - Login with username and password (rate limited)
 router.post('/login', loginLimiter, loginHandler);
 
-// POST /auth/logout - Clear auth cookie
+// POST /auth/logout - Clear auth cookies and revoke refresh tokens
 router.post('/logout', logoutHandler);
+
+// POST /auth/refresh - Exchange refresh token for new access + refresh tokens
+router.post('/refresh', apiLimiter, refreshHandler);
 
 // GET /auth/me - Get current authenticated user
 router.get('/me', requireAuth, meHandler);
