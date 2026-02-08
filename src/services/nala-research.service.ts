@@ -189,12 +189,12 @@ function parseStockResults(raw: any): NalaStockResult[] {
       },
       confidenceScore: clamp(Number(s.confidenceScore) || 70, 60, 95),
       explanation: stripMarkdown(String(s.explanation || '')).slice(0, 500),
-      risks: stripMarkdown(String(s.risks || '')).slice(0, 500),
+      risks: stripMarkdown(String(s.risks || '')).slice(0, 1000),
       localData: null,
     }));
 }
 
-async function enrichWithLocalData(stocks: NalaStockResult[]): Promise<NalaStockResult[]> {
+async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): Promise<NalaStockResult[]> {
   // Fast Prisma-only lookup — never triggers live Alpha Vantage fetches
   const tickers = stocks.map(s => s.ticker);
   const cachedRows = await prisma.fundamentalsCache.findMany({
@@ -209,20 +209,34 @@ async function enrichWithLocalData(stocks: NalaStockResult[]): Promise<NalaStock
     }
   }
 
+  // Check actual user holdings to set isHeld correctly
+  const heldTickers = new Set<string>();
+  if (userId) {
+    try {
+      const holdings = await prisma.holding.findMany({
+        where: { userId, ticker: { in: tickers } },
+        select: { ticker: true },
+      });
+      for (const h of holdings) heldTickers.add(h.ticker);
+    } catch {}
+  }
+
   return stocks.map((stock): NalaStockResult => {
     const ov = cacheMap.get(stock.ticker);
-    if (!ov) return stock;
+    const isHeld = heldTickers.has(stock.ticker);
+
+    if (!ov && !isHeld) return stock;
 
     const deviations: string[] = [];
 
-    if (stock.metrics.peRatio != null && ov.peRatio != null && ov.peRatio > 0) {
+    if (ov && stock.metrics.peRatio != null && ov.peRatio != null && ov.peRatio > 0) {
       const pctDiff = Math.abs(stock.metrics.peRatio - ov.peRatio) / ov.peRatio;
       if (pctDiff > 0.15) {
         deviations.push(`P/E: Perplexity ${stock.metrics.peRatio.toFixed(1)} vs local ${ov.peRatio.toFixed(1)}`);
       }
     }
 
-    if (stock.metrics.dividendYield != null && ov.dividendYield != null && ov.dividendYield > 0) {
+    if (ov && stock.metrics.dividendYield != null && ov.dividendYield != null && ov.dividendYield > 0) {
       const localYield = ov.dividendYield * 100;
       const pctDiff = Math.abs(stock.metrics.dividendYield - localYield) / localYield;
       if (pctDiff > 0.15) {
@@ -234,14 +248,17 @@ async function enrichWithLocalData(stocks: NalaStockResult[]): Promise<NalaStock
       ...stock,
       localData: {
         ticker: stock.ticker,
-        isHeld: true,
-        localMetrics: {
+        isHeld,
+        localMetrics: ov ? {
           peRatio: ov.peRatio ?? null,
           roe: ov.returnOnEquity ?? null,
           dividendYield: ov.dividendYield != null ? ov.dividendYield * 100 : null,
           profitMargin: ov.profitMargin != null ? ov.profitMargin * 100 : null,
           marketCap: ov.marketCap ?? null,
           beta: ov.beta ?? null,
+        } : {
+          peRatio: null, roe: null, dividendYield: null,
+          profitMargin: null, marketCap: null, beta: null,
         },
         deviations,
       },
@@ -251,7 +268,7 @@ async function enrichWithLocalData(stocks: NalaStockResult[]): Promise<NalaStock
 
 // ── Main Function ────────────────────────────────────────────────
 
-export async function askNala(question: string): Promise<NalaResearchResponse> {
+export async function askNala(question: string, userId?: string): Promise<NalaResearchResponse> {
   const normalized = normalizeQuestion(question);
   const cacheKey = `nala-${normalized}`;
 
@@ -317,7 +334,7 @@ export async function askNala(question: string): Promise<NalaResearchResponse> {
     // Enrich with local data (non-blocking, best-effort)
     if (stocks.length > 0) {
       try {
-        stocks = await enrichWithLocalData(stocks);
+        stocks = await enrichWithLocalData(stocks, userId);
       } catch (enrichErr) {
         console.warn('[Nala AI] Enrichment error (non-fatal):', (enrichErr as Error).message);
       }

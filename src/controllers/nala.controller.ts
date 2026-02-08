@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import { askNala, NalaSuggestionsResponse } from '../services/nala-research.service';
 
-export async function askNalaHandler(req: Request, res: Response): Promise<void> {
+export async function askNalaHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { question } = req.body;
 
@@ -15,7 +16,8 @@ export async function askNalaHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const result = await askNala(question.trim());
+    const userId = req.user?.userId;
+    const result = await askNala(question.trim(), userId);
     res.json(result);
   } catch (error) {
     console.error('[Nala Controller] Error:', error);
