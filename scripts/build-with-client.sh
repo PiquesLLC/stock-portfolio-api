@@ -5,7 +5,6 @@ set -e
 echo "=== Building API ==="
 npm install --include=dev
 npx prisma generate
-npx prisma db push
 npx tsc
 
 echo "=== Building UI Client ==="
