@@ -85,6 +85,8 @@ export interface PortfolioIntelligenceResponse {
   explanation: string;
   partial: boolean;
   heroStats: HeroStats | null;
+  winnersCount: number;
+  losersCount: number;
 }
 
 const CORRELATION_TRADING_DAYS = 180;
@@ -168,6 +170,8 @@ async function computeContributions(
 function splitContributors(contributions: HoldingContribution[]): {
   contributors: ContributorEntry[];
   detractors: ContributorEntry[];
+  winnersCount: number;
+  losersCount: number;
 } {
   const sorted = [...contributions].sort((a, b) => b.contributionDollar - a.contributionDollar);
 
@@ -177,10 +181,12 @@ function splitContributors(contributions: HoldingContribution[]): {
     percentReturn: c.percentReturn,
   });
 
-  const contributors = sorted.filter(c => c.contributionDollar > 0).slice(0, 5).map(toEntry);
-  const detractors = sorted.filter(c => c.contributionDollar < 0).slice(-5).reverse().map(toEntry);
+  const allWinners = sorted.filter(c => c.contributionDollar > 0);
+  const allLosers = sorted.filter(c => c.contributionDollar < 0);
+  const contributors = allWinners.slice(0, 5).map(toEntry);
+  const detractors = allLosers.slice(-5).reverse().map(toEntry);
 
-  return { contributors, detractors };
+  return { contributors, detractors, winnersCount: allWinners.length, losersCount: allLosers.length };
 }
 
 // ============================================================================
@@ -378,23 +384,29 @@ function generateExplanation(
 // HERO STATS
 // ============================================================================
 
-async function computeHeroStats(holdings: HoldingWithQuote[]): Promise<HeroStats> {
-  // --- Stat 1: Sector Driver & Sector Drag (net day P/L per sector) ---
-  // Sum net dayChange per sector, then pick best (most positive) and worst (most negative).
+async function computeHeroStats(
+  holdings: HoldingWithQuote[],
+  contributions: HoldingContribution[],
+  window: IntelligenceWindow
+): Promise<HeroStats> {
+  const periodLabel = window === '1d' ? 'today' : window === '5d' ? 'this week' : 'this month';
+  const periodPossessive = window === '1d' ? "today's" : window === '5d' ? "this week's" : "this month's";
+
+  // --- Stat 1: Sector Driver & Sector Drag (net P/L per sector) ---
   const sectorNetPL = new Map<string, number>();
-  for (const h of holdings) {
-    const sector = getSector(h.ticker);
-    sectorNetPL.set(sector, (sectorNetPL.get(sector) || 0) + h.dayChange);
+  for (const c of contributions) {
+    const sector = getSector(c.ticker);
+    sectorNetPL.set(sector, (sectorNetPL.get(sector) || 0) + c.contributionDollar);
   }
 
   let sectorDriver: HeroStats['sectorDriver'];
   let sectorDrag: HeroStats['sectorDrag'];
 
   if (sectorNetPL.size === 0) {
-    sectorDriver = { sector: null, percent: 0, label: 'No intraday movement yet' };
-    sectorDrag = { sector: null, percent: 0, label: 'No intraday movement yet' };
+    sectorDriver = { sector: null, percent: 0, label: 'No movement yet' };
+    sectorDrag = { sector: null, percent: 0, label: 'No movement yet' };
   } else {
-    const totalNetPL = holdings.reduce((sum, h) => sum + h.dayChange, 0);
+    const totalNetPL = contributions.reduce((sum, c) => sum + c.contributionDollar, 0);
 
     // Best sector (highest net P/L)
     let bestSector = '';
@@ -408,7 +420,7 @@ async function computeHeroStats(holdings: HoldingWithQuote[]): Promise<HeroStats
     sectorDriver = {
       sector: bestPL > 0 ? bestSector : null,
       percent: totalNetPL !== 0 ? Math.round((bestPL / Math.abs(totalNetPL)) * 1000) / 10 : 0,
-      label: bestPL > 0 ? `${fmtBest} net today` : 'No sector gains today',
+      label: bestPL > 0 ? `${fmtBest} net ${periodLabel}` : `No sector gains ${periodLabel}`,
     };
 
     // Worst sector (lowest net P/L)
@@ -423,47 +435,47 @@ async function computeHeroStats(holdings: HoldingWithQuote[]): Promise<HeroStats
     sectorDrag = {
       sector: worstPL < 0 ? worstSector : null,
       percent: totalNetPL !== 0 ? Math.round((worstPL / Math.abs(totalNetPL)) * 1000) / 10 : 0,
-      label: worstPL < 0 ? `${fmtWorst} net today` : 'No sector losses today',
+      label: worstPL < 0 ? `${fmtWorst} net ${periodLabel}` : `No sector losses ${periodLabel}`,
     };
   }
 
   // --- Stat 2: Largest Drag ---
-  const losers = holdings.filter(h => h.dayChange < 0);
+  const losers = contributions.filter(c => c.contributionDollar < 0);
   let largestDrag: HeroStats['largestDrag'];
   if (losers.length === 0) {
-    largestDrag = { ticker: null, lossDollar: 0, percent: 0, label: 'No losses today' };
+    largestDrag = { ticker: null, lossDollar: 0, percent: 0, label: `No losses ${periodLabel}` };
   } else {
-    const totalLosses = losers.reduce((sum, h) => sum + Math.abs(h.dayChange), 0);
-    const worst = losers.reduce((w, h) => h.dayChange < w.dayChange ? h : w);
-    const pct = Math.round((Math.abs(worst.dayChange) / totalLosses) * 1000) / 10;
-    const fmtLoss = Math.abs(worst.dayChange) >= 100
-      ? `$${Math.round(Math.abs(worst.dayChange)).toLocaleString('en-US')}`
-      : `$${Math.abs(worst.dayChange).toFixed(2)}`;
+    const totalLosses = losers.reduce((sum, c) => sum + Math.abs(c.contributionDollar), 0);
+    const worst = losers.reduce((w, c) => c.contributionDollar < w.contributionDollar ? c : w);
+    const pct = Math.round((Math.abs(worst.contributionDollar) / totalLosses) * 1000) / 10;
+    const fmtLoss = Math.abs(worst.contributionDollar) >= 100
+      ? `$${Math.round(Math.abs(worst.contributionDollar)).toLocaleString('en-US')}`
+      : `$${Math.abs(worst.contributionDollar).toFixed(2)}`;
     largestDrag = {
       ticker: worst.ticker,
-      lossDollar: Math.round(worst.dayChange * 100) / 100,
+      lossDollar: Math.round(worst.contributionDollar * 100) / 100,
       percent: pct,
-      label: `-${fmtLoss} (${pct}% of today's losses)`,
+      label: `-${fmtLoss} (${pct}% of ${periodPossessive} losses)`,
     };
   }
 
   // --- Stat 2b: Largest Driver (biggest gainer) ---
-  const winners = holdings.filter(h => h.dayChange > 0);
+  const winners = contributions.filter(c => c.contributionDollar > 0);
   let largestDriver: HeroStats['largestDriver'];
   if (winners.length === 0) {
-    largestDriver = { ticker: null, gainDollar: 0, percent: 0, label: 'No gains today' };
+    largestDriver = { ticker: null, gainDollar: 0, percent: 0, label: `No gains ${periodLabel}` };
   } else {
-    const totalGains = winners.reduce((sum, h) => sum + h.dayChange, 0);
-    const best = winners.reduce((b, h) => h.dayChange > b.dayChange ? h : b);
-    const pct = Math.round((best.dayChange / totalGains) * 1000) / 10;
-    const fmtGain = best.dayChange >= 100
-      ? `$${Math.round(best.dayChange).toLocaleString('en-US')}`
-      : `$${best.dayChange.toFixed(2)}`;
+    const totalGains = winners.reduce((sum, c) => sum + c.contributionDollar, 0);
+    const best = winners.reduce((b, c) => c.contributionDollar > b.contributionDollar ? c : b);
+    const pct = Math.round((best.contributionDollar / totalGains) * 1000) / 10;
+    const fmtGain = best.contributionDollar >= 100
+      ? `$${Math.round(best.contributionDollar).toLocaleString('en-US')}`
+      : `$${best.contributionDollar.toFixed(2)}`;
     largestDriver = {
       ticker: best.ticker,
-      gainDollar: Math.round(best.dayChange * 100) / 100,
+      gainDollar: Math.round(best.contributionDollar * 100) / 100,
       percent: pct,
-      label: `+${fmtGain} (${pct}% of today's gains)`,
+      label: `+${fmtGain} (${pct}% of ${periodPossessive} gains)`,
     };
   }
 
@@ -598,6 +610,7 @@ export async function getPortfolioIntelligence(
       return {
         window, contributors: [], detractors: [], sectorExposure: [],
         beta: null, explanation: 'User not found.', partial: true, heroStats: null,
+        winnersCount: 0, losersCount: 0,
       };
     }
   } else {
@@ -615,12 +628,14 @@ export async function getPortfolioIntelligence(
       explanation: 'Add holdings to see portfolio intelligence.',
       partial: true,
       heroStats: null,
+      winnersCount: 0,
+      losersCount: 0,
     };
   }
 
   // Compute attribution
   const { contributions, candleData } = await computeContributions(holdings, window);
-  const { contributors, detractors } = splitContributors(contributions);
+  const { contributors, detractors, winnersCount, losersCount } = splitContributors(contributions);
 
   // Compute sector exposure
   const sectorExposure = computeSectorExposure(holdings);
@@ -631,8 +646,8 @@ export async function getPortfolioIntelligence(
   // Generate explanation
   const explanation = generateExplanation(contributions, window);
 
-  // Compute hero stats (only for 1d window — they're intraday stats)
-  const heroStats = window === '1d' ? await computeHeroStats(holdings) : null;
+  // Compute hero stats for all windows
+  const heroStats = await computeHeroStats(holdings, contributions, window);
 
   const hasContributions = contributors.length > 0 || detractors.length > 0;
   const isIncomplete = window !== '1d' && !hasContributions;
@@ -646,6 +661,8 @@ export async function getPortfolioIntelligence(
     explanation,
     partial: isIncomplete,
     heroStats,
+    winnersCount,
+    losersCount,
   };
 
   // Short TTL if data is incomplete (candles still caching), otherwise normal TTL

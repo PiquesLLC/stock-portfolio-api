@@ -423,11 +423,23 @@ export async function reconstructPortfolioHistoryHiRes(
   const allDates = Array.from(allDatesSet).sort((a, b) => a - b);
   if (allDates.length === 0) return [];
 
+  // Pre-compute first available price per ticker for forward-fill.
+  // When a timestamp is BEFORE a ticker's first candle, use its earliest
+  // known price so the holding isn't silently dropped from the total.
+  const firstPrices = new Map<string, number>();
+  for (const holding of holdings) {
+    const candles = tickerCandles.get(holding.ticker);
+    if (candles && candles.closes.length > 0) {
+      firstPrices.set(holding.ticker, candles.closes[0]);
+    }
+  }
+
   const points: { time: number; value: number }[] = [];
 
   for (const dateMs of allDates) {
     let totalValue = cashBalance - marginDebt;
     let tickersWithPrice = 0;
+    let tickersWithActualPrice = 0;
 
     for (const holding of holdings) {
       const candles = tickerCandles.get(holding.ticker);
@@ -444,10 +456,21 @@ export async function reconstructPortfolioHistoryHiRes(
       if (bestIdx >= 0) {
         totalValue += holding.shares * candles.closes[bestIdx];
         tickersWithPrice++;
+        tickersWithActualPrice++;
+      } else {
+        // Before this ticker's first data point — forward-fill with first available price
+        const firstPrice = firstPrices.get(holding.ticker);
+        if (firstPrice !== undefined) {
+          totalValue += holding.shares * firstPrice;
+          tickersWithPrice++;
+        }
       }
     }
 
-    if (tickersWithPrice >= tickerCandles.size) {
+    // Include point if all tickers are accounted for (actual or forward-filled)
+    // AND at least half have real data (avoids phantom early points)
+    if (tickersWithPrice >= tickerCandles.size &&
+        tickersWithActualPrice >= Math.ceil(tickerCandles.size * 0.5)) {
       points.push({ time: dateMs, value: totalValue });
     }
   }

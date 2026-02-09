@@ -5,6 +5,7 @@ import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
 import { getAIEvents } from '../services/perplexity-events.service';
 import { askStockQuestion } from '../services/perplexity-qa.service';
+import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 
 interface PriceResult {
   price: number;
@@ -246,7 +247,7 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
 
     const holdings = await getETFHoldings(ticker);
     if (!holdings) {
-      res.status(404).json({ error: 'Holdings data not available for this ticker' });
+      res.json({ isETF: false });
       return;
     }
 
@@ -315,5 +316,31 @@ export async function askStockQuestionHandler(req: Request, res: Response): Prom
     }
     console.error('Error in stock Q&A:', error);
     res.status(500).json({ error: 'Failed to get answer' });
+  }
+}
+
+export async function getHistoricalCAGRHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const tickersParam = req.query.tickers as string;
+    if (!tickersParam) {
+      res.status(400).json({ error: 'Missing required query parameter: tickers' });
+      return;
+    }
+
+    const tickers = tickersParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    if (tickers.length === 0) {
+      res.status(400).json({ error: 'No valid tickers provided' });
+      return;
+    }
+    if (tickers.length > 50) {
+      res.status(400).json({ error: 'Too many tickers (max 50)' });
+      return;
+    }
+
+    const cagrs = await getHistoricalCAGRs(tickers);
+    res.json({ cagrs });
+  } catch (error) {
+    console.error('Error fetching historical CAGR:', error);
+    res.status(500).json({ error: 'Failed to fetch historical CAGR data' });
   }
 }

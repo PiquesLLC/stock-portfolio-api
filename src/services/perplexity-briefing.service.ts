@@ -41,7 +41,8 @@ Rules:
 - The takeaway is a single memorable sentence summarizing the section
 - Focus on: what drove gains/losses and WHY, upcoming catalysts to watch
 - Do NOT repeat raw numbers the user already sees — add insight and context
-- Do NOT recommend buying or selling`;
+- Do NOT recommend buying or selling
+- CRITICAL: Never invent or estimate portfolio dollar values. Use ONLY the exact total value provided in the user message. If you mention the portfolio value, use the exact number given.`;
 
 export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse> {
   const cacheKey = 'portfolio-briefing';
@@ -72,9 +73,11 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     )
     .join('\n');
 
+  const totalValue = portfolio.holdingsValue.toFixed(0);
   const userMessage =
+    `PORTFOLIO TOTAL VALUE: $${totalValue} (use this exact number if referencing portfolio value)\n\n` +
     `Here is my stock portfolio (${portfolio.holdings.length} positions, ` +
-    `total value $${portfolio.holdingsValue.toFixed(0)}, ` +
+    `total value $${totalValue}, ` +
     `today's change ${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%):\n\n` +
     `${holdingsSummary}\n\n` +
     `Write a weekly portfolio briefing. Research recent news and events for these stocks. ` +

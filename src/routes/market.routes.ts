@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler } from '../controllers/market.controller';
 
 const router = Router();
 
@@ -17,5 +17,6 @@ router.get('/news', getMarketNews);
 router.get('/stock/:ticker/news', getTickerNews);
 router.get('/stock/:ticker/ai-events', getAIEventsHandler);
 router.post('/stock/:ticker/ask', askStockQuestionHandler);
+router.get('/historical-cagr', getHistoricalCAGRHandler);
 
 export default router;

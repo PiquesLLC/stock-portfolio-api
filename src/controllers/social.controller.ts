@@ -120,6 +120,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
         region: true,
         showRegion: true,
         holdingsVisibility: true,
+        bio: true,
       },
     });
 
@@ -277,6 +278,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       showRegion,
       holdingsVisibility,
       dripEnabled,
+      bio,
     } = req.body;
 
     // Validate inputs
@@ -299,6 +301,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (region !== undefined) userData.region = region;
     if (showRegion !== undefined) userData.showRegion = showRegion;
     if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
+    if (bio !== undefined) userData.bio = typeof bio === 'string' ? bio.slice(0, 80) : null;
 
     // Update User
     const user = await prisma.user.update({
@@ -312,6 +315,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
         region: true,
         showRegion: true,
         holdingsVisibility: true,
+        bio: true,
       },
     });
 

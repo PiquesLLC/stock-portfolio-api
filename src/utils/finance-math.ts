@@ -176,7 +176,7 @@ export function calculateCorrelation(
   returns2: number[]
 ): number | null {
   const len = Math.min(returns1.length, returns2.length);
-  if (len < 20) return null;
+  if (len < 10) return null;
 
   // Use the last `len` values from each array
   const r1 = returns1.slice(-len);
@@ -213,7 +213,7 @@ export function calculateBeta(
   benchmarkReturns: number[]
 ): number | null {
   const len = Math.min(portfolioReturns.length, benchmarkReturns.length);
-  if (len < 20) return null;
+  if (len < 10) return null;
 
   const rp = portfolioReturns.slice(-len);
   const rb = benchmarkReturns.slice(-len);
@@ -254,7 +254,7 @@ export function annualizeReturn(totalReturn: number, days: number): number {
  * Uses sqrt(252) annualization factor (trading days).
  */
 export function annualizedVolatility(dailyReturns: number[]): number | null {
-  if (dailyReturns.length < 20) return null;
+  if (dailyReturns.length < 10) return null;
 
   const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
   const squaredDiffs = dailyReturns.map(r => Math.pow(r - mean, 2));

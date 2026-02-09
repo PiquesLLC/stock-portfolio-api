@@ -16,7 +16,7 @@ import {
   SnapshotPoint,
   CashflowEvent,
 } from '../utils/finance-math';
-import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses, getBenchmarkReturnWithQuote } from '../utils/candle-cache';
+import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses, getBenchmarkReturnWithQuote, getBenchmarkCandles } from '../utils/candle-cache';
 import { reconstructPortfolioHistory } from './snapshot.service';
 import { getQuote } from '../utils/finnhub';
 import { getPortfolio } from './portfolio.service';
@@ -172,7 +172,9 @@ export async function getPerformanceComparison(
 
   let snapshotPoints: SnapshotPoint[] = effectiveSnapshots.map(s => ({
     date: s.timestamp,
-    value: s.netEquity ?? s.totalValue,
+    // Use netEquity if it's a real value (> 0), otherwise fall back to totalValue.
+    // netEquity can be 0 (Decimal) when not yet computed — 0 ?? X returns 0, not X.
+    value: (s.netEquity !== null && Number(s.netEquity) > 0) ? Number(s.netEquity) : Number(s.totalValue),
   }));
 
   // ALWAYS prefer candle-based reconstruction for metrics accuracy.
@@ -193,10 +195,14 @@ export async function getPerformanceComparison(
     });
     const cashBalance = latestSnapshot?.cashBalance ?? 0;
 
+    // Request extra buffer days to ensure enough trading days for statistical measures.
+    // 30 calendar days ≈ 21 trading days → 20 returns, but we need margin for holidays/gaps.
+    const bufferDays = windowDays + 15;
+
     const reconstructed = await reconstructPortfolioHistory(
       holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
       cashBalance,
-      windowDays,
+      bufferDays,
       0,
     );
 
@@ -282,10 +288,49 @@ export async function getPerformanceComparison(
     ? Math.round((simpleReturnPct - benchmarkReturnPct) * 100) / 100
     : null;
 
-  // Risk metrics from portfolio daily returns
+  // Risk metrics — date-align portfolio and benchmark returns for accuracy.
+  // Portfolio daily returns from candle reconstruction are date-indexed;
+  // benchmark returns must match the same trading dates.
   const values = snapshotPoints.map(s => s.value);
   const portfolioReturns = dailyReturnsFromValues(values);
-  const benchmarkReturns = getBenchmarkReturns(benchmarkTicker, tradingDays);
+
+  // Build date-aligned benchmark returns from the same dates as portfolio
+  const benchmarkData = getBenchmarkCandles(benchmarkTicker);
+  let benchmarkReturns: number[] | null = null;
+
+  if (benchmarkData && snapshotPoints.length >= 2) {
+    // Create a date → close lookup for the benchmark
+    const bmCloseMap = new Map<string, number>();
+    for (let i = 0; i < benchmarkData.dates.length; i++) {
+      bmCloseMap.set(benchmarkData.dates[i], benchmarkData.closes[i]);
+    }
+
+    // For each portfolio snapshot date, find the matching benchmark close
+    const alignedBmReturns: number[] = [];
+    for (let i = 1; i < snapshotPoints.length; i++) {
+      const dateKey = snapshotPoints[i].date.toISOString().slice(0, 10);
+      const prevDateKey = snapshotPoints[i - 1].date.toISOString().slice(0, 10);
+      const bmClose = bmCloseMap.get(dateKey);
+      const bmPrevClose = bmCloseMap.get(prevDateKey);
+      if (bmClose != null && bmPrevClose != null && bmPrevClose > 0) {
+        alignedBmReturns.push((bmClose - bmPrevClose) / bmPrevClose);
+      }
+    }
+
+    // Only use aligned returns if we got enough matching dates
+    if (alignedBmReturns.length >= 10) {
+      benchmarkReturns = alignedBmReturns;
+      // Trim portfolio returns to match aligned length (in case some dates didn't match)
+      while (portfolioReturns.length > alignedBmReturns.length) {
+        portfolioReturns.shift();
+      }
+    }
+  }
+
+  // Fallback to tail-slicing if date alignment failed
+  if (!benchmarkReturns) {
+    benchmarkReturns = getBenchmarkReturns(benchmarkTicker, tradingDays);
+  }
 
   const beta = benchmarkReturns
     ? calculateBeta(portfolioReturns, benchmarkReturns)

@@ -15,7 +15,7 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
   try {
     const now = Math.floor(Date.now() / 1000);
     const from = now - 10 * 365 * 24 * 60 * 60; // 10 years for MAX chart view
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d&includePrePost=true`;
     const resp = await axios.get(url, {
       timeout: 10000,
       headers: { 'User-Agent': 'Mozilla/5.0' },

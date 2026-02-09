@@ -51,6 +51,7 @@ model User {
   region                 String?
   showRegion             Boolean                @default(true)
   holdingsVisibility     String                 @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
+  bio                    String?
   holdings               Holding[]
   snapshots              PortfolioSnapshot[]
   settings               UserSettings?

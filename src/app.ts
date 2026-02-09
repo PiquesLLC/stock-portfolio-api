@@ -14,10 +14,10 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"], // Tailwind needs inline styles
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], // Tailwind + Google Fonts
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", ...config.allowedOrigins],
-      fontSrc: ["'self'"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "https:"], // For HLS streams
       frameSrc: ["'none'"],
