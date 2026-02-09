@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import path from 'path';
+import fs from 'fs';
 import routes from './routes';
 import { config } from './config';
 import { apiLimiter } from './middleware/rateLimiter';
@@ -13,13 +15,14 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], // Tailwind + Google Fonts
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", ...config.allowedOrigins],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      workerSrc: ["'self'"],
       objectSrc: ["'none'"],
-      mediaSrc: ["'self'", "https:"], // For HLS streams
+      mediaSrc: ["'self'", "blob:", "https:"],
       frameSrc: ["'none'"],
     },
   },
@@ -66,9 +69,19 @@ if (process.env.READ_ONLY === 'true') {
 
 app.use('/', routes);
 
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
+// In production, serve the UI static files from client/ directory
+const clientDir = path.join(__dirname, '..', 'client');
+if (fs.existsSync(clientDir)) {
+  app.use(express.static(clientDir));
+  // SPA fallback: serve index.html for any non-API route
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientDir, 'index.html'));
+  });
+} else {
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+}
 
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Unhandled error:', err);
