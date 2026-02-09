@@ -89,8 +89,8 @@ export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
     : 'No recent activity recorded.';
 
   const userMessage =
-    `Portfolio (${portfolio.holdings.length} positions, total $${portfolio.holdingsValue.toFixed(0)}, ` +
-    `cash $${portfolio.cashBalance.toFixed(0)}, margin $${portfolio.marginDebt.toFixed(0)}):\n\n` +
+    `Portfolio (${portfolio.holdings.length} positions, net equity $${portfolio.netEquity.toFixed(0)}, ` +
+    `cash $${portfolio.cashBalance.toFixed(0)}, margin debt $${portfolio.marginDebt.toFixed(0)}):\n\n` +
     `${holdingsSummary}\n\n` +
     `Recent Activity:\n${activitySummary}\n\n` +
     `Analyze my portfolio behavior and provide educational insights.`;

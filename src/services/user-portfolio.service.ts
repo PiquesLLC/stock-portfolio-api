@@ -55,27 +55,46 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
 
   const enrichedHoldings = holdings.map((h) => {
     const quote = quotesResult.quotes.get(h.ticker);
-    // During extended hours, prefer extendedPrice (premarket/after-hours)
+    const priceUnavailable = !quote;
+    const priceIsStale = quote?.isStale ?? false;
+    const isRepricing = quote?.isRepricing ?? priceUnavailable;
+    const quoteAgeSeconds = quote?.quoteAgeSeconds;
+
+    // CRITICAL: Never use averageCost as fallback — it inflates portfolio value
+    // If we don't have a quote, mark as unavailable but don't calculate incorrect values
     const currentPrice = (quote?.extendedPrice && quote.extendedPrice > 0)
       ? quote.extendedPrice
-      : (quote?.currentPrice ?? h.averageCost);
-    const currentValue = currentPrice * h.shares;
+      : (quote?.currentPrice ?? 0);
+    const previousClose = quote?.previousClose ?? (quote?.currentPrice ?? currentPrice);
+
+    // Only calculate market values if we have a valid price
+    const hasValidPrice = quote && currentPrice > 0;
+
+    const currentValue = hasValidPrice ? h.shares * currentPrice : 0;
     const cost = h.averageCost * h.shares;
-    const pl = currentValue - cost;
-    const plPct = cost > 0 ? (pl / cost) * 100 : 0;
-    const previousClose = quote?.previousClose ?? quote?.currentPrice ?? h.averageCost;
-    const dc = (currentPrice - previousClose) * h.shares;
-    const dcPct = previousClose > 0 ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
 
-    const regClose = quote?.regularClose ?? currentPrice;
-    const regValue = regClose * h.shares;
-    regularHoldingsValue += regValue;
-    regularDayChange += regValue - (previousClose * h.shares);
-    afterHoursChange += currentValue - regValue;
+    // If price is unavailable, don't compute P/L (it would be misleading)
+    const pl = hasValidPrice ? currentValue - cost : 0;
+    const plPct = hasValidPrice && cost > 0 ? (pl / cost) * 100 : 0;
 
-    holdingsValue += currentValue;
+    const previousValue = hasValidPrice ? h.shares * previousClose : 0;
+    const dc = hasValidPrice ? currentValue - previousValue : 0;
+    const dcPct = hasValidPrice && previousValue > 0
+      ? (dc / previousValue) * 100
+      : 0;
+
+    // Only add to totals if we have valid price data
+    if (hasValidPrice) {
+      holdingsValue += currentValue;
+      dayChange += dc;
+
+      const regClose = quote?.regularClose ?? currentPrice;
+      const regValue = h.shares * regClose;
+      regularHoldingsValue += regValue;
+      regularDayChange += regValue - previousValue;
+      afterHoursChange += currentValue - regValue;
+    }
     totalCost += cost;
-    dayChange += dc;
 
     return {
       id: h.id,
@@ -84,14 +103,17 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
       averageCost: h.averageCost,
       createdAt: h.createdAt,
       updatedAt: h.updatedAt,
-      currentPrice,
+      currentPrice: hasValidPrice ? currentPrice : 0,
       currentValue,
       totalCost: cost,
       profitLoss: pl,
       profitLossPercent: plPct,
       dayChange: dc,
       dayChangePercent: dcPct,
-      priceUnavailable: !quote,
+      priceUnavailable,
+      priceIsStale,
+      isRepricing,
+      quoteAgeSeconds,
       session,
     };
   });
@@ -100,7 +122,14 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
   const netEquity = totalAssets - marginDebt;
   const totalPL = holdingsValue - totalCost;
   const totalPLPercent = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
-  const dayChangePercent = holdingsValue > 0 ? (dayChange / (holdingsValue - dayChange)) * 100 : 0;
+
+  // Day change percent: divide by previous holdings value (matching portfolio.service.ts)
+  const previousHoldingsValue = holdingsValue - dayChange;
+  const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
+
+  // Regular-hours and after-hours change percents
+  const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
+  const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
 
   return {
     holdings: enrichedHoldings,
@@ -116,16 +145,16 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     dayChange,
     dayChangePercent,
     regularDayChange,
-    regularDayChangePercent: (holdingsValue - dayChange) > 0 ? (regularDayChange / (holdingsValue - dayChange)) * 100 : 0,
+    regularDayChangePercent,
     afterHoursChange,
-    afterHoursChangePercent: regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0,
+    afterHoursChangePercent,
     session,
     quotesMeta: {
-      anyRepricing: quotesResult.repricingCount > 0,
+      anyRepricing: quotesResult.repricingCount > 0 || quotesResult.failedTickers.length > 0,
       quoteTimestamp: Date.now(),
       provider: quotesResult.provider,
       staleCount: quotesResult.staleCount,
-      failedTickers: quotesResult.failedTickers,
+      failedTickers: quotesResult.failedTickers.length > 0 ? quotesResult.failedTickers : undefined,
     },
   };
 }

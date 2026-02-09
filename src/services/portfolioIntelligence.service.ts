@@ -59,6 +59,10 @@ export interface ContributorEntry {
   ticker: string;
   percentReturn: number | null;
   contributionDollar: number;
+  shares?: number;
+  avgCost?: number;
+  currentPrice?: number;
+  currentValue?: number;
 }
 
 export interface SectorExposureEntry {
@@ -100,6 +104,10 @@ interface HoldingContribution {
   ticker: string;
   contributionDollar: number;
   percentReturn: number | null;
+  shares: number;
+  avgCost: number;
+  currentPrice: number;
+  currentValue: number;
 }
 
 async function computeContributions(
@@ -117,6 +125,10 @@ async function computeContributions(
         ticker: h.ticker,
         contributionDollar: Math.round(h.dayChange * 100) / 100,
         percentReturn,
+        shares: h.shares,
+        avgCost: h.averageCost,
+        currentPrice: h.currentPrice,
+        currentValue: h.currentValue,
       };
     });
     return { contributions, candleData: null };
@@ -147,19 +159,22 @@ async function computeContributions(
       }
     }
 
+    const holdingMeta = { shares: h.shares, avgCost: h.averageCost, currentPrice: h.currentPrice, currentValue: h.currentValue };
+
     if (!closes || closes.length < daysBack + 1) {
-      return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
+      return { ticker: h.ticker, contributionDollar: 0, percentReturn: null, ...holdingMeta };
     }
 
     const currentPrice = closes[closes.length - 1];
     const referenceClose = closes[closes.length - 1 - daysBack];
-    if (referenceClose <= 0) return { ticker: h.ticker, contributionDollar: 0, percentReturn: null };
+    if (referenceClose <= 0) return { ticker: h.ticker, contributionDollar: 0, percentReturn: null, ...holdingMeta };
     const priceChange = currentPrice - referenceClose;
     const percentReturn = Math.round(((currentPrice - referenceClose) / referenceClose) * 1000) / 10;
     return {
       ticker: h.ticker,
       contributionDollar: Math.round(h.shares * priceChange * 100) / 100,
       percentReturn,
+      ...holdingMeta,
     };
   });
 
@@ -179,6 +194,10 @@ function splitContributors(contributions: HoldingContribution[]): {
     ticker: c.ticker,
     contributionDollar: c.contributionDollar,
     percentReturn: c.percentReturn,
+    shares: c.shares,
+    avgCost: Math.round(c.avgCost * 100) / 100,
+    currentPrice: Math.round(c.currentPrice * 100) / 100,
+    currentValue: Math.round(c.currentValue * 100) / 100,
   });
 
   const allWinners = sorted.filter(c => c.contributionDollar > 0);

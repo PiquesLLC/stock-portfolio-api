@@ -73,7 +73,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     )
     .join('\n');
 
-  const totalValue = portfolio.holdingsValue.toFixed(0);
+  const totalValue = portfolio.netEquity.toFixed(0);
   const userMessage =
     `PORTFOLIO TOTAL VALUE: $${totalValue} (use this exact number if referencing portfolio value)\n\n` +
     `Here is my stock portfolio (${portfolio.holdings.length} positions, ` +

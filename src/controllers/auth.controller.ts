@@ -7,16 +7,39 @@ import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, del
 
 const prisma = new PrismaClient();
 
-// Cookie options for access token
+// Detect Capacitor requests (cross-origin native app) via custom header
+function isCapacitorRequest(req: Request): boolean {
+  return req.headers['x-capacitor'] === 'true';
+}
+
+function getCookieOptions(req: Request) {
+  const capacitor = isCapacitorRequest(req);
+  const accessOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || capacitor,
+    sameSite: (capacitor ? 'none' : 'strict') as 'none' | 'strict',
+    maxAge: 15 * 60 * 1000, // 15 minutes
+    path: '/',
+  };
+  const refreshOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || capacitor,
+    sameSite: (capacitor ? 'none' : 'strict') as 'none' | 'strict',
+    maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+    path: '/auth/refresh',
+  };
+  return { accessOptions, refreshOptions };
+}
+
+// Legacy static options (used where req is not available)
 const ACCESS_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
-  maxAge: 15 * 60 * 1000, // 15 minutes
+  maxAge: 15 * 60 * 1000,
   path: '/',
 };
 
-// Cookie options for refresh token
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -25,9 +48,12 @@ const REFRESH_COOKIE_OPTIONS = {
   path: '/auth/refresh',
 };
 
-function clearAllAuthCookies(res: Response): void {
-  res.clearCookie('authToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
-  res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/auth/refresh' });
+function clearAllAuthCookies(res: Response, req?: Request): void {
+  const capacitor = req ? isCapacitorRequest(req) : false;
+  const sameSite = capacitor ? 'none' as const : 'strict' as const;
+  const secure = process.env.NODE_ENV === 'production' || capacitor;
+  res.clearCookie('authToken', { httpOnly: true, secure, sameSite, path: '/' });
+  res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/auth/refresh' });
 }
 
 /**
@@ -49,8 +75,9 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    res.cookie('authToken', result.token, ACCESS_COOKIE_OPTIONS);
-    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    const { accessOptions, refreshOptions } = getCookieOptions(req);
+    res.cookie('authToken', result.token, accessOptions);
+    res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.json({ user: result.user });
   } catch (error) {
     console.error('Login error:', error);
@@ -77,7 +104,7 @@ export async function logoutHandler(req: AuthRequest, res: Response): Promise<vo
     }
   }
 
-  clearAllAuthCookies(res);
+  clearAllAuthCookies(res, req);
   res.json({ message: 'Logged out successfully' });
 }
 
@@ -176,8 +203,9 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    res.cookie('authToken', result.token, ACCESS_COOKIE_OPTIONS);
-    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    const { accessOptions, refreshOptions } = getCookieOptions(req);
+    res.cookie('authToken', result.token, accessOptions);
+    res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.status(201).json({ user: result.user });
   } catch (error) {
     console.error('Signup error:', error);
@@ -284,7 +312,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.user.delete({ where: { id: user.id } });
     });
 
-    clearAllAuthCookies(res);
+    clearAllAuthCookies(res, req);
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
     console.error('Delete account error:', error);
@@ -307,13 +335,14 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     const result = await rotateRefreshToken(token);
 
     if (!result) {
-      clearAllAuthCookies(res);
+      clearAllAuthCookies(res, req);
       res.status(401).json({ error: 'Invalid or expired refresh token', code: 'TOKEN_INVALID' });
       return;
     }
 
-    res.cookie('authToken', result.accessToken, ACCESS_COOKIE_OPTIONS);
-    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    const { accessOptions, refreshOptions } = getCookieOptions(req);
+    res.cookie('authToken', result.accessToken, accessOptions);
+    res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.json({ message: 'Token refreshed successfully' });
   } catch (error) {
     console.error('Refresh token error:', error);

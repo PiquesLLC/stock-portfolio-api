@@ -8,6 +8,8 @@ export interface HistoricalCAGR {
   ticker: string;
   cagr20yr: number | null;
   cagr10yr: number | null;
+  cagr5yr: number | null;
+  cagrMax: number | null;  // CAGR over all available data
   dataYears: number;
   startDate: string | null;
   endDate: string | null;
@@ -159,6 +161,8 @@ export async function getHistoricalCAGRs(
         ticker: upper,
         cagr20yr: null,
         cagr10yr: null,
+        cagr5yr: null,
+        cagrMax: null,
         dataYears: 0,
         startDate: null,
         endDate: null,
@@ -178,11 +182,28 @@ export async function getHistoricalCAGRs(
 
     const cagr20yr = calculateCAGR(candles.closes, candles.dates, 20);
     const cagr10yr = calculateCAGR(candles.closes, candles.dates, 10);
+    const cagr5yr = calculateCAGR(candles.closes, candles.dates, 5);
+
+    // cagrMax: CAGR over all available data (first close → last close)
+    let cagrMax: number | null = null;
+    if (candles.closes.length >= 2 && dataYears >= 1) {
+      const startPrice = candles.closes[0];
+      const endPrice = candles.closes[candles.closes.length - 1];
+      if (startPrice > 0 && endPrice > 0) {
+        const totalReturn = endPrice / startPrice;
+        let raw = Math.pow(totalReturn, 1 / dataYears) - 1;
+        if (raw > 2) raw = 2;
+        if (raw < -0.5) raw = -0.5;
+        cagrMax = Math.round(raw * 10000) / 10000;
+      }
+    }
 
     const result: HistoricalCAGR = {
       ticker: upper,
       cagr20yr,
       cagr10yr,
+      cagr5yr,
+      cagrMax,
       dataYears,
       startDate,
       endDate,

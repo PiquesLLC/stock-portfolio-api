@@ -50,7 +50,7 @@ export const config = {
   perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
 
   // CORS - allowed origins for API requests
-  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174').split(','),
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),
 
   // Rate limiting
   rateLimit: {
