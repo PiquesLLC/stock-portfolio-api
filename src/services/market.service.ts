@@ -119,10 +119,10 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
     console.warn(`Yahoo intraday fetch failed for ${upperTicker}:`, err instanceof Error ? err.message : err);
   }
 
-  // Finnhub fallback — daily candle for today
+  // Polygon fallback — daily candles (covers weekends/holidays)
   try {
     const now = Math.floor(Date.now() / 1000);
-    const from = now - 2 * 24 * 60 * 60; // 2 days
+    const from = now - 5 * 24 * 60 * 60; // 5 days to cover weekends + holidays
     const fb = await fetchFinnhubCandles(upperTicker, from, now, 'D');
     if (fb && fb.closes.length > 0) {
       const candles: IntradayCandle[] = fb.timestamps.map((t: number, i: number) => ({
