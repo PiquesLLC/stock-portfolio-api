@@ -141,49 +141,44 @@ export async function yahooGet(url: string, timeout = 5000) {
 }
 
 /**
- * Fetch daily candles using Finnhub as a fallback when Yahoo is blocked.
- * Returns data in Yahoo-compatible format so callers don't need to change.
+ * Fetch daily candles using Polygon.io as a fallback when Yahoo is blocked.
+ * Polygon free tier supports 5 requests/min with daily candle data.
  */
 export async function fetchFinnhubCandles(
   ticker: string,
   fromTimestamp: number,
   toTimestamp: number,
-  resolution: string = 'D',
+  _resolution: string = 'D',
 ): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[] } | null> {
   try {
     const { config } = await import('../config');
-    if (!config.finnhubApiKey) {
-      console.warn('[Finnhub Candle] No API key configured');
-      return null;
+
+    // Use Polygon.io for historical candles (free tier: 5 req/min, daily candles)
+    if (config.polygonApiKey) {
+      const fromDate = new Date(fromTimestamp * 1000).toISOString().split('T')[0];
+      const toDate = new Date(toTimestamp * 1000).toISOString().split('T')[0];
+      const url = `https://api.polygon.io/v2/aggs/ticker/${ticker.toUpperCase()}/range/1/day/${fromDate}/${toDate}?adjusted=true&sort=asc&apiKey=${config.polygonApiKey}`;
+
+      const resp = await axios.get(url, { timeout: 10000 });
+
+      if (resp.data?.results && resp.data.results.length > 0) {
+        const results = resp.data.results;
+        console.log(`[Polygon] Got ${results.length} daily candles for ${ticker}`);
+        return {
+          timestamps: results.map((r: any) => Math.floor(r.t / 1000)), // Polygon uses ms, convert to seconds
+          closes: results.map((r: any) => r.c),
+          highs: results.map((r: any) => r.h),
+          lows: results.map((r: any) => r.l),
+          opens: results.map((r: any) => r.o),
+        };
+      }
+      console.warn(`[Polygon] No results for ${ticker}: count=${resp.data?.resultsCount}`);
     }
 
-    const resp = await axios.get('https://finnhub.io/api/v1/stock/candle', {
-      params: {
-        symbol: ticker.toUpperCase(),
-        resolution,
-        from: fromTimestamp,
-        to: toTimestamp,
-        token: config.finnhubApiKey,
-      },
-      timeout: 10000,
-    });
-
-    if (resp.data?.s !== 'ok' || !resp.data?.c) {
-      console.warn(`[Finnhub Candle] No data for ${ticker}: status=${resp.data?.s}`);
-      return null;
-    }
-
-    console.log(`[Finnhub Candle] Got ${resp.data.c.length} candles for ${ticker}`);
-    return {
-      timestamps: resp.data.t,
-      closes: resp.data.c,
-      highs: resp.data.h,
-      lows: resp.data.l,
-      opens: resp.data.o,
-    };
+    return null;
   } catch (err: any) {
     const msg = err?.response?.status ? `HTTP ${err.response.status}` : err?.code || err?.message || String(err);
-    console.warn(`[Finnhub Candle] Failed for ${ticker}: ${msg}`);
+    console.warn(`[Polygon] Failed for ${ticker}: ${msg}`);
     return null;
   }
 }
