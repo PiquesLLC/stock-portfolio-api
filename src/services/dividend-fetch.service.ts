@@ -5,6 +5,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import { yahooGet } from '../utils/yahoo-http';
+import axios from 'axios';
 import NodeCache from 'node-cache';
 
 const prisma = new PrismaClient();
@@ -65,8 +66,42 @@ export async function fetchYahooDividends(ticker: string, yearsBack = 2): Promis
     return parsed;
   } catch (err) {
     console.warn(`[Dividend Fetch] Yahoo historical failed for ${ticker}:`, err instanceof Error ? err.message : err);
-    return [];
   }
+
+  // Polygon.io fallback for dividend data
+  try {
+    const { config } = await import('../config');
+    if (config.polygonApiKey) {
+      const url = `https://api.polygon.io/v3/reference/dividends?ticker=${ticker.toUpperCase()}&limit=20&order=desc&apiKey=${config.polygonApiKey}`;
+      const resp = await axios.get(url, { timeout: 10000 });
+      if (resp.data?.results && resp.data.results.length > 0) {
+        const parsed: ParsedDividend[] = [];
+        for (const div of resp.data.results) {
+          if (!div.cash_amount || div.cash_amount <= 0) continue;
+          const exDate = new Date(div.ex_dividend_date + 'T14:30:00Z');
+          const payDate = div.pay_date
+            ? new Date(div.pay_date + 'T14:30:00Z')
+            : new Date(exDate.getTime() + 21 * 86400000);
+          parsed.push({
+            ticker: ticker.toUpperCase(),
+            exDate,
+            payDate,
+            amountPerShare: Math.round(div.cash_amount * 10000) / 10000,
+            source: 'polygon',
+            payDateEstimated: !div.pay_date,
+          });
+        }
+        if (parsed.length > 0) {
+          console.log(`[Dividend Fetch] Polygon returned ${parsed.length} dividends for ${ticker}`);
+          return parsed;
+        }
+      }
+    }
+  } catch (polyErr) {
+    console.warn(`[Dividend Fetch] Polygon fallback failed for ${ticker}:`, polyErr instanceof Error ? polyErr.message : polyErr);
+  }
+
+  return [];
 }
 
 /**
