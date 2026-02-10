@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
@@ -10,6 +11,11 @@ import { checkMilestoneAlerts } from './services/milestone.service';
 import { PrismaClient } from '@prisma/client';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
+
+// Run prisma db push at startup (needs volume mounted, can't run at build time)
+console.log('[Init] Running prisma db push...');
+execSync('npx prisma db push --skip-generate', { stdio: 'inherit' });
+console.log('[Init] Database schema synced');
 
 const prisma = new PrismaClient();
 
