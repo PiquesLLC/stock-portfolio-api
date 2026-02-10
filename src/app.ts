@@ -10,6 +10,11 @@ import { apiLimiter } from './middleware/rateLimiter';
 
 const app = express();
 
+// Trust reverse proxy (Railway, Heroku, etc.) for correct IP detection in rate limiting
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Security headers (CSP, X-Frame-Options, etc.)
 app.use(helmet({
   contentSecurityPolicy: {
