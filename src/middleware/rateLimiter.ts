@@ -60,9 +60,10 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for health checks and GET requests in development
+    // Skip rate limiting for health checks and all GET requests
+    // GET requests are read-only; mutations are protected by mutationLimiter
     if (req.path === '/health') return true;
-    if (process.env.NODE_ENV !== 'production' && req.method === 'GET') return true;
+    if (req.method === 'GET') return true;
     return false;
   },
 });
