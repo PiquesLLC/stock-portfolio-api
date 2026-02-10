@@ -465,7 +465,10 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
  * Used for progressive loading to show price immediately.
  */
 export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
-  return fetchYahooQuote(ticker);
+  const yahoo = await fetchYahooQuote(ticker);
+  if (yahoo) return yahoo;
+  // Fallback to Finnhub when Yahoo is blocked
+  return fetchQuote(ticker);
 }
 
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
