@@ -27,7 +27,8 @@ const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
 
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
+    // Prefer explicit userId query param, then authenticated user, then legacy default
+    const userId = (req.query.userId as string | undefined) || req.user?.userId;
 
     let portfolio;
     if (userId) {
@@ -49,7 +50,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         portfolio.netEquity,
       ).catch(e => console.error('User snapshot error:', e));
     } else {
-      // Legacy: default portfolio (will be deprecated)
+      // Legacy: default portfolio (no auth)
       await createSnapshotIfNeeded();
       portfolio = await getPortfolio();
     }
@@ -189,6 +190,18 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     if (typeof cashBalance !== 'number' || cashBalance < 0) {
       res.status(400).json({ error: 'Invalid cashBalance: must be a non-negative number' });
       return;
+    }
+
+    // Update user-specific cash if authenticated
+    const authUserId = req.user?.userId;
+    if (authUserId) {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      await prisma.userSettings.upsert({
+        where: { userId: authUserId },
+        update: { cashBalance },
+        create: { userId: authUserId, cashBalance, marginDebt: 0 },
+      });
     }
 
     const settings = await updateCashBalance(cashBalance);
