@@ -14,19 +14,21 @@ function isCapacitorRequest(req: Request): boolean {
 
 function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);
+  // Use 'lax' for same-origin (works reliably on iOS Safari/PWA), 'none' for Capacitor cross-origin
+  const sameSite = capacitor ? 'none' as const : 'lax' as const;
   const accessOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production' || capacitor,
-    sameSite: (capacitor ? 'none' : 'strict') as 'none' | 'strict',
+    sameSite,
     maxAge: 15 * 60 * 1000, // 15 minutes
     path: '/',
   };
   const refreshOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production' || capacitor,
-    sameSite: (capacitor ? 'none' : 'strict') as 'none' | 'strict',
+    sameSite,
     maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-    path: '/auth/refresh',
+    path: '/',
   };
   return { accessOptions, refreshOptions };
 }
@@ -35,7 +37,7 @@ function getCookieOptions(req: Request) {
 const ACCESS_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
   maxAge: 15 * 60 * 1000,
   path: '/',
 };
@@ -43,17 +45,17 @@ const ACCESS_COOKIE_OPTIONS = {
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
   maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-  path: '/auth/refresh',
+  path: '/',
 };
 
 function clearAllAuthCookies(res: Response, req?: Request): void {
   const capacitor = req ? isCapacitorRequest(req) : false;
-  const sameSite = capacitor ? 'none' as const : 'strict' as const;
+  const sameSite = capacitor ? 'none' as const : 'lax' as const;
   const secure = process.env.NODE_ENV === 'production' || capacitor;
   res.clearCookie('authToken', { httpOnly: true, secure, sameSite, path: '/' });
-  res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/auth/refresh' });
+  res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
 }
 
 /**
