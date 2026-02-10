@@ -99,10 +99,11 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
       volume: pg.volumes[i],
     }));
 
-    // Keep only the most recent trading day's candles
+    // Keep only the most recent trading day's candles (using ET date, not UTC)
     if (candles.length > 0) {
-      const lastDate = candles[candles.length - 1].time.slice(0, 10);
-      const todayCandles = candles.filter(c => c.time.slice(0, 10) === lastDate);
+      const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+      const lastDateET = etDateFmt.format(new Date(candles[candles.length - 1].time));
+      const todayCandles = candles.filter(c => etDateFmt.format(new Date(c.time)) === lastDateET);
       if (todayCandles.length > 0) {
         yahooIntradayCache.set(cacheKey, todayCandles);
         return todayCandles;
