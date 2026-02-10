@@ -27,12 +27,13 @@ const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
 
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    // Prefer explicit userId query param, then authenticated user, then legacy default
-    const userId = (req.query.userId as string | undefined) || req.user?.userId;
+    // Only use userId if explicitly passed as query param (e.g., leaderboard profile views).
+    // The main portfolio always uses the system/default user's data.
+    const userId = req.query.userId as string | undefined;
 
     let portfolio;
     if (userId) {
-      // User-specific portfolio
+      // User-specific portfolio (for leaderboard/profile views)
       portfolio = await getUserPortfolio(userId);
       if (!portfolio) {
         res.status(404).json({ error: 'User not found' });
@@ -50,7 +51,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         portfolio.netEquity,
       ).catch(e => console.error('User snapshot error:', e));
     } else {
-      // Legacy: default portfolio (no auth)
+      // Default portfolio — the main portfolio data (all users see this)
       await createSnapshotIfNeeded();
       portfolio = await getPortfolio();
     }
@@ -88,11 +89,11 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
 
     // Check if this is an update vs new add
-    const authUserId = req.user?.userId;
-    const existingHoldings = await getHoldings(authUserId);
+    // Always use system/default portfolio — auth is for access control only
+    const existingHoldings = await getHoldings();
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
-    const holding = await upsertHolding({ ticker, shares, averageCost }, authUserId);
+    const holding = await upsertHolding({ ticker, shares, averageCost });
 
     // Auto-create transaction for TWR tracking (unless skipTransaction is set)
     // This ensures adding/removing stocks doesn't artificially inflate returns
@@ -113,7 +114,8 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       }
     }
 
-    // Fire activity event using authenticated user ID (prevents spoofing)
+    // Fire activity event using authenticated user ID
+    const authUserId = req.user?.userId;
     if (authUserId) {
       if (existingHolding) {
         createActivityEvent(authUserId, 'holding_updated', {
@@ -149,12 +151,12 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
 
     // Get the holding before deletion to know the cost basis
-    const authUserId = req.user?.userId;
-    const existingHoldings = await getHoldings(authUserId);
+    // Always use system/default portfolio — auth is for access control only
+    const existingHoldings = await getHoldings();
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
-    await deleteHolding(ticker, authUserId);
+    await deleteHolding(ticker);
 
     // Auto-create withdrawal transaction for TWR tracking
     if (!skipTransaction && costBasis >= 0.01) {
@@ -162,12 +164,12 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
         type: 'withdrawal',
         amount: costBasis,
         date: new Date().toISOString(),
-        userId: authUserId,
       });
       console.log(`[Holding] Auto-created withdrawal of $${costBasis.toFixed(2)} for removing ${ticker}`);
     }
 
-    // Fire activity event using authenticated user ID (prevents spoofing)
+    // Fire activity event using authenticated user ID
+    const authUserId = req.user?.userId;
     if (authUserId) {
       createActivityEvent(authUserId, 'holding_removed', { ticker }).catch(() => {});
     }
