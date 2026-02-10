@@ -87,10 +87,11 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
 
     // Check if this is an update vs new add
-    const existingHoldings = await getHoldings();
+    const authUserId = req.user?.userId;
+    const existingHoldings = await getHoldings(authUserId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
-    const holding = await upsertHolding({ ticker, shares, averageCost });
+    const holding = await upsertHolding({ ticker, shares, averageCost }, authUserId);
 
     // Auto-create transaction for TWR tracking (unless skipTransaction is set)
     // This ensures adding/removing stocks doesn't artificially inflate returns
@@ -112,7 +113,6 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
 
     // Fire activity event using authenticated user ID (prevents spoofing)
-    const authUserId = req.user?.userId;
     if (authUserId) {
       if (existingHolding) {
         createActivityEvent(authUserId, 'holding_updated', {
@@ -148,26 +148,25 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
 
     // Get the holding before deletion to know the cost basis
-    const existingHoldings = await getHoldings();
+    const authUserId = req.user?.userId;
+    const existingHoldings = await getHoldings(authUserId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
-    await deleteHolding(ticker);
+    await deleteHolding(ticker, authUserId);
 
     // Auto-create withdrawal transaction for TWR tracking
     if (!skipTransaction && costBasis >= 0.01) {
-      const userId = req.query.userId as string | undefined;
       await addTransaction({
         type: 'withdrawal',
         amount: costBasis,
         date: new Date().toISOString(),
-        userId,
+        userId: authUserId,
       });
       console.log(`[Holding] Auto-created withdrawal of $${costBasis.toFixed(2)} for removing ${ticker}`);
     }
 
     // Fire activity event using authenticated user ID (prevents spoofing)
-    const authUserId = req.user?.userId;
     if (authUserId) {
       createActivityEvent(authUserId, 'holding_removed', { ticker }).catch(() => {});
     }

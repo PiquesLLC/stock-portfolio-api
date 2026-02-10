@@ -5,18 +5,21 @@ import { getMarketSession } from '../utils/market-hours';
 
 const prisma = new PrismaClient();
 
-export async function getHoldings(): Promise<Holding[]> {
+const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+export async function getHoldings(userId?: string): Promise<Holding[]> {
   return prisma.holding.findMany({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { userId: userId || DEFAULT_USER_ID },
     orderBy: { ticker: 'asc' },
   });
 }
 
-export async function upsertHolding(input: HoldingInput): Promise<Holding> {
+export async function upsertHolding(input: HoldingInput, userId?: string): Promise<Holding> {
   const ticker = input.ticker.toUpperCase();
+  const uid = userId || DEFAULT_USER_ID;
 
   const existing = await prisma.holding.findFirst({
-    where: { ticker, userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { ticker, userId: uid },
   });
 
   if (existing) {
@@ -34,14 +37,14 @@ export async function upsertHolding(input: HoldingInput): Promise<Holding> {
       ticker,
       shares: input.shares,
       averageCost: input.averageCost,
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId: uid,
     },
   });
 }
 
-export async function deleteHolding(ticker: string): Promise<void> {
+export async function deleteHolding(ticker: string, userId?: string): Promise<void> {
   const existing = await prisma.holding.findFirst({
-    where: { ticker: ticker.toUpperCase(), userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { ticker: ticker.toUpperCase(), userId: userId || DEFAULT_USER_ID },
   });
   if (existing) {
     await prisma.holding.delete({ where: { id: existing.id } });
