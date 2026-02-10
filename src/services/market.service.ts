@@ -3,19 +3,37 @@ import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsRe
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import axios from 'axios';
 import NodeCache from 'node-cache';
-import { yahooGet, fetchFinnhubCandles } from '../utils/yahoo-http';
+import { yahooGet, fetchPolygonAggs, fetchFinnhubCandles } from '../utils/yahoo-http';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
 
-async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
-  const cacheKey = `yahoo:${ticker}`;
+async function fetchDailyCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
+  const cacheKey = `daily:${ticker}`;
   const cached = yahooCache.get<StockDetailsResponse['candles']>(cacheKey);
   if (cached) return cached;
 
+  // Polygon.io primary — 10 years of daily candles (paid plan)
+  const today = new Date().toISOString().split('T')[0];
+  const tenYearsAgo = new Date(Date.now() - 10 * 365.25 * 86400000).toISOString().split('T')[0];
+  const pg = await fetchPolygonAggs(ticker, 1, 'day', tenYearsAgo, today);
+  if (pg && pg.closes.length > 0) {
+    const candles: StockDetailsResponse['candles'] = {
+      closes: pg.closes,
+      dates: pg.timestamps.map(t => new Date(t * 1000).toISOString().slice(0, 10)),
+      highs: pg.highs,
+      lows: pg.lows,
+      opens: pg.opens,
+      volumes: pg.volumes,
+    };
+    yahooCache.set(cacheKey, candles);
+    return candles;
+  }
+
+  // Yahoo Finance fallback
   try {
     const now = Math.floor(Date.now() / 1000);
-    const from = now - 10 * 365 * 24 * 60 * 60; // 10 years for MAX chart view
+    const from = now - 10 * 365 * 24 * 60 * 60;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d&includePrePost=true`;
     const resp = await yahooGet(url);
 
@@ -43,35 +61,12 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
     }
 
     if (closes.length === 0) return null;
-
     const candles: StockDetailsResponse['candles'] = { closes, dates, highs, lows, opens, volumes };
     yahooCache.set(cacheKey, candles);
     return candles;
-  } catch (err) {
-    console.warn(`Yahoo Finance candle fetch failed for ${ticker}:`, err instanceof Error ? err.message : err);
+  } catch {
+    return null;
   }
-
-  // Polygon.io fallback for daily candles
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const from = now - 2 * 365 * 24 * 60 * 60; // 2 years (Polygon free tier limit)
-    const fb = await fetchFinnhubCandles(ticker, from, now, 'D');
-    if (fb && fb.closes.length > 0) {
-      const candles: StockDetailsResponse['candles'] = {
-        closes: fb.closes,
-        dates: fb.timestamps.map((t: number) => new Date(t * 1000).toISOString().slice(0, 10)),
-        highs: fb.highs,
-        lows: fb.lows,
-        opens: fb.opens,
-        volumes: fb.volumes ?? fb.closes.map(() => 0),
-      };
-      console.log(`[Polygon] Got ${fb.closes.length} daily candles for ${ticker} (details)`);
-      yahooCache.set(cacheKey, candles);
-      return candles;
-    }
-  } catch { /* Polygon also failed */ }
-
-  return null;
 }
 
 export interface IntradayCandle {
@@ -85,58 +80,66 @@ export interface IntradayCandle {
 
 export async function fetchIntradayCandles(ticker: string): Promise<IntradayCandle[]> {
   const upperTicker = ticker.toUpperCase();
-  const cacheKey = `yahoo-intra:${upperTicker}`;
+  const cacheKey = `intra:${upperTicker}`;
   const cached = yahooIntradayCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?interval=5m&range=1d&includePrePost=true`;
-    const resp = await yahooGet(url);
+  // Polygon.io primary — 5-minute bars for the last 2 trading days
+  const today = new Date().toISOString().split('T')[0];
+  const daysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0]; // 5 days covers weekends
+  const pg = await fetchPolygonAggs(upperTicker, 5, 'minute', daysAgo, today, 60);
+  if (pg && pg.closes.length > 0) {
+    // Filter to only today's trading session (or last trading day if weekend/holiday)
+    const candles: IntradayCandle[] = pg.timestamps.map((t, i) => ({
+      time: new Date(t * 1000).toISOString(),
+      open: pg.opens[i],
+      high: pg.highs[i],
+      low: pg.lows[i],
+      close: pg.closes[i],
+      volume: pg.volumes[i],
+    }));
 
-    const result = resp.data?.chart?.result?.[0];
-    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
-
-    const timestamps: number[] = result.timestamp;
-    const q = result.indicators.quote[0];
-    const candles: IntradayCandle[] = [];
-
-    for (let i = 0; i < timestamps.length; i++) {
-      if (q.close[i] != null) {
-        candles.push({
-          time: new Date(timestamps[i] * 1000).toISOString(),
-          open: q.open?.[i] ?? q.close[i],
-          high: q.high?.[i] ?? q.close[i],
-          low: q.low?.[i] ?? q.close[i],
-          close: q.close[i],
-          volume: q.volume?.[i] ?? 0,
-        });
+    // Keep only the most recent trading day's candles
+    if (candles.length > 0) {
+      const lastDate = candles[candles.length - 1].time.slice(0, 10);
+      const todayCandles = candles.filter(c => c.time.slice(0, 10) === lastDate);
+      if (todayCandles.length > 0) {
+        yahooIntradayCache.set(cacheKey, todayCandles);
+        return todayCandles;
       }
     }
 
     yahooIntradayCache.set(cacheKey, candles);
     return candles;
-  } catch (err) {
-    console.warn(`Yahoo intraday fetch failed for ${upperTicker}:`, err instanceof Error ? err.message : err);
   }
 
-  // Polygon fallback — daily candles (covers weekends/holidays)
+  // Yahoo Finance fallback
   try {
-    const now = Math.floor(Date.now() / 1000);
-    const from = now - 5 * 24 * 60 * 60; // 5 days to cover weekends + holidays
-    const fb = await fetchFinnhubCandles(upperTicker, from, now, 'D');
-    if (fb && fb.closes.length > 0) {
-      const candles: IntradayCandle[] = fb.timestamps.map((t: number, i: number) => ({
-        time: new Date(t * 1000).toISOString(),
-        open: fb.opens[i] ?? fb.closes[i],
-        high: fb.highs[i] ?? fb.closes[i],
-        low: fb.lows[i] ?? fb.closes[i],
-        close: fb.closes[i],
-        volume: 0,
-      }));
-      yahooIntradayCache.set(cacheKey, candles);
-      return candles;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?interval=5m&range=1d&includePrePost=true`;
+    const resp = await yahooGet(url);
+    const result = resp.data?.chart?.result?.[0];
+    if (result?.timestamp && result?.indicators?.quote?.[0]) {
+      const timestamps: number[] = result.timestamp;
+      const q = result.indicators.quote[0];
+      const candles: IntradayCandle[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        if (q.close[i] != null) {
+          candles.push({
+            time: new Date(timestamps[i] * 1000).toISOString(),
+            open: q.open?.[i] ?? q.close[i],
+            high: q.high?.[i] ?? q.close[i],
+            low: q.low?.[i] ?? q.close[i],
+            close: q.close[i],
+            volume: q.volume?.[i] ?? 0,
+          });
+        }
+      }
+      if (candles.length > 0) {
+        yahooIntradayCache.set(cacheKey, candles);
+        return candles;
+      }
     }
-  } catch { /* both failed */ }
+  } catch { /* Yahoo also failed */ }
 
   return [];
 }
@@ -144,67 +147,65 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
 const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourly candles
 
 /**
- * Fetch hourly candles from Yahoo Finance for a given range.
- * Used for 1W (15m interval, 5d range) and 1M (60m interval, 1mo range).
+ * Fetch hourly candles for 1W (15m bars, 5 days) or 1M (60m bars, 30 days).
+ * Polygon.io primary, Yahoo Finance fallback.
  */
 export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): Promise<IntradayCandle[]> {
   const upperTicker = ticker.toUpperCase();
-  const cacheKey = `yahoo-hourly:${upperTicker}:${period}`;
+  const cacheKey = `hourly:${upperTicker}:${period}`;
   const cached = yahooHourlyCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
+  // Polygon.io primary — proper resolution per period
+  const today = new Date().toISOString().split('T')[0];
+  const rangeDays = period === '1W' ? 7 : 35; // extra days for weekends
+  const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
+  const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
+
+  const pg = await fetchPolygonAggs(upperTicker, multiplier, timespan, fromDate, today, 300);
+  if (pg && pg.closes.length > 0) {
+    const candles: IntradayCandle[] = pg.timestamps.map((t, i) => ({
+      time: new Date(t * 1000).toISOString(),
+      open: pg.opens[i],
+      high: pg.highs[i],
+      low: pg.lows[i],
+      close: pg.closes[i],
+      volume: pg.volumes[i],
+    }));
+    yahooHourlyCache.set(cacheKey, candles);
+    return candles;
+  }
+
+  // Yahoo Finance fallback
   try {
     const params = period === '1W'
       ? 'interval=15m&range=5d&includePrePost=true'
       : 'interval=60m&range=1mo&includePrePost=true';
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?${params}`;
     const resp = await yahooGet(url);
-
     const result = resp.data?.chart?.result?.[0];
-    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
-
-    const timestamps: number[] = result.timestamp;
-    const q = result.indicators.quote[0];
-    const candles: IntradayCandle[] = [];
-
-    for (let i = 0; i < timestamps.length; i++) {
-      if (q.close[i] != null) {
-        candles.push({
-          time: new Date(timestamps[i] * 1000).toISOString(),
-          open: q.open?.[i] ?? q.close[i],
-          high: q.high?.[i] ?? q.close[i],
-          low: q.low?.[i] ?? q.close[i],
-          close: q.close[i],
-          volume: q.volume?.[i] ?? 0,
-        });
+    if (result?.timestamp && result?.indicators?.quote?.[0]) {
+      const timestamps: number[] = result.timestamp;
+      const q = result.indicators.quote[0];
+      const candles: IntradayCandle[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        if (q.close[i] != null) {
+          candles.push({
+            time: new Date(timestamps[i] * 1000).toISOString(),
+            open: q.open?.[i] ?? q.close[i],
+            high: q.high?.[i] ?? q.close[i],
+            low: q.low?.[i] ?? q.close[i],
+            close: q.close[i],
+            volume: q.volume?.[i] ?? 0,
+          });
+        }
+      }
+      if (candles.length > 0) {
+        yahooHourlyCache.set(cacheKey, candles);
+        return candles;
       }
     }
-
-    yahooHourlyCache.set(cacheKey, candles);
-    return candles;
-  } catch (err) {
-    console.warn(`Yahoo hourly fetch failed for ${upperTicker} (${period}):`, err instanceof Error ? err.message : err);
-  }
-
-  // Finnhub fallback — daily candles
-  try {
-    const rangeDays = period === '1W' ? 5 : 30;
-    const now = Math.floor(Date.now() / 1000);
-    const from = now - rangeDays * 24 * 60 * 60;
-    const fb = await fetchFinnhubCandles(upperTicker, from, now, 'D');
-    if (fb && fb.closes.length > 0) {
-      const candles: IntradayCandle[] = fb.timestamps.map((t: number, i: number) => ({
-        time: new Date(t * 1000).toISOString(),
-        open: fb.opens[i] ?? fb.closes[i],
-        high: fb.highs[i] ?? fb.closes[i],
-        low: fb.lows[i] ?? fb.closes[i],
-        close: fb.closes[i],
-        volume: 0,
-      }));
-      yahooHourlyCache.set(cacheKey, candles);
-      return candles;
-    }
-  } catch { /* both failed */ }
+  } catch { /* Yahoo also failed */ }
 
   return [];
 }
@@ -465,30 +466,27 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
  * Used for progressive loading to show price immediately.
  */
 export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
-  const yahoo = await fetchYahooQuote(ticker);
-  if (yahoo) return yahoo;
-  // Fallback to Finnhub when Yahoo is blocked
-  return fetchQuote(ticker);
+  // Finnhub first (real-time data), Yahoo as fallback
+  try {
+    return await fetchQuote(ticker);
+  } catch {
+    return fetchYahooQuote(ticker);
+  }
 }
 
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 
-  // Use Yahoo for quote + candles (fast, no queue), Finnhub only for profile + metrics
+  // Polygon for candles, Finnhub for quote/profile/metrics, Yahoo as fallback for quote
   const [quote, profileRaw, metricsRaw, candles] = await Promise.all([
-    fetchYahooQuote(upperTicker).catch(() => null),
+    fetchQuote(upperTicker).catch(() => fetchYahooQuote(upperTicker).catch(() => null)),
     getStockProfile(upperTicker).catch(() => null),
     getStockMetrics(upperTicker).catch(() => null),
-    fetchYahooCandles(upperTicker).catch(() => null),
+    fetchDailyCandles(upperTicker).catch(() => null),
   ]);
 
   if (!quote) {
-    // Last resort: try Finnhub quote through the queue
-    const finnhubQuote = await fetchQuote(upperTicker).catch(() => null);
-    if (!finnhubQuote) {
-      throw new Error(`No quote data available for ${upperTicker}`);
-    }
-    return { ticker: upperTicker, quote: finnhubQuote, profile: null, metrics: null, candles };
+    throw new Error(`No quote data available for ${upperTicker}`);
   }
 
   // Map profile

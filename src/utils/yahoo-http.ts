@@ -1,9 +1,110 @@
 /**
- * Yahoo Finance HTTP client with cookie/crumb authentication.
- * Yahoo blocks datacenter IPs (like Railway) unless requests include
- * consent cookies and a crumb token. This module handles that transparently.
+ * Market data client — Polygon.io primary, Yahoo Finance fallback.
+ * Polygon.io Stocks Developer plan ($79/mo): unlimited API calls,
+ * 10-year history, minute aggregates, 15-min delayed data.
+ * Yahoo is kept as fallback but is blocked from Railway datacenter IPs.
  */
 import axios from 'axios';
+import NodeCache from 'node-cache';
+
+// ─── Polygon.io ─────────────────────────────────────────────────────────────
+
+let _polygonApiKey: string | null = null;
+
+async function getPolygonKey(): Promise<string | null> {
+  if (_polygonApiKey !== null) return _polygonApiKey || null;
+  const { config } = await import('../config');
+  _polygonApiKey = config.polygonApiKey || '';
+  return _polygonApiKey || null;
+}
+
+// Cache for Polygon results — keyed by request URL
+const polygonCache = new NodeCache({ stdTTL: 300 }); // 5-min default
+const polygonDailyCache = new NodeCache({ stdTTL: 86400 }); // 24h for daily candles
+
+export interface PolygonCandleResult {
+  timestamps: number[];
+  closes: number[];
+  highs: number[];
+  lows: number[];
+  opens: number[];
+  volumes: number[];
+}
+
+/**
+ * Generic Polygon.io aggregates (candle bars) fetcher.
+ * @param ticker - Stock ticker
+ * @param multiplier - Bar size multiplier (e.g., 5 for 5-minute bars)
+ * @param timespan - Bar timespan: 'minute' | 'hour' | 'day' | 'week' | 'month'
+ * @param from - Start date (YYYY-MM-DD)
+ * @param to - End date (YYYY-MM-DD)
+ * @param cacheTTL - Cache TTL in seconds (0 = use default per timespan)
+ */
+export async function fetchPolygonAggs(
+  ticker: string,
+  multiplier: number,
+  timespan: string,
+  from: string,
+  to: string,
+  cacheTTL?: number,
+): Promise<PolygonCandleResult | null> {
+  const apiKey = await getPolygonKey();
+  if (!apiKey) return null;
+
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `polygon:${upperTicker}:${multiplier}:${timespan}:${from}:${to}`;
+
+  // Use daily cache for day+ timespans, short cache for intraday
+  const cache = timespan === 'day' || timespan === 'week' || timespan === 'month'
+    ? polygonDailyCache
+    : polygonCache;
+  const cached = cache.get<PolygonCandleResult>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const url = `https://api.polygon.io/v2/aggs/ticker/${upperTicker}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&limit=50000&apiKey=${apiKey}`;
+    const resp = await axios.get(url, { timeout: 15000 });
+
+    if (resp.data?.results && resp.data.results.length > 0) {
+      const results = resp.data.results;
+      const data: PolygonCandleResult = {
+        timestamps: results.map((r: any) => Math.floor(r.t / 1000)),
+        closes: results.map((r: any) => r.c),
+        highs: results.map((r: any) => r.h),
+        lows: results.map((r: any) => r.l),
+        opens: results.map((r: any) => r.o),
+        volumes: results.map((r: any) => r.v ?? 0),
+      };
+      const ttl = cacheTTL ?? (timespan === 'day' ? 86400 : timespan === 'minute' ? 60 : 300);
+      cache.set(cacheKey, data, ttl);
+      console.log(`[Polygon] ${results.length} bars (${multiplier}${timespan}) for ${upperTicker}`);
+      return data;
+    }
+    // No results but no error
+    return null;
+  } catch (err: any) {
+    const msg = err?.response?.status ? `HTTP ${err.response.status}` : err?.code || err?.message || String(err);
+    console.warn(`[Polygon] Failed ${upperTicker} (${multiplier}${timespan}): ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Fetch daily candles from Polygon.io.
+ * Backward-compatible wrapper used by snapshot.service.ts and other callers.
+ */
+export async function fetchFinnhubCandles(
+  ticker: string,
+  fromTimestamp: number,
+  toTimestamp: number,
+  _resolution: string = 'D',
+): Promise<PolygonCandleResult | null> {
+  const fromDate = new Date(fromTimestamp * 1000).toISOString().split('T')[0];
+  const toDate = new Date(toTimestamp * 1000).toISOString().split('T')[0];
+  return fetchPolygonAggs(ticker, 1, 'day', fromDate, toDate);
+}
+
+// ─── Yahoo Finance (fallback) ───────────────────────────────────────────────
 
 let yahooCookie = '';
 let yahooCrumb = '';
@@ -14,105 +115,65 @@ const YAHOO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 
 async function ensureYahooCookie(): Promise<void> {
   if (yahooCookie && yahooCrumb && Date.now() < yahooCookieExpiry) return;
-
-  // Don't retry too often if it keeps failing
   if (cookieAttempts > 0 && Date.now() < yahooCookieExpiry) return;
-
   cookieAttempts++;
 
   try {
-    // Method 1: Use the Yahoo consent cookie approach
-    // The A3 cookie with value "d=AQ..." bypasses consent screens
-    // First, try getting cookies from the Yahoo Finance page
     const initResp = await axios.get('https://finance.yahoo.com/quote/AAPL', {
-      timeout: 15000,
+      timeout: 8000,
       maxRedirects: 5,
       validateStatus: () => true,
       headers: {
         'User-Agent': YAHOO_UA,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
       },
     });
 
-    console.log(`[Yahoo] finance.yahoo.com responded with HTTP ${initResp.status}`);
     const setCookies = initResp.headers['set-cookie'];
     if (setCookies && setCookies.length > 0) {
       yahooCookie = setCookies.map((c: string) => c.split(';')[0]).join('; ');
-      console.log(`[Yahoo] Got ${setCookies.length} cookies from finance.yahoo.com`);
-    } else {
-      console.warn('[Yahoo] No set-cookie headers from finance.yahoo.com');
     }
 
-    // Try to get crumb with the cookies we have
     if (yahooCookie) {
-      try {
-        const crumbResp = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-          timeout: 10000,
-          headers: { 'User-Agent': YAHOO_UA, Cookie: yahooCookie },
-          validateStatus: () => true,
-        });
-
-        if (crumbResp.status === 200 && crumbResp.data && typeof crumbResp.data === 'string' && crumbResp.data.length < 50) {
-          yahooCrumb = crumbResp.data;
-          yahooCookieExpiry = Date.now() + 3600000; // 1 hour
-          console.log('[Yahoo] Cookie/crumb obtained successfully');
-          return;
-        }
-      } catch (crumbErr) {
-        console.warn('[Yahoo] Crumb fetch failed:', crumbErr instanceof Error ? crumbErr.message : crumbErr);
-      }
-    }
-
-    // Method 2: Try fc.yahoo.com as fallback
-    try {
-      const fcResp = await axios.get('https://fc.yahoo.com', {
-        timeout: 10000,
-        maxRedirects: 5,
+      const crumbResp = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+        timeout: 5000,
+        headers: { 'User-Agent': YAHOO_UA, Cookie: yahooCookie },
         validateStatus: () => true,
-        headers: { 'User-Agent': YAHOO_UA },
       });
-
-      const fcCookies = fcResp.headers['set-cookie'];
-      if (fcCookies && fcCookies.length > 0) {
-        yahooCookie = fcCookies.map((c: string) => c.split(';')[0]).join('; ');
-
-        const crumbResp = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-          timeout: 10000,
-          headers: { 'User-Agent': YAHOO_UA, Cookie: yahooCookie },
-        });
-
-        if (crumbResp.data && typeof crumbResp.data === 'string') {
-          yahooCrumb = crumbResp.data;
-          yahooCookieExpiry = Date.now() + 3600000;
-          console.log('[Yahoo] Cookie/crumb obtained via fc.yahoo.com');
-          return;
-        }
+      if (crumbResp.status === 200 && crumbResp.data && typeof crumbResp.data === 'string' && crumbResp.data.length < 50) {
+        yahooCrumb = crumbResp.data;
+        yahooCookieExpiry = Date.now() + 3600000;
+        return;
       }
-    } catch {
-      // fc.yahoo.com also failed
     }
 
-    // If we got cookies but no crumb, still use cookies (query1 may work without crumb)
-    if (yahooCookie) {
-      yahooCookieExpiry = Date.now() + 600000; // Retry in 10 min
-      console.log('[Yahoo] Got cookies but no crumb — will use cookies only');
-    } else {
-      yahooCookieExpiry = Date.now() + 300000; // Retry in 5 min
-      console.warn('[Yahoo] Failed to obtain any cookies');
+    // Fallback: fc.yahoo.com
+    const fcResp = await axios.get('https://fc.yahoo.com', {
+      timeout: 5000, maxRedirects: 5, validateStatus: () => true,
+      headers: { 'User-Agent': YAHOO_UA },
+    });
+    const fcCookies = fcResp.headers['set-cookie'];
+    if (fcCookies?.length) {
+      yahooCookie = fcCookies.map((c: string) => c.split(';')[0]).join('; ');
+      const crumbResp = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+        timeout: 5000,
+        headers: { 'User-Agent': YAHOO_UA, Cookie: yahooCookie },
+      });
+      if (crumbResp.data && typeof crumbResp.data === 'string') {
+        yahooCrumb = crumbResp.data;
+        yahooCookieExpiry = Date.now() + 3600000;
+        return;
+      }
     }
-  } catch (err: any) {
-    const msg = err?.response?.status
-      ? `HTTP ${err.response.status} ${err.response.statusText || ''}`
-      : err?.code || err?.message || String(err);
-    console.warn('[Yahoo] Cookie acquisition failed:', msg);
-    yahooCookieExpiry = Date.now() + 300000; // Retry in 5 min
+
+    yahooCookieExpiry = Date.now() + (yahooCookie ? 600000 : 300000);
+  } catch {
+    yahooCookieExpiry = Date.now() + 300000;
   }
 }
 
 /**
  * Make an authenticated GET request to Yahoo Finance.
- * Automatically handles cookie/crumb and falls back to unauthenticated if needed.
  */
 export async function yahooGet(url: string, timeout = 5000) {
   await ensureYahooCookie();
@@ -120,103 +181,14 @@ export async function yahooGet(url: string, timeout = 5000) {
   const headers: Record<string, string> = { 'User-Agent': YAHOO_UA };
   if (yahooCookie) headers['Cookie'] = yahooCookie;
 
-  // If we have a crumb, try query2 with crumb first
   if (yahooCrumb) {
     const finalUrl = url + (url.includes('?') ? '&' : '?') + `crumb=${encodeURIComponent(yahooCrumb)}`;
     const q2Url = finalUrl.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com');
-
     try {
       return await axios.get(q2Url, { timeout, headers });
-    } catch {
-      // Fall through to raw request
-    }
+    } catch { /* fall through */ }
   }
 
-  // Single attempt with cookies or without — don't waste time on multiple retries
-  // if Yahoo is blocking our IP entirely
-  if (yahooCookie) {
-    headers['Cookie'] = yahooCookie;
-  }
+  if (yahooCookie) headers['Cookie'] = yahooCookie;
   return await axios.get(url, { timeout, headers });
-}
-
-/**
- * Polygon.io rate limiter — free tier allows 5 requests/minute.
- * We track timestamps of recent calls and wait if needed.
- */
-const polygonCallTimestamps: number[] = [];
-const POLYGON_MAX_RPM = 5;
-const POLYGON_WINDOW_MS = 60000;
-
-async function polygonRateLimit(): Promise<void> {
-  const now = Date.now();
-  // Remove timestamps older than 1 minute
-  while (polygonCallTimestamps.length > 0 && polygonCallTimestamps[0] < now - POLYGON_WINDOW_MS) {
-    polygonCallTimestamps.shift();
-  }
-  if (polygonCallTimestamps.length >= POLYGON_MAX_RPM) {
-    const waitMs = polygonCallTimestamps[0] + POLYGON_WINDOW_MS - now + 100;
-    console.log(`[Polygon] Rate limit — waiting ${Math.round(waitMs / 1000)}s`);
-    await new Promise(resolve => setTimeout(resolve, waitMs));
-  }
-  polygonCallTimestamps.push(Date.now());
-}
-
-// Simple in-memory cache for Polygon results (24h TTL)
-const polygonCache = new Map<string, { data: any; expiry: number }>();
-
-/**
- * Fetch daily candles using Polygon.io as a fallback when Yahoo is blocked.
- * Polygon free tier supports 5 requests/min with daily candle data.
- */
-export async function fetchFinnhubCandles(
-  ticker: string,
-  fromTimestamp: number,
-  toTimestamp: number,
-  _resolution: string = 'D',
-): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[]; volumes: number[] } | null> {
-  try {
-    const { config } = await import('../config');
-
-    // Use Polygon.io for historical candles (free tier: 5 req/min, daily candles)
-    if (config.polygonApiKey) {
-      const fromDate = new Date(fromTimestamp * 1000).toISOString().split('T')[0];
-      const toDate = new Date(toTimestamp * 1000).toISOString().split('T')[0];
-      const cacheKey = `${ticker.toUpperCase()}:${fromDate}:${toDate}`;
-
-      // Check cache first
-      const cached = polygonCache.get(cacheKey);
-      if (cached && Date.now() < cached.expiry) {
-        return cached.data;
-      }
-
-      await polygonRateLimit();
-
-      const url = `https://api.polygon.io/v2/aggs/ticker/${ticker.toUpperCase()}/range/1/day/${fromDate}/${toDate}?adjusted=true&sort=asc&apiKey=${config.polygonApiKey}`;
-
-      const resp = await axios.get(url, { timeout: 10000 });
-
-      if (resp.data?.results && resp.data.results.length > 0) {
-        const results = resp.data.results;
-        console.log(`[Polygon] Got ${results.length} daily candles for ${ticker}`);
-        const data = {
-          timestamps: results.map((r: any) => Math.floor(r.t / 1000)), // Polygon uses ms, convert to seconds
-          closes: results.map((r: any) => r.c),
-          highs: results.map((r: any) => r.h),
-          lows: results.map((r: any) => r.l),
-          opens: results.map((r: any) => r.o),
-          volumes: results.map((r: any) => r.v ?? 0),
-        };
-        polygonCache.set(cacheKey, { data, expiry: Date.now() + 86400000 }); // 24h cache
-        return data;
-      }
-      console.warn(`[Polygon] No results for ${ticker}: count=${resp.data?.resultsCount}`);
-    }
-
-    return null;
-  } catch (err: any) {
-    const msg = err?.response?.status ? `HTTP ${err.response.status}` : err?.code || err?.message || String(err);
-    console.warn(`[Polygon] Failed for ${ticker}: ${msg}`);
-    return null;
-  }
 }

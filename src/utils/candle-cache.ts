@@ -315,7 +315,7 @@ export function clearCandleCache(): void {
 // BENCHMARK CANDLE CACHING
 // ============================================================================
 
-import { yahooGet } from './yahoo-http';
+import { yahooGet, fetchPolygonAggs } from './yahoo-http';
 
 const BENCHMARK_TICKERS = ['SPY', 'QQQ', 'DIA'];
 const benchmarkCache = new NodeCache({ stdTTL: 86400 }); // 24h
@@ -328,13 +328,26 @@ export interface BenchmarkCandles {
   fetchedAt: number;
 }
 
-async function fetchBenchmarkFromYahoo(ticker: string): Promise<BenchmarkCandles | null> {
+async function fetchBenchmarkCandles(ticker: string): Promise<BenchmarkCandles | null> {
+  // Polygon.io primary
+  const today = new Date().toISOString().split('T')[0];
+  const fromDate = new Date(Date.now() - 400 * 86400000).toISOString().split('T')[0];
+  const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
+  if (pg && pg.closes.length >= 2) {
+    const dates = pg.timestamps.map(t => new Date(t * 1000).toISOString().slice(0, 10));
+    const returns: number[] = [];
+    for (let i = 1; i < pg.closes.length; i++) {
+      if (pg.closes[i - 1] > 0) returns.push((pg.closes[i] - pg.closes[i - 1]) / pg.closes[i - 1]);
+    }
+    return { ticker, closes: pg.closes, dates, returns, fetchedAt: Date.now() };
+  }
+
+  // Yahoo Finance fallback
   try {
     const now = Math.floor(Date.now() / 1000);
-    const from = now - 400 * 24 * 60 * 60; // ~400 days for 252 trading days
+    const from = now - 400 * 24 * 60 * 60;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${from}&period2=${now}&interval=1d`;
     const resp = await yahooGet(url);
-
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
 
@@ -342,24 +355,17 @@ async function fetchBenchmarkFromYahoo(ticker: string): Promise<BenchmarkCandles
     const q = result.indicators.quote[0];
     const closes: number[] = [];
     const dates: string[] = [];
-
     for (let i = 0; i < timestamps.length; i++) {
       if (q.close[i] != null) {
         closes.push(q.close[i]);
         dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
       }
     }
-
     if (closes.length < 2) return null;
-
-    // Calculate daily returns
     const returns: number[] = [];
     for (let i = 1; i < closes.length; i++) {
-      if (closes[i - 1] > 0) {
-        returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
-      }
+      if (closes[i - 1] > 0) returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
     }
-
     return { ticker, closes, dates, returns, fetchedAt: Date.now() };
   } catch (err) {
     console.warn(`[BenchmarkCache] Failed to fetch ${ticker}:`, err instanceof Error ? err.message : err);
@@ -377,7 +383,7 @@ export async function ensureBenchmarksCached(): Promise<void> {
     const existing = benchmarkCache.get<BenchmarkCandles>(`benchmark:${ticker}`);
     if (existing) continue;
 
-    const data = await fetchBenchmarkFromYahoo(ticker);
+    const data = await fetchBenchmarkCandles(ticker);
     if (data) {
       benchmarkCache.set(`benchmark:${ticker}`, data);
       console.log(`[BenchmarkCache] Cached ${ticker}: ${data.closes.length} days`);
