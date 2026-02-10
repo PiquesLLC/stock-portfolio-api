@@ -327,38 +327,25 @@ async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number;
 
 export async function fetchPrice(ticker: string): Promise<Quote> {
   try {
-    return await getPolygonQuote(ticker);
+    return await getQuote(ticker);
   } catch {
-    return getQuote(ticker);
+    return getPolygonQuote(ticker);
   }
 }
 
 export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
-  // Polygon snapshot as primary (paid plan — one batch call for all tickers)
-  let result: QuotesResult;
-  try {
-    const polygonResult = await getPolygonQuotes(tickers);
-    result = {
-      quotes: polygonResult.quotes,
-      staleCount: polygonResult.staleCount,
-      repricingCount: polygonResult.repricingCount,
-      failedTickers: polygonResult.failedTickers,
-      provider: polygonResult.provider,
-    };
-  } catch (error) {
-    console.warn('[fetchPrices] Polygon failed, falling back to Finnhub:', error);
-    result = await getQuotes(tickers);
-  }
+  // Finnhub primary (real-time), Polygon fallback (15-min delay), Yahoo last resort
+  const result = await getQuotes(tickers);
 
-  // Finnhub fallback for any tickers Polygon couldn't resolve
+  // Polygon fallback for any tickers Finnhub failed on (rate limiting, etc.)
   if (result.failedTickers.length > 0) {
     try {
-      const finnhubResult = await getQuotes(result.failedTickers);
-      for (const [ticker, quote] of finnhubResult.quotes) {
+      const polygonResult = await getPolygonQuotes(result.failedTickers);
+      for (const [ticker, quote] of polygonResult.quotes) {
         result.quotes.set(ticker, quote);
         result.failedTickers = result.failedTickers.filter(t => t !== ticker);
       }
-    } catch { /* Finnhub also failed, continue to Yahoo */ }
+    } catch { /* Polygon also failed, continue to Yahoo */ }
   }
 
   // Yahoo Finance fallback for any remaining failures
@@ -408,9 +395,9 @@ export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
 export async function fetchQuote(ticker: string): Promise<Quote> {
   let quote: Quote;
   try {
-    quote = await getPolygonQuote(ticker);
-  } catch {
     quote = await getQuote(ticker);
+  } catch {
+    quote = await getPolygonQuote(ticker);
   }
 
   // Override session with per-ticker market hours (international/commodity aware)
