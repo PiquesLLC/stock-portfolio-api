@@ -47,7 +47,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
       }
     }
 
-    const portfolio = await getPortfolio();
+    const portfolio = await getPortfolio({ preferPolygon: true });
 
     // Skip snapshot only if majority of quotes are unavailable
     // (allows snapshots during premarket/after-hours when some tickers lack data)

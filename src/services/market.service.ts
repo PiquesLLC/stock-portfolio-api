@@ -333,19 +333,30 @@ export async function fetchPrice(ticker: string): Promise<Quote> {
   }
 }
 
-export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
-  // Finnhub primary (real-time), Polygon fallback (15-min delay), Yahoo last resort
-  const result = await getQuotes(tickers);
+export async function fetchPrices(tickers: string[], options?: { preferPolygon?: boolean }): Promise<QuotesResult> {
+  let result: QuotesResult;
 
-  // Polygon fallback for any tickers Finnhub failed on (rate limiting, etc.)
-  if (result.failedTickers.length > 0) {
+  if (options?.preferPolygon) {
+    // Polygon primary (for background tasks — saves Finnhub quota)
     try {
-      const polygonResult = await getPolygonQuotes(result.failedTickers);
-      for (const [ticker, quote] of polygonResult.quotes) {
-        result.quotes.set(ticker, quote);
-        result.failedTickers = result.failedTickers.filter(t => t !== ticker);
-      }
-    } catch { /* Polygon also failed, continue to Yahoo */ }
+      const polygonResult = await getPolygonQuotes(tickers);
+      result = { ...polygonResult };
+    } catch {
+      result = await getQuotes(tickers);
+    }
+  } else {
+    // Finnhub primary (real-time), Polygon fallback (15-min delay)
+    result = await getQuotes(tickers);
+
+    if (result.failedTickers.length > 0) {
+      try {
+        const polygonResult = await getPolygonQuotes(result.failedTickers);
+        for (const [ticker, quote] of polygonResult.quotes) {
+          result.quotes.set(ticker, quote);
+          result.failedTickers = result.failedTickers.filter(t => t !== ticker);
+        }
+      } catch { /* Polygon also failed, continue to Yahoo */ }
+    }
   }
 
   // Yahoo Finance fallback for any remaining failures

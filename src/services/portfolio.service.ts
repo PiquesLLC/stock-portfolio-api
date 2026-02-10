@@ -121,7 +121,7 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
   return result as Settings;
 }
 
-export async function getPortfolio(): Promise<Portfolio> {
+export async function getPortfolio(options?: { preferPolygon?: boolean }): Promise<Portfolio> {
   const [holdings, settings] = await Promise.all([getHoldings(), getSettings()]);
 
   const marginDebt = settings.marginDebt ?? 0;
@@ -161,7 +161,7 @@ export async function getPortfolio(): Promise<Portfolio> {
   }
 
   const tickers = holdings.map((h) => h.ticker);
-  const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers);
+  const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers, options);
 
   let holdingsValue = 0;
   let regularHoldingsValue = 0;
