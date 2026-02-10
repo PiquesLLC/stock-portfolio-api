@@ -315,7 +315,7 @@ export function clearCandleCache(): void {
 // BENCHMARK CANDLE CACHING
 // ============================================================================
 
-import axios from 'axios';
+import { yahooGet } from './yahoo-http';
 
 const BENCHMARK_TICKERS = ['SPY', 'QQQ', 'DIA'];
 const benchmarkCache = new NodeCache({ stdTTL: 86400 }); // 24h
@@ -333,10 +333,7 @@ async function fetchBenchmarkFromYahoo(ticker: string): Promise<BenchmarkCandles
     const now = Math.floor(Date.now() / 1000);
     const from = now - 400 * 24 * 60 * 60; // ~400 days for 252 trading days
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${from}&period2=${now}&interval=1d`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;

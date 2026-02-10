@@ -4,7 +4,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import axios from 'axios';
+import { yahooGet } from '../utils/yahoo-http';
 import NodeCache from 'node-cache';
 
 const prisma = new PrismaClient();
@@ -37,10 +37,7 @@ export async function fetchYahooDividends(ticker: string, yearsBack = 2): Promis
     const from = now - yearsBack * 365 * 24 * 60 * 60;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d&events=div`;
 
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.events?.dividends) return [];
@@ -79,10 +76,7 @@ export async function fetchYahooDividends(ticker: string, yearsBack = 2): Promis
 export async function fetchUpcomingDividend(ticker: string): Promise<ParsedDividend | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=calendarEvents`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const cal = resp.data?.quoteSummary?.result?.[0]?.calendarEvents;
     if (!cal) return null;

@@ -4,6 +4,7 @@ import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
 import axios from 'axios';
 import NodeCache from 'node-cache';
+import { yahooGet } from '../utils/yahoo-http';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
@@ -267,7 +268,7 @@ export async function reconstructPortfolioHistory(
       const now = Math.floor(Date.now() / 1000);
       const from = now - Math.max(365, periodDays + 30) * 24 * 60 * 60;
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
-      const resp = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const resp = await yahooGet(url);
       const result = resp.data?.chart?.result?.[0];
       if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
 
@@ -377,7 +378,7 @@ export async function reconstructPortfolioHistoryHiRes(
 
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${yahooRange}&interval=${yahooInterval}&includePrePost=true`;
-      const resp = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const resp = await yahooGet(url);
       const result = resp.data?.chart?.result?.[0];
       if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
 

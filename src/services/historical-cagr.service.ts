@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { yahooGet } from '../utils/yahoo-http';
 import NodeCache from 'node-cache';
 
 const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
@@ -42,19 +42,9 @@ async function fetchMonthlyCandles(
   ticker: string
 ): Promise<{ closes: number[]; dates: string[] } | null> {
   try {
-    const response = await axios.get<YahooChartResult>(
-      `${YAHOO_BASE_URL}/${encodeURIComponent(ticker.toUpperCase())}`,
-      {
-        params: {
-          interval: '1mo',
-          range: 'max',
-        },
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        timeout: 15000,
-      }
+    const response = await yahooGet(
+      `${YAHOO_BASE_URL}/${encodeURIComponent(ticker.toUpperCase())}?interval=1mo&range=max`,
+      15000
     );
 
     const result = response.data.chart.result?.[0];

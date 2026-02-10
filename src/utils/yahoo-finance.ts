@@ -2,6 +2,7 @@ import axios from 'axios';
 import NodeCache from 'node-cache';
 import { Quote } from '../types';
 import { getMarketSession } from './market-hours';
+import { yahooGet } from './yahoo-http';
 
 const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
@@ -53,17 +54,10 @@ export async function getYahooQuote(ticker: string): Promise<Quote> {
 
   try {
     // Use 1-minute interval with includePrePost=true to get extended hours data
-    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
-      params: {
-        interval: '1m',
-        range: '1d',
-        includePrePost: 'true',
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      timeout: 5000,
-    });
+    const response = await yahooGet(
+      `${YAHOO_BASE_URL}/${upperTicker}?interval=1m&range=1d&includePrePost=true`,
+      5000
+    );
 
     const result = response.data.chart.result?.[0];
     if (!result) {
@@ -392,16 +386,10 @@ export async function getETFHoldings(ticker: string): Promise<ETFHoldingsData | 
 
   // Try to detect ETF status from chart endpoint (which still works)
   try {
-    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
-      params: {
-        interval: '1d',
-        range: '5d',
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      timeout: 5000,
-    });
+    const response = await yahooGet(
+      `${YAHOO_BASE_URL}/${upperTicker}?interval=1d&range=5d`,
+      5000
+    );
 
     const result = response.data.chart.result?.[0];
     if (result) {
@@ -845,16 +833,9 @@ export async function get52WeekRange(ticker: string): Promise<Week52Range | null
   }
 
   try {
-    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
-      params: {
-        interval: '1d',
-        range: '1y',
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      timeout: 10000,
-    });
+    const response = await yahooGet(
+      `${YAHOO_BASE_URL}/${upperTicker}?interval=1d&range=1y`
+    );
 
     const result = response.data.chart.result?.[0];
     if (!result) {
@@ -871,8 +852,8 @@ export async function get52WeekRange(ticker: string): Promise<Week52Range | null
     }
 
     // Calculate 52-week high from daily highs
-    const validHighs = quotes.high.filter((h): h is number => h !== null && h > 0);
-    const validLows = quotes.low.filter((l): l is number => l !== null && l > 0);
+    const validHighs = quotes.high.filter((h: any): h is number => h !== null && h > 0);
+    const validLows = quotes.low.filter((l: any): l is number => l !== null && l > 0);
 
     if (validHighs.length === 0 || validLows.length === 0) {
       console.error(`[Yahoo 52W] Insufficient data for ${upperTicker}`);
@@ -943,16 +924,10 @@ export async function getAllTimeRange(ticker: string): Promise<AllTimeRange | nu
   }
 
   try {
-    const response = await axios.get<YahooChartResult>(`${YAHOO_BASE_URL}/${upperTicker}`, {
-      params: {
-        interval: '1wk', // Weekly candles for max range
-        range: 'max',
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      timeout: 15000,
-    });
+    const response = await yahooGet(
+      `${YAHOO_BASE_URL}/${upperTicker}?interval=1wk&range=max`,
+      15000
+    );
 
     const result = response.data.chart.result?.[0];
     if (!result) {
@@ -969,8 +944,8 @@ export async function getAllTimeRange(ticker: string): Promise<AllTimeRange | nu
     }
 
     // Calculate all-time high from weekly highs
-    const validHighs = quotes.high.filter((h): h is number => h !== null && h > 0);
-    const validLows = quotes.low.filter((l): l is number => l !== null && l > 0);
+    const validHighs = quotes.high.filter((h: any): h is number => h !== null && h > 0);
+    const validLows = quotes.low.filter((l: any): l is number => l !== null && l > 0);
 
     if (validHighs.length === 0 || validLows.length === 0) {
       console.error(`[Yahoo AllTime] Insufficient data for ${upperTicker}`);

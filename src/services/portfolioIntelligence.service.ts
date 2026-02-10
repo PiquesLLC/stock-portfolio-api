@@ -7,7 +7,7 @@ import {
 } from '../utils/candle-cache';
 import { HoldingWithQuote, HeroStats } from '../types';
 import { getSector } from '../utils/sectors';
-import axios from 'axios';
+import { yahooGet } from '../utils/yahoo-http';
 import NodeCache from 'node-cache';
 
 // Yahoo Finance candle cache for fallback
@@ -22,10 +22,7 @@ async function fetchYahooCandlesFallback(ticker: string): Promise<{ closes: numb
     const now = Math.floor(Date.now() / 1000);
     const from = now - 60 * 24 * 60 * 60; // 60 days back
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;

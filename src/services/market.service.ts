@@ -3,6 +3,7 @@ import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsRe
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import axios from 'axios';
 import NodeCache from 'node-cache';
+import { yahooGet } from '../utils/yahoo-http';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
@@ -16,10 +17,7 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
     const now = Math.floor(Date.now() / 1000);
     const from = now - 10 * 365 * 24 * 60 * 60; // 10 years for MAX chart view
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d&includePrePost=true`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
@@ -72,10 +70,7 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
 
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?interval=5m&range=1d&includePrePost=true`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
@@ -122,10 +117,7 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): P
       ? 'interval=15m&range=5d&includePrePost=true'
       : 'interval=60m&range=1mo&includePrePost=true';
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?${params}`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
@@ -238,10 +230,7 @@ async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number;
 
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
-    const resp = await axios.get(url, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url, 8000);
 
     const meta = resp.data?.chart?.result?.[0]?.meta;
     if (!meta) return null;
@@ -351,10 +340,7 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
 async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
-    const resp = await axios.get(url, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
+    const resp = await yahooGet(url);
 
     const meta = resp.data?.chart?.result?.[0]?.meta;
     if (!meta || !meta.regularMarketPrice) return null;

@@ -4,7 +4,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import axios from 'axios';
+import { yahooGet } from '../utils/yahoo-http';
 
 const prisma = new PrismaClient();
 
@@ -55,10 +55,7 @@ export async function updateDripSettings(userId: string | null, enabled: boolean
  */
 async function fetchCurrentPrice(ticker: string): Promise<number> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d`;
-  const resp = await axios.get(url, {
-    timeout: 10000,
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
+  const resp = await yahooGet(url);
 
   const meta = resp.data?.chart?.result?.[0]?.meta;
   if (!meta?.regularMarketPrice) {
