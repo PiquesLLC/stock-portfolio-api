@@ -31,6 +31,49 @@ async function ensureDefaultUser(): Promise<void> {
   }
 }
 
+// One-time migration: copy holdings from the default system user to real users who have none.
+// This fixes the bug where holdings were saved under the hardcoded default user instead of the
+// authenticated user's ID.
+async function migrateDefaultHoldingsToUsers(): Promise<void> {
+  const defaultHoldings = await prisma.holding.findMany({
+    where: { userId: DEFAULT_USER_ID },
+  });
+  if (defaultHoldings.length === 0) return;
+
+  // Find all real users (not the system user) who have zero holdings
+  const realUsers = await prisma.user.findMany({
+    where: { id: { not: DEFAULT_USER_ID }, username: { not: '_system' } },
+    select: { id: true, username: true },
+  });
+
+  for (const user of realUsers) {
+    const userHoldings = await prisma.holding.count({ where: { userId: user.id } });
+    if (userHoldings === 0) {
+      // Copy all default holdings to this user
+      for (const h of defaultHoldings) {
+        await prisma.holding.create({
+          data: {
+            ticker: h.ticker,
+            shares: h.shares,
+            averageCost: h.averageCost,
+            userId: user.id,
+          },
+        });
+      }
+      // Also copy settings (cash balance, margin debt)
+      const defaultSettings = await prisma.settings.findUnique({ where: { id: 'default' } });
+      if (defaultSettings) {
+        await prisma.userSettings.upsert({
+          where: { userId: user.id },
+          update: { cashBalance: defaultSettings.cashBalance, marginDebt: defaultSettings.marginDebt ?? 0 },
+          create: { userId: user.id, cashBalance: defaultSettings.cashBalance, marginDebt: defaultSettings.marginDebt ?? 0 },
+        });
+      }
+      console.log(`[Migration] Copied ${defaultHoldings.length} holdings to user ${user.username} (${user.id})`);
+    }
+  }
+}
+
 // Helper to get all unique tickers from holdings
 async function getAllHeldTickers(): Promise<string[]> {
   const holdings = await prisma.holding.findMany({
@@ -46,6 +89,9 @@ const server = app.listen(config.port, async () => {
 
   // Ensure default system user exists before any schedulers run
   await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
+
+  // Migrate holdings from default user to real users (one-time fix)
+  await migrateDefaultHoldingsToUsers().catch(err => console.error('[Migration] Failed:', err.message));
 
   // Cache benchmark data on startup and every 6 hours
   ensureBenchmarksCached().catch(err => console.error('Benchmark cache init failed:', err));
