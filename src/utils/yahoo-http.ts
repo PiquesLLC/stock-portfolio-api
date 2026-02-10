@@ -114,7 +114,7 @@ async function ensureYahooCookie(): Promise<void> {
  * Make an authenticated GET request to Yahoo Finance.
  * Automatically handles cookie/crumb and falls back to unauthenticated if needed.
  */
-export async function yahooGet(url: string, timeout = 10000) {
+export async function yahooGet(url: string, timeout = 5000) {
   await ensureYahooCookie();
 
   const headers: Record<string, string> = { 'User-Agent': YAHOO_UA };
@@ -128,24 +128,16 @@ export async function yahooGet(url: string, timeout = 10000) {
     try {
       return await axios.get(q2Url, { timeout, headers });
     } catch {
-      // Fall through to other methods
-    }
-  }
-
-  // Try query1 with cookies (no crumb needed for some endpoints)
-  if (yahooCookie) {
-    try {
-      return await axios.get(url, { timeout, headers });
-    } catch {
       // Fall through to raw request
     }
   }
 
-  // Last resort: raw request without cookies
-  return await axios.get(url, {
-    timeout,
-    headers: { 'User-Agent': YAHOO_UA },
-  });
+  // Single attempt with cookies or without — don't waste time on multiple retries
+  // if Yahoo is blocking our IP entirely
+  if (yahooCookie) {
+    headers['Cookie'] = yahooCookie;
+  }
+  return await axios.get(url, { timeout, headers });
 }
 
 /**
@@ -160,7 +152,10 @@ export async function fetchFinnhubCandles(
 ): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[] } | null> {
   try {
     const { config } = await import('../config');
-    if (!config.finnhubApiKey) return null;
+    if (!config.finnhubApiKey) {
+      console.warn('[Finnhub Candle] No API key configured');
+      return null;
+    }
 
     const resp = await axios.get('https://finnhub.io/api/v1/stock/candle', {
       params: {
@@ -173,8 +168,12 @@ export async function fetchFinnhubCandles(
       timeout: 10000,
     });
 
-    if (resp.data?.s !== 'ok' || !resp.data?.c) return null;
+    if (resp.data?.s !== 'ok' || !resp.data?.c) {
+      console.warn(`[Finnhub Candle] No data for ${ticker}: status=${resp.data?.s}`);
+      return null;
+    }
 
+    console.log(`[Finnhub Candle] Got ${resp.data.c.length} candles for ${ticker}`);
     return {
       timestamps: resp.data.t,
       closes: resp.data.c,
@@ -182,7 +181,9 @@ export async function fetchFinnhubCandles(
       lows: resp.data.l,
       opens: resp.data.o,
     };
-  } catch {
+  } catch (err: any) {
+    const msg = err?.response?.status ? `HTTP ${err.response.status}` : err?.code || err?.message || String(err);
+    console.warn(`[Finnhub Candle] Failed for ${ticker}: ${msg}`);
     return null;
   }
 }
