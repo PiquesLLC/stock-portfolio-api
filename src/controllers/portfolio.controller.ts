@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -323,6 +323,22 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
             time: s.timestamp.getTime(),
             value: s.netEquity ?? s.totalValue,
           }));
+        }
+      }
+
+      // Fill the gap between last Polygon candle (~15min delayed) and now
+      // using recent snapshots recorded every 60 seconds
+      if (points.length > 0) {
+        const lastCandleTime = points[points.length - 1].time;
+        const gapMs = now - lastCandleTime;
+        if (gapMs > 5 * 60 * 1000) { // gap > 5 minutes
+          const snapshots = await getSnapshotsAfter(new Date(lastCandleTime));
+          for (const s of snapshots) {
+            const t = s.timestamp.getTime();
+            if (t > lastCandleTime && t < now - 5000) {
+              points.push({ time: t, value: s.netEquity ?? s.totalValue });
+            }
+          }
         }
       }
 

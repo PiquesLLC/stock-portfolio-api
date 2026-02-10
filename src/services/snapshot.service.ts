@@ -98,6 +98,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
     const snapshotTime = new Date();
     const snapshot = await prisma.portfolioSnapshot.create({
       data: {
+        userId: '237198da-612e-411c-9ef8-f267c887a9f1',
         timestamp: snapshotTime,
         totalValue: portfolio.totalAssets, // Assets only - no marginDebt
         cashBalance: portfolio.cashBalance,
