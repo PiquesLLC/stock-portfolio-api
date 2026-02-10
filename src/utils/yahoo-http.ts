@@ -141,6 +141,31 @@ export async function yahooGet(url: string, timeout = 5000) {
 }
 
 /**
+ * Polygon.io rate limiter — free tier allows 5 requests/minute.
+ * We track timestamps of recent calls and wait if needed.
+ */
+const polygonCallTimestamps: number[] = [];
+const POLYGON_MAX_RPM = 5;
+const POLYGON_WINDOW_MS = 60000;
+
+async function polygonRateLimit(): Promise<void> {
+  const now = Date.now();
+  // Remove timestamps older than 1 minute
+  while (polygonCallTimestamps.length > 0 && polygonCallTimestamps[0] < now - POLYGON_WINDOW_MS) {
+    polygonCallTimestamps.shift();
+  }
+  if (polygonCallTimestamps.length >= POLYGON_MAX_RPM) {
+    const waitMs = polygonCallTimestamps[0] + POLYGON_WINDOW_MS - now + 100;
+    console.log(`[Polygon] Rate limit — waiting ${Math.round(waitMs / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+  polygonCallTimestamps.push(Date.now());
+}
+
+// Simple in-memory cache for Polygon results (24h TTL)
+const polygonCache = new Map<string, { data: any; expiry: number }>();
+
+/**
  * Fetch daily candles using Polygon.io as a fallback when Yahoo is blocked.
  * Polygon free tier supports 5 requests/min with daily candle data.
  */
@@ -157,6 +182,16 @@ export async function fetchFinnhubCandles(
     if (config.polygonApiKey) {
       const fromDate = new Date(fromTimestamp * 1000).toISOString().split('T')[0];
       const toDate = new Date(toTimestamp * 1000).toISOString().split('T')[0];
+      const cacheKey = `${ticker.toUpperCase()}:${fromDate}:${toDate}`;
+
+      // Check cache first
+      const cached = polygonCache.get(cacheKey);
+      if (cached && Date.now() < cached.expiry) {
+        return cached.data;
+      }
+
+      await polygonRateLimit();
+
       const url = `https://api.polygon.io/v2/aggs/ticker/${ticker.toUpperCase()}/range/1/day/${fromDate}/${toDate}?adjusted=true&sort=asc&apiKey=${config.polygonApiKey}`;
 
       const resp = await axios.get(url, { timeout: 10000 });
@@ -164,7 +199,7 @@ export async function fetchFinnhubCandles(
       if (resp.data?.results && resp.data.results.length > 0) {
         const results = resp.data.results;
         console.log(`[Polygon] Got ${results.length} daily candles for ${ticker}`);
-        return {
+        const data = {
           timestamps: results.map((r: any) => Math.floor(r.t / 1000)), // Polygon uses ms, convert to seconds
           closes: results.map((r: any) => r.c),
           highs: results.map((r: any) => r.h),
@@ -172,6 +207,8 @@ export async function fetchFinnhubCandles(
           opens: results.map((r: any) => r.o),
           volumes: results.map((r: any) => r.v ?? 0),
         };
+        polygonCache.set(cacheKey, { data, expiry: Date.now() + 86400000 }); // 24h cache
+        return data;
       }
       console.warn(`[Polygon] No results for ${ticker}: count=${resp.data?.resultsCount}`);
     }
