@@ -142,5 +142,47 @@ export async function yahooGet(url: string, timeout = 10000) {
   }
 
   // Last resort: raw request without cookies
-  return await axios.get(url, { timeout, headers: { 'User-Agent': YAHOO_UA } });
+  return await axios.get(url, {
+    timeout,
+    headers: { 'User-Agent': YAHOO_UA },
+  });
+}
+
+/**
+ * Fetch daily candles using Finnhub as a fallback when Yahoo is blocked.
+ * Returns data in Yahoo-compatible format so callers don't need to change.
+ */
+export async function fetchFinnhubCandles(
+  ticker: string,
+  fromTimestamp: number,
+  toTimestamp: number,
+  resolution: string = 'D',
+): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[] } | null> {
+  try {
+    const { config } = await import('../config');
+    if (!config.finnhubApiKey) return null;
+
+    const resp = await axios.get('https://finnhub.io/api/v1/stock/candle', {
+      params: {
+        symbol: ticker.toUpperCase(),
+        resolution,
+        from: fromTimestamp,
+        to: toTimestamp,
+        token: config.finnhubApiKey,
+      },
+      timeout: 10000,
+    });
+
+    if (resp.data?.s !== 'ok' || !resp.data?.c) return null;
+
+    return {
+      timestamps: resp.data.t,
+      closes: resp.data.c,
+      highs: resp.data.h,
+      lows: resp.data.l,
+      opens: resp.data.o,
+    };
+  } catch {
+    return null;
+  }
 }

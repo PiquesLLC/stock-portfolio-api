@@ -3,7 +3,7 @@ import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsRe
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import axios from 'axios';
 import NodeCache from 'node-cache';
-import { yahooGet } from '../utils/yahoo-http';
+import { yahooGet, fetchFinnhubCandles } from '../utils/yahoo-http';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
@@ -96,8 +96,28 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
     return candles;
   } catch (err) {
     console.warn(`Yahoo intraday fetch failed for ${upperTicker}:`, err instanceof Error ? err.message : err);
-    return [];
   }
+
+  // Finnhub fallback — daily candle for today
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 2 * 24 * 60 * 60; // 2 days
+    const fb = await fetchFinnhubCandles(upperTicker, from, now, 'D');
+    if (fb && fb.closes.length > 0) {
+      const candles: IntradayCandle[] = fb.timestamps.map((t: number, i: number) => ({
+        time: new Date(t * 1000).toISOString(),
+        open: fb.opens[i] ?? fb.closes[i],
+        high: fb.highs[i] ?? fb.closes[i],
+        low: fb.lows[i] ?? fb.closes[i],
+        close: fb.closes[i],
+        volume: 0,
+      }));
+      yahooIntradayCache.set(cacheKey, candles);
+      return candles;
+    }
+  } catch { /* both failed */ }
+
+  return [];
 }
 
 const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourly candles
@@ -143,8 +163,29 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): P
     return candles;
   } catch (err) {
     console.warn(`Yahoo hourly fetch failed for ${upperTicker} (${period}):`, err instanceof Error ? err.message : err);
-    return [];
   }
+
+  // Finnhub fallback — daily candles
+  try {
+    const rangeDays = period === '1W' ? 5 : 30;
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - rangeDays * 24 * 60 * 60;
+    const fb = await fetchFinnhubCandles(upperTicker, from, now, 'D');
+    if (fb && fb.closes.length > 0) {
+      const candles: IntradayCandle[] = fb.timestamps.map((t: number, i: number) => ({
+        time: new Date(t * 1000).toISOString(),
+        open: fb.opens[i] ?? fb.closes[i],
+        high: fb.highs[i] ?? fb.closes[i],
+        low: fb.lows[i] ?? fb.closes[i],
+        close: fb.closes[i],
+        volume: 0,
+      }));
+      yahooHourlyCache.set(cacheKey, candles);
+      return candles;
+    }
+  } catch { /* both failed */ }
+
+  return [];
 }
 
 const yahooQuoteCache = new NodeCache({ stdTTL: 10 }); // 10s cache for live Yahoo quotes

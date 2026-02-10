@@ -4,7 +4,7 @@ import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
 import axios from 'axios';
 import NodeCache from 'node-cache';
-import { yahooGet } from '../utils/yahoo-http';
+import { yahooGet, fetchFinnhubCandles } from '../utils/yahoo-http';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
@@ -290,8 +290,25 @@ export async function reconstructPortfolioHistory(
       return data;
     } catch (e) {
       console.warn(`Yahoo candle fetch failed for ${ticker}:`, e instanceof Error ? e.message : e);
-      return null;
     }
+
+    // Finnhub fallback for daily candles
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const from = now - Math.max(365, periodDays + 30) * 24 * 60 * 60;
+      const fb = await fetchFinnhubCandles(ticker, from, now, 'D');
+      if (fb && fb.closes.length > 0) {
+        const dates = fb.timestamps.map((t: number) => t * 1000);
+        const data = { dates, closes: fb.closes };
+        chartCandleCache.set(cacheKey, data);
+        console.log(`[Chart] Using Finnhub daily candles for ${ticker} (${fb.closes.length} points)`);
+        return data;
+      }
+    } catch {
+      // Both Yahoo and Finnhub failed
+    }
+
+    return null;
   };
 
   const candleResults = await Promise.all(holdings.map(h => fetchYahoo(h.ticker)));
@@ -400,8 +417,27 @@ export async function reconstructPortfolioHistoryHiRes(
       return data;
     } catch (e) {
       console.warn(`Yahoo hires fetch failed for ${ticker}:`, e instanceof Error ? e.message : e);
-      return null;
     }
+
+    // Finnhub fallback — daily candles (lower resolution but better than nothing)
+    try {
+      const rangeDaysMap: Record<string, number> = { '1d': 1, '5d': 5, '1mo': 30, '3mo': 90, '6mo': 180 };
+      const rangeDays = rangeDaysMap[yahooRange] || 30;
+      const now = Math.floor(Date.now() / 1000);
+      const from = now - rangeDays * 24 * 60 * 60;
+      const fb = await fetchFinnhubCandles(ticker, from, now, 'D');
+      if (fb && fb.closes.length > 0) {
+        const dates = fb.timestamps.map((t: number) => t * 1000);
+        const data = { dates, closes: fb.closes };
+        hiresCache.set(cacheKey, data);
+        console.log(`[Chart] Using Finnhub daily candles for ${ticker} hires (${fb.closes.length} points)`);
+        return data;
+      }
+    } catch {
+      // Both Yahoo and Finnhub failed
+    }
+
+    return null;
   };
 
   const candleResults = await Promise.all(holdings.map(h => fetchYahooHiRes(h.ticker)));
