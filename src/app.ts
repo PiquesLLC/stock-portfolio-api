@@ -31,15 +31,15 @@ app.use(helmet({
 // CORS configuration - locked down to specific origins
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman) in dev only
-    if (!origin && config.nodeEnv === 'development') {
+    // Allow requests with no origin (same-origin in production, mobile apps, Postman in dev)
+    if (!origin) {
       return callback(null, true);
     }
-    if (origin && config.allowedOrigins.includes(origin)) {
+    if (config.allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     // In development, allow LAN origins (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-    if (config.nodeEnv === 'development' && origin) {
+    if (config.nodeEnv === 'development') {
       const lanRe = /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
       if (lanRe.test(origin)) {
         return callback(null, true);
