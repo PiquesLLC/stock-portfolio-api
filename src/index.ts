@@ -13,6 +13,24 @@ import { rotateTickerFundamentals } from './services/fundamentals.service';
 
 const prisma = new PrismaClient();
 
+const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+// Ensure the legacy default user exists (many services reference this hardcoded ID)
+async function ensureDefaultUser(): Promise<void> {
+  const existing = await prisma.user.findUnique({ where: { id: DEFAULT_USER_ID } });
+  if (!existing) {
+    await prisma.user.create({
+      data: {
+        id: DEFAULT_USER_ID,
+        username: '_system',
+        displayName: 'My Portfolio',
+        profilePublic: false,
+      },
+    });
+    console.log('[Init] Created default system user');
+  }
+}
+
 // Helper to get all unique tickers from holdings
 async function getAllHeldTickers(): Promise<string[]> {
   const holdings = await prisma.holding.findMany({
@@ -22,9 +40,12 @@ async function getAllHeldTickers(): Promise<string[]> {
   return holdings.map(h => h.ticker);
 }
 
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
+
+  // Ensure default system user exists before any schedulers run
+  await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
 
   // Cache benchmark data on startup and every 6 hours
   ensureBenchmarksCached().catch(err => console.error('Benchmark cache init failed:', err));
