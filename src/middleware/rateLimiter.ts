@@ -55,7 +55,7 @@ export const mutationLimiter = rateLimit({
  */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 200 : 1000, // Much higher in dev
+  max: process.env.NODE_ENV === 'production' ? 600 : 1000, // Higher for real-time dashboard
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
