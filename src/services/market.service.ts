@@ -49,8 +49,29 @@ async function fetchYahooCandles(ticker: string): Promise<StockDetailsResponse['
     return candles;
   } catch (err) {
     console.warn(`Yahoo Finance candle fetch failed for ${ticker}:`, err instanceof Error ? err.message : err);
-    return null;
   }
+
+  // Polygon.io fallback for daily candles
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 2 * 365 * 24 * 60 * 60; // 2 years (Polygon free tier limit)
+    const fb = await fetchFinnhubCandles(ticker, from, now, 'D');
+    if (fb && fb.closes.length > 0) {
+      const candles: StockDetailsResponse['candles'] = {
+        closes: fb.closes,
+        dates: fb.timestamps.map((t: number) => new Date(t * 1000).toISOString().slice(0, 10)),
+        highs: fb.highs,
+        lows: fb.lows,
+        opens: fb.opens,
+        volumes: fb.volumes ?? fb.closes.map(() => 0),
+      };
+      console.log(`[Polygon] Got ${fb.closes.length} daily candles for ${ticker} (details)`);
+      yahooCache.set(cacheKey, candles);
+      return candles;
+    }
+  } catch { /* Polygon also failed */ }
+
+  return null;
 }
 
 export interface IntradayCandle {

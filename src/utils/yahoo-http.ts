@@ -149,7 +149,7 @@ export async function fetchFinnhubCandles(
   fromTimestamp: number,
   toTimestamp: number,
   _resolution: string = 'D',
-): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[] } | null> {
+): Promise<{ timestamps: number[]; closes: number[]; highs: number[]; lows: number[]; opens: number[]; volumes: number[] } | null> {
   try {
     const { config } = await import('../config');
 
@@ -170,6 +170,7 @@ export async function fetchFinnhubCandles(
           highs: results.map((r: any) => r.h),
           lows: results.map((r: any) => r.l),
           opens: results.map((r: any) => r.o),
+          volumes: results.map((r: any) => r.v ?? 0),
         };
       }
       console.warn(`[Polygon] No results for ${ticker}: count=${resp.data?.resultsCount}`);
