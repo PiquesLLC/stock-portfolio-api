@@ -35,10 +35,13 @@ async function ensureYahooCookie(): Promise<void> {
       },
     });
 
+    console.log(`[Yahoo] finance.yahoo.com responded with HTTP ${initResp.status}`);
     const setCookies = initResp.headers['set-cookie'];
     if (setCookies && setCookies.length > 0) {
       yahooCookie = setCookies.map((c: string) => c.split(';')[0]).join('; ');
       console.log(`[Yahoo] Got ${setCookies.length} cookies from finance.yahoo.com`);
+    } else {
+      console.warn('[Yahoo] No set-cookie headers from finance.yahoo.com');
     }
 
     // Try to get crumb with the cookies we have
@@ -98,8 +101,11 @@ async function ensureYahooCookie(): Promise<void> {
       yahooCookieExpiry = Date.now() + 300000; // Retry in 5 min
       console.warn('[Yahoo] Failed to obtain any cookies');
     }
-  } catch (err) {
-    console.warn('[Yahoo] Cookie acquisition failed:', err instanceof Error ? err.message : err);
+  } catch (err: any) {
+    const msg = err?.response?.status
+      ? `HTTP ${err.response.status} ${err.response.statusText || ''}`
+      : err?.code || err?.message || String(err);
+    console.warn('[Yahoo] Cookie acquisition failed:', msg);
     yahooCookieExpiry = Date.now() + 300000; // Retry in 5 min
   }
 }
