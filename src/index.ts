@@ -3,7 +3,7 @@ import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded } from './services/snapshot.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
-import { postDividendsForDate, backfillMissedDividends } from './services/dividend-post.service';
+import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
@@ -86,12 +86,10 @@ const server = app.listen(config.port, async () => {
     syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Error:', err));
   }, 6 * 60 * 60 * 1000);
 
-  // Dividend posting — check for payable dividends every hour + backfill any missed
+  // Dividend posting — check for payable dividends every hour (today's date only)
   postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
-  // Backfill past dividends that were never credited (e.g., after fresh deploy)
-  setTimeout(() => {
-    backfillMissedDividends().catch(err => console.error('[Dividend Backfill] Failed:', err));
-  }, 15000); // 15s delay to let sync finish first
+  // NOTE: backfillMissedDividends removed — it double-counts dividends already
+  // reflected in historical stock prices, inflating portfolio value via DRIP.
   setInterval(() => {
     postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
   }, 60 * 60 * 1000);
