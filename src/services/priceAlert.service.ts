@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { getQuotes } from '../utils/finnhub';
+import { fetchPrices } from './market.service';
 
 const prisma = new PrismaClient();
 
@@ -178,7 +178,7 @@ export async function evaluatePriceAlerts(): Promise<void> {
   const tickers = [...new Set(activeAlerts.map(a => a.ticker))];
 
   // Fetch current quotes
-  const { quotes, failedTickers } = await getQuotes(tickers);
+  const { quotes, failedTickers } = await fetchPrices(tickers);
 
   if (failedTickers.length > 0) {
     console.log(`[Price Alerts] Could not fetch quotes for: ${failedTickers.join(', ')}`);

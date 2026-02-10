@@ -18,7 +18,7 @@ import {
 } from '../utils/finance-math';
 import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses, getBenchmarkReturnWithQuote, getBenchmarkCandles } from '../utils/candle-cache';
 import { reconstructPortfolioHistory } from './snapshot.service';
-import { getQuote } from '../utils/finnhub';
+import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';
 
 const prisma = new PrismaClient();
@@ -91,7 +91,7 @@ export async function getPerformanceComparison(
       // Get benchmark return from live quote
       let benchmarkReturnPct: number | null = null;
       try {
-        const benchmarkQuote = await getQuote(benchmarkTicker);
+        const benchmarkQuote = await fetchPrice(benchmarkTicker);
         if (benchmarkQuote.changePercent != null) {
           benchmarkReturnPct = Math.round(benchmarkQuote.changePercent * 100) / 100;
         }
@@ -251,7 +251,7 @@ export async function getPerformanceComparison(
   let benchmarkReturnPct: number | null = null;
 
   try {
-    const quote = await getQuote(benchmarkTicker);
+    const quote = await fetchPrice(benchmarkTicker);
 
     if (window === '1D') {
       // For 1D, use the quote's built-in day change

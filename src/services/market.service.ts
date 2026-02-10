@@ -1,4 +1,5 @@
 import { getQuote, getQuotes, QuotesResult, searchSymbols, getStockProfile, getStockMetrics, getHistoricalCandles } from '../utils/finnhub';
+import { getPolygonQuotes, getPolygonQuote } from '../utils/polygon';
 import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsResponse } from '../types';
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import axios from 'axios';
@@ -325,13 +326,42 @@ async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number;
 // Free tier: 60 API calls/minute
 
 export async function fetchPrice(ticker: string): Promise<Quote> {
-  return getQuote(ticker);
+  try {
+    return await getPolygonQuote(ticker);
+  } catch {
+    return getQuote(ticker);
+  }
 }
 
 export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
-  const result = await getQuotes(tickers);
+  // Polygon snapshot as primary (paid plan — one batch call for all tickers)
+  let result: QuotesResult;
+  try {
+    const polygonResult = await getPolygonQuotes(tickers);
+    result = {
+      quotes: polygonResult.quotes,
+      staleCount: polygonResult.staleCount,
+      repricingCount: polygonResult.repricingCount,
+      failedTickers: polygonResult.failedTickers,
+      provider: polygonResult.provider,
+    };
+  } catch (error) {
+    console.warn('[fetchPrices] Polygon failed, falling back to Finnhub:', error);
+    result = await getQuotes(tickers);
+  }
 
-  // Yahoo Finance fallback for any tickers Finnhub failed on (rate limiting, etc.)
+  // Finnhub fallback for any tickers Polygon couldn't resolve
+  if (result.failedTickers.length > 0) {
+    try {
+      const finnhubResult = await getQuotes(result.failedTickers);
+      for (const [ticker, quote] of finnhubResult.quotes) {
+        result.quotes.set(ticker, quote);
+        result.failedTickers = result.failedTickers.filter(t => t !== ticker);
+      }
+    } catch { /* Finnhub also failed, continue to Yahoo */ }
+  }
+
+  // Yahoo Finance fallback for any remaining failures
   if (result.failedTickers.length > 0) {
     const yahooFallbacks = await Promise.all(
       result.failedTickers.map(async (ticker) => {
@@ -376,7 +406,12 @@ export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
 }
 
 export async function fetchQuote(ticker: string): Promise<Quote> {
-  const quote = await getQuote(ticker);
+  let quote: Quote;
+  try {
+    quote = await getPolygonQuote(ticker);
+  } catch {
+    quote = await getQuote(ticker);
+  }
 
   // Override session with per-ticker market hours (international/commodity aware)
   quote.session = getMarketSessionForTicker(ticker);

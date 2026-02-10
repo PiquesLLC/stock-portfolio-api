@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { getQuotes } from '../utils/finnhub';
+import { fetchPrices } from './market.service';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 
 const prisma = new PrismaClient();
@@ -57,7 +57,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
 
     // Fetch quotes for all tickers
     const allTickers = tickerHolders.map(t => t.ticker);
-    const { quotes } = await getQuotes(allTickers);
+    const { quotes } = await fetchPrices(allTickers);
 
     // Process each ticker
     for (const { ticker, userIds } of tickerHolders) {

@@ -227,9 +227,10 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
     const upperTicker = ticker.toUpperCase();
     const cached = cache.get<Quote>(`polygon:${upperTicker}`);
     if (cached) {
-      // Check if quote is repricing based on age
+      // Polygon Developer plan has ~15min delay; only stale if >30 min old
+      const POLYGON_SNAPSHOT_THRESHOLD = 1800;
       const quoteAge = Math.floor((now - (cached.updatedAt || cached.timestamp * 1000)) / 1000);
-      const isRepricing = quoteAge > config.repriceThresholdSeconds;
+      const isRepricing = quoteAge > POLYGON_SNAPSHOT_THRESHOLD;
       quotes.set(upperTicker, {
         ...cached,
         quoteAgeSeconds: quoteAge,
@@ -330,7 +331,10 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
           const change = price - prevClose;
           const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
           const quoteAge = Math.floor((now - timestamp) / 1000);
-          const isRepricing = quoteAge > config.repriceThresholdSeconds;
+          // Polygon Developer plan has ~15min delay — fresh API responses are not repricing.
+          // Only mark as repricing if data is over 30 minutes old (truly stale).
+          const POLYGON_SNAPSHOT_THRESHOLD = 1800;
+          const isRepricing = quoteAge > POLYGON_SNAPSHOT_THRESHOLD;
 
           const quote: Quote = {
             ticker,
