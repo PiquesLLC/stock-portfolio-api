@@ -278,6 +278,24 @@ export async function fetchPrice(ticker: string): Promise<Quote> {
 export async function fetchPrices(tickers: string[]): Promise<QuotesResult> {
   const result = await getQuotes(tickers);
 
+  // Yahoo Finance fallback for any tickers Finnhub failed on (rate limiting, etc.)
+  if (result.failedTickers.length > 0) {
+    const yahooFallbacks = await Promise.all(
+      result.failedTickers.map(async (ticker) => {
+        try {
+          const quote = await fetchYahooQuote(ticker);
+          return quote ? { ticker, quote } : null;
+        } catch { return null; }
+      })
+    );
+    for (const fb of yahooFallbacks) {
+      if (fb) {
+        result.quotes.set(fb.ticker, fb.quote);
+        result.failedTickers = result.failedTickers.filter(t => t !== fb.ticker);
+      }
+    }
+  }
+
   // During extended hours, enrich all quotes with Yahoo's real-time extended prices
   const session = getMarketSession();
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
