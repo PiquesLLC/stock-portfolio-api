@@ -10,6 +10,7 @@ import {
   getDailyReportHandler,
   regenerateDailyReportHandler,
   explainBriefingHandler,
+  getEarningsSummaryHandler,
 } from '../controllers/insights.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 
@@ -25,5 +26,6 @@ router.post('/briefing/explain', explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
 router.post('/daily-report/regenerate', regenerateDailyReportHandler);
+router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
 
 export default router;

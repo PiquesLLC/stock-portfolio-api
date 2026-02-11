@@ -3,6 +3,7 @@ import { callPerplexity, extractJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
+import { getEarningsSummary } from './earnings-summary.service';
 
 // Cache daily reports for 4 hours
 const reportCache = new NodeCache({ stdTTL: 14400 });
@@ -40,15 +41,17 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
   if (cached) return { ...cached, cached: true };
 
   // Gather data in parallel
-  const [portfolioResult, newsResult, economicResult] = await Promise.allSettled([
+  const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
     getPortfolio(),
     fetchMarketNews(10),
     getEconomicDashboard(),
+    getEarningsSummary(),
   ]);
 
   const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
   const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
   const economic = economicResult.status === 'fulfilled' ? economicResult.value : null;
+  const earnings = earningsResult.status === 'fulfilled' ? earningsResult.value : { results: [], partial: true };
 
   if (!portfolio || portfolio.holdings.length === 0) {
     return {
@@ -112,6 +115,19 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     economicSummary = parts.join('\n');
   }
 
+  // Build upcoming earnings (next 7 days)
+  const upcomingEarnings = earnings.results
+    .filter(e => e.daysUntil >= 0 && e.daysUntil <= 7)
+    .slice(0, 8)
+    .map(e => {
+      const date = new Date(e.reportDate);
+      const dow = date.toLocaleDateString('en-US', { weekday: 'short' });
+      return `${e.ticker} (${dow})`;
+    });
+  const earningsSummaryLine = upcomingEarnings.length > 0
+    ? `UPCOMING EARNINGS THIS WEEK: ${upcomingEarnings.join(', ')}`
+    : 'UPCOMING EARNINGS THIS WEEK: None';
+
   const userMessage =
     `Today is ${formattedDate}. Generate my daily portfolio briefing.\n\n` +
     `MY PORTFOLIO (${portfolio.holdings.length} holdings, total value $${portfolio.netEquity.toFixed(0)}):\n` +
@@ -119,6 +135,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     `Yesterday's change: $${portfolio.dayChange.toFixed(0)} (${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%)\n\n` +
     `MARKET HEADLINES:\n${newsSummary}\n\n` +
     `ECONOMIC SNAPSHOT:\n${economicSummary}\n\n` +
+    `${earningsSummaryLine}\n\n` +
     `Give me 3-5 top stories relevant to my portfolio and the broader market.\n` +
     `Give me 2-3 things to watch today.`;
 

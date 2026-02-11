@@ -9,6 +9,7 @@ import { getIncomeInsights, IncomeWindow } from '../services/income-insights.ser
 import { getPortfolioBriefing, explainBriefingSection } from '../services/perplexity-briefing.service';
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
 import { getDailyReport, regenerateDailyReport } from '../services/perplexity-daily-report.service';
+import { getEarningsSummary } from '../services/earnings-summary.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -161,6 +162,16 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
       watchToday: [],
       cached: false,
     });
+  }
+}
+
+export async function getEarningsSummaryHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await getEarningsSummary();
+    res.json(result);
+  } catch (error) {
+    console.error('Earnings summary error:', error);
+    res.status(500).json({ results: [], partial: true });
   }
 }
 
