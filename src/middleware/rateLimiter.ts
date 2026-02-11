@@ -54,7 +54,7 @@ export const mutationLimiter = rateLimit({
  */
 export const heavyReadLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 120 : 300,
+  max: process.env.NODE_ENV === 'production' ? 120 : 1000,
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
