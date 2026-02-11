@@ -80,3 +80,54 @@ export async function getEarningsHandler(req: Request, res: Response): Promise<v
     res.status(500).json({ error: 'Failed to fetch earnings data' });
   }
 }
+
+// POST /fundamentals/earnings/batch
+export async function getEarningsBatchHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const tickers = Array.isArray(req.body?.tickers) ? req.body.tickers : [];
+
+    if (tickers.length === 0) {
+      res.status(400).json({ error: 'tickers must be a non-empty array' });
+      return;
+    }
+
+    if (tickers.length > 25) {
+      res.status(400).json({ error: 'tickers array too large (max 25)' });
+      return;
+    }
+
+    const uniqueTickers = Array.from(
+      new Set(
+        tickers
+          .filter((t: unknown) => typeof t === 'string' && t.trim().length > 0)
+          .map((t: string) => t.trim().toUpperCase())
+      )
+    );
+
+    if (uniqueTickers.length === 0) {
+      res.status(400).json({ error: 'tickers must contain at least one valid symbol' });
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      uniqueTickers.map(async (ticker) => {
+        const data = await getEarningsData(ticker);
+        return { ticker, data };
+      })
+    );
+
+    const payload = results.map((result, index) => {
+      const ticker = uniqueTickers[index];
+      if (result.status === 'fulfilled') {
+        return { ticker, ...result.value.data };
+      }
+      return { ticker, error: 'Failed to fetch earnings data' };
+    });
+
+    const partial = results.some(r => r.status === 'rejected');
+    res.json({ results: payload, partial });
+  } catch (error) {
+    console.error('Error fetching earnings batch:', error);
+    res.status(500).json({ error: 'Failed to fetch earnings batch' });
+  }
+}
