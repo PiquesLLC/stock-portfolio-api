@@ -50,6 +50,17 @@ export const mutationLimiter = rateLimit({
 });
 
 /**
+ * Heavy read limiter - protect expensive GET endpoints (charts, AI, news, etc.)
+ */
+export const heavyReadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 120 : 300,
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * Higher limits in dev to support pre-fetching and background tasks
  */
