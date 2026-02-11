@@ -1,14 +1,21 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { AuthRequest, AuthErrorCode } from '../types/auth';
 import { verifyTokenDetailed, rotateRefreshToken } from '../services/auth.service';
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path: '/',
-};
+function isCapacitorRequest(req: Request): boolean {
+  return req.headers['x-capacitor'] === 'true';
+}
+
+function getCookieOptions(req: Request) {
+  const capacitor = isCapacitorRequest(req);
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || capacitor,
+    sameSite: (capacitor ? 'none' : 'lax') as const,
+    path: '/',
+  };
+}
 
 /**
  * Extract access token from httpOnly cookie (primary) or Authorization header (fallback)
@@ -36,9 +43,10 @@ function extractRefreshToken(req: AuthRequest): string | null {
   return null;
 }
 
-function clearAuthCookies(res: Response): void {
-  res.clearCookie('authToken', COOKIE_OPTIONS);
-  res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, path: '/auth/refresh' });
+function clearAuthCookies(res: Response, req: Request): void {
+  const options = getCookieOptions(req);
+  res.clearCookie('authToken', options);
+  res.clearCookie('refreshToken', options);
 }
 
 /**
@@ -49,7 +57,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   const accessToken = extractAccessToken(req);
 
   if (!accessToken) {
-    clearAuthCookies(res);
+    clearAuthCookies(res, req);
     res.status(401).json({ error: 'Authorization required', code: 'NO_TOKEN' as AuthErrorCode });
     return;
   }
@@ -70,36 +78,36 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
         .then((result) => {
           if (result) {
             // Set new cookies
+            const options = getCookieOptions(req);
             res.cookie('authToken', result.accessToken, {
-              ...COOKIE_OPTIONS,
+              ...options,
               maxAge: 15 * 60 * 1000, // 15 minutes
             });
             res.cookie('refreshToken', result.refreshToken, {
-              ...COOKIE_OPTIONS,
-              path: '/auth/refresh',
+              ...options,
               maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
             });
             req.user = result.payload;
             next();
           } else {
-            clearAuthCookies(res);
+            clearAuthCookies(res, req);
             res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           }
         })
         .catch(() => {
-          clearAuthCookies(res);
+          clearAuthCookies(res, req);
           res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
         });
       return;
     }
 
-    clearAuthCookies(res);
+    clearAuthCookies(res, req);
     res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' as AuthErrorCode });
     return;
   }
 
   // Token is invalid (not just expired)
-  clearAuthCookies(res);
+  clearAuthCookies(res, req);
   res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' as AuthErrorCode });
 }
 
@@ -116,9 +124,9 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
       req.user = payload;
     } else if (expired) {
       // Clear invalid cookies but don't block the request
-      clearAuthCookies(res);
+      clearAuthCookies(res, req);
     } else {
-      clearAuthCookies(res);
+      clearAuthCookies(res, req);
     }
   }
 
