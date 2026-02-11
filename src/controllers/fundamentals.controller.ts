@@ -96,10 +96,10 @@ export async function getEarningsBatchHandler(req: Request, res: Response): Prom
       return;
     }
 
-    const uniqueTickers = Array.from(
+    const uniqueTickers: string[] = Array.from(
       new Set(
         tickers
-          .filter((t: unknown) => typeof t === 'string' && t.trim().length > 0)
+          .filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0)
           .map((t: string) => t.trim().toUpperCase())
       )
     );
@@ -119,7 +119,7 @@ export async function getEarningsBatchHandler(req: Request, res: Response): Prom
     const payload = results.map((result, index) => {
       const ticker = uniqueTickers[index];
       if (result.status === 'fulfilled') {
-        return { ticker, ...result.value.data };
+        return { ...result.value.data, ticker };
       }
       return { ticker, error: 'Failed to fetch earnings data' };
     });
