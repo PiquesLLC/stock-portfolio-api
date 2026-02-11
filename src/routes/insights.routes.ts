@@ -8,6 +8,7 @@ import {
   getBriefingHandler,
   getBehaviorHandler,
   getDailyReportHandler,
+  regenerateDailyReportHandler,
   explainBriefingHandler,
 } from '../controllers/insights.controller';
 
@@ -22,5 +23,6 @@ router.get('/briefing', getBriefingHandler);
 router.post('/briefing/explain', explainBriefingHandler);
 router.get('/behavior', getBehaviorHandler);
 router.get('/daily-report', getDailyReportHandler);
+router.post('/daily-report/regenerate', regenerateDailyReportHandler);
 
 export default router;

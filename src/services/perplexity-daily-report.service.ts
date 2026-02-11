@@ -6,6 +6,7 @@ import { getEconomicDashboard } from './economic.service';
 
 // Cache daily reports for 4 hours
 const reportCache = new NodeCache({ stdTTL: 14400 });
+const DAILY_REPORT_CACHE_KEY = 'daily-report';
 
 export interface DailyReportResponse {
   generatedAt: string;
@@ -35,8 +36,7 @@ const SYSTEM_PROMPT = `You are a portfolio analyst writing a concise daily morni
 Return 3-5 top stories and 2-3 watch items. Focus on what's actionable and relevant to the user's holdings.`;
 
 export async function getDailyReport(): Promise<DailyReportResponse> {
-  const cacheKey = 'daily-report';
-  const cached = reportCache.get<DailyReportResponse>(cacheKey);
+  const cached = reportCache.get<DailyReportResponse>(DAILY_REPORT_CACHE_KEY);
   if (cached) return { ...cached, cached: true };
 
   // Gather data in parallel
@@ -162,7 +162,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     };
 
     if (result.topStories.length > 0) {
-      reportCache.set(cacheKey, result);
+      reportCache.set(DAILY_REPORT_CACHE_KEY, result);
     }
 
     const elapsed = Date.now() - startTime;
@@ -180,4 +180,9 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
       cached: false,
     };
   }
+}
+
+export async function regenerateDailyReport(): Promise<DailyReportResponse> {
+  reportCache.del(DAILY_REPORT_CACHE_KEY);
+  return getDailyReport();
 }
