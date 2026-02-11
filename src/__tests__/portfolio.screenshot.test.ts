@@ -35,4 +35,16 @@ describe('Screenshot OCR parsing', () => {
     expect(result.parsed).toHaveLength(0);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
+
+  it('uses price as average cost when only price is available', () => {
+    const text = `
+    Symbol Quantity Market Value Price
+    PG 27.3593 $2,512.40 $91.83
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(1);
+    expect(result.parsed[0]).toMatchObject({ ticker: 'PG', shares: 27.3593, averageCost: 91.83 });
+    expect(result.warnings.some(w => w.message.includes('Average cost not found'))).toBe(true);
+  });
 });

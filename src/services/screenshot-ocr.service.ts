@@ -33,6 +33,18 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
   const parsed: OcrParsedRow[] = [];
   const warnings: { rowNumber: number; message: string }[] = [];
 
+  let headerHasPrice = false;
+  let headerHasAvgCost = false;
+  lines.forEach(line => {
+    const lower = line.toLowerCase();
+    if (lower.includes('symbol') || lower.includes('shares') || lower.includes('quantity')) {
+      if (lower.includes('price')) headerHasPrice = true;
+      if (lower.includes('avg') || lower.includes('average') || lower.includes('cost basis') || lower.includes('cost')) {
+        headerHasAvgCost = true;
+      }
+    }
+  });
+
   lines.forEach((line, idx) => {
     const rowNumber = idx + 1;
     const lower = line.toLowerCase();
@@ -80,18 +92,52 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       .filter((n): n is number => n !== null);
 
     let shares = allNums[0];
-    let averageCost = dollarValues.length >= 2 ? dollarValues[1] : (dollarValues[0] ?? allNums[1]);
+    let averageCost: number | null = null;
+    let usedPriceAsAverage = false;
 
-    if (lower.includes('avg') || lower.includes('average') || lower.includes('cost')) {
-      const avgIdx = lower.search(/avg|average|cost|basis/);
-      if (avgIdx >= 0) {
-        const after = line.slice(avgIdx);
-        const afterNums = (after.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
-          .map(n => parseNumber(n))
-          .filter((n): n is number => n !== null);
-        if (afterNums.length > 0) {
-          averageCost = afterNums[0];
+    const priceCandidate = (() => {
+      if (shares == null || dollarValues.length === 0) return null;
+      let best: number | null = null;
+      let bestDelta = Number.POSITIVE_INFINITY;
+      for (const candidate of dollarValues) {
+        const target = candidate * shares;
+        for (const other of dollarValues) {
+          if (other === candidate) continue;
+          const delta = Math.abs(other - target);
+          if (delta < bestDelta) {
+            bestDelta = delta;
+            best = candidate;
+          }
         }
+      }
+      return best;
+    })();
+
+    if (headerHasAvgCost) {
+      if (dollarValues.length >= 2) {
+        if (priceCandidate != null) {
+          const perShareCandidates = dollarValues.filter(v => v !== priceCandidate);
+          const closest = perShareCandidates.reduce<number | null>((best, v) => {
+            if (best == null) return v;
+            return Math.abs(v - priceCandidate) < Math.abs(best - priceCandidate) ? v : best;
+          }, null);
+          averageCost = closest ?? dollarValues[1];
+        } else {
+          averageCost = dollarValues[1];
+        }
+      } else {
+        averageCost = dollarValues[0] ?? allNums[1] ?? null;
+      }
+    } else {
+      averageCost = dollarValues.length >= 2 ? dollarValues[1] : (dollarValues[0] ?? allNums[1] ?? null);
+    }
+
+    if (headerHasPrice && priceCandidate != null) {
+      if (averageCost == null) {
+        averageCost = priceCandidate;
+        usedPriceAsAverage = true;
+      } else if (!headerHasAvgCost && dollarValues.length <= 2 && averageCost === priceCandidate) {
+        usedPriceAsAverage = true;
       }
     }
 
@@ -110,8 +156,12 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       ticker,
       shares,
       averageCost,
-      confidence: dollarValues.length >= 2 ? 'high' : 'medium',
+      confidence: usedPriceAsAverage ? 'low' : (dollarValues.length >= 2 ? 'high' : 'medium'),
     });
+
+    if (usedPriceAsAverage) {
+      warnings.push({ rowNumber, message: 'Average cost not found; used price as proxy' });
+    }
   });
 
   return { parsed, warnings };
