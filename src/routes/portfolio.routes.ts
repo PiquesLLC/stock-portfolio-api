@@ -14,6 +14,7 @@ import {
   importPortfolioCsvHandler,
   confirmPortfolioImportHandler,
   clearPortfolioHandler,
+  importPortfolioScreenshotHandler,
 } from '../controllers/portfolio.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
@@ -36,6 +37,7 @@ router.get('/summary', getSummaryHandler);
 router.get('/performance', heavyReadLimiter, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', requireAuth, upload.single('file'), importPortfolioCsvHandler);
+router.post('/import/screenshot', requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
 router.post('/import/confirm', requireAuth, confirmPortfolioImportHandler);
 router.post('/clear', requireAuth, clearPortfolioHandler);
 

@@ -9,6 +9,7 @@ import {
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
 import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { extractTextFromImage, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -720,6 +721,36 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
   } catch (error) {
     console.error('Clear portfolio error:', error);
     res.status(500).json({ error: 'Failed to clear portfolio' });
+  }
+}
+
+export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file || !file.buffer) {
+      res.status(400).json({ error: 'Image file is required (field name: file)' });
+      return;
+    }
+
+    const { text, confidence } = await extractTextFromImage(file.buffer);
+    const result = parseHoldingsFromText(text);
+
+    // Apply overall OCR confidence to row confidence (simple heuristic)
+    const parsed = result.parsed.map(row => ({
+      ...row,
+      confidence: confidence >= 85 ? 'high' : confidence >= 70 ? 'medium' : 'low',
+    }));
+
+    res.json({
+      parsed,
+      warnings: result.warnings,
+      totalRows: parsed.length + result.warnings.length,
+      validRows: parsed.length,
+      skippedRows: result.warnings.length,
+    });
+  } catch (error) {
+    console.error('Screenshot OCR error:', error);
+    res.status(500).json({ error: 'Failed to process screenshot' });
   }
 }
 
