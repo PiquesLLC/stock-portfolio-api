@@ -15,6 +15,20 @@ const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/h
 let lastSnapshotTime: number = 0;
 let isCreatingSnapshot = false;
 
+export async function resetSnapshotsForCompositionChange(): Promise<void> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  await prisma.holdingSnapshot.deleteMany({
+    where: { timestamp: { gte: cutoff } },
+  });
+  await prisma.portfolioSnapshot.deleteMany({
+    where: {
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      timestamp: { gte: cutoff },
+    },
+  });
+  lastSnapshotTime = 0;
+}
+
 export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null> {
   const now = Date.now();
   const intervalMs = config.snapshotIntervalSeconds * 1000;

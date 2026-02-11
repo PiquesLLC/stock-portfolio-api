@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange } from '../services/snapshot.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -98,6 +98,11 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
     const holding = await upsertHolding({ ticker, shares, averageCost });
+    try {
+      await resetSnapshotsForCompositionChange();
+    } catch (err) {
+      console.warn('[Snapshot] Reset failed after holding update:', err);
+    }
 
     // Auto-create transaction for TWR tracking (unless skipTransaction is set)
     // This ensures adding/removing stocks doesn't artificially inflate returns
@@ -161,6 +166,11 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
     await deleteHolding(ticker);
+    try {
+      await resetSnapshotsForCompositionChange();
+    } catch (err) {
+      console.warn('[Snapshot] Reset failed after holding removal:', err);
+    }
 
     // Auto-create withdrawal transaction for TWR tracking
     if (!skipTransaction && costBasis >= 0.01) {
@@ -649,6 +659,11 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         SYSTEM_USER_ID
       );
     }
+    try {
+      await resetSnapshotsForCompositionChange();
+    } catch (err) {
+      console.warn('[Snapshot] Reset failed after import confirm:', err);
+    }
 
     res.json({ added, updated, removed });
   } catch (error) {
@@ -671,6 +686,11 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       update: { cashBalance: 0, marginDebt: 0 },
       create: { userId: SYSTEM_USER_ID, cashBalance: 0, marginDebt: 0 },
     });
+    try {
+      await resetSnapshotsForCompositionChange();
+    } catch (err) {
+      console.warn('[Snapshot] Reset failed after clear portfolio:', err);
+    }
 
     res.json({ cleared: true, holdingsRemoved: deleted.count });
   } catch (error) {
