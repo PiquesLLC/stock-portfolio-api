@@ -114,7 +114,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
 
   const userMessage =
     `Today is ${formattedDate}. Generate my daily portfolio briefing.\n\n` +
-    `MY PORTFOLIO (${portfolio.holdings.length} holdings, total value $${portfolio.holdingsValue.toFixed(0)}):\n` +
+    `MY PORTFOLIO (${portfolio.holdings.length} holdings, total value $${portfolio.netEquity.toFixed(0)}):\n` +
     `${holdingsSummary}\n` +
     `Yesterday's change: $${portfolio.dayChange.toFixed(0)} (${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%)\n\n` +
     `MARKET HEADLINES:\n${newsSummary}\n\n` +
