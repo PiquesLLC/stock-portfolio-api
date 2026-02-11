@@ -1,46 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import request from 'supertest';
 import { generateTestToken, generateExpiredToken, generateInvalidToken, testUser } from './helpers';
+import { __mockPrisma as prismaMock } from '../utils/prisma';
 
-// ─── Prisma Mock ──────────────────────────────────────────────────────────────
-// vi.hoisted runs before vi.mock factory so the variable is available.
-const prismaMock = vi.hoisted(() => ({
-  user: {
-    findUnique: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
-  userSettings: {
-    create: vi.fn(),
-    deleteMany: vi.fn(),
-  },
-  refreshToken: {
-    create: vi.fn(),
-    findUnique: vi.fn(),
-    update: vi.fn(),
-    updateMany: vi.fn(),
-  },
-  activityEvent: { deleteMany: vi.fn() },
-  follow: { deleteMany: vi.fn() },
-  alertEvent: { deleteMany: vi.fn() },
-  alert: { deleteMany: vi.fn() },
-  holding: { deleteMany: vi.fn() },
-  portfolioSnapshot: { deleteMany: vi.fn() },
-  $transaction: vi.fn(),
-}));
-
-vi.mock('@prisma/client', () => {
-  return {
-    PrismaClient: function () {
-      return prismaMock;
-    },
-  };
-});
-
-// ─── Rate Limiter Mock ────────────────────────────────────────────────────────
+// Rate Limiter Mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Disable rate limiters in tests
 vi.mock('../middleware/rateLimiter', () => {
   const passthrough = (req: any, res: any, next: any) => next();
@@ -49,11 +14,12 @@ vi.mock('../middleware/rateLimiter', () => {
     setPasswordLimiter: passthrough,
     signupLimiter: passthrough,
     mutationLimiter: passthrough,
+    heavyReadLimiter: passthrough,
     apiLimiter: passthrough,
   };
 });
 
-// ─── Import modules after mocks ──────────────────────────────────────────────
+// â”€â”€â”€ Import modules after mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import {
   hashPassword,
   verifyPassword,
@@ -78,15 +44,15 @@ import { requireAuth, optionalAuth, requireOwnership } from '../middleware/auth.
 // Import Express app for integration tests
 import app from '../app';
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH SERVICE UNIT TESTS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 describe('Auth Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  // ── Password Hashing ──────────────────────────────────────────────────────
+  // â”€â”€ Password Hashing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('hashPassword', () => {
     it('should return a bcrypt hash', async () => {
       const hash = await hashPassword('MyPassword1');
@@ -102,7 +68,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Password Verification ─────────────────────────────────────────────────
+  // â”€â”€ Password Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('verifyPassword', () => {
     it('should return true for correct password', async () => {
       const hash = await bcrypt.hash('Correct1', 10);
@@ -117,7 +83,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── JWT Access Token Generation ───────────────────────────────────────────
+  // â”€â”€ JWT Access Token Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('generateAccessToken', () => {
     it('should return a valid JWT', () => {
       const token = generateAccessToken(testUser);
@@ -128,7 +94,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Legacy Token Generation ───────────────────────────────────────────────
+  // â”€â”€ Legacy Token Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('generateToken', () => {
     it('should return a valid JWT with 7-day expiry', () => {
       const token = generateToken(testUser);
@@ -139,7 +105,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Token Verification ────────────────────────────────────────────────────
+  // â”€â”€ Token Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('verifyToken', () => {
     it('should return payload for valid token', () => {
       const token = generateTestToken(testUser);
@@ -166,7 +132,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Detailed Token Verification ───────────────────────────────────────────
+  // â”€â”€ Detailed Token Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('verifyTokenDetailed', () => {
     it('should return { payload, expired: false } for valid token', () => {
       const token = generateTestToken(testUser);
@@ -198,7 +164,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Login ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('loginWithPassword', () => {
     it('should return tokens and user for valid credentials', async () => {
       const hash = await bcrypt.hash('ValidPass1', 10);
@@ -248,7 +214,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Signup ────────────────────────────────────────────────────────────────
+  // â”€â”€ Signup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('signup', () => {
     it('should create user, settings, and return tokens', async () => {
       prismaMock.user.findUnique.mockResolvedValue(null); // username not taken
@@ -280,7 +246,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Set Password ──────────────────────────────────────────────────────────
+  // â”€â”€ Set Password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('setPassword', () => {
     it('should update password and return true', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'u1', username: 'alice' });
@@ -298,7 +264,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Get User By ID ────────────────────────────────────────────────────────
+  // â”€â”€ Get User By ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('getUserById', () => {
     it('should return user data', async () => {
       prismaMock.user.findUnique.mockResolvedValue({
@@ -317,7 +283,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Has Password ──────────────────────────────────────────────────────────
+  // â”€â”€ Has Password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('hasPassword', () => {
     it('should return true when password is set', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ passwordHash: '$2a$...' });
@@ -335,7 +301,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Change Password ───────────────────────────────────────────────────────
+  // â”€â”€ Change Password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('changePassword', () => {
     it('should succeed with correct current password', async () => {
       const hash = await bcrypt.hash('OldPass1', 10);
@@ -369,7 +335,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Username Exists ───────────────────────────────────────────────────────
+  // â”€â”€ Username Exists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('usernameExists', () => {
     it('should return true for existing username', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'u1' });
@@ -382,7 +348,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Refresh Token Generation ──────────────────────────────────────────────
+  // â”€â”€ Refresh Token Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('generateRefreshToken', () => {
     it('should create a token in the database and return it', async () => {
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'stored-token' });
@@ -398,7 +364,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Refresh Token Rotation ────────────────────────────────────────────────
+  // â”€â”€ Refresh Token Rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('rotateRefreshToken', () => {
     it('should return new tokens for a valid refresh token', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
@@ -460,7 +426,7 @@ describe('Auth Service', () => {
     });
   });
 
-  // ── Revoke All Refresh Tokens ─────────────────────────────────────────────
+  // â”€â”€ Revoke All Refresh Tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('revokeAllRefreshTokens', () => {
     it('should update all non-revoked tokens for user', async () => {
       prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 2 });
@@ -474,9 +440,9 @@ describe('Auth Service', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH MIDDLEWARE UNIT TESTS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 describe('Auth Middleware', () => {
   function createMockReqResNext() {
     const req: any = {
@@ -500,7 +466,7 @@ describe('Auth Middleware', () => {
     vi.clearAllMocks();
   });
 
-  // ── requireAuth ───────────────────────────────────────────────────────────
+  // â”€â”€ requireAuth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('requireAuth', () => {
     it('should call next() with valid token in cookie', () => {
       const { req, res, next } = createMockReqResNext();
@@ -605,7 +571,7 @@ describe('Auth Middleware', () => {
     });
   });
 
-  // ── optionalAuth ──────────────────────────────────────────────────────────
+  // â”€â”€ optionalAuth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('optionalAuth', () => {
     it('should set req.user when valid token provided', () => {
       const { req, res, next } = createMockReqResNext();
@@ -660,7 +626,7 @@ describe('Auth Middleware', () => {
     });
   });
 
-  // ── requireOwnership ──────────────────────────────────────────────────────
+  // â”€â”€ requireOwnership â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('requireOwnership', () => {
     it('should call next() when user owns the resource (params)', () => {
       const { req, res, next } = createMockReqResNext();
@@ -740,15 +706,15 @@ describe('Auth Middleware', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH ROUTES INTEGRATION TESTS (supertest)
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 describe('Auth Routes (Integration)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  // ── POST /auth/login ──────────────────────────────────────────────────────
+  // â”€â”€ POST /auth/login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/login', () => {
     it('should return 200 and set cookies on successful login', async () => {
       const hash = await bcrypt.hash('ValidPass1', 10);
@@ -802,7 +768,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/logout ─────────────────────────────────────────────────────
+  // â”€â”€ POST /auth/logout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/logout', () => {
     it('should return 200 and clear cookies', async () => {
       const res = await request(app).post('/auth/logout');
@@ -812,7 +778,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── GET /auth/me ──────────────────────────────────────────────────────────
+  // â”€â”€ GET /auth/me â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('GET /auth/me', () => {
     it('should return user data for authenticated request', async () => {
       const token = generateTestToken(testUser);
@@ -848,7 +814,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/signup ─────────────────────────────────────────────────────
+  // â”€â”€ POST /auth/signup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/signup', () => {
     it('should return 201 and set cookies on successful signup', async () => {
       prismaMock.user.findUnique.mockResolvedValue(null); // username check + signup check
@@ -913,7 +879,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/set-password ───────────────────────────────────────────────
+  // â”€â”€ POST /auth/set-password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/set-password', () => {
     it('should set password successfully', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'u1', username: 'alice' });
@@ -954,7 +920,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/change-password ────────────────────────────────────────────
+  // â”€â”€ POST /auth/change-password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/change-password', () => {
     it('should change password for authenticated user', async () => {
       const token = generateTestToken(testUser);
@@ -1005,7 +971,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── DELETE /auth/delete-account ───────────────────────────────────────────
+  // â”€â”€ DELETE /auth/delete-account â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('DELETE /auth/delete-account', () => {
     it('should delete account with correct password', async () => {
       const token = generateTestToken(testUser);
@@ -1075,7 +1041,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── GET /auth/check-username/:username ────────────────────────────────────
+  // â”€â”€ GET /auth/check-username/:username â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('GET /auth/check-username/:username', () => {
     it('should return available: true for unused username', async () => {
       prismaMock.user.findUnique.mockResolvedValue(null);
@@ -1096,7 +1062,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── GET /auth/has-password/:username ──────────────────────────────────────
+  // â”€â”€ GET /auth/has-password/:username â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('GET /auth/has-password/:username', () => {
     it('should return hasPassword: true when password is set', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ passwordHash: '$2a$...' });
@@ -1117,7 +1083,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/refresh ────────────────────────────────────────────────────
+  // â”€â”€ POST /auth/refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/refresh', () => {
     it('should rotate tokens and set new cookies', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
@@ -1162,7 +1128,7 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 
-  // ── POST /auth/change-password (revokes refresh tokens) ──────────────────
+  // â”€â”€ POST /auth/change-password (revokes refresh tokens) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/change-password (token revocation)', () => {
     it('should revoke all refresh tokens after successful password change', async () => {
       const token = generateTestToken(testUser);
@@ -1185,3 +1151,4 @@ describe('Auth Routes (Integration)', () => {
     });
   });
 });
+

@@ -5,8 +5,8 @@ process.env.JWT_SECRET = 'test-jwt-secret-key-for-testing-only';
 process.env.NODE_ENV = 'development';
 process.env.DATABASE_URL = 'file:./test.db';
 
-// Mock PrismaClient globally
-vi.mock('@prisma/client', () => {
+// Mock Prisma singleton globally
+vi.mock('../utils/prisma', () => {
   const mockPrisma = {
     user: {
       findUnique: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock('@prisma/client', () => {
   };
 
   return {
-    PrismaClient: vi.fn(() => mockPrisma),
+    default: mockPrisma,
     __mockPrisma: mockPrisma,
   };
 });
