@@ -741,9 +741,14 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       confidence: confidence >= 85 ? 'high' : confidence >= 70 ? 'medium' : 'low',
     }));
 
+    const guidanceWarning = {
+      rowNumber: 0,
+      message: 'For best results, ensure the stock name/ticker, share count, and average price are clearly visible in the screenshot.',
+    };
+
     res.json({
       parsed,
-      warnings: result.warnings,
+      warnings: [guidanceWarning, ...result.warnings],
       totalRows: parsed.length + result.warnings.length,
       validRows: parsed.length,
       skippedRows: result.warnings.length,
