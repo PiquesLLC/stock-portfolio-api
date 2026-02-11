@@ -734,7 +734,10 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       return;
     }
 
-    const { text, confidence } = await extractTextFromImage(file.buffer);
+    const { text, confidence } = await extractTextFromImage(file.buffer, {
+      mimeType: file.mimetype,
+      fileName: file.originalname,
+    });
     const result = parseHoldingsFromText(text);
 
     // Apply overall OCR confidence to row confidence (simple heuristic)
@@ -759,6 +762,10 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
     });
   } catch (error) {
     console.error('Screenshot OCR error:', error);
+    if (String((error as Error)?.message || '').includes('HEIC conversion failed')) {
+      res.status(400).json({ error: 'Unsupported image format. Please upload PNG or JPG.' });
+      return;
+    }
     res.status(500).json({ error: 'Failed to process screenshot' });
   }
 }

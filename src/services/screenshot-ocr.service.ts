@@ -1,4 +1,5 @@
 import { createWorker } from 'tesseract.js';
+import sharp from 'sharp';
 
 export interface OcrParsedRow {
   rowNumber: number;
@@ -11,6 +12,37 @@ export interface OcrParsedRow {
 export interface OcrParseResult {
   parsed: OcrParsedRow[];
   warnings: { rowNumber: number; message: string }[];
+}
+
+function isHeic(mimeType?: string | null, fileName?: string | null): boolean {
+  if (mimeType) {
+    const normalized = mimeType.toLowerCase();
+    if (normalized === 'image/heic' || normalized === 'image/heif') {
+      return true;
+    }
+  }
+  if (fileName) {
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith('.heic') || lower.endsWith('.heif')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function maybeConvertHeicToPng(
+  buffer: Buffer,
+  options?: { mimeType?: string | null; fileName?: string | null }
+): Promise<Buffer> {
+  if (!isHeic(options?.mimeType, options?.fileName)) {
+    return buffer;
+  }
+  try {
+    return await sharp(buffer).png().toBuffer();
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`HEIC conversion failed: ${err.message}`);
+  }
 }
 
 function parseNumber(value: string): number | null {
@@ -167,10 +199,14 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
   return { parsed, warnings };
 }
 
-export async function extractTextFromImage(buffer: Buffer): Promise<{ text: string; confidence: number }> {
+export async function extractTextFromImage(
+  buffer: Buffer,
+  options?: { mimeType?: string | null; fileName?: string | null }
+): Promise<{ text: string; confidence: number }> {
+  const inputBuffer = await maybeConvertHeicToPng(buffer, options);
   const worker = await createWorker('eng');
   try {
-    const { data } = await worker.recognize(buffer);
+    const { data } = await worker.recognize(inputBuffer);
     return { text: data.text || '', confidence: data.confidence ?? 0 };
   } finally {
     await worker.terminate();
