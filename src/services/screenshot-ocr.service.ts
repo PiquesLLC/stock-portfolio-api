@@ -35,40 +35,69 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
 
   lines.forEach((line, idx) => {
     const rowNumber = idx + 1;
-    const tickerMatch = line.match(/\b[A-Z]{1,5}\b/);
-    if (!tickerMatch) {
+    const lower = line.toLowerCase();
+    if (lower.includes('symbol') && lower.includes('shares')) {
       return;
     }
-    const ticker = tickerMatch[0].toUpperCase();
+    const tickerMatches = Array.from(line.matchAll(/\b[A-Z]{1,5}\b/g));
+    if (tickerMatches.length === 0) return;
+
+    let ticker = '';
+    for (const match of tickerMatches) {
+      const candidate = match[0].toUpperCase();
+      const idx = match.index ?? 0;
+      const beforeChar = idx > 0 ? line[idx - 1] : '';
+      if (beforeChar === '&' || beforeChar === '/' || beforeChar === '.') {
+        continue;
+      }
+      if (candidate.length === 1 && line.includes('S&P')) {
+        continue;
+      }
+      const after = line.slice(idx + candidate.length);
+      if (/^\s*[\d.]/.test(after)) {
+        ticker = candidate;
+        break;
+      }
+    }
+
+    if (!ticker) {
+      ticker = tickerMatches[tickerMatches.length - 1][0].toUpperCase();
+    }
+
     if (!isValidTicker(ticker)) {
       warnings.push({ rowNumber, message: 'Invalid ticker format' });
       return;
     }
 
-    const nums = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+    const afterTicker = line.slice(line.indexOf(ticker) + ticker.length);
+    const dollarMatches = afterTicker.match(/\$[\d,]+(\.\d+)?/g) || [];
+    const dollarValues = dollarMatches
+      .map(v => parseNumber(v))
+      .filter((n): n is number => n !== null);
+
+    const allNums = (afterTicker.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
       .map(n => parseNumber(n))
       .filter((n): n is number => n !== null);
 
-    if (nums.length < 2) {
-      warnings.push({ rowNumber, message: 'Not enough numeric values found' });
-      return;
+    let shares = allNums[0];
+    let averageCost = dollarValues.length >= 2 ? dollarValues[1] : (dollarValues[0] ?? allNums[1]);
+
+    if (lower.includes('avg') || lower.includes('average') || lower.includes('cost')) {
+      const avgIdx = lower.search(/avg|average|cost|basis/);
+      if (avgIdx >= 0) {
+        const after = line.slice(avgIdx);
+        const afterNums = (after.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+          .map(n => parseNumber(n))
+          .filter((n): n is number => n !== null);
+        if (afterNums.length > 0) {
+          averageCost = afterNums[0];
+        }
+      }
     }
 
-    let shares = nums[0];
-    let averageCost = nums[1];
-
-    const lower = line.toLowerCase();
-    const avgIdx = lower.search(/avg|average|cost|basis/);
-    if (avgIdx >= 0) {
-      const after = line.slice(avgIdx);
-      const afterNums = (after.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
-        .map(n => parseNumber(n))
-        .filter((n): n is number => n !== null);
-      if (afterNums.length > 0) {
-        averageCost = afterNums[0];
-        const remaining = nums.filter(n => n !== averageCost);
-        if (remaining.length > 0) shares = remaining[0];
-      }
+    if (shares == null || averageCost == null) {
+      warnings.push({ rowNumber, message: 'Not enough numeric values found' });
+      return;
     }
 
     if (shares <= 0 || averageCost < 0) {
@@ -81,7 +110,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       ticker,
       shares,
       averageCost,
-      confidence: 'medium',
+      confidence: dollarValues.length >= 2 ? 'high' : 'medium',
     });
   });
 
