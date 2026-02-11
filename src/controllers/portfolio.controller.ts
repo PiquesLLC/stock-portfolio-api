@@ -618,6 +618,8 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
     });
 
     res.json({
+      reviewRequired: true,
+      editableFields: ['ticker', 'shares', 'averageCost'],
       parsed: parsedRows,
       warnings,
       totalRows: data.length,
@@ -747,6 +749,8 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
     };
 
     res.json({
+      reviewRequired: true,
+      editableFields: ['ticker', 'shares', 'averageCost'],
       parsed,
       warnings: [guidanceWarning, ...result.warnings],
       totalRows: parsed.length + result.warnings.length,
