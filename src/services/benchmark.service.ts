@@ -130,7 +130,7 @@ export async function getPerformanceComparison(
   // Get portfolio snapshots for this window
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: {
-      userId: userId ?? null,
+      userId: userId ?? undefined,
       timestamp: { gte: windowStart },
     },
     orderBy: { timestamp: 'asc' },
@@ -139,7 +139,7 @@ export async function getPerformanceComparison(
   // Also get the last snapshot before the window for baseline
   const baselineSnapshot = await prisma.portfolioSnapshot.findFirst({
     where: {
-      userId: userId ?? null,
+      userId: userId ?? undefined,
       timestamp: { lt: windowStart },
     },
     orderBy: { timestamp: 'desc' },
@@ -190,10 +190,19 @@ export async function getPerformanceComparison(
 
   if (holdings.length > 0 && windowDays > 1) {
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: userId ?? null },
+      where: { userId: userId ?? undefined },
       orderBy: { timestamp: 'desc' },
     });
     const cashBalance = latestSnapshot?.cashBalance ?? 0;
+    // Get marginDebt from settings (not on snapshot model)
+    let marginDebt = 0;
+    if (userId) {
+      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+      marginDebt = userSettings?.marginDebt ?? 0;
+    } else {
+      const settings = await prisma.settings.findFirst();
+      marginDebt = settings?.marginDebt ?? 0;
+    }
 
     // Request extra buffer days to ensure enough trading days for statistical measures.
     // 30 calendar days ≈ 21 trading days → 20 returns, but we need margin for holidays/gaps.
@@ -203,7 +212,7 @@ export async function getPerformanceComparison(
       holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
       cashBalance,
       bufferDays,
-      0,
+      marginDebt,
     );
 
     if (reconstructed.length >= 2) {
