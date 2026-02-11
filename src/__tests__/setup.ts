@@ -16,6 +16,7 @@ vi.mock('../utils/prisma', () => {
     },
     userSettings: {
       create: vi.fn(),
+      upsert: vi.fn(),
       deleteMany: vi.fn(),
     },
     refreshToken: {
@@ -25,7 +26,7 @@ vi.mock('../utils/prisma', () => {
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
-    holding: { deleteMany: vi.fn() },
+    holding: { deleteMany: vi.fn(), findMany: vi.fn(), upsert: vi.fn() },
     portfolioSnapshot: { deleteMany: vi.fn() },
     activityEvent: { deleteMany: vi.fn() },
     follow: { deleteMany: vi.fn() },

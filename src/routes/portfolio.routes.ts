@@ -11,12 +11,17 @@ import {
   getChartHandler,
   getPerformanceHandler,
   getTickerActivity,
+  importPortfolioCsvHandler,
+  confirmPortfolioImportHandler,
+  clearPortfolioHandler,
 } from '../controllers/portfolio.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
+import multer from 'multer';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', optionalAuth, getPortfolioHandler);
 router.post('/holdings', requireAuth, addHolding);
@@ -30,5 +35,8 @@ router.get('/metrics', getMetricsHandler);
 router.get('/summary', getSummaryHandler);
 router.get('/performance', heavyReadLimiter, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
+router.post('/import/csv', requireAuth, upload.single('file'), importPortfolioCsvHandler);
+router.post('/import/confirm', requireAuth, confirmPortfolioImportHandler);
+router.post('/clear', requireAuth, clearPortfolioHandler);
 
 export default router;

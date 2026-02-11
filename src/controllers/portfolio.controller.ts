@@ -22,6 +22,9 @@ import { LookbackPeriod, ProjectionMode, PaceWindow } from '../types';
 import { getPerformanceComparison, PerformanceWindow } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
+import { parse as parseCsv } from 'csv-parse/sync';
+
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -475,6 +478,204 @@ export async function getTickerActivity(req: AuthRequest, res: Response): Promis
   } catch (error) {
     console.error('Error fetching ticker activity:', error);
     res.status(500).json({ error: 'Failed to fetch ticker activity' });
+  }
+}
+
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/[\s_-]/g, '');
+}
+
+function parseNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[$,]/g, '').trim();
+    if (!cleaned) return null;
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function isValidTicker(ticker: string): boolean {
+  return /^[A-Z]{1,5}$/.test(ticker);
+}
+
+export async function importPortfolioCsvHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file || !file.buffer) {
+      res.status(400).json({ error: 'CSV file is required (field name: file)' });
+      return;
+    }
+
+    const csvText = file.buffer.toString('utf8');
+    const data = parseCsv(csvText, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    }) as Record<string, unknown>[];
+    const headers = Object.keys(data[0] || {});
+
+    const headerMap: Record<string, string> = {};
+    headers.forEach((h) => {
+      const normalized = normalizeHeader(h);
+      headerMap[normalized] = h;
+    });
+
+    const tickerKey = headerMap.ticker || headerMap.symbol;
+    const sharesKey = headerMap.shares || headerMap.qty || headerMap.quantity;
+    const averageCostKey =
+      headerMap.averagecost ||
+      headerMap.avgcost ||
+      headerMap.average_cost ||
+      headerMap.avg_cost ||
+      headerMap.costbasis ||
+      headerMap.cost_basis;
+
+    if (!tickerKey || !sharesKey || !averageCostKey) {
+      res.status(400).json({ error: 'CSV must include ticker, shares, and average cost columns' });
+      return;
+    }
+
+    const knownHeaders = new Set([
+      tickerKey,
+      sharesKey,
+      averageCostKey,
+    ]);
+
+    const warnings: { rowNumber: number; message: string }[] = [];
+    headers.forEach((h) => {
+      if (!knownHeaders.has(h)) {
+        warnings.push({ rowNumber: 0, message: `Unknown column '${h}' ignored` });
+      }
+    });
+
+    const parsedRows: {
+      rowNumber: number;
+      ticker: string;
+      shares: number;
+      averageCost: number;
+      confidence: 'high' | 'medium' | 'low';
+    }[] = [];
+
+    let skippedRows = 0;
+    data.forEach((row, index) => {
+      const rowNumber = index + 1;
+      const rawTicker = String(row[tickerKey] || '').trim().toUpperCase();
+      const shares = parseNumber(row[sharesKey]);
+      const averageCost = parseNumber(row[averageCostKey]);
+
+      if (!rawTicker || !isValidTicker(rawTicker) || shares == null || shares <= 0 || averageCost == null || averageCost < 0) {
+        skippedRows += 1;
+        warnings.push({
+          rowNumber,
+          message: 'Invalid row data (ticker/shares/averageCost)',
+        });
+        return;
+      }
+
+      parsedRows.push({
+        rowNumber,
+        ticker: rawTicker,
+        shares,
+        averageCost,
+        confidence: 'high',
+      });
+    });
+
+    res.json({
+      parsed: parsedRows,
+      warnings,
+      totalRows: data.length,
+      validRows: parsedRows.length,
+      skippedRows,
+    });
+  } catch (error) {
+    console.error('CSV import parse error:', error);
+    res.status(500).json({ error: 'Failed to parse CSV' });
+  }
+}
+
+export async function confirmPortfolioImportHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { holdings, mode } = req.body as { holdings?: any[]; mode?: 'replace' | 'merge' };
+    if (!Array.isArray(holdings) || holdings.length === 0) {
+      res.status(400).json({ error: 'holdings must be a non-empty array' });
+      return;
+    }
+    if (mode !== 'replace' && mode !== 'merge') {
+      res.status(400).json({ error: 'mode must be replace or merge' });
+      return;
+    }
+
+    const existingHoldings = await prisma.holding.findMany({
+      where: { userId: SYSTEM_USER_ID },
+      select: { ticker: true },
+    });
+    const existingSet = new Set(existingHoldings.map(h => h.ticker.toUpperCase()));
+
+    const normalized = holdings.map((h) => ({
+      ticker: String(h.ticker || '').trim().toUpperCase(),
+      shares: Number(h.shares),
+      averageCost: Number(h.averageCost),
+    })).filter(h => isValidTicker(h.ticker) && h.shares > 0 && Number.isFinite(h.averageCost) && h.averageCost >= 0);
+
+    if (normalized.length === 0) {
+      res.status(400).json({ error: 'holdings must include at least one valid entry' });
+      return;
+    }
+
+    const incomingSet = new Set(normalized.map(h => h.ticker));
+
+    let added = 0;
+    let updated = 0;
+    let removed = 0;
+
+    if (mode === 'replace') {
+      removed = existingHoldings.length;
+      added = normalized.length;
+      updated = 0;
+
+      await prisma.holding.deleteMany({ where: { userId: SYSTEM_USER_ID } });
+    } else {
+      added = normalized.filter(h => !existingSet.has(h.ticker)).length;
+      updated = normalized.filter(h => existingSet.has(h.ticker)).length;
+    }
+
+    for (const h of normalized) {
+      await upsertHolding(
+        { ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
+        SYSTEM_USER_ID
+      );
+    }
+
+    res.json({ added, updated, removed });
+  } catch (error) {
+    console.error('Import confirm error:', error);
+    res.status(500).json({ error: 'Failed to apply import' });
+  }
+}
+
+export async function clearPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { confirmation } = req.body as { confirmation?: string };
+    if (confirmation !== 'CLEAR') {
+      res.status(400).json({ error: 'Invalid confirmation' });
+      return;
+    }
+
+    const deleted = await prisma.holding.deleteMany({ where: { userId: SYSTEM_USER_ID } });
+    await prisma.userSettings.upsert({
+      where: { userId: SYSTEM_USER_ID },
+      update: { cashBalance: 0, marginDebt: 0 },
+      create: { userId: SYSTEM_USER_ID, cashBalance: 0, marginDebt: 0 },
+    });
+
+    res.json({ cleared: true, holdingsRemoved: deleted.count });
+  } catch (error) {
+    console.error('Clear portfolio error:', error);
+    res.status(500).json({ error: 'Failed to clear portfolio' });
   }
 }
 
