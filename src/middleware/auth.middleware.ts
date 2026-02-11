@@ -12,7 +12,7 @@ function getCookieOptions(req: Request) {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production' || capacitor,
-    sameSite: (capacitor ? 'none' : 'lax') as const,
+    sameSite: capacitor ? ('none' as const) : ('lax' as const),
     path: '/',
   };
 }
