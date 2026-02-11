@@ -11,7 +11,7 @@ export interface OcrParsedRow {
 
 export interface OcrParseResult {
   parsed: OcrParsedRow[];
-  warnings: { rowNumber: number; message: string }[];
+  warnings: { rowNumber: number; message: string; line?: string }[];
 }
 
 function isHeic(mimeType?: string | null, fileName?: string | null): boolean {
@@ -101,7 +101,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     .filter(Boolean);
 
   const parsed: OcrParsedRow[] = [];
-  const warnings: { rowNumber: number; message: string }[] = [];
+  const warnings: { rowNumber: number; message: string; line?: string }[] = [];
 
   let headerHasPrice = false;
   let headerHasAvgCost = false;
@@ -148,7 +148,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     }
 
     if (!isValidTicker(ticker)) {
-      warnings.push({ rowNumber, message: 'Invalid ticker format' });
+      warnings.push({ rowNumber, message: 'Invalid ticker format', line });
       continue;
     }
 
@@ -232,12 +232,12 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     }
 
     if (shares == null || averageCost == null) {
-      warnings.push({ rowNumber, message: 'Not enough numeric values found' });
+      warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
       continue;
     }
 
     if (shares <= 0 || averageCost < 0) {
-      warnings.push({ rowNumber, message: 'Invalid shares or average cost' });
+      warnings.push({ rowNumber, message: 'Invalid shares or average cost', line });
       continue;
     }
 
@@ -250,7 +250,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     });
 
     if (usedPriceAsAverage) {
-      warnings.push({ rowNumber, message: 'Average cost not found; used price as proxy' });
+      warnings.push({ rowNumber, message: 'Average cost not found; used price as proxy', line });
     }
   }
 
