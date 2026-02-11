@@ -56,6 +56,44 @@ function isValidTicker(ticker: string): boolean {
   return /^[A-Z]{1,5}$/.test(ticker);
 }
 
+function extractSharesAndAvgCost(line: string): { shares: number | null; averageCost: number | null } {
+  const lower = line.toLowerCase();
+  const sharesMatch = lower.match(/([\d.,]+)\s*shares/);
+  const shares = sharesMatch ? parseNumber(sharesMatch[1]) : null;
+
+  let averageCost: number | null = null;
+  const avgIdx = lower.search(/avg|average|cost/);
+  const dollarMatches = Array.from(line.matchAll(/\$[\d,]+(\.\d+)?/g));
+  if (avgIdx >= 0 && dollarMatches.length > 0) {
+    let bestValue: number | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const match of dollarMatches) {
+      const idx = match.index ?? 0;
+      const distance = Math.abs(idx - avgIdx);
+      const value = parseNumber(match[0]);
+      if (value != null && distance < bestDistance) {
+        bestDistance = distance;
+        bestValue = value;
+      }
+    }
+    averageCost = bestValue;
+  } else {
+    const avgMatch = lower.match(/avg\.?\s*cost[^$]*\$?([\d.,]+)/);
+    if (avgMatch) {
+      averageCost = parseNumber(avgMatch[1]);
+    }
+  }
+
+  if (averageCost == null && (lower.includes('avg') || lower.includes('average') || lower.includes('cost'))) {
+    const nums = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+      .map(n => parseNumber(n))
+      .filter((n): n is number => n !== null);
+    averageCost = nums.length > 0 ? nums[nums.length - 1] : null;
+  }
+
+  return { shares, averageCost };
+}
+
 export function parseHoldingsFromText(text: string): OcrParseResult {
   const lines = text
     .split(/\r?\n/)
@@ -77,14 +115,15 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     }
   });
 
-  lines.forEach((line, idx) => {
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
     const rowNumber = idx + 1;
     const lower = line.toLowerCase();
-    if (lower.includes('symbol') && lower.includes('shares')) {
-      return;
+    if (lower.includes('symbol') && (lower.includes('shares') || lower.includes('quantity'))) {
+      continue;
     }
     const tickerMatches = Array.from(line.matchAll(/\b[A-Z]{1,5}\b/g));
-    if (tickerMatches.length === 0) return;
+    if (tickerMatches.length === 0) continue;
 
     let ticker = '';
     for (const match of tickerMatches) {
@@ -98,7 +137,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
         continue;
       }
       const after = line.slice(idx + candidate.length);
-      if (/^\s*[\d.]/.test(after)) {
+      if (/^\s*[\d.$]/.test(after)) {
         ticker = candidate;
         break;
       }
@@ -110,7 +149,26 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
 
     if (!isValidTicker(ticker)) {
       warnings.push({ rowNumber, message: 'Invalid ticker format' });
-      return;
+      continue;
+    }
+
+    const nextLine = lines[idx + 1];
+    if (nextLine) {
+      const nextLower = nextLine.toLowerCase();
+      if (nextLower.includes('shares') && (nextLower.includes('avg') || nextLower.includes('cost'))) {
+        const { shares, averageCost } = extractSharesAndAvgCost(nextLine);
+        if (shares != null && averageCost != null && shares > 0 && averageCost >= 0) {
+          parsed.push({
+            rowNumber,
+            ticker,
+            shares,
+            averageCost,
+            confidence: 'medium',
+          });
+          idx += 1;
+          continue;
+        }
+      }
     }
 
     const afterTicker = line.slice(line.indexOf(ticker) + ticker.length);
@@ -175,12 +233,12 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
 
     if (shares == null || averageCost == null) {
       warnings.push({ rowNumber, message: 'Not enough numeric values found' });
-      return;
+      continue;
     }
 
     if (shares <= 0 || averageCost < 0) {
       warnings.push({ rowNumber, message: 'Invalid shares or average cost' });
-      return;
+      continue;
     }
 
     parsed.push({
@@ -194,7 +252,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     if (usedPriceAsAverage) {
       warnings.push({ rowNumber, message: 'Average cost not found; used price as proxy' });
     }
-  });
+  }
 
   return { parsed, warnings };
 }
