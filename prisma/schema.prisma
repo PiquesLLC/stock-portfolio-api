@@ -37,6 +37,16 @@ model PortfolioSnapshot {
   @@index([userId, timestamp])
 }
 
+model PortfolioCompositionChange {
+  id        String   @id @default(uuid())
+  userId    String
+  reason    String?
+  timestamp DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, timestamp])
+}
+
 model User {
   id                     String                 @id @default(uuid())
   username               String                 @unique
@@ -58,6 +68,7 @@ model User {
   followers              Follow[]               @relation("following")
   following              Follow[]               @relation("follower")
   activityEvents         ActivityEvent[]
+  compositionChanges     PortfolioCompositionChange[]
   transactions           Transaction[]
   alerts                 Alert[]
   dividendCredits        DividendCredit[]

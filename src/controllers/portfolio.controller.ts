@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -99,6 +99,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
 
     const holding = await upsertHolding({ ticker, shares, averageCost });
     try {
+      await recordCompositionChange('holding_update');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
       console.warn('[Snapshot] Reset failed after holding update:', err);
@@ -167,6 +168,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
 
     await deleteHolding(ticker);
     try {
+      await recordCompositionChange('holding_remove');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
       console.warn('[Snapshot] Reset failed after holding removal:', err);
@@ -359,7 +361,17 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points.push({ time: now, value: liveValue });
       }
 
-      const periodStartValue = previousCloseValue || (points.length > 0 ? points[0].value : liveValue);
+      // If composition changed within the last day, rebaseline to avoid false jumps.
+      const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
+      const latestChange = await getLatestCompositionChangeAfter(rangeStart);
+      if (latestChange) {
+        const cutoff = latestChange.getTime();
+        points = points.filter(p => p.time >= cutoff);
+      }
+
+      const periodStartValue = latestChange
+        ? (points.length > 0 ? points[0].value : liveValue)
+        : (previousCloseValue || (points.length > 0 ? points[0].value : liveValue));
 
       res.json({ points, periodStartValue, period: '1D' });
       return;
@@ -412,6 +424,16 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // Append current live value
     if (points.length === 0 || now - points[points.length - 1].time > 5000) {
       points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+    }
+
+    // Rebaseline to latest composition change within the window to avoid false jumps.
+    if (points.length > 0) {
+      const windowStart = new Date(points[0].time);
+      const latestChange = await getLatestCompositionChangeAfter(windowStart);
+      if (latestChange) {
+        const cutoff = latestChange.getTime();
+        points = points.filter(p => p.time >= cutoff);
+      }
     }
 
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
@@ -660,6 +682,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       );
     }
     try {
+      await recordCompositionChange(mode === 'replace' ? 'import_replace' : 'import_merge');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
       console.warn('[Snapshot] Reset failed after import confirm:', err);
@@ -687,6 +710,7 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       create: { userId: SYSTEM_USER_ID, cashBalance: 0, marginDebt: 0 },
     });
     try {
+      await recordCompositionChange('portfolio_clear');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
       console.warn('[Snapshot] Reset failed after clear portfolio:', err);

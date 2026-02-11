@@ -15,6 +15,26 @@ const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/h
 let lastSnapshotTime: number = 0;
 let isCreatingSnapshot = false;
 
+export async function recordCompositionChange(reason?: string): Promise<void> {
+  await prisma.portfolioCompositionChange.create({
+    data: {
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      reason: reason || null,
+    },
+  });
+}
+
+export async function getLatestCompositionChangeAfter(startDate: Date): Promise<Date | null> {
+  const latest = await prisma.portfolioCompositionChange.findFirst({
+    where: {
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      timestamp: { gte: startDate },
+    },
+    orderBy: { timestamp: 'desc' },
+  });
+  return latest?.timestamp ?? null;
+}
+
 export async function resetSnapshotsForCompositionChange(): Promise<void> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   await prisma.holdingSnapshot.deleteMany({
