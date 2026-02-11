@@ -1,9 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { Goal, GoalInput, GoalWithProgress, TimeToGoalRange } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
 
-const prisma = new PrismaClient();
+
 
 /**
  * Get all goals
@@ -248,3 +248,4 @@ export async function getGoalWithProgress(id: string): Promise<GoalWithProgress 
     },
   };
 }
+

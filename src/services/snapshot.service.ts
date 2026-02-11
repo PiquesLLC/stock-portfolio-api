@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { PortfolioSnapshot } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
@@ -9,7 +9,7 @@ import { yahooGet, fetchFinnhubCandles, fetchPolygonAggs } from '../utils/yahoo-
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
 
-const prisma = new PrismaClient();
+
 
 // In-memory lock to prevent race conditions in snapshot creation
 let lastSnapshotTime: number = 0;
@@ -248,7 +248,7 @@ export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
 
 /**
  * Reconstruct historical portfolio value from current holdings + candle data.
- * Uses each holding's shares × historical close price, summed across all tickers.
+ * Uses each holding's shares Ã— historical close price, summed across all tickers.
  * cashBalance is added as a constant since we don't track cash history.
  */
 export async function reconstructPortfolioHistory(
@@ -259,7 +259,7 @@ export async function reconstructPortfolioHistory(
 ): Promise<{ time: number; value: number }[]> {
   if (holdings.length === 0) return [];
 
-  // Fetch daily candles for holdings — Polygon primary, Yahoo fallback
+  // Fetch daily candles for holdings â€” Polygon primary, Yahoo fallback
   const fetchDailyForChart = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
     const cacheKey = `chart-candle:${ticker}`;
     const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
@@ -340,7 +340,7 @@ export async function reconstructPortfolioHistory(
 
     for (const holding of holdings) {
       const candles = tickerCandles.get(holding.ticker);
-      if (!candles) continue; // Yahoo failed for this ticker entirely — skip
+      if (!candles) continue; // Yahoo failed for this ticker entirely â€” skip
 
       // Binary search for closest date <= dateMs
       let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
@@ -388,7 +388,7 @@ export async function reconstructPortfolioHistoryHiRes(
     const cached = hiresCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
     if (cached) return cached;
 
-    // Polygon.io primary — map Yahoo params to Polygon params
+    // Polygon.io primary â€” map Yahoo params to Polygon params
     const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
     const rangeDays = rangeDaysMap[yahooRange] || 35;
     const today = new Date().toISOString().split('T')[0];
@@ -491,7 +491,7 @@ export async function reconstructPortfolioHistoryHiRes(
         tickersWithPrice++;
         tickersWithActualPrice++;
       } else {
-        // Before this ticker's first data point — forward-fill with first available price
+        // Before this ticker's first data point â€” forward-fill with first available price
         const firstPrice = firstPrices.get(holding.ticker);
         if (firstPrice !== undefined) {
           totalValue += holding.shares * firstPrice;
@@ -508,7 +508,7 @@ export async function reconstructPortfolioHistoryHiRes(
     }
   }
 
-  // Filter outlier points — if a point deviates more than 5% from its neighbors,
+  // Filter outlier points â€” if a point deviates more than 5% from its neighbors,
   // it's likely a bad after-hours quote. Replace with interpolated value.
   if (points.length >= 3) {
     for (let i = 1; i < points.length - 1; i++) {
@@ -868,3 +868,4 @@ export async function cleanupDuplicateSnapshots(): Promise<number> {
 
   return toDelete.length;
 }
+

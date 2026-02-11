@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 
-const prisma = new PrismaClient();
+
 
 const ALERT_TYPES = ['drawdown', 'sector_exposure', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
 type AlertType = typeof ALERT_TYPES[number];
@@ -100,7 +100,7 @@ export async function evaluateAlerts(userId: string): Promise<void> {
           await checkSectorExposure(alert.id, userId, alert.threshold ?? 35);
           break;
         // 52w_high, 52w_low, underperform_spy would need candle data
-        // Skipping complex checks for now — they can be added when candle cache is richer
+        // Skipping complex checks for now â€” they can be added when candle cache is richer
       }
     } catch (err) {
       console.error(`Alert evaluation failed for ${alert.type}:`, err);
@@ -183,3 +183,4 @@ async function checkSectorExposure(alertId: string, userId: string, thresholdPct
     }
   }
 }
+

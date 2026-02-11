@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Company Fundamentals Service
  *
  * Fetches company overview, income statements, balance sheets, and cash flows
@@ -6,7 +6,7 @@
  * Background rotation job refreshes ~4 tickers per run.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import {
   fetchCompanyOverview,
   fetchIncomeStatement,
@@ -18,11 +18,11 @@ import {
   AVFinancialReport,
 } from '../utils/alpha-vantage';
 
-const prisma = new PrismaClient();
+
 
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-// ── Parsed types ──────────────────────────────────────────────────
+// â”€â”€ Parsed types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface ParsedOverview {
   name: string;
@@ -88,7 +88,7 @@ export interface FundamentalsResponse {
   dataAge: 'fresh' | 'cached' | 'stale';
 }
 
-// ── Parsers ───────────────────────────────────────────────────────
+// â”€â”€ Parsers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function parseOverview(raw: AVCompanyOverview): ParsedOverview {
   return {
@@ -157,7 +157,7 @@ function parseCashFlows(reports: AVFinancialReport[], period: 'annual' | 'quarte
   });
 }
 
-// ── Cache logic ───────────────────────────────────────────────────
+// â”€â”€ Cache logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** Get fundamentals from cache, fetching from AV if stale and budget allows. */
 export async function getCompanyFundamentals(ticker: string): Promise<FundamentalsResponse> {
@@ -185,10 +185,10 @@ export async function getCompanyFundamentals(ticker: string): Promise<Fundamenta
     // If cache is still valid, return it
     if (dataAge !== 'stale') return result;
 
-    // Cache is stale — try to refresh in background if budget allows
+    // Cache is stale â€” try to refresh in background if budget allows
     const remaining = await getDailyCallsRemaining();
     if (remaining >= 4) {
-      // Refresh async — return stale data now, next request gets fresh
+      // Refresh async â€” return stale data now, next request gets fresh
       refreshFundamentals(upper).catch(err =>
         console.error(`[AV Fundamentals] Background refresh failed for ${upper}:`, err.message)
       );
@@ -197,7 +197,7 @@ export async function getCompanyFundamentals(ticker: string): Promise<Fundamenta
     return result;
   }
 
-  // No cache at all — try to fetch if budget allows
+  // No cache at all â€” try to fetch if budget allows
   const remaining = await getDailyCallsRemaining();
   if (remaining >= 4) {
     try {
@@ -319,3 +319,4 @@ export async function rotateTickerFundamentals(allTickers: string[]): Promise<vo
     }
   }
 }
+

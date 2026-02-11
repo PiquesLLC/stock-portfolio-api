@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { getPortfolio } from './portfolio.service';
 import { getAllSnapshots } from './snapshot.service';
 import { insightsCache } from '../utils/finnhub';
@@ -24,7 +24,7 @@ import {
 import { config } from '../config';
 import { getSector } from '../utils/sectors';
 
-const prisma = new PrismaClient();
+
 
 // Reduced trading days for correlation (9 months instead of 1 year)
 const CORRELATION_TRADING_DAYS = 180;
@@ -284,7 +284,7 @@ export async function getHealthScore(): Promise<HealthScore> {
       concDrivers.push({
         label: `${sortedByValue[0].ticker} weight`,
         value: `${top1Pct.toFixed(1)}%`,
-        impact: 'Within 25% threshold — no penalty.',
+        impact: 'Within 25% threshold â€” no penalty.',
       });
     }
 
@@ -304,7 +304,7 @@ export async function getHealthScore(): Promise<HealthScore> {
       concDrivers.push({
         label: 'Top 3 weight',
         value: `${top3Pct.toFixed(1)}%`,
-        impact: 'Within 55% threshold — no penalty.',
+        impact: 'Within 55% threshold â€” no penalty.',
       });
     }
   } else if (holdings.length === 0) {
@@ -320,7 +320,7 @@ export async function getHealthScore(): Promise<HealthScore> {
   const volCalc: string[] = [
     'Score starts at 25/25.',
     'Computed from annualized standard deviation of daily portfolio snapshot returns.',
-    '>40% annualized → 5/25, >25% → 15/25, >15% → 20/25, ≤15% → 25/25.',
+    '>40% annualized â†’ 5/25, >25% â†’ 15/25, >15% â†’ 20/25, â‰¤15% â†’ 25/25.',
   ];
   const volEvidence: string[] = [];
   const volDrivers: { label: string; value: string; impact: string }[] = [];
@@ -363,12 +363,12 @@ export async function getHealthScore(): Promise<HealthScore> {
         volatilityScore = 20;
         volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 20/25 (>15% threshold).' });
       } else {
-        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Full score — below 15% threshold.' });
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Full score â€” below 15% threshold.' });
       }
     }
   } else {
     volEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for volatility analysis).`);
-    volDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data — default score 25/25.' });
+    volDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data â€” default score 25/25.' });
   }
 
   // ============================================================
@@ -377,7 +377,7 @@ export async function getHealthScore(): Promise<HealthScore> {
   const ddCalc: string[] = [
     'Score starts at 25/25.',
     'Max drawdown = largest peak-to-trough decline in portfolio snapshot history.',
-    '>20% → 5/25, >10% → 15/25, >5% → 20/25, ≤5% → 25/25.',
+    '>20% â†’ 5/25, >10% â†’ 15/25, >5% â†’ 20/25, â‰¤5% â†’ 25/25.',
   ];
   const ddEvidence: string[] = [];
   const ddDrivers: { label: string; value: string; impact: string }[] = [];
@@ -396,7 +396,7 @@ export async function getHealthScore(): Promise<HealthScore> {
       const ddPct = (maxDD * 100).toFixed(1);
       const peakDate = snapshots[peakIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
       const troughDate = snapshots[troughIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
-      ddEvidence.push(`Max drawdown: -${ddPct}% (peak ${peakDate} → trough ${troughDate}).`);
+      ddEvidence.push(`Max drawdown: -${ddPct}% (peak ${peakDate} â†’ trough ${troughDate}).`);
       ddEvidence.push(`Peak value: $${Math.round(values[peakIdx]).toLocaleString()}, trough value: $${Math.round(values[troughIdx]).toLocaleString()}.`);
 
       if (maxDD > 0.2) {
@@ -413,19 +413,19 @@ export async function getHealthScore(): Promise<HealthScore> {
         drawdownScore = 20;
         ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 20/25 (>5% threshold).' });
       } else {
-        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Full score — below 5% threshold.' });
+        ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Full score â€” below 5% threshold.' });
       }
     }
   } else {
     ddEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for drawdown analysis).`);
-    ddDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data — default score 25/25.' });
+    ddDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data â€” default score 25/25.' });
   }
 
   // ============================================================
   // DIVERSIFICATION DETAIL
   // ============================================================
   const divCalc: string[] = [
-    '15+ holdings → 25/25, 10–14 → 22, 7–9 → 18, 5–6 → 15, 3–4 → 10, <3 → 5.',
+    '15+ holdings â†’ 25/25, 10â€“14 â†’ 22, 7â€“9 â†’ 18, 5â€“6 â†’ 15, 3â€“4 â†’ 10, <3 â†’ 5.',
     'Also penalised if sector concentration is extreme (HHI of weights).',
   ];
   const divEvidence: string[] = [];
@@ -456,20 +456,20 @@ export async function getHealthScore(): Promise<HealthScore> {
 
   if (holdings.length >= 15) {
     diversificationScore = 25;
-    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: 'Full score (≥15 holdings).' });
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: 'Full score (â‰¥15 holdings).' });
   } else if (holdings.length >= 10) {
     diversificationScore = 22;
-    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '22/25 (10–14 holdings).' });
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '22/25 (10â€“14 holdings).' });
   } else if (holdings.length >= 7) {
     diversificationScore = 18;
-    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '18/25 (7–9 holdings).' });
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '18/25 (7â€“9 holdings).' });
   } else if (holdings.length >= 5) {
     diversificationScore = 15;
-    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '15/25 (5–6 holdings).' });
-    divFixes.push('Adding 2–3 more positions from underrepresented sectors would improve this score.');
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '15/25 (5â€“6 holdings).' });
+    divFixes.push('Adding 2â€“3 more positions from underrepresented sectors would improve this score.');
   } else if (holdings.length >= 3) {
     diversificationScore = 10;
-    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '10/25 (3–4 holdings).' });
+    divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '10/25 (3â€“4 holdings).' });
     if (!reasons.some(r => r.includes('diversif'))) {
       reasons.push('Limited diversification with only ' + holdings.length + ' holdings');
       quickFixes.push('Consider adding more uncorrelated assets');
@@ -479,18 +479,18 @@ export async function getHealthScore(): Promise<HealthScore> {
     diversificationScore = 5;
     divDrivers.push({ label: 'Holdings count', value: `${holdings.length}`, impact: '5/25 (<3 holdings).' });
     reasons.push('Very limited diversification');
-    divFixes.push('Build a diversified portfolio with at least 7–10 holdings across multiple sectors.');
+    divFixes.push('Build a diversified portfolio with at least 7â€“10 holdings across multiple sectors.');
   }
 
   if (sectorsSorted.length > 0 && sectorsSorted[0].pct > 50) {
-    divDrivers.push({ label: `${sectorsSorted[0].sector} sector`, value: `${sectorsSorted[0].pct.toFixed(1)}%`, impact: 'Over 50% in one sector — consider rebalancing.' });
+    divDrivers.push({ label: `${sectorsSorted[0].sector} sector`, value: `${sectorsSorted[0].pct.toFixed(1)}%`, impact: 'Over 50% in one sector â€” consider rebalancing.' });
   }
 
   // ============================================================
   // MARGIN PENALTY DETAIL
   // ============================================================
   const marginCalc: string[] = [
-    'Penalty = min(15, marginRatio × 30).',
+    'Penalty = min(15, marginRatio Ã— 30).',
     'marginRatio = marginDebt / totalAssets.',
   ];
   const marginEvidence: string[] = [];
@@ -518,7 +518,7 @@ export async function getHealthScore(): Promise<HealthScore> {
       marginFixes.push('Reducing margin debt would directly improve your health score.');
     }
   } else {
-    marginEvidence.push('No margin debt — no penalty applied.');
+    marginEvidence.push('No margin debt â€” no penalty applied.');
   }
 
   // ============================================================
@@ -1299,3 +1299,4 @@ export function getInsightsCacheStatus(): {
 export function clearAllInsightsCaches(): void {
   insightsCache.flushAll();
 }
+

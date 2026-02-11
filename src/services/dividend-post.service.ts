@@ -1,13 +1,14 @@
-/**
+﻿/**
  * Dividend Posting Service
  * Credits dividends to user portfolios on pay date.
- * Idempotent — safe to run multiple times per day.
+ * Idempotent â€” safe to run multiple times per day.
  */
 
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { isDripEnabled, reinvestDividend } from './drip.service';
 
-const prisma = new PrismaClient();
+
 
 /**
  * Post dividends for all events with payDate on the given date.
@@ -87,7 +88,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
         });
 
         posted++;
-        console.log(`[Dividend Post] Credited $${amountGross} to ${holding.userId ?? 'default'} for ${event.ticker} (${sharesEligible} shares × $${event.amountPerShare})`);
+        console.log(`[Dividend Post] Credited $${amountGross} to ${holding.userId ?? 'default'} for ${event.ticker} (${sharesEligible} shares Ã— $${event.amountPerShare})`);
 
         // Auto-reinvest if DRIP is enabled
         try {
@@ -110,7 +111,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
         }
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-          // Unique constraint violation — already posted, skip silently
+          // Unique constraint violation â€” already posted, skip silently
           skipped++;
         } else {
           console.error(`[Dividend Post] Error posting for ${event.ticker} user=${holding.userId}:`, err instanceof Error ? err.message : err);
@@ -129,7 +130,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
 /**
  * Backfill all missed dividend postings for events with payDate in the past.
  * Iterates each unique past payDate and calls postDividendsForDate.
- * Idempotent — safe to run multiple times.
+ * Idempotent â€” safe to run multiple times.
  */
 export async function backfillMissedDividends(): Promise<{ totalPosted: number; totalSkipped: number; datesProcessed: number }> {
   const today = new Date();
@@ -219,3 +220,4 @@ export async function getDividendCredits(userId?: string | null, ticker?: string
     orderBy: { creditedAt: 'desc' },
   });
 }
+

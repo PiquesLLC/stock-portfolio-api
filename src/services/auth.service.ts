@@ -1,11 +1,11 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import jwt, { SignOptions, Secret, TokenExpiredError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse } from '../types/auth';
 
-const prisma = new PrismaClient();
+
 
 const SALT_ROUNDS = 10;
 
@@ -311,3 +311,4 @@ export async function signup(
     },
   };
 }
+

@@ -1,10 +1,11 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { Portfolio } from '../types';
 import { getMarketSession } from '../utils/market-hours';
 
-const prisma = new PrismaClient();
 
+
+// User-specific portfolio used for public profiles/leaderboards (not the system/default portfolio).
 export async function getUserPortfolio(userId: string): Promise<Portfolio | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -60,7 +61,7 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     const isRepricing = quote?.isRepricing ?? priceUnavailable;
     const quoteAgeSeconds = quote?.quoteAgeSeconds;
 
-    // CRITICAL: Never use averageCost as fallback — it inflates portfolio value
+    // CRITICAL: Never use averageCost as fallback â€” it inflates portfolio value
     // If we don't have a quote, mark as unavailable but don't calculate incorrect values
     const currentPrice = (quote?.extendedPrice && quote.extendedPrice > 0)
       ? quote.extendedPrice
@@ -158,3 +159,4 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     },
   };
 }
+

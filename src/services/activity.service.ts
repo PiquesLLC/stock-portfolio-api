@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { getFollowingIds } from './follow.service';
 
-const prisma = new PrismaClient();
 
 export type ActivityType = 'holding_added' | 'holding_removed' | 'holding_updated';
 
@@ -134,3 +133,4 @@ export async function getUserActivity(
     createdAt: e.createdAt.toISOString(),
   }));
 }
+

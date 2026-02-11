@@ -1,16 +1,16 @@
-/**
+﻿/**
  * Earnings Service
  *
  * Fetches quarterly and annual EPS data from Alpha Vantage.
  * Shares the FundamentalsCache table (earningsJson column).
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import axios from 'axios';
 import { fetchEarnings, parseAVNumber, getDailyCallsRemaining, AVQuarterlyEarning } from '../utils/alpha-vantage';
 import { config } from '../config';
 
-const prisma = new PrismaClient();
+
 
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -92,7 +92,7 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       const data = JSON.parse(cached.earningsJson);
       return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
     }
-    // AV budget exhausted and no cache — fall back to Yahoo Finance
+    // AV budget exhausted and no cache â€” fall back to Yahoo Finance
     return fetchFinnhubFallback(upper);
   }
 
@@ -102,7 +102,7 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       if (cached?.earningsJson) {
         return { ticker: upper, ...JSON.parse(cached.earningsJson), lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
       }
-      // AV returned nothing — fall back to Yahoo Finance
+      // AV returned nothing â€” fall back to Yahoo Finance
       return fetchFinnhubFallback(upper);
     }
 
@@ -128,7 +128,7 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       const data = JSON.parse(cached.earningsJson);
       return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
     }
-    // AV failed completely — fall back to Yahoo Finance
+    // AV failed completely â€” fall back to Yahoo Finance
     return fetchFinnhubFallback(upper);
   }
 }
@@ -218,3 +218,4 @@ async function fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
     return { ticker, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
   }
 }
+

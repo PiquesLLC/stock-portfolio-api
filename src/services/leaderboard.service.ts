@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { LeaderboardWindow, LeaderboardRegion, LeaderboardEntry, LeaderboardResponse } from '../types';
 import {
   calculateTWR,
@@ -16,7 +16,7 @@ const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
   apac: 'APAC',
 };
 
-const prisma = new PrismaClient();
+
 
 function getWindowStartDate(window: LeaderboardWindow): Date {
   const now = new Date();
@@ -242,3 +242,4 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     lastUpdated: new Date().toISOString(),
   };
 }
+

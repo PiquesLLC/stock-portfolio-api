@@ -1,9 +1,9 @@
-/**
+﻿/**
  * Benchmark Comparison Service
  * Computes portfolio TWR vs benchmark (SPY/QQQ/DIA) for any window.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import {
   calculateTWR,
   calculateBeta,
@@ -21,7 +21,7 @@ import { reconstructPortfolioHistory } from './snapshot.service';
 import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';
 
-const prisma = new PrismaClient();
+
 
 export type PerformanceWindow = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
 
@@ -162,7 +162,7 @@ export async function getPerformanceComparison(
   );
 
   // Filter out snapshots where netEquity is null (totalValue includes cost basis,
-  // not actual equity). Only filter if SOME snapshots have netEquity — if none do,
+  // not actual equity). Only filter if SOME snapshots have netEquity â€” if none do,
   // totalValue is all we have and is likely correct for that user.
   const hasAnyNetEquity = allSnapshots.some(s => s.netEquity !== null && Number(s.netEquity) > 0);
   const reliableSnapshots = hasAnyNetEquity
@@ -173,7 +173,7 @@ export async function getPerformanceComparison(
   let snapshotPoints: SnapshotPoint[] = effectiveSnapshots.map(s => ({
     date: s.timestamp,
     // Use netEquity if it's a real value (> 0), otherwise fall back to totalValue.
-    // netEquity can be 0 (Decimal) when not yet computed — 0 ?? X returns 0, not X.
+    // netEquity can be 0 (Decimal) when not yet computed â€” 0 ?? X returns 0, not X.
     value: (s.netEquity !== null && Number(s.netEquity) > 0) ? Number(s.netEquity) : Number(s.totalValue),
   }));
 
@@ -205,7 +205,7 @@ export async function getPerformanceComparison(
     }
 
     // Request extra buffer days to ensure enough trading days for statistical measures.
-    // 30 calendar days ≈ 21 trading days → 20 returns, but we need margin for holidays/gaps.
+    // 30 calendar days â‰ˆ 21 trading days â†’ 20 returns, but we need margin for holidays/gaps.
     const bufferDays = windowDays + 15;
 
     const reconstructed = await reconstructPortfolioHistory(
@@ -241,7 +241,7 @@ export async function getPerformanceComparison(
   const twrRaw = calculateTWR(snapshotPoints, cashflows);
   const twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
 
-  // Calculate MWR (XIRR) — needs initial investment + final value
+  // Calculate MWR (XIRR) â€” needs initial investment + final value
   let mwrPct: number | null = null;
   if (snapshotPoints.length >= 2) {
     const xirrFlows: CashflowEvent[] = [
@@ -256,7 +256,7 @@ export async function getPerformanceComparison(
     mwrPct = xirr !== null ? Math.round(xirr * 10000) / 100 : null;
   }
 
-  // Benchmark return — always use real-time quote for accuracy
+  // Benchmark return â€” always use real-time quote for accuracy
   let benchmarkReturnPct: number | null = null;
 
   try {
@@ -292,12 +292,12 @@ export async function getPerformanceComparison(
     ? Math.round(((snapshotPoints[snapshotPoints.length - 1].value - snapshotPoints[0].value) / snapshotPoints[0].value) * 10000) / 100
     : null;
 
-  // Alpha — computed from simpleReturnPct; UI may override with chart-derived values
+  // Alpha â€” computed from simpleReturnPct; UI may override with chart-derived values
   const alphaPct = (simpleReturnPct !== null && benchmarkReturnPct !== null)
     ? Math.round((simpleReturnPct - benchmarkReturnPct) * 100) / 100
     : null;
 
-  // Risk metrics — date-align portfolio and benchmark returns for accuracy.
+  // Risk metrics â€” date-align portfolio and benchmark returns for accuracy.
   // Portfolio daily returns from candle reconstruction are date-indexed;
   // benchmark returns must match the same trading dates.
   const values = snapshotPoints.map(s => s.value);
@@ -308,7 +308,7 @@ export async function getPerformanceComparison(
   let benchmarkReturns: number[] | null = null;
 
   if (benchmarkData && snapshotPoints.length >= 2) {
-    // Create a date → close lookup for the benchmark
+    // Create a date â†’ close lookup for the benchmark
     const bmCloseMap = new Map<string, number>();
     for (let i = 0; i < benchmarkData.dates.length; i++) {
       bmCloseMap.set(benchmarkData.dates[i], benchmarkData.closes[i]);
@@ -376,3 +376,4 @@ export async function getPerformanceComparison(
     dataEndDate: allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1].timestamp.toISOString() : null,
   };
 }
+

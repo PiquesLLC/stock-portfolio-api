@@ -7,11 +7,9 @@ import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
-import { PrismaClient } from '@prisma/client';
+import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
-
-const prisma = new PrismaClient();
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 

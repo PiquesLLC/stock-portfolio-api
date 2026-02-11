@@ -1,14 +1,14 @@
-import NodeCache from 'node-cache';
-import { PrismaClient } from '@prisma/client';
+﻿import NodeCache from 'node-cache';
+import prisma from '../utils/prisma';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { matchPersona, StrategyPersona } from '../data/strategy-personas';
 
-const prisma = new PrismaClient();
+
 
 // Cache research results for 30 minutes
 const nalaCache = new NodeCache({ stdTTL: 1800 });
 
-// ── Types ────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface NalaStockMetrics {
   peRatio: number | null;
@@ -76,7 +76,7 @@ export interface NalaSuggestionsResponse {
   suggestions: NalaSuggestion[];
 }
 
-// ── System Prompt ────────────────────────────────────────────────
+// â”€â”€ System Prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const SYSTEM_PROMPT = `You are a stock research engine. Return ONLY valid JSON matching this exact schema:
 {
@@ -118,7 +118,7 @@ Rules:
 - marketCapB is in billions (e.g. 2850 for $2.85T)
 - Set metrics to null if data is unavailable`;
 
-// ── Helpers ──────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function normalizeQuestion(q: string): string {
   return q.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[?!.]+$/, '');
@@ -195,7 +195,7 @@ function parseStockResults(raw: any): NalaStockResult[] {
 }
 
 async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): Promise<NalaStockResult[]> {
-  // Fast Prisma-only lookup — never triggers live Alpha Vantage fetches
+  // Fast Prisma-only lookup â€” never triggers live Alpha Vantage fetches
   const tickers = stocks.map(s => s.ticker);
   const cachedRows = await prisma.fundamentalsCache.findMany({
     where: { ticker: { in: tickers } },
@@ -266,7 +266,7 @@ async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): 
   });
 }
 
-// ── Main Function ────────────────────────────────────────────────
+// â”€â”€ Main Function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function askNala(question: string, userId?: string): Promise<NalaResearchResponse> {
   const normalized = normalizeQuestion(question);
@@ -289,7 +289,7 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
       }
     : null;
 
-  console.log(`[Nala AI] Question: "${question}" → Persona: ${persona?.name || 'General Research'}`);
+  console.log(`[Nala AI] Question: "${question}" â†’ Persona: ${persona?.name || 'General Research'}`);
 
   try {
     const resp = await callPerplexity([
@@ -370,3 +370,4 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
     };
   }
 }
+

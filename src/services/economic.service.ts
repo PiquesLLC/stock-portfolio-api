@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Economic Indicators Service
  *
  * US: Fetches CPI, Fed Funds Rate, Treasury Yield, Unemployment, GDP from Alpha Vantage.
@@ -6,7 +6,7 @@
  * Caches to Prisma/SQLite. Refreshes daily via background jobs.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import {
   fetchCPI,
   fetchFedFundsRate,
@@ -18,7 +18,7 @@ import {
 } from '../utils/alpha-vantage';
 import { fetchWorldBankIndicator } from '../utils/world-bank';
 
-const prisma = new PrismaClient();
+
 
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -181,14 +181,14 @@ export async function refreshEconomicIndicators(): Promise<void> {
       console.log(`[AV Economic] Updated ${cfg.key}: ${history[0]?.value}`);
     } catch (err) {
       console.error(`[AV Economic] Failed ${cfg.key}:`, (err as Error).message);
-      // Continue to next indicator — don't let one failure block others
+      // Continue to next indicator â€” don't let one failure block others
     }
   }
 
   console.log('[AV Economic] Refresh complete');
 }
 
-// ─── International Economic Data (World Bank API) ──────────────────────────
+// â”€â”€â”€ International Economic Data (World Bank API) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface InternationalEconomicDashboard {
   regions: {
@@ -348,3 +348,4 @@ export async function refreshInternationalIndicators(): Promise<void> {
 
   console.log('[WB International] Refresh complete');
 }
+

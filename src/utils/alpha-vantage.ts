@@ -7,10 +7,9 @@
  */
 
 import axios from 'axios';
-import { PrismaClient } from '@prisma/client';
+import prisma from './prisma';
 import { config } from '../config';
 
-const prisma = new PrismaClient();
 const AV_BASE_URL = 'https://www.alphavantage.co/query';
 const MIN_REQUEST_DELAY_MS = 13000; // 5/min = 12s, +1s safety
 const MAX_RETRIES = 2;

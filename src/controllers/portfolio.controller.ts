@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+﻿import { Request, Response } from 'express';
 import {
   getPortfolio,
   upsertHolding,
@@ -21,19 +21,20 @@ import {
 import { LookbackPeriod, ProjectionMode, PaceWindow } from '../types';
 import { getPerformanceComparison, PerformanceWindow } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
+import prisma from '../utils/prisma';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
 
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    // Only use userId if explicitly passed as query param (e.g., leaderboard profile views).
+    // Only use userId if explicitly passed as query param (e.g., leaderboard/social profile views).
     // The main portfolio always uses the system/default user's data.
     const userId = req.query.userId as string | undefined;
 
     let portfolio;
     if (userId) {
-      // User-specific portfolio (for leaderboard/profile views)
+      // User-specific portfolio (public profile/leaderboard views only)
       portfolio = await getUserPortfolio(userId);
       if (!portfolio) {
         res.status(404).json({ error: 'User not found' });
@@ -51,7 +52,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         portfolio.netEquity,
       ).catch(e => console.error('User snapshot error:', e));
     } else {
-      // Default portfolio — the main portfolio data (all users see this)
+      // Default portfolio â€” the main portfolio data (all users see this)
       await createSnapshotIfNeeded();
       portfolio = await getPortfolio();
     }
@@ -89,7 +90,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
 
     // Check if this is an update vs new add
-    // Always use system/default portfolio — auth is for access control only
+    // Always use system/default portfolio â€” auth is for access control only
     const existingHoldings = await getHoldings();
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
@@ -151,7 +152,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
 
     // Get the holding before deletion to know the cost basis
-    // Always use system/default portfolio — auth is for access control only
+    // Always use system/default portfolio â€” auth is for access control only
     const existingHoldings = await getHoldings();
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
@@ -197,8 +198,6 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     // Update user-specific cash if authenticated
     const authUserId = req.user?.userId;
     if (authUserId) {
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
       await prisma.userSettings.upsert({
         where: { userId: authUserId },
         update: { cashBalance },
@@ -292,7 +291,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // If userId provided, delegate to user chart handler
+    // If userId provided, delegate to user chart handler (public profile/leaderboard only)
     if (userId) {
       req.params = { ...req.params, userId };
       return getUserChartHandler(req, res);
@@ -359,13 +358,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     // Use high-resolution data for short periods (like Robinhood)
     if (period === '1W') {
-      // 15-min candles for 5 days → ~130 points per ticker
+      // 15-min candles for 5 days â†’ ~130 points per ticker
       points = await reconstructPortfolioHistoryHiRes(
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
         portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
       );
     } else if (period === '1M') {
-      // 1-hour candles for 1 month → ~150 points per ticker
+      // 1-hour candles for 1 month â†’ ~150 points per ticker
       points = await reconstructPortfolioHistoryHiRes(
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
         portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
@@ -439,6 +438,7 @@ export async function getPerformanceHandler(req: Request, res: Response): Promis
   try {
     const window = ((req.query.window as string) || '1M').toUpperCase() as PerformanceWindow;
     const benchmark = ((req.query.benchmark as string) || 'SPY').toUpperCase();
+    // Optional userId for public profile/leaderboard comparisons only.
     const userId = (req.query.userId as string) || undefined;
 
     if (!VALID_PERF_WINDOWS.includes(window)) {
@@ -477,3 +477,4 @@ export async function getTickerActivity(req: AuthRequest, res: Response): Promis
     res.status(500).json({ error: 'Failed to fetch ticker activity' });
   }
 }
+

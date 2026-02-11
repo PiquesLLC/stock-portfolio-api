@@ -1,10 +1,10 @@
-import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+﻿import { Response } from 'express';
+import prisma from '../utils/prisma';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructIntradayGap } from '../services/snapshot.service';
 import { AuthRequest } from '../types/auth';
 
-const prisma = new PrismaClient();
+
 
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
 
@@ -230,3 +230,4 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
     res.status(500).json({ error: 'Failed to fetch user chart data' });
   }
 }
+

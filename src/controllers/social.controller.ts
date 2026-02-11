@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+﻿import { Request, Response } from 'express';
+import prisma from '../utils/prisma';
 import {
   followUser,
   unfollowUser,
@@ -12,7 +12,7 @@ import { getFeed, getUserActivity } from '../services/activity.service';
 import { getPerformanceComparison } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
 
-const prisma = new PrismaClient();
+
 
 // POST /users/:userId/follow
 // Uses authenticated user as follower (no body required)
@@ -363,3 +363,4 @@ export async function getFeedHandler(req: Request, res: Response): Promise<void>
     res.status(500).json({ error: 'Failed to get feed' });
   }
 }
+

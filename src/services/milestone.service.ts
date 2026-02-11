@@ -1,8 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 
-const prisma = new PrismaClient();
+
 
 // Track which milestones we've already notified (ticker-userId-type -> timestamp)
 // This prevents spam if a stock hovers near a milestone
@@ -206,3 +206,4 @@ export async function markAllMilestoneEventsRead(userId: string): Promise<void> 
     data: { read: true },
   });
 }
+

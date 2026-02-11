@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
 
-const prisma = new PrismaClient();
+
 
 export type PriceAlertCondition = 'above' | 'below' | 'pct_up' | 'pct_down';
 export type ReferencePriceType = 'current' | 'open' | 'avgCost';
@@ -265,3 +265,4 @@ export async function evaluatePriceAlerts(): Promise<void> {
     }
   }
 }
+

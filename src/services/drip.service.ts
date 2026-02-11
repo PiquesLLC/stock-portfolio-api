@@ -1,12 +1,12 @@
-/**
+﻿/**
  * DRIP (Dividend Reinvestment Plan) Service
  * Handles automatic dividend reinvestment into additional shares.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { yahooGet } from '../utils/yahoo-http';
 
-const prisma = new PrismaClient();
+
 
 /**
  * Check if DRIP is enabled for a user.
@@ -263,7 +263,7 @@ export interface DividendTimeline {
 
 /**
  * Get the timeline for a dividend credit (for UI display).
- * Shows: Announced → Payment → Reinvestment
+ * Shows: Announced â†’ Payment â†’ Reinvestment
  */
 export async function getDividendTimeline(creditId: string): Promise<DividendTimeline> {
   const credit = await prisma.dividendCredit.findUnique({
@@ -320,3 +320,4 @@ export async function getDripSettings(userId: string | null): Promise<{ enabled:
   const enabled = await isDripEnabled(userId);
   return { enabled };
 }
+

@@ -1,11 +1,11 @@
-/**
- * Dividend Service — CRUD operations for dividend events.
+﻿/**
+ * Dividend Service â€” CRUD operations for dividend events.
  * Updated for new schema with exDate, payDate, amountPerShare.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 
-const prisma = new PrismaClient();
+
 
 export interface DividendEventInput {
   ticker: string;
@@ -143,3 +143,4 @@ export async function deleteDividendEvent(id: string) {
     where: { id },
   });
 }
+

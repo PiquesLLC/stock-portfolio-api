@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 
-const prisma = new PrismaClient();
+
 
 export interface TransactionInput {
   type: 'deposit' | 'withdrawal';
@@ -33,3 +33,4 @@ export async function getTransactions(userId?: string | null, since?: Date) {
 export async function deleteTransaction(id: string) {
   return prisma.transaction.delete({ where: { id } });
 }
+

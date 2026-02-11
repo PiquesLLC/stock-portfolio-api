@@ -1,11 +1,11 @@
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+﻿import { Request, Response } from 'express';
+import prisma from '../utils/prisma';
 import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword, verifyPassword, rotateRefreshToken, revokeAllRefreshTokens } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, deleteAccountSchema, formatZodError } from '../validators/auth.validators';
 
-const prisma = new PrismaClient();
+
 
 // Detect Capacitor requests (cross-origin native app) via custom header
 function isCapacitorRequest(req: Request): boolean {
@@ -351,3 +351,4 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 }
+

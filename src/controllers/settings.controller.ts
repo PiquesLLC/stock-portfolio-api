@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+﻿import { Request, Response } from 'express';
+import prisma from '../utils/prisma';
 import { AuthRequest } from '../types/auth';
 import {
   getSettings,
@@ -15,7 +15,7 @@ import {
 import { updateSettings } from '../services/portfolio.service';
 import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapshot.service';
 
-const prisma = new PrismaClient();
+
 
 export async function getSettingsHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -291,3 +291,4 @@ export async function cleanupSnapshotsHandler(req: Request, res: Response): Prom
     res.status(500).json({ error: 'Failed to cleanup snapshots' });
   }
 }
+

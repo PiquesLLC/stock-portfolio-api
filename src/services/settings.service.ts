@@ -1,11 +1,11 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { Settings, BaselineInput, BrokerLifetimeInput, YtdInput, PerformanceSummary } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { getSnapshotsAfter } from './snapshot.service';
 import { getTransactions } from './transaction.service';
 import { calculateTWR, SnapshotPoint, CashflowEvent } from '../utils/finance-math';
 
-const prisma = new PrismaClient();
+
 
 export async function getSettings(): Promise<Settings> {
   let settings = await prisma.settings.findUnique({
@@ -254,3 +254,4 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
     brokerLifetime,
   };
 }
+

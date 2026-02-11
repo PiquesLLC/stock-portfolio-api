@@ -1,14 +1,14 @@
-/**
+﻿/**
  * Dividend Fetch Service
  * Auto-fetches dividend events from Yahoo Finance for held tickers.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { yahooGet } from '../utils/yahoo-http';
 import axios from 'axios';
 import NodeCache from 'node-cache';
 
-const prisma = new PrismaClient();
+
 
 // Track when each ticker was last synced (6h cooldown)
 const syncCache = new NodeCache({ stdTTL: 6 * 3600 });
@@ -238,3 +238,4 @@ export async function syncAllHeldTickers(): Promise<{ synced: number; tickers: n
   console.log(`[Dividend Sync] Complete: ${totalSynced} events across ${tickers.length} tickers`);
   return { synced: totalSynced, tickers: tickers.length };
 }
+

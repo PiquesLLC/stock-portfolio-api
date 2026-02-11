@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 
-const prisma = new PrismaClient();
+
 
 export async function followUser(followerId: string, followingId: string): Promise<void> {
   if (followerId === followingId) {
@@ -80,3 +80,4 @@ export async function getFollowingIds(userId: string): Promise<string[]> {
   });
   return follows.map((f) => f.followingId);
 }
+

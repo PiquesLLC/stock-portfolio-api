@@ -1,8 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import axios from 'axios';
 import { config } from '../config';
 
-const prisma = new PrismaClient();
+
 
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 const TARGET_CHANGE_THRESHOLD = 0.05; // 5% change triggers notification
@@ -54,7 +54,7 @@ async function fetchPriceTarget(ticker: string): Promise<FinnhubPriceTarget | nu
     return response.data;
   } catch (error: any) {
     if (error?.response?.status === 403) {
-      console.warn(`[Analyst] Price target endpoint requires premium plan — disabling for this session`);
+      console.warn(`[Analyst] Price target endpoint requires premium plan â€” disabling for this session`);
       priceTargetDisabled = true;
     }
     return null;
@@ -77,7 +77,7 @@ async function fetchRecommendations(ticker: string): Promise<FinnhubRecommendati
     return null;
   } catch (error: any) {
     if (error?.response?.status === 403) {
-      console.warn(`[Analyst] Recommendations endpoint requires premium plan — disabling for this session`);
+      console.warn(`[Analyst] Recommendations endpoint requires premium plan â€” disabling for this session`);
       recommendationsDisabled = true;
     }
     return null;
@@ -268,3 +268,4 @@ export async function getAnalystSnapshot(ticker: string): Promise<any | null> {
     where: { ticker: ticker.toUpperCase() },
   });
 }
+

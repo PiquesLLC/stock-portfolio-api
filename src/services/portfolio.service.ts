@@ -1,9 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
 import { getMarketSession } from '../utils/market-hours';
 
-const prisma = new PrismaClient();
+
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -287,3 +287,4 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
     session,
   };
 }
+
