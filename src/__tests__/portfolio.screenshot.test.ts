@@ -47,4 +47,26 @@ describe('Screenshot OCR parsing', () => {
     expect(result.parsed[0]).toMatchObject({ ticker: 'PG', shares: 27.3593, averageCost: 91.83 });
     expect(result.warnings.some(w => w.message.includes('Average cost not found'))).toBe(true);
   });
+
+  it('parses two-line mobile rows with shares and avg cost', () => {
+    const text = `
+    AAPL $1,956.91
+    11.328 shares | $156.07 avg. cost
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(1);
+    expect(result.parsed[0]).toMatchObject({ ticker: 'AAPL', shares: 11.328, averageCost: 156.07 });
+  });
+
+  it('skips ticker-like noise without shares or prices', () => {
+    const text = `
+    0556 e@BU@ WAN a 16%8
+    Assets P&L Orders(0)
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(0);
+    expect(result.warnings.length).toBeGreaterThan(0);
+  });
 });

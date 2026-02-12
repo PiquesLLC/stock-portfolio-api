@@ -152,10 +152,29 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       continue;
     }
 
+    const hasDollar = line.includes('$');
+    const hasAvgHint = lower.includes('avg') || lower.includes('average') || lower.includes('cost');
     const nextLine = lines[idx + 1];
+    const nextLower = nextLine ? nextLine.toLowerCase() : '';
+    const nextHasShares = nextLower.includes('shares');
+    const nextHasAvgHint = nextLower.includes('avg') || nextLower.includes('average') || nextLower.includes('cost');
+    const afterTickerRaw = line.slice(line.indexOf(ticker) + ticker.length);
+    const simpleNumericTail = /^[\s\d.,$]+$/.test(afterTickerRaw);
+    const numericCount = (afterTickerRaw.match(/[-+]?\d[\d,]*\.?\d*/g) || []).length;
+
+    // If there's no clear numeric context (no $ and no shares/avg cost on this or next line), skip.
+    if (
+      !hasDollar &&
+      !hasAvgHint &&
+      !(nextHasShares && nextHasAvgHint) &&
+      !(simpleNumericTail && numericCount >= 2)
+    ) {
+      warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
+      continue;
+    }
+
     if (nextLine) {
-      const nextLower = nextLine.toLowerCase();
-      if (nextLower.includes('shares') && (nextLower.includes('avg') || nextLower.includes('cost'))) {
+      if (nextHasShares && nextHasAvgHint) {
         const { shares, averageCost } = extractSharesAndAvgCost(nextLine);
         if (shares != null && averageCost != null && shares > 0 && averageCost >= 0) {
           parsed.push({
