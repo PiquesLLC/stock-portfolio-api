@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
+import prisma from '../utils/prisma';
 import {
   getWatchlists,
   getWatchlistDetail,
