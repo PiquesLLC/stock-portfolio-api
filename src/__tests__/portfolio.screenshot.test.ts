@@ -102,11 +102,14 @@ describe('Screenshot OCR parsing', () => {
     DRI 1
     Mullen Automo... 45.43 +2.33 11.50
     MULN 25 esal% 50.1091
+    Polestar Autom... 2,045.12 1,960.24 3.320
+    PSY 615 -4nos 56.50
     `;
 
     const result = parseHoldingsFromText(text);
-    expect(result.parsed).toHaveLength(2);
+    expect(result.parsed).toHaveLength(3);
     expect(result.parsed[0]).toMatchObject({ ticker: 'DRI', shares: 1, averageCost: 152.17 });
-    expect(result.parsed[1]).toMatchObject({ ticker: 'MULN', shares: 25, averageCost: 11.5 });
+    expect(result.parsed[1]).toMatchObject({ ticker: 'MULN', shares: 25, averageCost: 1.8172 });
+    expect(result.parsed[2]).toMatchObject({ ticker: 'PSNY', shares: 615, averageCost: 3.32 });
   });
 });

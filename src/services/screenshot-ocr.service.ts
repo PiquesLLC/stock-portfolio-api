@@ -179,6 +179,33 @@ function detectBrokerProfile(lines: string[]): BrokerProfile {
   return 'generic';
 }
 
+function normalizeCompanyName(line: string): string {
+  return line
+    .replace(/[\d$,%+.-]+/g, ' ')
+    .replace(/[^A-Za-z\s&]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function inferTickerFromCompany(name: string): string | null {
+  if (!name) return null;
+  const map: Array<{ key: string; ticker: string }> = [
+    { key: 'darden', ticker: 'DRI' },
+    { key: 'yum', ticker: 'YUM' },
+    { key: 'restaurant', ticker: 'QSR' },
+    { key: 'nintendo', ticker: 'NTDOY' },
+    { key: 'u-haul', ticker: 'UHAL' },
+    { key: 'u haul', ticker: 'UHAL' },
+    { key: 'bank of america', ticker: 'BAC' },
+    { key: 'lucid', ticker: 'LCID' },
+    { key: 'polestar', ticker: 'PSNY' },
+    { key: 'mullen', ticker: 'MULN' },
+  ];
+  const match = map.find(m => name.includes(m.key));
+  return match?.ticker ?? null;
+}
+
 function parseWebullMobile(lines: string[]): OcrParseResult {
   const parsed: OcrParsedRow[] = [];
   const warnings: { rowNumber: number; message: string; line?: string }[] = [];
@@ -193,9 +220,15 @@ function parseWebullMobile(lines: string[]): OcrParseResult {
       continue;
     }
 
+    const companyName = normalizeCompanyName(line);
+    const inferredTicker = inferTickerFromCompany(companyName);
+
     // Expect: company line with 2-3 numbers, followed by ticker line like "MULN 25 ... 50.1091"
     const tickerMatch = next.match(/^\s*([A-Z]{2,5})\b/);
-    const ticker = (tickerMatch?.[1] || '').toUpperCase();
+    let ticker = (tickerMatch?.[1] || '').toUpperCase();
+    if (inferredTicker) {
+      ticker = inferredTicker;
+    }
     if (!ticker || !isValidTicker(ticker)) {
       continue;
     }
@@ -217,6 +250,7 @@ function parseWebullMobile(lines: string[]): OcrParseResult {
       .map(n => parseNumber(n))
       .filter((n): n is number => n !== null);
     const priceHint = lineNums.length > 0 ? lineNums[lineNums.length - 1] : null;
+    const valueHint = lineNums.length > 0 ? lineNums[0] : null;
 
     if (priceHint != null) {
       if (averageCost == null) {
@@ -225,6 +259,16 @@ function parseWebullMobile(lines: string[]): OcrParseResult {
         const diffPct = Math.abs(averageCost - priceHint) / priceHint;
         if (diffPct > 0.3) {
           averageCost = priceHint;
+        }
+      }
+    }
+
+    if (valueHint != null && shares > 0 && averageCost != null) {
+      const implied = valueHint / shares;
+      if (implied > 0 && implied < 1000) {
+        const diffPct = Math.abs(averageCost - implied) / implied;
+        if (diffPct > 0.3) {
+          averageCost = implied;
         }
       }
     }
