@@ -69,9 +69,17 @@ export async function rotateRefreshToken(
     include: { user: { select: { id: true, username: true } } },
   });
 
-  if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-    // If a revoked token is reused, revoke the entire family for safety
-    if (stored?.revokedAt) {
+  if (!stored || stored.expiresAt < new Date()) {
+    return null;
+  }
+
+  if (stored.revokedAt) {
+    // Grace period: if revoked less than 30 seconds ago, this is likely a
+    // concurrent request that raced with the first refresh — not a reuse attack.
+    // Just return null without nuking all tokens.
+    const msSinceRevoked = Date.now() - stored.revokedAt.getTime();
+    if (msSinceRevoked > 30_000) {
+      // Genuine reuse attack — revoke the entire family for safety
       await prisma.refreshToken.updateMany({
         where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },

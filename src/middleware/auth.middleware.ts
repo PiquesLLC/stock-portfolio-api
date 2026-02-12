@@ -57,6 +57,34 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   const accessToken = extractAccessToken(req);
 
   if (!accessToken) {
+    // Access token cookie expired (browser deleted it) — try refresh token
+    const refreshToken = extractRefreshToken(req);
+    if (refreshToken) {
+      rotateRefreshToken(refreshToken)
+        .then((result) => {
+          if (result) {
+            const options = getCookieOptions(req);
+            res.cookie('authToken', result.accessToken, {
+              ...options,
+              maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
+            });
+            res.cookie('refreshToken', result.refreshToken, {
+              ...options,
+              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+            });
+            req.user = result.payload;
+            next();
+          } else {
+            clearAuthCookies(res, req);
+            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
+          }
+        })
+        .catch(() => {
+          clearAuthCookies(res, req);
+          res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
+        });
+      return;
+    }
     clearAuthCookies(res, req);
     res.status(401).json({ error: 'Authorization required', code: 'NO_TOKEN' as AuthErrorCode });
     return;
@@ -81,7 +109,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
             const options = getCookieOptions(req);
             res.cookie('authToken', result.accessToken, {
               ...options,
-              maxAge: 15 * 60 * 1000, // 15 minutes
+              maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
             });
             res.cookie('refreshToken', result.refreshToken, {
               ...options,
@@ -112,7 +140,8 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
 }
 
 /**
- * Optional auth middleware - extracts user if token present, continues regardless
+ * Optional auth middleware - extracts user if token present, continues regardless.
+ * If access token is expired but refresh token exists, silently refreshes.
  */
 export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction): void {
   const accessToken = extractAccessToken(req);
@@ -122,10 +151,37 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
 
     if (payload && !expired) {
       req.user = payload;
-    } else {
-      // Invalid token (not just expired) - clear cookies
-      clearAuthCookies(res, req);
+      next();
+      return;
     }
+
+    if (expired) {
+      // Try silent refresh instead of just clearing cookies
+      const refreshToken = extractRefreshToken(req);
+      if (refreshToken) {
+        rotateRefreshToken(refreshToken)
+          .then((result) => {
+            if (result) {
+              const options = getCookieOptions(req);
+              res.cookie('authToken', result.accessToken, {
+                ...options,
+                maxAge: 15 * 60 * 1000,
+              });
+              res.cookie('refreshToken', result.refreshToken, {
+                ...options,
+                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+              });
+              req.user = result.payload;
+            }
+            next();
+          })
+          .catch(() => { next(); });
+        return;
+      }
+    }
+
+    // Token is invalid (not just expired) — clear cookies
+    clearAuthCookies(res, req);
   }
 
   next();

@@ -20,7 +20,7 @@ function getCookieOptions(req: Request) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production' || capacitor,
     sameSite,
-    maxAge: 15 * 60 * 1000, // 15 minutes
+    maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT access token expiry
     path: '/',
   };
   const refreshOptions = {
@@ -38,7 +38,7 @@ const ACCESS_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax' as const,
-  maxAge: 15 * 60 * 1000,
+  maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT access token expiry
   path: '/',
 };
 
