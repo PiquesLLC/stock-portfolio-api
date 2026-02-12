@@ -2,8 +2,20 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { askNala, NalaSuggestionsResponse } from '../services/nala-research.service';
 
+const AI_PREMIUM_ENABLED = process.env.AI_PREMIUM_ENABLED === 'true';
+
+function requirePremium(res: Response): boolean {
+  if (AI_PREMIUM_ENABLED) return true;
+  res.status(402).json({
+    error: 'Premium feature',
+    code: 'premium_required',
+  });
+  return false;
+}
+
 export async function askNalaHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const { question } = req.body;
 
     if (!question || typeof question !== 'string' || question.trim().length < 5) {
@@ -36,6 +48,7 @@ export async function askNalaHandler(req: AuthRequest, res: Response): Promise<v
 }
 
 export async function getSuggestionsHandler(_req: Request, res: Response): Promise<void> {
+  if (!requirePremium(res)) return;
   const suggestions: NalaSuggestionsResponse = {
     suggestions: [
       { text: 'Show me 5 stocks Warren Buffett would like', icon: '🏛️' },

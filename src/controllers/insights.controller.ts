@@ -13,6 +13,16 @@ import { getEarningsSummary } from '../services/earnings-summary.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
+const AI_PREMIUM_ENABLED = process.env.AI_PREMIUM_ENABLED === 'true';
+
+function requirePremium(res: Response): boolean {
+  if (AI_PREMIUM_ENABLED) return true;
+  res.status(402).json({
+    error: 'Premium feature',
+    code: 'premium_required',
+  });
+  return false;
+}
 
 export async function getHealthHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -83,6 +93,7 @@ const VALID_INCOME_WINDOWS = ['today', '5d', '1m'] as const;
 
 export async function getIncomeInsightsHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const windowParam = req.query.window as string | undefined;
     let window: IncomeWindow = 'today';
 
@@ -114,6 +125,7 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
 
 export async function getBriefingHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const briefing = await getPortfolioBriefing();
     res.json(briefing);
   } catch (error) {
@@ -133,6 +145,7 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
 
 export async function getBehaviorHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const behavior = await getBehaviorInsights();
     res.json(behavior);
   } catch (error) {
@@ -152,6 +165,7 @@ export async function getBehaviorHandler(req: Request, res: Response): Promise<v
 
 export async function getDailyReportHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const report = await getDailyReport();
     res.json(report);
   } catch (error) {
@@ -185,6 +199,7 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
 
 export async function regenerateDailyReportHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const report = await regenerateDailyReport();
     res.json(report);
   } catch (error) {
@@ -203,6 +218,7 @@ export async function regenerateDailyReportHandler(req: Request, res: Response):
 
 export async function explainBriefingHandler(req: Request, res: Response): Promise<void> {
   try {
+    if (!requirePremium(res)) return;
     const { title, body } = req.body;
     if (!title || !body) {
       res.status(400).json({ error: 'title and body are required' });
