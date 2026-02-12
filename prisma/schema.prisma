@@ -71,10 +71,38 @@ model User {
   compositionChanges     PortfolioCompositionChange[]
   transactions           Transaction[]
   alerts                 Alert[]
+  watchlists             Watchlist[]
   dividendCredits        DividendCredit[]
   lots                   Lot[]
   dividendReinvestments  DividendReinvestment[]
   refreshTokens          RefreshToken[]
+}
+
+model Watchlist {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  color       String   @default("#00C805")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  holdings    WatchlistHolding[]
+
+  @@unique([userId, name])
+}
+
+model WatchlistHolding {
+  id          String    @id @default(uuid())
+  watchlistId String
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  ticker      String
+  shares      Float
+  averageCost Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([watchlistId, ticker])
 }
 
 model RefreshToken {

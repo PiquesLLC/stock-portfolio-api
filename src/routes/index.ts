@@ -18,6 +18,7 @@ import analystRoutes from './analyst.routes';
 import milestoneRoutes from './milestone.routes';
 import fundamentalsRoutes from './fundamentals.routes';
 import nalaRoutes from './nala.routes';
+import watchlistRoutes from './watchlist.routes';
 
 const router = Router();
 
@@ -40,5 +41,6 @@ router.use('/analyst', analystRoutes);
 router.use('/milestones', milestoneRoutes);
 router.use('/fundamentals', fundamentalsRoutes);
 router.use('/nala', nalaRoutes);
+router.use('/watchlists', watchlistRoutes);
 
 export default router;
