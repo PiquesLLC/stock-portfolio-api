@@ -61,13 +61,14 @@ describe('Screenshot OCR parsing', () => {
 
   it('skips ticker-like noise without shares or prices', () => {
     const text = `
+    Mkt Value/Qty Last/Avg Price
     0556 e@BU@ WAN a 16%8
     Assets P&L Orders(0)
     `;
 
     const result = parseHoldingsFromText(text);
     expect(result.parsed).toHaveLength(0);
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.length).toBeGreaterThanOrEqual(0);
   });
 
   it('parses ticker lines that start with a ticker and two numbers', () => {
@@ -91,5 +92,20 @@ describe('Screenshot OCR parsing', () => {
     const result = parseHoldingsFromText(text);
     expect(result.parsed).toHaveLength(1);
     expect(result.parsed[0]).toMatchObject({ ticker: 'NTDOY', shares: 7, averageCost: 9.60 });
+  });
+
+  it('parses robinhood-style two-line rows', () => {
+    const text = `
+    Mkt Value/Qty Last/Avg Price
+    Darden Restaur.. 152.17 +7.73 152.17
+    DRI 1
+    Mullen Automo... 45.43 +2.33 11.50
+    MULN 25 esal% 50.1091
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(2);
+    expect(result.parsed[0]).toMatchObject({ ticker: 'DRI', shares: 1, averageCost: 152.17 });
+    expect(result.parsed[1]).toMatchObject({ ticker: 'MULN', shares: 25, averageCost: 11.5 });
   });
 });

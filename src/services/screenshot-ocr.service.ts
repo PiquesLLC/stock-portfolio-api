@@ -161,11 +161,102 @@ function extractSharesAndAvgCost(line: string): { shares: number | null; average
   return { shares, averageCost };
 }
 
+type BrokerProfile = 'robinhood_mobile' | 'generic';
+
+function detectBrokerProfile(lines: string[]): BrokerProfile {
+  const joined = lines.join(' ').toLowerCase();
+  if (
+    joined.includes('open p&l') ||
+    joined.includes('last/avg') ||
+    joined.includes('mkt value/qty') ||
+    joined.includes('orders(0)') ||
+    joined.includes('watchlists') ||
+    joined.includes('markets menu')
+  ) {
+    return 'robinhood_mobile';
+  }
+  return 'generic';
+}
+
+function parseRobinhoodMobile(lines: string[]): OcrParseResult {
+  const parsed: OcrParsedRow[] = [];
+  const warnings: { rowNumber: number; message: string; line?: string }[] = [];
+
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    const rowNumber = i + 1;
+    const lower = line.toLowerCase();
+
+    if (lower.includes('symbol') || lower.includes('mkt value') || lower.includes('open p&l')) {
+      continue;
+    }
+
+    // Expect: company line with 2-3 numbers, followed by ticker line like "MULN 25 ... 50.1091"
+    const nextTokens = next.trim().split(/\s+/);
+    const ticker = (nextTokens[0] || '').toUpperCase();
+    if (!isValidTicker(ticker) || ticker.length < 2) {
+      continue;
+    }
+
+    const nextNums = (next.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+      .map(n => parseNumber(n))
+      .filter((n): n is number => n !== null);
+
+    if (nextNums.length < 1) {
+      warnings.push({ rowNumber: i + 2, message: 'Not enough numeric values found', line: next });
+      continue;
+    }
+
+    const shares = nextNums[0];
+    let averageCost = nextNums.length >= 2 ? nextNums[nextNums.length - 1] : null;
+
+    // If avg cost looks off, fall back to price from previous line (last number there).
+    const lineNums = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+      .map(n => parseNumber(n))
+      .filter((n): n is number => n !== null);
+    const priceHint = lineNums.length > 0 ? lineNums[lineNums.length - 1] : null;
+
+    if (priceHint != null) {
+      if (averageCost == null) {
+        averageCost = priceHint;
+      } else {
+        const diffPct = Math.abs(averageCost - priceHint) / priceHint;
+        if (diffPct > 0.3) {
+          averageCost = priceHint;
+        }
+      }
+    }
+
+    if (averageCost == null || shares <= 0 || averageCost < 0) {
+      warnings.push({ rowNumber: i + 2, message: 'Invalid shares or average cost', line: next });
+      continue;
+    }
+
+    parsed.push({
+      rowNumber: i + 2,
+      ticker,
+      shares,
+      averageCost,
+      confidence: 'medium',
+    });
+
+    i += 1; // consume next line
+  }
+
+  return { parsed, warnings };
+}
+
 export function parseHoldingsFromText(text: string): OcrParseResult {
   const lines = text
     .split(/\r?\n/)
     .map(l => l.trim())
     .filter(Boolean);
+
+  const profile = detectBrokerProfile(lines);
+  if (profile === 'robinhood_mobile') {
+    return parseRobinhoodMobile(lines);
+  }
 
   const parsed: OcrParsedRow[] = [];
   const warnings: { rowNumber: number; message: string; line?: string }[] = [];
