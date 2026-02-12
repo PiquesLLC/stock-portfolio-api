@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles } from '../services/market.service';
+import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
@@ -158,6 +158,27 @@ export async function getHourlyCandles(req: Request, res: Response): Promise<voi
   } catch (error) {
     console.error('Error fetching hourly candles:', error);
     res.status(500).json({ error: 'Failed to fetch hourly data' });
+  }
+}
+
+export async function getDailyCandles(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    const period = (req.query.period as string)?.toUpperCase() || '3M';
+    if (!ticker) {
+      res.status(400).json({ error: 'Missing ticker parameter' });
+      return;
+    }
+    const daysMap: Record<string, number> = {
+      '3M': 90, 'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '1Y': 365, 'ALL': 365 * 5,
+    };
+    const days = daysMap[period] ?? 90;
+    const candles = await fetchDailyCandles(ticker, days);
+    res.json({ ticker, candles });
+  } catch (error) {
+    console.error('Error fetching daily candles:', error);
+    res.status(500).json({ error: 'Failed to fetch daily data' });
   }
 }
 

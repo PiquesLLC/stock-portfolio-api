@@ -11,8 +11,13 @@ import {
   updateWatchlistHolding,
   removeWatchlistHolding,
 } from '../services/watchlist.service';
+import {
+  reconstructPortfolioHistory,
+  reconstructPortfolioHistoryHiRes,
+} from '../services/snapshot.service';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'] as const;
 
 export async function listWatchlistsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -174,5 +179,70 @@ export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Respo
   } catch (error) {
     console.error('Watchlist holding delete error:', error);
     res.status(500).json({ error: 'Failed to delete watchlist holding' });
+  }
+}
+
+export async function getWatchlistChartHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const period = ((req.query.period as string) || '1D').toUpperCase();
+    if (!VALID_CHART_PERIODS.includes(period as typeof VALID_CHART_PERIODS[number])) {
+      res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
+      return;
+    }
+
+    const watchlist = await prisma.watchlist.findFirst({
+      where: { id, userId: SYSTEM_USER_ID },
+      select: { id: true, holdings: { select: { ticker: true, shares: true } } },
+    });
+
+    if (!watchlist) {
+      res.status(404).json({ error: 'Watchlist not found' });
+      return;
+    }
+
+    const holdings = watchlist.holdings.map(h => ({ ticker: h.ticker, shares: h.shares }));
+    if (holdings.length === 0) {
+      res.json({ points: [], periodStartValue: 0, period });
+      return;
+    }
+
+    let points: { time: number; value: number }[] = [];
+    const now = Date.now();
+
+    if (period === '1D') {
+      points = await reconstructPortfolioHistoryHiRes(holdings, 0, 0, '1d', '5m');
+    } else if (period === '1W') {
+      points = await reconstructPortfolioHistoryHiRes(holdings, 0, 0, '5d', '15m');
+    } else if (period === '1M') {
+      points = await reconstructPortfolioHistoryHiRes(holdings, 0, 0, '1mo', '1h');
+    } else if (period === 'YTD') {
+      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+      if (ytdDays <= 90) {
+        const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+        points = await reconstructPortfolioHistoryHiRes(holdings, 0, 0, yahooRange as any, '1h');
+        const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+        points = points.filter(p => p.time >= ytdStart);
+      } else {
+        points = await reconstructPortfolioHistory(holdings, 0, ytdDays, 0);
+      }
+    } else {
+      const periodDaysMap: Record<string, number> = {
+        '3M': 90,
+        '1Y': 365,
+        'ALL': 365 * 5,
+      };
+      const periodDays = periodDaysMap[period] ?? 30;
+      points = await reconstructPortfolioHistory(holdings, 0, periodDays, 0);
+    }
+
+    const periodStartValue = points.length > 0 ? points[0].value : 0;
+    res.json({ points, periodStartValue, period });
+  } catch (error) {
+    console.error('Watchlist chart error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch watchlist chart',
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
+    });
   }
 }

@@ -235,7 +235,7 @@ async function buildFallbackNala(
     const priceText = price > 0 ? '$' + price.toFixed(2) : 'unavailable';
     return {
       ticker: h.ticker,
-      companyName: ov?.companyName ?? h.companyName ?? h.ticker,
+      companyName: ov?.companyName ?? (h as any).companyName ?? h.ticker,
       sector: ov?.sector ?? 'Unknown',
       currentPrice: h.currentPrice ?? null,
       metrics: {

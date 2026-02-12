@@ -9,6 +9,7 @@ import {
   addWatchlistHoldingHandler,
   updateWatchlistHoldingHandler,
   removeWatchlistHoldingHandler,
+  getWatchlistChartHandler,
 } from '../controllers/watchlist.controller';
 
 const router = Router();
@@ -16,6 +17,7 @@ const router = Router();
 router.get('/', requireAuth, listWatchlistsHandler);
 router.post('/', requireAuth, createWatchlistHandler);
 router.get('/:id', requireAuth, getWatchlistHandler);
+router.get('/:id/chart', requireAuth, getWatchlistChartHandler);
 router.put('/:id', requireAuth, updateWatchlistHandler);
 router.delete('/:id', requireAuth, deleteWatchlistHandler);
 router.post('/:id/holdings', requireAuth, addWatchlistHoldingHandler);

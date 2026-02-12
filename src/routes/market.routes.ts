@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler } from '../controllers/market.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
@@ -11,6 +11,7 @@ router.get('/fast-quote/:ticker', getFastQuote);
 router.get('/stock/:ticker/details', heavyReadLimiter, getStockDetails);
 router.get('/stock/:ticker/intraday', heavyReadLimiter, getIntraday);
 router.get('/stock/:ticker/hourly', heavyReadLimiter, getHourlyCandles);
+router.get('/stock/:ticker/daily', heavyReadLimiter, getDailyCandles);
 router.get('/stock/:ticker/etf-holdings', getETFHoldingsHandler);
 router.get('/stock/:ticker/about', getAssetAboutHandler);
 router.get('/benchmark/:ticker/closes', getBenchmarkClosesHandler);

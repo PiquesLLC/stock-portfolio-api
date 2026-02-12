@@ -1,7 +1,12 @@
 import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
+import { fetchPolygonAggs } from '../utils/yahoo-http';
+import NodeCache from 'node-cache';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+// Cache performance data for 5 minutes
+const perfCache = new NodeCache({ stdTTL: 300 });
 
 export interface WatchlistSummary {
   totalValue: number;
@@ -23,6 +28,88 @@ export interface WatchlistHoldingView {
   profitLossPercent: number;
   dayChange: number;
   dayChangePercent: number;
+  weekChangePercent: number;
+  monthChangePercent: number;
+  yearChangePercent: number;
+  peRatio: number | null;
+}
+
+interface TickerPerf { weekChangePercent: number; monthChangePercent: number; yearChangePercent: number }
+
+function dateDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0];
+}
+
+async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
+  const cacheKey = `wl-perf:${ticker}`;
+  const cached = perfCache.get<TickerPerf>(cacheKey);
+  if (cached) return cached;
+
+  const today = new Date().toISOString().split('T')[0];
+  const yearAgo = dateDaysAgo(370); // slightly over 1yr to ensure we get data
+
+  try {
+    const data = await fetchPolygonAggs(ticker, 1, 'day', yearAgo, today);
+    if (!data || data.closes.length < 2) {
+      return { weekChangePercent: 0, monthChangePercent: 0, yearChangePercent: 0 };
+    }
+
+    const closes = data.closes;
+    const current = closes[closes.length - 1];
+
+    // ~5 trading days back for 1 week
+    const weekIdx = Math.max(0, closes.length - 6);
+    const weekAgoPrice = closes[weekIdx];
+
+    // ~21 trading days back for 1 month
+    const monthIdx = Math.max(0, closes.length - 22);
+    const monthAgoPrice = closes[monthIdx];
+
+    // First data point = ~1 year ago
+    const yearAgoPrice = closes[0];
+
+    const perf: TickerPerf = {
+      weekChangePercent: weekAgoPrice > 0 ? ((current - weekAgoPrice) / weekAgoPrice) * 100 : 0,
+      monthChangePercent: monthAgoPrice > 0 ? ((current - monthAgoPrice) / monthAgoPrice) * 100 : 0,
+      yearChangePercent: yearAgoPrice > 0 ? ((current - yearAgoPrice) / yearAgoPrice) * 100 : 0,
+    };
+
+    perfCache.set(cacheKey, perf);
+    return perf;
+  } catch {
+    return { weekChangePercent: 0, monthChangePercent: 0, yearChangePercent: 0 };
+  }
+}
+
+async function fetchPERatios(tickers: string[]): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (tickers.length === 0) return result;
+
+  const rows = await prisma.fundamentalsCache.findMany({
+    where: { ticker: { in: tickers } },
+    select: { ticker: true, overviewJson: true },
+  });
+
+  for (const row of rows) {
+    try {
+      const overview = typeof row.overviewJson === 'string'
+        ? JSON.parse(row.overviewJson)
+        : row.overviewJson;
+      const pe = overview?.PERatio ? parseFloat(overview.PERatio) : null;
+      result.set(row.ticker, pe && !isNaN(pe) ? pe : null);
+    } catch {
+      result.set(row.ticker, null);
+    }
+  }
+
+  // Fill missing tickers with null
+  for (const t of tickers) {
+    if (!result.has(t)) result.set(t, null);
+  }
+
+  return result;
 }
 
 export async function getWatchlists(userId: string = SYSTEM_USER_ID) {
@@ -53,17 +140,24 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
   if (!watchlist) return null;
 
   const tickers = watchlist.holdings.map(h => h.ticker.toUpperCase());
-  const { quotes } = tickers.length > 0 ? await fetchPrices(tickers) : { quotes: new Map() as Map<string, any> };
+  const [{ quotes }, perfMap, peMap] = await Promise.all([
+    tickers.length > 0 ? fetchPrices(tickers) : { quotes: new Map() as Map<string, any> },
+    Promise.all(tickers.map(async t => [t, await fetchTickerPerf(t)] as const))
+      .then(entries => new Map(entries)),
+    fetchPERatios(tickers),
+  ]);
 
   let totalValue = 0;
   let totalCost = 0;
   let dayChange = 0;
 
   const holdings: WatchlistHoldingView[] = watchlist.holdings.map(h => {
-    const quote = quotes.get(h.ticker.toUpperCase());
+    const upperTicker = h.ticker.toUpperCase();
+    const quote = quotes.get(upperTicker);
     const currentPrice = quote?.currentPrice ?? 0;
     const previousClose = quote?.previousClose ?? currentPrice;
     const hasValidPrice = currentPrice > 0;
+    const perf = perfMap.get(upperTicker) ?? { weekChangePercent: 0, monthChangePercent: 0, yearChangePercent: 0 };
 
     const currentValue = hasValidPrice ? h.shares * currentPrice : 0;
     const holdingCost = h.shares * h.averageCost;
@@ -92,6 +186,10 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
       profitLossPercent,
       dayChange: holdingDayChange,
       dayChangePercent: holdingDayChangePercent,
+      weekChangePercent: perf.weekChangePercent,
+      monthChangePercent: perf.monthChangePercent,
+      yearChangePercent: perf.yearChangePercent,
+      peRatio: peMap.get(upperTicker) ?? null,
     };
   });
 

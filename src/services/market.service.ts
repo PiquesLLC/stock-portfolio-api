@@ -9,8 +9,8 @@ import { yahooGet, fetchPolygonAggs, fetchFinnhubCandles } from '../utils/yahoo-
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
 
-async function fetchDailyCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
-  const cacheKey = `daily:${ticker}`;
+async function fetchStockDetailCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
+  const cacheKey = `detail-daily:${ticker}`;
   const cached = yahooCache.get<StockDetailsResponse['candles']>(cacheKey);
   if (cached) return cached;
 
@@ -208,6 +208,34 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M'): P
       }
     }
   } catch { /* Yahoo also failed */ }
+
+  return [];
+}
+
+const dailyCandleCache = new NodeCache({ stdTTL: 3600 }); // 1hr cache for daily candles
+
+export async function fetchDailyCandles(ticker: string, days: number): Promise<IntradayCandle[]> {
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `daily:${upperTicker}:${days}`;
+  const cached = dailyCandleCache.get<IntradayCandle[]>(cacheKey);
+  if (cached) return cached;
+
+  const today = new Date().toISOString().split('T')[0];
+  const fromDate = new Date(Date.now() - (days + 10) * 86400000).toISOString().split('T')[0];
+
+  const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDate, today);
+  if (pg && pg.closes.length > 0) {
+    const candles: IntradayCandle[] = pg.timestamps.map((t, i) => ({
+      time: new Date(t * 1000).toISOString(),
+      open: pg.opens[i],
+      high: pg.highs[i],
+      low: pg.lows[i],
+      close: pg.closes[i],
+      volume: pg.volumes[i],
+    }));
+    dailyCandleCache.set(cacheKey, candles);
+    return candles;
+  }
 
   return [];
 }
@@ -516,7 +544,7 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
     fetchQuote(upperTicker).catch(() => fetchYahooQuote(upperTicker).catch(() => null)),
     getStockProfile(upperTicker).catch(() => null),
     getStockMetrics(upperTicker).catch(() => null),
-    fetchDailyCandles(upperTicker).catch(() => null),
+    fetchStockDetailCandles(upperTicker).catch(() => null),
   ]);
 
   if (!quote) {
