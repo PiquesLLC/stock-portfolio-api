@@ -122,10 +122,8 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
 
     if (payload && !expired) {
       req.user = payload;
-    } else if (expired) {
-      // Clear invalid cookies but don't block the request
-      clearAuthCookies(res, req);
     } else {
+      // Invalid token (not just expired) - clear cookies
       clearAuthCookies(res, req);
     }
   }
