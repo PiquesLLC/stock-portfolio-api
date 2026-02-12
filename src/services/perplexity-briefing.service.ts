@@ -83,6 +83,41 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     `Write a weekly portfolio briefing. Research recent news and events for these stocks. ` +
     `What drove the biggest movers? Any upcoming earnings, FDA decisions, or macro events to watch?`;
 
+  const buildFallback = (): PortfolioBriefingResponse => {
+    const holdingsSorted = [...portfolio.holdings].sort((a, b) => b.currentValue - a.currentValue);
+    const top = holdingsSorted.slice(0, 3);
+    const movers = [...portfolio.holdings]
+      .sort((a, b) => Math.abs(b.dayChangePercent) - Math.abs(a.dayChangePercent))
+      .slice(0, 3);
+
+    const sections: BriefingSection[] = [];
+    if (top.length > 0) {
+      sections.push({
+        title: 'Top holdings',
+        takeaway: 'Your portfolio is led by a few core positions.',
+        body: top.map(h => `${h.ticker} is ${h.shares} shares at $${h.currentPrice.toFixed(2)}.`).join(' '),
+        sentiment: 'neutral',
+      });
+    }
+    if (movers.length > 0) {
+      sections.push({
+        title: 'Biggest movers',
+        takeaway: 'A few names drove most of today’s move.',
+        body: movers.map(h => `${h.ticker} moved ${h.dayChangePercent >= 0 ? '+' : ''}${h.dayChangePercent.toFixed(1)}%.`).join(' '),
+        sentiment: 'neutral',
+      });
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      verdict: 'Briefing generated in basic mode.',
+      headline: `Portfolio value $${portfolio.netEquity.toFixed(0)} with ${portfolio.holdings.length} positions.`,
+      sections,
+      holdingCount: portfolio.holdings.length,
+      cached: false,
+    };
+  };
+
   try {
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
@@ -90,14 +125,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     ], { timeout: 60000 });
 
     if (!resp || !resp.content) {
-      return {
-        generatedAt: new Date().toISOString(),
-        verdict: '',
-        headline: 'Unable to generate briefing at this time.',
-        sections: [],
-        holdingCount: portfolio.holdings.length,
-        cached: false,
-      };
+      return buildFallback();
     }
 
     const jsonStr = extractJson(resp.content);
@@ -124,14 +152,7 @@ export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse>
     return result;
   } catch (error: any) {
     console.error('[Perplexity Briefing] Error:', error.message);
-    return {
-      generatedAt: new Date().toISOString(),
-      verdict: '',
-      headline: 'Briefing temporarily unavailable.',
-      sections: [],
-      holdingCount: portfolio.holdings.length,
-      cached: false,
-    };
+    return buildFallback();
   }
 }
 

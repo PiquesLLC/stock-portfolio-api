@@ -139,6 +139,20 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     `Give me 3-5 top stories relevant to my portfolio and the broader market.\n` +
     `Give me 2-3 things to watch today.`;
 
+  const buildFallback = (): DailyReportResponse => {
+    const dayChange = portfolio.dayChangePercent ?? 0;
+    const watchToday = upcomingEarnings.length > 0 ? [upcomingEarnings.join(', ')] : [];
+    return {
+      generatedAt: new Date().toISOString(),
+      greeting: 'Good morning!',
+      marketOverview: 'Daily report generated in basic mode.',
+      portfolioSummary: `Your portfolio is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% today.`,
+      topStories: [],
+      watchToday,
+      cached: false,
+    };
+  };
+
   try {
     const startTime = Date.now();
     const resp = await callPerplexity([
@@ -147,15 +161,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     ], { timeout: 60000 });
 
     if (!resp || !resp.content) {
-      return {
-        generatedAt: new Date().toISOString(),
-        greeting: 'Good morning!',
-        marketOverview: 'Unable to generate market overview at this time.',
-        portfolioSummary: 'Unable to generate portfolio summary at this time.',
-        topStories: [],
-        watchToday: [],
-        cached: false,
-      };
+      return buildFallback();
     }
 
     const jsonStr = extractJson(resp.content);
@@ -187,15 +193,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     return result;
   } catch (error: any) {
     console.error('[Perplexity Daily Report] Error:', error.message);
-    return {
-      generatedAt: new Date().toISOString(),
-      greeting: 'Good morning!',
-      marketOverview: 'Daily report temporarily unavailable.',
-      portfolioSummary: '',
-      topStories: [],
-      watchToday: [],
-      cached: false,
-    };
+    return buildFallback();
   }
 }
 

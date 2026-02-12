@@ -2,6 +2,7 @@
 import prisma from '../utils/prisma';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { matchPersona, StrategyPersona } from '../data/strategy-personas';
+import { getPortfolio } from './portfolio.service';
 
 
 
@@ -194,6 +195,85 @@ function parseStockResults(raw: any): NalaStockResult[] {
     }));
 }
 
+async function buildFallbackNala(
+  question: string,
+  strategyInfo: NalaStrategyInfo | null,
+  userId?: string
+): Promise<NalaResearchResponse> {
+  const portfolio = await getPortfolio();
+
+  if (portfolio.holdings.length === 0) {
+    return {
+      question,
+      strategy: strategyInfo,
+      stocks: [],
+      strategyExplanation: 'Basic mode is available once you add holdings.',
+      citations: [],
+      generatedAt: new Date().toISOString(),
+      cached: false,
+    };
+  }
+
+  const holdings = [...portfolio.holdings].sort((a, b) => b.currentValue - a.currentValue).slice(0, 8);
+  const tickers = holdings.map(h => h.ticker);
+  const cachedRows = await prisma.fundamentalsCache.findMany({
+    where: { ticker: { in: tickers } },
+    select: { ticker: true, overviewJson: true },
+  });
+
+  const cacheMap = new Map<string, any>();
+  for (const row of cachedRows) {
+    if (row.overviewJson) {
+      try { cacheMap.set(row.ticker, JSON.parse(row.overviewJson)); } catch {}
+    }
+  }
+
+  let stocks: NalaStockResult[] = holdings.map(h => {
+    const ov = cacheMap.get(h.ticker);
+    const marketCapB = ov?.marketCap ? ov.marketCap / 1e9 : null;
+    const price = h.currentPrice ?? h.averageCost ?? 0;
+    const priceText = price > 0 ? '$' + price.toFixed(2) : 'unavailable';
+    return {
+      ticker: h.ticker,
+      companyName: ov?.companyName ?? h.companyName ?? h.ticker,
+      sector: ov?.sector ?? 'Unknown',
+      currentPrice: h.currentPrice ?? null,
+      metrics: {
+        peRatio: ov?.peRatio ?? null,
+        roe: ov?.returnOnEquity ?? null,
+        debtToEquity: ov?.debtToEquity ?? null,
+        dividendYield: ov?.dividendYield != null ? ov.dividendYield * 100 : null,
+        revenueGrowthYoY: ov?.revenueGrowthYoY ?? null,
+        profitMargin: ov?.profitMargin != null ? ov.profitMargin * 100 : null,
+        freeCashFlowYield: ov?.freeCashFlowYield ?? null,
+        marketCapB,
+        beta: ov?.beta ?? null,
+        pegRatio: ov?.pegRatio ?? null,
+      },
+      confidenceScore: 65,
+      explanation: 'Included from your portfolio in basic mode. Current price ' + priceText + '.',
+      risks: 'Basic mode uses limited data. Verify metrics before acting.',
+      localData: null,
+    };
+  });
+
+  if (stocks.length > 0) {
+    try {
+      stocks = await enrichWithLocalData(stocks, userId);
+    } catch {}
+  }
+
+  return {
+    question,
+    strategy: strategyInfo,
+    stocks,
+    strategyExplanation: 'Basic mode uses your current holdings and cached fundamentals.',
+    citations: [],
+    generatedAt: new Date().toISOString(),
+    cached: false,
+  };
+}
+
 async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): Promise<NalaStockResult[]> {
   // Fast Prisma-only lookup â€” never triggers live Alpha Vantage fetches
   const tickers = stocks.map(s => s.ticker);
@@ -299,15 +379,7 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
 
     if (!resp || !resp.content) {
       console.warn('[Nala AI] Empty Perplexity response');
-      return {
-        question,
-        strategy: strategyInfo,
-        stocks: [],
-        strategyExplanation: 'Unable to research this question at this time.',
-        citations: [],
-        generatedAt: new Date().toISOString(),
-        cached: false,
-      };
+      return await buildFallbackNala(question, strategyInfo, userId);
     }
 
     const jsonStr = extractJson(resp.content);
@@ -317,15 +389,7 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
     } catch (parseErr) {
       console.error('[Nala AI] JSON parse error:', (parseErr as Error).message);
       console.error('[Nala AI] Raw content (first 500):', resp.content.slice(0, 500));
-      return {
-        question,
-        strategy: strategyInfo,
-        stocks: [],
-        strategyExplanation: 'Unable to parse research results.',
-        citations: resp.citations || [],
-        generatedAt: new Date().toISOString(),
-        cached: false,
-      };
+      return await buildFallbackNala(question, strategyInfo, userId);
     }
 
     // Parse and validate stocks
@@ -359,15 +423,8 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
     return result;
   } catch (error: any) {
     console.error('[Nala AI] Error:', error.message);
-    return {
-      question,
-      strategy: strategyInfo,
-      stocks: [],
-      strategyExplanation: 'Research temporarily unavailable. Please try again.',
-      citations: [],
-      generatedAt: new Date().toISOString(),
-      cached: false,
-    };
+    return await buildFallbackNala(question, strategyInfo, userId);
   }
 }
+
 

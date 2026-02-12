@@ -95,6 +95,46 @@ export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
     `Recent Activity:\n${activitySummary}\n\n` +
     `Analyze my portfolio behavior and provide educational insights.`;
 
+  const buildFallback = (): BehaviorInsightsResponse => {
+    const totalValue = portfolio.holdingsValue;
+    const top = [...portfolio.holdings].sort((a, b) => b.currentValue - a.currentValue)[0];
+    const topWeight = top && totalValue > 0 ? (top.currentValue / totalValue) * 100 : 0;
+
+    const insights: BehaviorInsight[] = [];
+    if (top) {
+      insights.push({
+        category: 'concentration',
+        title: 'Largest position weight',
+        observation: `${top.ticker} is your largest holding at ${topWeight.toFixed(1)}% of the portfolio.`,
+        suggestion: topWeight > 25 ? 'Consider whether this concentration matches your risk tolerance.' : 'Concentration appears reasonable.',
+        severity: topWeight > 25 ? 'warning' : 'info',
+      });
+    }
+    insights.push({
+      category: 'diversification',
+      title: 'Number of positions',
+      observation: `You currently hold ${portfolio.holdings.length} positions.`,
+      suggestion: portfolio.holdings.length < 5 ? 'Adding more positions can reduce single‑stock risk.' : 'Your position count supports diversification.',
+      severity: portfolio.holdings.length < 5 ? 'warning' : 'positive',
+    });
+    insights.push({
+      category: 'timing',
+      title: 'Recent activity',
+      observation: `You have ${activity.length} recent activity events.`,
+      suggestion: activity.length > 20 ? 'High activity can increase timing risk. Ensure changes are intentional.' : 'Activity level looks manageable.',
+      severity: activity.length > 20 ? 'info' : 'positive',
+    });
+
+    return {
+      generatedAt: new Date().toISOString(),
+      summary: 'Behavior insights generated in basic mode.',
+      insights,
+      activityCount: activity.length,
+      holdingCount: portfolio.holdings.length,
+      cached: false,
+    };
+  };
+
   try {
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
@@ -102,14 +142,7 @@ export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
     ], { timeout: 60000 });
 
     if (!resp || !resp.content) {
-      return {
-        generatedAt: new Date().toISOString(),
-        summary: 'Unable to generate behavior insights at this time.',
-        insights: [],
-        activityCount: activity.length,
-        holdingCount: portfolio.holdings.length,
-        cached: false,
-      };
+      return buildFallback();
     }
 
     const jsonStr = extractJson(resp.content);
@@ -140,13 +173,6 @@ export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
     return result;
   } catch (error: any) {
     console.error('[Perplexity Behavior] Error:', error.message);
-    return {
-      generatedAt: new Date().toISOString(),
-      summary: 'Behavior insights temporarily unavailable.',
-      insights: [],
-      activityCount: activity.length,
-      holdingCount: portfolio.holdings.length,
-      cached: false,
-    };
+    return buildFallback();
   }
 }
