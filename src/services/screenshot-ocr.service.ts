@@ -138,11 +138,14 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     }
     const tickerMatches = Array.from(line.matchAll(/\b[A-Z]{1,5}\b/g));
     if (tickerMatches.length === 0) {
-      const numericValues = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
-        .map(n => parseNumber(n))
-        .filter((n): n is number => n !== null);
-      if (numericValues.length >= 2) {
-        pendingPriceHint = numericValues[numericValues.length - 1];
+      const hasDecimal = /\d+\.\d+/.test(line) || line.includes('$');
+      if (hasDecimal) {
+        const numericValues = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+          .map(n => parseNumber(n))
+          .filter((n): n is number => n !== null);
+        if (numericValues.length >= 2) {
+          pendingPriceHint = numericValues[numericValues.length - 1];
+        }
       }
       continue;
     }
@@ -201,7 +204,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     const numericCount = (afterTickerRaw.match(/[-+]?\d[\d,]*\.?\d*/g) || []).length;
     const tickerAtStart = tickerIndex === 0;
 
-    if (ticker.length === 1 && (!tickerAtStart || numericCount < 2)) {
+    if (ticker.length === 1 && (!tickerAtStart || !/^\s*[A-Z]\s*[\d.$]/.test(line))) {
       warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
       continue;
     }
@@ -300,9 +303,10 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
         const scaledBy100 = averageCost / 100;
         const scaledBy1000 = averageCost / 1000;
         const candidates = [averageCost, scaledBy10, scaledBy100, scaledBy1000].filter(v => v > 0);
+        const hint = pendingPriceHint;
         const closest = candidates.reduce((best, v) => {
           if (best == null) return v;
-          return Math.abs(v - pendingPriceHint) < Math.abs(best - pendingPriceHint) ? v : best;
+          return Math.abs(v - hint) < Math.abs(best - hint) ? v : best;
         }, null as number | null);
         if (closest != null) {
           averageCost = closest;
