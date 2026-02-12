@@ -45,6 +45,19 @@ async function maybeConvertHeicToPng(
   }
 }
 
+async function preprocessForOcr(buffer: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(buffer)
+      .grayscale()
+      .normalize()
+      .sharpen()
+      .png()
+      .toBuffer();
+  } catch {
+    return buffer;
+  }
+}
+
 function parseNumber(value: string): number | null {
   const cleaned = value.replace(/[$,]/g, '').trim();
   if (!cleaned) return null;
@@ -281,9 +294,10 @@ export async function extractTextFromImage(
   options?: { mimeType?: string | null; fileName?: string | null }
 ): Promise<{ text: string; confidence: number }> {
   const inputBuffer = await maybeConvertHeicToPng(buffer, options);
+  const preprocessed = await preprocessForOcr(inputBuffer);
   const worker = await createWorker('eng');
   try {
-    const { data } = await worker.recognize(inputBuffer);
+    const { data } = await worker.recognize(preprocessed);
     return { text: data.text || '', confidence: data.confidence ?? 0 };
   } finally {
     await worker.terminate();
