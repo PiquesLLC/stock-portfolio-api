@@ -94,8 +94,9 @@ describe('Screenshot OCR parsing', () => {
     expect(result.parsed[0]).toMatchObject({ ticker: 'NTDOY', shares: 7, averageCost: 9.60 });
   });
 
-  it('parses robinhood-style two-line rows', () => {
+  it('parses webull-style two-line rows', () => {
     const text = `
+    Assets P&L Orders(0) Transfers History
     Mkt Value/Qty Last/Avg Price
     Darden Restaur.. 152.17 +7.73 152.17
     DRI 1

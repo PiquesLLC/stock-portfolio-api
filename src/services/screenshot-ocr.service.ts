@@ -161,24 +161,25 @@ function extractSharesAndAvgCost(line: string): { shares: number | null; average
   return { shares, averageCost };
 }
 
-type BrokerProfile = 'robinhood_mobile' | 'generic';
+type BrokerProfile = 'webull_mobile' | 'generic';
 
 function detectBrokerProfile(lines: string[]): BrokerProfile {
   const joined = lines.join(' ').toLowerCase();
   if (
-    joined.includes('open p&l') ||
-    joined.includes('last/avg') ||
-    joined.includes('mkt value/qty') ||
+    joined.includes('assets p&l') ||
     joined.includes('orders(0)') ||
+    joined.includes('open p&l') ||
+    joined.includes('mkt value/qty') ||
+    joined.includes('last/avg') ||
     joined.includes('watchlists') ||
     joined.includes('markets menu')
   ) {
-    return 'robinhood_mobile';
+    return 'webull_mobile';
   }
   return 'generic';
 }
 
-function parseRobinhoodMobile(lines: string[]): OcrParseResult {
+function parseWebullMobile(lines: string[]): OcrParseResult {
   const parsed: OcrParsedRow[] = [];
   const warnings: { rowNumber: number; message: string; line?: string }[] = [];
 
@@ -254,8 +255,8 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     .filter(Boolean);
 
   const profile = detectBrokerProfile(lines);
-  if (profile === 'robinhood_mobile') {
-    return parseRobinhoodMobile(lines);
+  if (profile === 'webull_mobile') {
+    return parseWebullMobile(lines);
   }
 
   const parsed: OcrParsedRow[] = [];
