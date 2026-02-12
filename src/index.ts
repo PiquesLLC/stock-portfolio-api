@@ -1,4 +1,4 @@
-import app from './app';
+﻿import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded } from './services/snapshot.service';
@@ -40,13 +40,23 @@ async function cleanupMigratedHoldings(): Promise<void> {
   }
 }
 
-// Helper to get all unique tickers from holdings
+// Helper to get all unique tickers from holdings + watchlists
 async function getAllHeldTickers(): Promise<string[]> {
-  const holdings = await prisma.holding.findMany({
-    select: { ticker: true },
-    distinct: ['ticker'],
-  });
-  return holdings.map(h => h.ticker);
+  const [holdings, watchlistHoldings] = await Promise.all([
+    prisma.holding.findMany({
+      select: { ticker: true },
+      distinct: ['ticker'],
+    }),
+    prisma.watchlistHolding.findMany({
+      select: { ticker: true },
+      distinct: ['ticker'],
+    }),
+  ]);
+
+  const tickers = [...holdings, ...watchlistHoldings]
+    .map(h => h.ticker.toUpperCase());
+
+  return Array.from(new Set(tickers));
 }
 
 const server = app.listen(config.port, async () => {
@@ -65,7 +75,7 @@ const server = app.listen(config.port, async () => {
     ensureBenchmarksCached().catch(err => console.error('Benchmark cache refresh failed:', err));
   }, 6 * 60 * 60 * 1000);
 
-  // Background snapshot scheduler — creates portfolio snapshots even when
+  // Background snapshot scheduler â€” creates portfolio snapshots even when
   // no browser is connected, so the 1D chart never has gaps.
   const SNAPSHOT_INTERVAL_MS = config.snapshotIntervalSeconds * 1000;
   console.log(`[Snapshot Scheduler] Running every ${config.snapshotIntervalSeconds}s`);
@@ -78,21 +88,21 @@ const server = app.listen(config.port, async () => {
     });
   }, SNAPSHOT_INTERVAL_MS);
 
-  // Dividend sync — fetch dividend events from Yahoo Finance on startup + every 6 hours
+  // Dividend sync â€” fetch dividend events from Yahoo Finance on startup + every 6 hours
   syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));
   setInterval(() => {
     syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Error:', err));
   }, 6 * 60 * 60 * 1000);
 
-  // Dividend posting — check for payable dividends every hour (today's date only)
+  // Dividend posting â€” check for payable dividends every hour (today's date only)
   postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
-  // NOTE: backfillMissedDividends removed — it double-counts dividends already
+  // NOTE: backfillMissedDividends removed â€” it double-counts dividends already
   // reflected in historical stock prices, inflating portfolio value via DRIP.
   setInterval(() => {
     postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
   }, 60 * 60 * 1000);
 
-  // Price alert evaluation — check every 60 seconds
+  // Price alert evaluation â€” check every 60 seconds
   console.log('[Price Alert Scheduler] Running every 60s');
   setInterval(() => {
     evaluatePriceAlerts().catch(err =>
@@ -100,7 +110,7 @@ const server = app.listen(config.port, async () => {
     );
   }, 60000);
 
-  // Analyst updates — check once per day (every 24 hours)
+  // Analyst updates â€” check once per day (every 24 hours)
   // Also run on startup after a short delay
   console.log('[Analyst Scheduler] Running every 24 hours');
   setTimeout(async () => {
@@ -121,7 +131,7 @@ const server = app.listen(config.port, async () => {
     }
   }, 24 * 60 * 60 * 1000); // Every 24 hours
 
-  // Alpha Vantage: Economic indicators — refresh daily (5 API calls)
+  // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls)
   console.log('[AV Economic] Running daily');
   setTimeout(() => {
     refreshEconomicIndicators().catch(err =>
@@ -134,7 +144,7 @@ const server = app.listen(config.port, async () => {
     );
   }, 24 * 60 * 60 * 1000);
 
-  // World Bank: International economic indicators — refresh daily (6 API calls, no key needed)
+  // World Bank: International economic indicators â€” refresh daily (6 API calls, no key needed)
   console.log('[WB International] Running daily');
   setTimeout(() => {
     refreshInternationalIndicators().catch(err =>
@@ -147,7 +157,7 @@ const server = app.listen(config.port, async () => {
     );
   }, 24 * 60 * 60 * 1000);
 
-  // Alpha Vantage: Fundamentals rotation — refresh oldest tickers every 6 hours (4 API calls per ticker)
+  // Alpha Vantage: Fundamentals rotation â€” refresh oldest tickers every 6 hours (4 API calls per ticker)
   console.log('[AV Fundamentals] Rotating every 6 hours');
   setTimeout(async () => {
     try {
@@ -166,7 +176,7 @@ const server = app.listen(config.port, async () => {
     }
   }, 6 * 60 * 60 * 1000);
 
-  // Milestone alerts (52w high/low, ATH/ATL) — using Yahoo Finance for accurate 52w data
+  // Milestone alerts (52w high/low, ATH/ATL) â€” using Yahoo Finance for accurate 52w data
   console.log('[Milestone Scheduler] Running every 30 minutes');
   setTimeout(() => {
     checkMilestoneAlerts().catch(err =>
@@ -187,3 +197,8 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
+
+
+
+

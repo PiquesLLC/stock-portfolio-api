@@ -88,6 +88,11 @@ export interface PortfolioIntelligenceResponse {
   heroStats: HeroStats | null;
   winnersCount: number;
   losersCount: number;
+  streakSource?: 'candles' | 'snapshots';
+  totalGains: number;
+  totalLosses: number;
+  totalAbsMovement: number;
+  netPnL: number;
 }
 
 const CORRELATION_TRADING_DAYS = 180;
@@ -403,7 +408,8 @@ function generateExplanation(
 async function computeHeroStats(
   holdings: HoldingWithQuote[],
   contributions: HoldingContribution[],
-  window: IntelligenceWindow
+  window: IntelligenceWindow,
+  candleData?: Map<string, HistoricalCandles> | null
 ): Promise<HeroStats> {
   const periodLabel = window === '1d' ? 'today' : window === '5d' ? 'this week' : 'this month';
   const periodPossessive = window === '1d' ? "today's" : window === '5d' ? "this week's" : "this month's";
@@ -503,7 +509,102 @@ async function computeHeroStats(
   const heldTickers = new Set(holdings.map(h => h.ticker));
 
   try {
-    const allSnaps = await getRecentHoldingSnapshots(10);
+    if (window === '1m' && candleData) {
+      const maxDays = 22; // Approx. 1 month of trading days
+      const upStreaks = new Map<string, { days: number; cumPct: number }>();
+      const downStreaks = new Map<string, { days: number; cumPct: number }>();
+
+      for (const h of holdings) {
+        const candles = candleData.get(h.ticker);
+        let returns: number[] | null = null;
+
+        if (candles && !candles.partial && candles.returns.length > 0) {
+          returns = candles.returns;
+        } else {
+          const yahooData = await fetchYahooCandlesFallback(h.ticker);
+          if (yahooData && yahooData.closes.length > 1) {
+            returns = [];
+            for (let i = 1; i < yahooData.closes.length; i++) {
+              const prev = yahooData.closes[i - 1];
+              if (prev > 0) {
+                returns.push((yahooData.closes[i] - prev) / prev);
+              }
+            }
+          }
+        }
+
+        if (!returns || returns.length === 0) continue;
+
+        const recentReturns = returns.slice(-maxDays);
+
+        // Winning streak: consecutive positive returns
+        let upDays = 0;
+        let upPct = 0;
+        for (let i = recentReturns.length - 1; i >= 0; i--) {
+          const r = recentReturns[i];
+          if (r > 0) { upDays++; upPct += r * 100; }
+          else break;
+        }
+        if (upDays > 0) upStreaks.set(h.ticker, { days: upDays, cumPct: Math.round(upPct * 10) / 10 });
+
+        // Losing streak: consecutive negative returns
+        let downDays = 0;
+        let downPct = 0;
+        for (let i = recentReturns.length - 1; i >= 0; i--) {
+          const r = recentReturns[i];
+          if (r < 0) { downDays++; downPct += r * 100; }
+          else break;
+        }
+        if (downDays > 0) downStreaks.set(h.ticker, { days: downDays, cumPct: Math.round(downPct * 10) / 10 });
+      }
+
+      // Best winning streak
+      let bestUp = '';
+      let bestUpDays = 0;
+      let bestUpPct = -Infinity;
+      for (const [ticker, s] of upStreaks) {
+        if (s.days > bestUpDays || (s.days === bestUpDays && s.cumPct > bestUpPct)) {
+          bestUp = ticker;
+          bestUpDays = s.days;
+          bestUpPct = s.cumPct;
+        }
+      }
+
+      if (bestUp && bestUpDays > 0) {
+        momentum = {
+          ticker: bestUp,
+          streakDays: bestUpDays,
+          streakPct: bestUpPct,
+          label: `Up ${bestUpDays} day${bestUpDays !== 1 ? 's' : ''} (+${bestUpPct}%)`,
+        };
+      }
+
+      // Worst losing streak
+      let bestDown = '';
+      let bestDownDays = 0;
+      let bestDownPct = Infinity;
+      for (const [ticker, s] of downStreaks) {
+        if (s.days > bestDownDays || (s.days === bestDownDays && s.cumPct < bestDownPct)) {
+          bestDown = ticker;
+          bestDownDays = s.days;
+          bestDownPct = s.cumPct;
+        }
+      }
+
+      if (bestDown && bestDownDays > 0) {
+        deceleration = {
+          ticker: bestDown,
+          streakDays: bestDownDays,
+          streakPct: bestDownPct,
+          label: `Down ${bestDownDays} day${bestDownDays !== 1 ? 's' : ''} (${bestDownPct}%)`,
+        };
+      }
+
+      return { sectorDriver, sectorDrag, largestDrag, largestDriver, momentum, deceleration };
+    }
+
+    const lookbackDays = window === '1m' ? 30 : 10;
+    const allSnaps = await getRecentHoldingSnapshots(lookbackDays);
     const holdingSnaps = allSnaps.filter(s => heldTickers.has(s.ticker));
 
     // Group snapshots by date -> ticker -> dayPLPercent
@@ -627,6 +728,10 @@ export async function getPortfolioIntelligence(
         window, contributors: [], detractors: [], sectorExposure: [],
         beta: null, explanation: 'User not found.', partial: true, heroStats: null,
         winnersCount: 0, losersCount: 0,
+        totalGains: 0,
+        totalLosses: 0,
+        totalAbsMovement: 0,
+        netPnL: 0,
       };
     }
   } else {
@@ -646,12 +751,24 @@ export async function getPortfolioIntelligence(
       heroStats: null,
       winnersCount: 0,
       losersCount: 0,
+      totalGains: 0,
+      totalLosses: 0,
+      totalAbsMovement: 0,
+      netPnL: 0,
     };
   }
 
   // Compute attribution
   const { contributions, candleData } = await computeContributions(holdings, window);
   const { contributors, detractors, winnersCount, losersCount } = splitContributors(contributions);
+  const totalGains = contributions
+    .filter(c => c.contributionDollar > 0)
+    .reduce((sum, c) => sum + c.contributionDollar, 0);
+  const totalLosses = contributions
+    .filter(c => c.contributionDollar < 0)
+    .reduce((sum, c) => sum + Math.abs(c.contributionDollar), 0);
+  const totalAbsMovement = totalGains + totalLosses;
+  const netPnL = contributions.reduce((sum, c) => sum + c.contributionDollar, 0);
 
   // Compute sector exposure
   const sectorExposure = computeSectorExposure(holdings);
@@ -663,10 +780,13 @@ export async function getPortfolioIntelligence(
   const explanation = generateExplanation(contributions, window);
 
   // Compute hero stats for all windows
-  const heroStats = await computeHeroStats(holdings, contributions, window);
+  const heroStats = await computeHeroStats(holdings, contributions, window, candleData);
 
   const hasContributions = contributors.length > 0 || detractors.length > 0;
   const isIncomplete = window !== '1d' && !hasContributions;
+
+  const streakSource: 'candles' | 'snapshots' =
+    window === '1m' && candleData ? 'candles' : 'snapshots';
 
   const result: PortfolioIntelligenceResponse = {
     window,
@@ -679,6 +799,11 @@ export async function getPortfolioIntelligence(
     heroStats,
     winnersCount,
     losersCount,
+    streakSource,
+    totalGains: Math.round(totalGains * 100) / 100,
+    totalLosses: Math.round(totalLosses * 100) / 100,
+    totalAbsMovement: Math.round(totalAbsMovement * 100) / 100,
+    netPnL: Math.round(netPnL * 100) / 100,
   };
 
   // Short TTL if data is incomplete (candles still caching), otherwise normal TTL

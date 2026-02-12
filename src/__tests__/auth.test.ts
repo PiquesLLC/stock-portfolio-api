@@ -396,7 +396,7 @@ describe('Auth Service', () => {
         id: 'rt-2',
         token: 'revoked-token',
         userId: 'user-1',
-        revokedAt: new Date(),
+        revokedAt: new Date(Date.now() - 60_000),
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice' },
       });
@@ -409,6 +409,21 @@ describe('Auth Service', () => {
           where: expect.objectContaining({ userId: 'user-1', revokedAt: null }),
         })
       );
+    });
+
+    it('should return null without revoking family if token was recently revoked', async () => {
+      prismaMock.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-2b',
+        token: 'revoked-token-recent',
+        userId: 'user-1',
+        revokedAt: new Date(Date.now() - 5_000),
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'user-1', username: 'alice' },
+      });
+
+      const result = await rotateRefreshToken('revoked-token-recent');
+      expect(result).toBeNull();
+      expect(prismaMock.refreshToken.updateMany).not.toHaveBeenCalled();
     });
 
     it('should return null for expired refresh token', async () => {

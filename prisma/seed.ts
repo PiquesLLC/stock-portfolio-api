@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 // Box-Muller transform for normal distribution
 function randomNormal(mean: number, stdDev: number): number {
@@ -68,13 +69,47 @@ function randInt(min: number, max: number): number {
 async function main() {
   console.log('Seeding demo users...');
 
-  // Clean up existing demo data
+  // Clean up existing demo data (delete children before parents)
+  await prisma.priceAlertEvent.deleteMany();
+  await prisma.priceAlert.deleteMany({ where: { userId: { not: null } } });
+  await prisma.alertEvent.deleteMany();
+  await prisma.alert.deleteMany({ where: { userId: { not: null } } });
+  await prisma.dividendReinvestment.deleteMany({ where: { userId: { not: null } } });
+  await prisma.dividendCredit.deleteMany({ where: { userId: { not: null } } });
+  await prisma.holdingSnapshot.deleteMany();
   await prisma.portfolioSnapshot.deleteMany({ where: { userId: { not: null } } });
-  await prisma.holding.deleteMany({ where: { userId: { not: null } } });
+  await prisma.portfolioCompositionChange.deleteMany();
+  await prisma.transaction.deleteMany({ where: { userId: { not: null } } });
+  await prisma.lot.deleteMany({ where: { userId: { not: null } } });
+  await prisma.watchlistHolding.deleteMany();
+  await prisma.watchlist.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.leaderboardCache.deleteMany();
   await prisma.userSettings.deleteMany();
   await prisma.activityEvent.deleteMany();
   await prisma.follow.deleteMany();
+  await prisma.milestoneEvent.deleteMany();
+  await prisma.holding.deleteMany({ where: { userId: { not: null } } });
   await prisma.user.deleteMany();
+
+  // Recreate the system/default user so main portfolio endpoints don't 500
+  await prisma.user.create({
+    data: {
+      id: SYSTEM_USER_ID,
+      username: 'system',
+      displayName: 'System',
+      region: 'NA',
+      trackingActive: true,
+      leaderboardEligible: false,
+    },
+  });
+  await prisma.userSettings.create({
+    data: {
+      userId: SYSTEM_USER_ID,
+      cashBalance: 0,
+      marginDebt: 0,
+    },
+  });
 
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
