@@ -46,7 +46,14 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
       return;
     }
     const watchlist = await createWatchlist(SYSTEM_USER_ID, { name, description, color });
-    res.status(201).json(watchlist);
+    res.status(201).json({
+      id: watchlist.id,
+      name: watchlist.name,
+      description: watchlist.description,
+      color: watchlist.color,
+      holdingsCount: 0,
+      createdAt: watchlist.createdAt,
+    });
   } catch (error: any) {
     if (error?.code === 'P2002') {
       res.status(409).json({ error: 'Watchlist name already exists' });
@@ -66,7 +73,15 @@ export async function updateWatchlistHandler(req: AuthRequest, res: Response): P
       res.status(404).json({ error: 'Watchlist not found' });
       return;
     }
-    res.json(updated);
+    const holdingsCount = await prisma.watchlistHolding.count({ where: { watchlistId: updated.id } });
+    res.json({
+      id: updated.id,
+      name: updated.name,
+      description: updated.description,
+      color: updated.color,
+      holdingsCount,
+      createdAt: updated.createdAt,
+    });
   } catch (error: any) {
     if (error?.code === 'P2002') {
       res.status(409).json({ error: 'Watchlist name already exists' });
