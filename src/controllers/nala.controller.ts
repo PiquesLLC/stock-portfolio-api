@@ -23,6 +23,7 @@ export async function askNalaHandler(req: AuthRequest, res: Response): Promise<v
     console.error('[Nala Controller] Error:', error);
     res.status(500).json({
       error: 'Failed to process research question',
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
       question: req.body?.question || '',
       stocks: [],
       strategy: null,
