@@ -81,4 +81,15 @@ describe('Screenshot OCR parsing', () => {
     expect(result.parsed[0]).toMatchObject({ ticker: 'MULN', shares: 25, averageCost: 50.1091 });
     expect(result.parsed[1]).toMatchObject({ ticker: 'BAC', shares: 5, averageCost: 28.5 });
   });
+
+  it('uses previous line price to correct missing decimals', () => {
+    const text = `
+    Nintendo Co Ltd 48.00 +0.35 9.60
+    NTDOY Ss  o7m 5953
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(1);
+    expect(result.parsed[0]).toMatchObject({ ticker: 'NTDOY', shares: 7, averageCost: 9.60 });
+  });
 });

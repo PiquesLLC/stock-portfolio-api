@@ -118,6 +118,7 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
 
   let headerHasPrice = false;
   let headerHasAvgCost = false;
+  let pendingPriceHint: number | null = null;
   lines.forEach(line => {
     const lower = line.toLowerCase();
     if (lower.includes('symbol') || lower.includes('shares') || lower.includes('quantity')) {
@@ -136,7 +137,15 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       continue;
     }
     const tickerMatches = Array.from(line.matchAll(/\b[A-Z]{1,5}\b/g));
-    if (tickerMatches.length === 0) continue;
+    if (tickerMatches.length === 0) {
+      const numericValues = (line.match(/[-+]?\d[\d,]*\.?\d*/g) || [])
+        .map(n => parseNumber(n))
+        .filter((n): n is number => n !== null);
+      if (numericValues.length >= 2) {
+        pendingPriceHint = numericValues[numericValues.length - 1];
+      }
+      continue;
+    }
 
     let ticker = '';
     let tickerIndex = -1;
@@ -155,10 +164,13 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       const candidate = match[0].toUpperCase();
       const idx = match.index ?? 0;
       const beforeChar = idx > 0 ? line[idx - 1] : '';
-      if (beforeChar === '&' || beforeChar === '/' || beforeChar === '.') {
+      if (beforeChar === '&' || beforeChar === '/' || beforeChar === '.' || beforeChar === '-') {
         continue;
       }
       if (candidate.length === 1 && line.includes('S&P')) {
+        continue;
+      }
+      if (candidate.length === 1 && idx > 0) {
         continue;
       }
       const after = line.slice(idx + candidate.length);
@@ -188,6 +200,11 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     const afterTickerRaw = line.slice(line.indexOf(ticker) + ticker.length);
     const numericCount = (afterTickerRaw.match(/[-+]?\d[\d,]*\.?\d*/g) || []).length;
     const tickerAtStart = tickerIndex === 0;
+
+    if (ticker.length === 1 && (!tickerAtStart || numericCount < 2)) {
+      warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
+      continue;
+    }
 
     // If there's no clear numeric context (no $ and no shares/avg cost on this or next line), skip.
     if (
@@ -277,6 +294,30 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       }
     }
 
+    if (averageCost != null && pendingPriceHint != null) {
+      if (averageCost > 1000 && pendingPriceHint > 0 && pendingPriceHint < 1000) {
+        const scaledBy10 = averageCost / 10;
+        const scaledBy100 = averageCost / 100;
+        const scaledBy1000 = averageCost / 1000;
+        const candidates = [averageCost, scaledBy10, scaledBy100, scaledBy1000].filter(v => v > 0);
+        const closest = candidates.reduce((best, v) => {
+          if (best == null) return v;
+          return Math.abs(v - pendingPriceHint) < Math.abs(best - pendingPriceHint) ? v : best;
+        }, null as number | null);
+        if (closest != null) {
+          averageCost = closest;
+          usedPriceAsAverage = true;
+        }
+      }
+      if (averageCost != null) {
+        const diffPct = Math.abs(averageCost - pendingPriceHint) / pendingPriceHint;
+        if (diffPct > 0.3) {
+          averageCost = pendingPriceHint;
+          usedPriceAsAverage = true;
+        }
+      }
+    }
+
     if (shares == null || averageCost == null) {
       warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
       continue;
@@ -298,6 +339,8 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     if (usedPriceAsAverage) {
       warnings.push({ rowNumber, message: 'Average cost not found; used price as proxy', line });
     }
+
+    pendingPriceHint = null;
   }
 
   return { parsed, warnings };
