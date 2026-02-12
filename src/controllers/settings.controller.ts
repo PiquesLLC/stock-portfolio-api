@@ -38,7 +38,10 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
     }
   } catch (error) {
     console.error('Error fetching settings:', error);
-    res.status(500).json({ error: 'Failed to fetch settings' });
+    res.status(500).json({
+      error: 'Failed to fetch settings',
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
+    });
   }
 }
 

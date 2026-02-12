@@ -171,7 +171,11 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
     res.json(result);
   } catch (error) {
     console.error('Earnings summary error:', error);
-    res.status(500).json({ results: [], partial: true });
+    res.status(500).json({
+      results: [],
+      partial: true,
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
+    });
   }
 }
 

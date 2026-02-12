@@ -70,7 +70,10 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
     });
   } catch (error) {
     console.error('Error fetching portfolio:', error);
-    res.status(500).json({ error: 'Failed to fetch portfolio' });
+    res.status(500).json({
+      error: 'Failed to fetch portfolio',
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
+    });
   }
 }
 
@@ -442,7 +445,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     res.json({ points, periodStartValue, period });
   } catch (error) {
     console.error('Error fetching chart data:', error);
-    res.status(500).json({ error: 'Failed to fetch chart data' });
+    res.status(500).json({
+      error: 'Failed to fetch chart data',
+      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
+    });
   }
 }
 
