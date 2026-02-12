@@ -751,7 +751,7 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       message: 'For best results, ensure the stock name/ticker, share count, and average price are clearly visible in the screenshot.',
     };
 
-    res.json({
+    const responsePayload: Record<string, unknown> = {
       reviewRequired: true,
       editableFields: ['ticker', 'shares', 'averageCost'],
       parsed,
@@ -759,7 +759,16 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       totalRows: parsed.length + result.warnings.length,
       validRows: parsed.length,
       skippedRows: result.warnings.length,
-    });
+    };
+
+    if (process.env.NODE_ENV !== 'production' && String(req.query.debug) === '1') {
+      responsePayload.debug = {
+        rawText: text,
+        rawLines: text.split(/\r?\n/).map(line => line.trim()).filter(Boolean),
+      };
+    }
+
+    res.json(responsePayload);
   } catch (error) {
     console.error('Screenshot OCR error:', error);
     if (String((error as Error)?.message || '').includes('HEIC conversion failed')) {
