@@ -69,4 +69,16 @@ describe('Screenshot OCR parsing', () => {
     expect(result.parsed).toHaveLength(0);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
+
+  it('parses ticker lines that start with a ticker and two numbers', () => {
+    const text = `
+    MULN 25 esal% 50.1091
+    BAC 5 ; s28.5¢
+    `;
+
+    const result = parseHoldingsFromText(text);
+    expect(result.parsed).toHaveLength(2);
+    expect(result.parsed[0]).toMatchObject({ ticker: 'MULN', shares: 25, averageCost: 50.1091 });
+    expect(result.parsed[1]).toMatchObject({ ticker: 'BAC', shares: 5, averageCost: 28.5 });
+  });
 });

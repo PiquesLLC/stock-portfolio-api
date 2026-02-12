@@ -139,6 +139,18 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     if (tickerMatches.length === 0) continue;
 
     let ticker = '';
+    let tickerIndex = -1;
+    const trimmedLine = line.trimStart();
+    for (const match of tickerMatches) {
+      const candidate = match[0].toUpperCase();
+      const idx = match.index ?? 0;
+      if (idx === 0 || trimmedLine.startsWith(candidate + ' ')) {
+        ticker = candidate;
+        tickerIndex = idx;
+        break;
+      }
+    }
+
     for (const match of tickerMatches) {
       const candidate = match[0].toUpperCase();
       const idx = match.index ?? 0;
@@ -152,12 +164,14 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
       const after = line.slice(idx + candidate.length);
       if (/^\s*[\d.$]/.test(after)) {
         ticker = candidate;
+        tickerIndex = idx;
         break;
       }
     }
 
     if (!ticker) {
       ticker = tickerMatches[tickerMatches.length - 1][0].toUpperCase();
+      tickerIndex = tickerMatches[tickerMatches.length - 1].index ?? -1;
     }
 
     if (!isValidTicker(ticker)) {
@@ -172,15 +186,15 @@ export function parseHoldingsFromText(text: string): OcrParseResult {
     const nextHasShares = nextLower.includes('shares');
     const nextHasAvgHint = nextLower.includes('avg') || nextLower.includes('average') || nextLower.includes('cost');
     const afterTickerRaw = line.slice(line.indexOf(ticker) + ticker.length);
-    const simpleNumericTail = /^[\s\d.,$]+$/.test(afterTickerRaw);
     const numericCount = (afterTickerRaw.match(/[-+]?\d[\d,]*\.?\d*/g) || []).length;
+    const tickerAtStart = tickerIndex === 0;
 
     // If there's no clear numeric context (no $ and no shares/avg cost on this or next line), skip.
     if (
       !hasDollar &&
       !hasAvgHint &&
       !(nextHasShares && nextHasAvgHint) &&
-      !(simpleNumericTail && numericCount >= 2)
+      !((tickerAtStart || /^\s*[\d.$]/.test(afterTickerRaw)) && numericCount >= 2)
     ) {
       warnings.push({ rowNumber, message: 'Not enough numeric values found', line });
       continue;
