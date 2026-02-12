@@ -58,6 +58,60 @@ async function preprocessForOcr(buffer: Buffer): Promise<Buffer> {
   }
 }
 
+async function buildPreprocessVariants(buffer: Buffer): Promise<{ label: string; buffer: Buffer }[]> {
+  const variants: { label: string; buffer: Buffer }[] = [{ label: 'original', buffer }];
+
+  try {
+    const enhanced = await sharp(buffer).grayscale().normalize().sharpen().png().toBuffer();
+    variants.push({ label: 'enhanced', buffer: enhanced });
+  } catch {
+    // ignore
+  }
+
+  try {
+    const meta = await sharp(buffer).metadata();
+    const width = meta.width ? Math.round(meta.width * 1.5) : undefined;
+    const thresholded = await sharp(buffer)
+      .grayscale()
+      .normalize()
+      .threshold(160)
+      .resize(width ? { width } : undefined)
+      .png()
+      .toBuffer();
+    variants.push({ label: 'threshold', buffer: thresholded });
+  } catch {
+    // ignore
+  }
+
+  return variants;
+}
+
+async function recognizeBestVariant(
+  buffer: Buffer
+): Promise<{ text: string; confidence: number; variant: string; parsed: OcrParseResult }> {
+  const variants = await buildPreprocessVariants(buffer);
+  const worker = await createWorker('eng');
+  try {
+    let best: { text: string; confidence: number; variant: string; parsed: OcrParseResult; score: number } | null = null;
+
+    for (const variant of variants) {
+      const { data } = await worker.recognize(variant.buffer);
+      const text = data.text || '';
+      const confidence = data.confidence ?? 0;
+      const parsed = parseHoldingsFromText(text);
+      const score = parsed.parsed.length * 10 - parsed.warnings.length;
+
+      if (!best || score > best.score || (score === best.score && confidence > best.confidence)) {
+        best = { text, confidence, variant: variant.label, parsed, score };
+      }
+    }
+
+    return best ?? { text: '', confidence: 0, variant: 'original', parsed: { parsed: [], warnings: [] } };
+  } finally {
+    await worker.terminate();
+  }
+}
+
 function parseNumber(value: string): number | null {
   const cleaned = value.replace(/[$,]/g, '').trim();
   if (!cleaned) return null;
@@ -363,4 +417,12 @@ export async function extractTextFromImage(
   } finally {
     await worker.terminate();
   }
+}
+
+export async function extractBestOcrForHoldings(
+  buffer: Buffer,
+  options?: { mimeType?: string | null; fileName?: string | null }
+): Promise<{ text: string; confidence: number; variant: string; parsed: OcrParseResult }> {
+  const inputBuffer = await maybeConvertHeicToPng(buffer, options);
+  return recognizeBestVariant(inputBuffer);
 }

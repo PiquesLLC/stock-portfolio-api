@@ -9,7 +9,7 @@ import {
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
 import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
-import { extractTextFromImage, parseHoldingsFromText } from '../services/screenshot-ocr.service';
+import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 
 import {
@@ -740,11 +740,11 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       return;
     }
 
-    const { text, confidence } = await extractTextFromImage(file.buffer, {
+    const { text, confidence, variant, parsed: parsedResult } = await extractBestOcrForHoldings(file.buffer, {
       mimeType: file.mimetype,
       fileName: file.originalname,
     });
-    const result = parseHoldingsFromText(text);
+    const result = parsedResult ?? parseHoldingsFromText(text);
 
     // Apply overall OCR confidence to row confidence (simple heuristic)
     const parsed = result.parsed.map(row => ({
@@ -771,6 +771,7 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       responsePayload.debug = {
         rawText: text,
         rawLines: text.split(/\r?\n/).map(line => line.trim()).filter(Boolean),
+        ocrVariant: variant,
       };
     }
 
