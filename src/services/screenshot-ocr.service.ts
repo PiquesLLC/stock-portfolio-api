@@ -193,9 +193,9 @@ function parseRobinhoodMobile(lines: string[]): OcrParseResult {
     }
 
     // Expect: company line with 2-3 numbers, followed by ticker line like "MULN 25 ... 50.1091"
-    const nextTokens = next.trim().split(/\s+/);
-    const ticker = (nextTokens[0] || '').toUpperCase();
-    if (!isValidTicker(ticker) || ticker.length < 2) {
+    const tickerMatch = next.match(/^\s*([A-Z]{2,5})\b/);
+    const ticker = (tickerMatch?.[1] || '').toUpperCase();
+    if (!ticker || !isValidTicker(ticker)) {
       continue;
     }
 
