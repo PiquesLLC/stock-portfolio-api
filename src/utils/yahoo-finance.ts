@@ -723,6 +723,72 @@ const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
     sector: 'Communication Services',
     industry: 'Electronic Gaming & Multimedia',
   },
+  CAT: {
+    description: 'Caterpillar Inc. manufactures construction and mining equipment, diesel and natural gas engines, industrial gas turbines, and diesel-electric locomotives worldwide. The Construction Industries segment offers machinery for infrastructure, forestry, and building construction. The Resource Industries segment provides equipment for mining, quarry, and aggregates. The Energy & Transportation segment offers reciprocating engines, turbines, diesel-electric locomotives, and related services. Caterpillar is the world\'s largest manufacturer of construction and mining equipment. The company was founded in 1925 through the merger of Holt Manufacturing and C.L. Best Tractor and is headquartered in Irving, TX.',
+    sector: 'Industrials',
+    industry: 'Farm & Heavy Construction Machinery',
+  },
+  PWR: {
+    description: 'Quanta Services, Inc. provides infrastructure services for the electric and gas utility, renewable energy, telecommunications, and pipeline industries in the United States, Canada, and internationally. The Electric Power Infrastructure Solutions segment designs, installs, upgrades, and maintains electric power transmission and distribution infrastructure. The Renewable Energy Infrastructure Solutions segment provides engineering, procurement, and construction services for wind, solar, and battery storage. The Underground Utility and Infrastructure Solutions segment installs and maintains gas distribution and transmission systems. The company was founded in 1997 and is headquartered in Houston, TX.',
+    sector: 'Industrials',
+    industry: 'Engineering & Construction',
+  },
+  ROK: {
+    description: 'Rockwell Automation, Inc. provides industrial automation and digital transformation solutions worldwide. The Intelligent Devices segment offers drives, motion control, safety devices, sensors, and industrial components. The Software & Control segment provides control and visualization software, information software, and network technology. The Lifecycle Services segment delivers consulting, professional services, and connected enterprise solutions. The company serves industries including automotive, food and beverage, life sciences, oil and gas, and mining. Rockwell Automation was founded in 1903 and is headquartered in Milwaukee, WI.',
+    sector: 'Industrials',
+    industry: 'Specialty Industrial Machinery',
+  },
+  MAR: {
+    description: 'Marriott International, Inc. operates, franchises, and licenses hotel, residential, and timeshare properties worldwide. The company operates through US & Canada and International segments. It operates and franchises hotels and resorts under brands including Marriott, Sheraton, Westin, W Hotels, The Ritz-Carlton, St. Regis, Courtyard, Residence Inn, and Fairfield. The company manages approximately 8,800 properties across 139 countries, making it the world\'s largest hotel company by room count. Marriott International was founded by J. Willard Marriott in 1927 and is headquartered in Bethesda, MD.',
+    sector: 'Consumer Cyclical',
+    industry: 'Lodging',
+  },
+  HLT: {
+    description: 'Hilton Worldwide Holdings Inc. is a global hospitality company that manages and franchises hotels and resorts. The company operates through Management & Franchise and Ownership segments. It operates brands including Hilton Hotels & Resorts, Waldorf Astoria, Conrad, DoubleTree, Hampton, Embassy Suites, Hilton Garden Inn, and Home2 Suites. Hilton has a portfolio of approximately 7,500 properties with over 1.1 million rooms across 126 countries and territories. The company was founded by Conrad Hilton in 1919 and is headquartered in McLean, VA.',
+    sector: 'Consumer Cyclical',
+    industry: 'Lodging',
+  },
+  FERG: {
+    description: 'Ferguson plc distributes plumbing and heating products in the United States, United Kingdom, and Canada. The company supplies residential and commercial customers with pipes, valves, fittings, plumbing fixtures, HVAC equipment, waterworks products, and fire protection systems. It serves professional contractors, municipalities, and industrial customers through approximately 1,700 branches. Ferguson is the largest distributor of plumbing supplies in North America. The company was founded in 1887 and is headquartered in Wokingham, United Kingdom, with US operations based in Newport News, VA.',
+    sector: 'Industrials',
+    industry: 'Industrial Distribution',
+  },
+  CRH: {
+    description: 'CRH plc manufactures and distributes building materials worldwide. The Americas Materials segment produces aggregates, asphalt, cement, and ready-mixed concrete across North America. The Americas Products segment provides architectural products, infrastructure products, and construction accessories. The company also operates in Europe through its Building Products and Materials divisions. CRH is one of the largest building materials companies in the world, operating in over 25 countries with approximately 3,100 operating locations. The company was founded in 1970 and is headquartered in Dublin, Ireland.',
+    sector: 'Basic Materials',
+    industry: 'Building Materials',
+  },
+  CSX: {
+    description: 'CSX Corporation provides rail-based freight transportation services in the eastern United States, the District of Columbia, and parts of Canada. The company transports merchandise including chemicals, automotive, agricultural, forest products, minerals, and metals. It also transports intermodal containers and trailers, as well as coal for utilities and industrial customers. CSX operates approximately 20,000 route miles of track across 26 states east of the Mississippi River. The company was founded in 1827 and is headquartered in Jacksonville, FL.',
+    sector: 'Industrials',
+    industry: 'Railroads',
+  },
+  GILD: {
+    description: 'Gilead Sciences, Inc. is a biopharmaceutical company that discovers, develops, and commercializes medicines in areas of unmet medical need worldwide. The company\'s products include Biktarvy, Descovy, and Truvada for HIV/AIDS treatment and prevention; Veklury (remdesivir) for COVID-19; Harvoni and Sovaldi for hepatitis C; Vemlidy for hepatitis B; and Yescarta and Tecartus CAR T-cell therapies for certain cancers. Gilead is a leader in antiviral therapeutics and has expanded into oncology and inflammatory diseases. The company was founded by Michael L. Riordan in June 1987 and is headquartered in Foster City, CA.',
+    sector: 'Healthcare',
+    industry: 'Drug Manufacturers—General',
+  },
+  EWJ: {
+    description: 'iShares MSCI Japan ETF tracks the MSCI Japan Index, providing exposure to large and mid-cap Japanese equities. The fund invests in companies across Japan\'s economy including Toyota, Sony, Mitsubishi, Keyence, and other major corporations. Top sectors include industrials, consumer discretionary, financials, and information technology. EWJ is one of the oldest and most widely traded Japan-focused ETFs, offering investors broad access to the world\'s third-largest economy. The fund is managed by BlackRock.',
+    category: 'Japan Stock',
+    fundFamily: 'iShares',
+    inceptionDate: 'Mar 12, 1996',
+    numberOfHoldings: 225,
+  },
+  EIS: {
+    description: 'iShares MSCI Israel ETF tracks the MSCI Israel Capped Investable Market Index, providing exposure to Israeli equities across all market capitalizations. The fund invests in companies spanning Israel\'s technology-heavy economy, including firms in information technology, healthcare, financials, and real estate sectors. Israel is known as the "Startup Nation" with a highly innovative technology sector. Top holdings typically include Check Point Software, Nice Ltd, and Bank Leumi. The fund is managed by BlackRock.',
+    category: 'Miscellaneous Region',
+    fundFamily: 'iShares',
+    inceptionDate: 'Mar 26, 2008',
+    numberOfHoldings: 112,
+  },
+  EWZ: {
+    description: 'iShares MSCI Brazil ETF tracks the MSCI Brazil 25/50 Index, providing exposure to large and mid-cap Brazilian equities. The fund invests in companies across Brazil\'s commodity-rich economy including Petrobras, Vale, Itau Unibanco, and Ambev. Top sectors include financials, energy, materials, and utilities. EWZ is the most widely traded Brazil-focused ETF and offers investors access to Latin America\'s largest economy. The fund is managed by BlackRock.',
+    category: 'Latin America Stock',
+    fundFamily: 'iShares',
+    inceptionDate: 'Jul 10, 2000',
+    numberOfHoldings: 47,
+  },
 };
 
 /**
