@@ -15,6 +15,7 @@ import {
   reconstructPortfolioHistory,
   reconstructPortfolioHistoryHiRes,
 } from '../services/snapshot.service';
+import { fetchPrices } from '../services/market.service';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'] as const;
@@ -234,6 +235,23 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
       };
       const periodDays = periodDaysMap[period] ?? 30;
       points = await reconstructPortfolioHistory(holdings, 0, periodDays, 0);
+    }
+
+    // Append live value so the chart line always reaches "now"
+    if (points.length > 0 && (period === '1D' || period === '1W')) {
+      const lastPt = points[points.length - 1];
+      if (now - lastPt.time > 10_000) {
+        const tickers = holdings.map(h => h.ticker);
+        const { quotes } = await fetchPrices(tickers);
+        let liveValue = 0;
+        for (const h of holdings) {
+          const q = quotes.get(h.ticker.toUpperCase());
+          liveValue += h.shares * (q?.currentPrice ?? 0);
+        }
+        if (liveValue > 0) {
+          points.push({ time: now, value: liveValue });
+        }
+      }
     }
 
     const periodStartValue = points.length > 0 ? points[0].value : 0;
