@@ -2,9 +2,11 @@ import NodeCache from 'node-cache';
 import prisma from '../utils/prisma';
 import { subSectorGroups } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
+import { yahooGet } from '../utils/yahoo-http';
 
 // 1D cache: 60s, longer periods: 5min (historical data doesn't change fast)
 const heatmapCache = new NodeCache({ stdTTL: 60 });
+const yahooFundamentalsCache = new NodeCache({ stdTTL: 6 * 60 * 60 }); // 6h
 
 export type HeatmapPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
 
@@ -77,6 +79,48 @@ function resolveMarketCapB(overview: any): number | null {
   const rawCap = parseMarketCapB(overview?.marketCap ?? overview?.MarketCapitalization);
   if (rawCap != null) return rawCap / 1_000_000_000;
   return null;
+}
+
+async function fetchYahooFundamentals(ticker: string): Promise<{ name: string; marketCapB: number } | null> {
+  const upper = ticker.toUpperCase();
+  const cacheKey = `yh-fund:${upper}`;
+  const cached = yahooFundamentalsCache.get<{ name: string; marketCapB: number }>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(upper)}?modules=price`;
+    const resp = await yahooGet(url, 8000);
+    const price = resp.data?.quoteSummary?.result?.[0]?.price;
+    if (!price) return null;
+
+    const name = price.shortName || price.longName || upper;
+    const mc = price.marketCap?.raw;
+    if (typeof mc !== 'number' || !isFinite(mc) || mc <= 0) return null;
+
+    const result = { name, marketCapB: mc / 1_000_000_000 };
+    yahooFundamentalsCache.set(cacheKey, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchYahooFundamentalsBatch(tickers: string[]): Promise<Map<string, { name: string; marketCapB: number }>> {
+  const result = new Map<string, { name: string; marketCapB: number }>();
+  if (tickers.length === 0) return result;
+
+  const BATCH_SIZE = 20;
+  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
+    const batch = tickers.slice(i, i + BATCH_SIZE);
+    const settled = await Promise.allSettled(batch.map(t => fetchYahooFundamentals(t)));
+    for (let j = 0; j < settled.length; j++) {
+      const r = settled[j];
+      if (r.status === 'fulfilled' && r.value) {
+        result.set(batch[j].toUpperCase(), r.value);
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -156,6 +200,13 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D'): Promise<Heat
     } catch {
       // Ignore malformed cache rows
     }
+  }
+
+  // Yahoo fallback for missing fundamentals (name + market cap)
+  const missingTickers = uniqueTickers.filter(t => !fundamentalsMap.has(t));
+  const yahooFallbacks = await fetchYahooFundamentalsBatch(missingTickers);
+  for (const [ticker, data] of yahooFallbacks) {
+    fundamentalsMap.set(ticker, { companyName: data.name, marketCapB: data.marketCapB });
   }
 
   const sectors: HeatmapSector[] = Object.entries(subSectorGroups).map(([sectorName, subSectors]) => {

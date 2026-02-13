@@ -2,6 +2,7 @@
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded } from './services/snapshot.service';
+import { backfillLeaderboardDemoData } from './services/demo-data.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
@@ -88,6 +89,13 @@ const server = app.listen(config.port, async () => {
       }
     });
   }, SNAPSHOT_INTERVAL_MS);
+
+  // Demo leaderboard data backfill â€” holdings + snapshots + activity events
+  setTimeout(() => {
+    backfillLeaderboardDemoData().catch(err =>
+      console.error('[Demo Data] Backfill failed:', (err as Error).message)
+    );
+  }, 60000); // 60s delay after startup
 
   // Dividend sync â€” fetch dividend events from Yahoo Finance on startup + every 6 hours
   syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));

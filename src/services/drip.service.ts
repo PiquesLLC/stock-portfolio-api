@@ -6,34 +6,40 @@
 import prisma from '../utils/prisma';
 import { yahooGet } from '../utils/yahoo-http';
 
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+function resolveUserId(userId?: string | null): string {
+  return userId ?? SYSTEM_USER_ID;
+}
 
 
 /**
  * Check if DRIP is enabled for a user.
  */
 export async function isDripEnabled(userId: string | null): Promise<boolean> {
-  if (userId) {
+  const targetUserId = resolveUserId(userId);
+  if (targetUserId) {
     const userSettings = await prisma.userSettings.findUnique({
-      where: { userId },
+      where: { userId: targetUserId },
     });
     return userSettings?.dripEnabled ?? false;
-  } else {
-    const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
-    });
-    return settings?.dripEnabled ?? false;
   }
+  const settings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+  });
+  return settings?.dripEnabled ?? false;
 }
 
 /**
  * Update DRIP settings for a user.
  */
 export async function updateDripSettings(userId: string | null, enabled: boolean): Promise<void> {
-  if (userId) {
+  const targetUserId = resolveUserId(userId);
+  if (targetUserId) {
     await prisma.userSettings.upsert({
-      where: { userId },
+      where: { userId: targetUserId },
       create: {
-        userId,
+        userId: targetUserId,
         cashBalance: 0,
         marginDebt: 0,
         dripEnabled: enabled,
@@ -108,7 +114,7 @@ export async function reinvestDividend(
   const holding = await prisma.holding.findFirst({
     where: {
       ticker,
-      userId: userId ?? null,
+      userId: resolveUserId(userId),
     },
   });
 
@@ -123,7 +129,7 @@ export async function reinvestDividend(
     // 1. Create DividendReinvestment record
     const drip = await tx.dividendReinvestment.create({
       data: {
-        userId: userId ?? null,
+        userId: resolveUserId(userId),
         dividendCreditId: creditId,
         ticker,
         sharesPurchased,
@@ -151,7 +157,7 @@ export async function reinvestDividend(
     // 3. Create Lot record for the reinvested shares
     await tx.lot.create({
       data: {
-        userId: userId ?? null,
+        userId: resolveUserId(userId),
         ticker,
         shares: sharesPurchased,
         costPerShare: pricePerShare,
@@ -163,9 +169,9 @@ export async function reinvestDividend(
     });
 
     // 4. Deduct from cash balance (dividend was already credited to cash)
-    if (userId) {
+    if (resolveUserId(userId)) {
       await tx.userSettings.update({
-        where: { userId },
+        where: { userId: resolveUserId(userId) },
         data: {
           cashBalance: { decrement: amountToReinvest },
         },
@@ -217,7 +223,7 @@ export async function getReinvestments(
 }>> {
   const reinvestments = await prisma.dividendReinvestment.findMany({
     where: {
-      userId: userId ?? null,
+      userId: resolveUserId(userId),
       ...(ticker ? { ticker: ticker.toUpperCase() } : {}),
     },
     orderBy: { fillDate: 'desc' },

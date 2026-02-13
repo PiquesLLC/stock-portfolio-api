@@ -280,6 +280,12 @@ async function refreshFundamentals(ticker: string): Promise<void> {
   console.log(`[AV Fundamentals] Cached ${ticker}`);
 }
 
+/** Public wrapper to force-refresh fundamentals for a ticker. */
+export async function refreshFundamentalsForTicker(ticker: string): Promise<void> {
+  const upper = ticker.toUpperCase();
+  await refreshFundamentals(upper);
+}
+
 /** Background rotation: refresh the N oldest/never-fetched tickers. */
 export async function rotateTickerFundamentals(allTickers: string[]): Promise<void> {
   const remaining = await getDailyCallsRemaining();

@@ -8,6 +8,11 @@ import { Prisma } from '@prisma/client';
 import prisma from '../utils/prisma';
 import { isDripEnabled, reinvestDividend } from './drip.service';
 
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+function resolveUserId(userId?: string | null): string {
+  return userId ?? SYSTEM_USER_ID;
+}
 
 
 /**
@@ -169,10 +174,11 @@ export async function getDividendSummary(userId?: string | null): Promise<{
   byTicker: { ticker: string; total: number; count: number }[];
 }> {
   const ytdStart = new Date(new Date().getFullYear(), 0, 1);
+  const targetUserId = resolveUserId(userId);
 
   const credits = await prisma.dividendCredit.findMany({
     where: {
-      userId: userId ?? null,
+      userId: targetUserId,
       status: 'posted',
     },
     orderBy: { creditedAt: 'desc' },
@@ -207,9 +213,10 @@ export async function getDividendSummary(userId?: string | null): Promise<{
  * Get dividend credits (history) for a user.
  */
 export async function getDividendCredits(userId?: string | null, ticker?: string): Promise<any[]> {
+  const targetUserId = resolveUserId(userId);
   return prisma.dividendCredit.findMany({
     where: {
-      userId: userId ?? null,
+      userId: targetUserId,
       ...(ticker ? { ticker: ticker.toUpperCase() } : {}),
       status: 'posted',
     },

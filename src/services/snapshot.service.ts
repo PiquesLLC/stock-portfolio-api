@@ -414,6 +414,7 @@ export async function reconstructPortfolioHistoryHiRes(
   marginDebt: number,
   yahooRange: string,   // e.g. '5d', '1mo'
   yahooInterval: string, // e.g. '15m', '1h'
+  minActualRatio: number = 0.5, // minimum fraction of tickers with real data
 ): Promise<{ time: number; value: number }[]> {
   if (holdings.length === 0) return [];
 
@@ -535,9 +536,10 @@ export async function reconstructPortfolioHistoryHiRes(
     }
 
     // Include point if all tickers are accounted for (actual or forward-filled)
-    // AND at least half have real data (avoids phantom early points)
+    // AND enough tickers have real data (avoids phantom early points).
+    const ratio = Math.max(0.5, Math.min(1, minActualRatio));
     if (tickersWithPrice >= tickerCandles.size &&
-        tickersWithActualPrice >= Math.ceil(tickerCandles.size * 0.5)) {
+        tickersWithActualPrice >= Math.ceil(tickerCandles.size * ratio)) {
       points.push({ time: dateMs, value: totalValue });
     }
   }
@@ -616,6 +618,114 @@ export async function createUserSnapshotIfNeeded(userId: string, totalAssets: nu
   });
 
   userSnapshotLocks.set(userId, snapshotTime.getTime());
+}
+
+// ----------------------------------------------------------------------------
+// Demo user snapshot backfill (leaderboard/profile cards)
+// ----------------------------------------------------------------------------
+
+function randomNormal(mean: number, stdDev: number): number {
+  const u1 = Math.random();
+  const u2 = Math.random();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return mean + stdDev * z;
+}
+
+export async function backfillDemoUserSnapshots(days: number = 90, minSnapshots: number = 5): Promise<void> {
+  const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+  const users = await prisma.user.findMany({
+    where: {
+      leaderboardEligible: true,
+      id: { not: DEFAULT_USER_ID },
+    },
+    select: { id: true, displayName: true },
+  });
+
+  if (users.length === 0) return;
+
+  let backfilledUsers = 0;
+  let skippedUsers = 0;
+
+  for (const user of users) {
+    const snapshotCount = await prisma.portfolioSnapshot.count({ where: { userId: user.id } });
+    if (snapshotCount >= minSnapshots) {
+      skippedUsers++;
+      continue;
+    }
+
+    const [holdings, settings] = await Promise.all([
+      prisma.holding.findMany({
+        where: { userId: user.id },
+        select: { shares: true, averageCost: true },
+      }),
+      prisma.userSettings.findUnique({ where: { userId: user.id } }),
+    ]);
+
+    if (holdings.length === 0) {
+      skippedUsers++;
+      continue;
+    }
+
+    const cashBalance = settings?.cashBalance ?? 0;
+    const marginDebt = settings?.marginDebt ?? 0;
+
+    const holdingsValue = holdings.reduce((sum, h) => sum + (h.shares * h.averageCost), 0);
+    const initialAssets = holdingsValue + cashBalance;
+    if (initialAssets <= 0) {
+      skippedUsers++;
+      continue;
+    }
+
+    // Random walk parameters per user for variety
+    const userDrift = 0.0003 + (Math.random() - 0.5) * 0.001;
+    const userVol = 0.012 + Math.random() * 0.008;
+
+    let currentValue = initialAssets;
+    const now = new Date();
+
+    for (let day = days - 1; day >= 0; day--) {
+      const snapshotDate = new Date(now);
+      snapshotDate.setDate(snapshotDate.getDate() - day);
+      snapshotDate.setHours(16, 0, 0, 0);
+
+      // Skip weekends
+      const dow = snapshotDate.getDay();
+      if (dow === 0 || dow === 6) continue;
+
+      const dailyReturn = randomNormal(userDrift, userVol);
+      const prevValue = currentValue;
+      currentValue = currentValue * (1 + dailyReturn);
+
+      const dailyPL = currentValue - prevValue;
+      const dailyPLPercent = prevValue > 0 ? (dailyPL / prevValue) * 100 : 0;
+
+      const totalPL = currentValue - initialAssets;
+      const totalPLPercent = initialAssets > 0 ? (totalPL / initialAssets) * 100 : 0;
+
+      const snapshotTotalValue = Math.round(currentValue * 100) / 100;
+      const snapshotNetEquity = Math.round((currentValue - marginDebt) * 100) / 100;
+
+      await prisma.portfolioSnapshot.create({
+        data: {
+          timestamp: snapshotDate,
+          totalValue: snapshotTotalValue,
+          cashBalance,
+          dailyPL: Math.round(dailyPL * 100) / 100,
+          dailyPLPercent: Math.round(dailyPLPercent * 100) / 100,
+          totalPL: Math.round(totalPL * 100) / 100,
+          totalPLPercent: Math.round(totalPLPercent * 100) / 100,
+          netEquity: snapshotNetEquity,
+          userId: user.id,
+        },
+      });
+    }
+
+    backfilledUsers++;
+    console.log(`[Demo Snapshots] Backfilled ${user.displayName ?? user.id}`);
+  }
+
+  console.log(`[Demo Snapshots] Done: ${backfilledUsers} backfilled, ${skippedUsers} skipped`);
 }
 
 export async function getUserChartSnapshots(userId: string, period: string): Promise<{

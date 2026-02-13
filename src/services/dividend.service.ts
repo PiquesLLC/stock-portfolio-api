@@ -5,6 +5,12 @@
 
 import prisma from '../utils/prisma';
 
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+function resolveUserId(userId?: string | null): string {
+  return userId ?? SYSTEM_USER_ID;
+}
+
 
 
 export interface DividendEventInput {
@@ -57,9 +63,10 @@ export async function getDividendEvents(options?: {
   if (options?.ticker) {
     tickerFilter = { ticker: options.ticker.toUpperCase() };
   } else {
+    const targetUserId = resolveUserId(options?.userId);
     const holdings = await prisma.holding.findMany({
       where: {
-        userId: options?.userId ?? null,
+        userId: targetUserId,
         shares: { gt: 0 },
       },
       select: { ticker: true },
@@ -85,9 +92,10 @@ export async function getDividendEvents(options?: {
 
 export async function getUpcomingDividendEvents(userId?: string | null) {
   // Only return events for tickers the user actually holds
+  const targetUserId = resolveUserId(userId);
   const holdings = await prisma.holding.findMany({
     where: {
-      userId: userId ?? null,
+      userId: targetUserId,
       shares: { gt: 0 },
     },
     select: { ticker: true },
