@@ -31,6 +31,38 @@ async function ensureDefaultUser(): Promise<void> {
   }
 }
 
+// Ensure the system user participates in leaderboard rankings
+async function ensureDefaultUserLeaderboard(): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: DEFAULT_USER_ID },
+    select: { id: true, leaderboardEligible: true, profilePublic: true, trackingStartAt: true },
+  });
+
+  if (!user) return;
+
+  let trackingStartAt = user.trackingStartAt;
+  if (!trackingStartAt) {
+    const firstSnapshot = await prisma.portfolioSnapshot.findFirst({
+      where: { userId: DEFAULT_USER_ID },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    });
+    trackingStartAt = firstSnapshot?.timestamp ?? new Date();
+  }
+
+  const updates: { leaderboardEligible?: boolean; profilePublic?: boolean; trackingStartAt?: Date } = {};
+  if (!user.leaderboardEligible) updates.leaderboardEligible = true;
+  if (!user.profilePublic) updates.profilePublic = true;
+  if (user.trackingStartAt?.getTime() !== trackingStartAt.getTime()) {
+    updates.trackingStartAt = trackingStartAt;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await prisma.user.update({ where: { id: DEFAULT_USER_ID }, data: updates });
+    console.log('[Init] Enabled leaderboard for system user');
+  }
+}
+
 // One-time cleanup: remove migrated holdings from non-system users
 // (the old migration function incorrectly copied demo holdings to real users)
 async function cleanupMigratedHoldings(): Promise<void> {
@@ -67,6 +99,7 @@ const server = app.listen(config.port, async () => {
 
   // Ensure default system user exists before any schedulers run
   await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
+  await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
 
   // One-time cleanup of incorrectly migrated holdings
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));

@@ -292,6 +292,8 @@ export async function signup(
       displayName,
       passwordHash,
       profilePublic: true,
+      leaderboardEligible: true,
+      trackingStartAt: new Date(),
     },
     select: { id: true, username: true, displayName: true },
   });

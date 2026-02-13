@@ -77,7 +77,9 @@ export async function ensureLeaderboardUsersHaveHoldings(): Promise<{ filled: nu
   return { filled, skipped };
 }
 
-export async function seedLeaderboardActivityEvents(): Promise<{ seeded: number; skipped: number }> {
+export async function seedLeaderboardActivityEvents(
+  options: { force?: boolean } = {}
+): Promise<{ seeded: number; skipped: number }> {
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
@@ -90,12 +92,17 @@ export async function seedLeaderboardActivityEvents(): Promise<{ seeded: number;
 
   let seeded = 0;
   let skipped = 0;
+  const force = options.force ?? false;
 
   for (const user of users) {
-    const existing = await prisma.activityEvent.count({ where: { userId: user.id } });
-    if (existing > 0) {
-      skipped++;
-      continue;
+    if (force) {
+      await prisma.activityEvent.deleteMany({ where: { userId: user.id } });
+    } else {
+      const existing = await prisma.activityEvent.count({ where: { userId: user.id } });
+      if (existing > 0) {
+        skipped++;
+        continue;
+      }
     }
 
     const holdings = await prisma.holding.findMany({
@@ -108,13 +115,13 @@ export async function seedLeaderboardActivityEvents(): Promise<{ seeded: number;
     }
 
     const tickers = holdings.map(h => h.ticker);
-    const eventCount = randInt(10, 25);
+    const eventCount = randInt(18, 35);
     const events = [];
 
     for (let i = 0; i < eventCount; i++) {
       const ticker = tickers[randInt(0, tickers.length - 1)];
       const roll = Math.random();
-      const type = roll < 0.4 ? 'holding_added' : roll < 0.85 ? 'holding_updated' : 'holding_removed';
+      const type = roll < 0.25 ? 'holding_added' : roll < 0.9 ? 'holding_updated' : 'holding_removed';
 
       const shares = randInt(1, 50);
       const previousShares = randInt(1, 50);
@@ -128,7 +135,7 @@ export async function seedLeaderboardActivityEvents(): Promise<{ seeded: number;
             : { ticker, previousShares };
 
       const createdAt = new Date();
-      createdAt.setDate(createdAt.getDate() - randInt(0, 30));
+      createdAt.setDate(createdAt.getDate() - randInt(0, 45));
       createdAt.setHours(randInt(9, 16), randInt(0, 59), randInt(0, 59), 0);
 
       events.push({
@@ -146,6 +153,10 @@ export async function seedLeaderboardActivityEvents(): Promise<{ seeded: number;
 
   console.log(`[Demo Activity] Done: ${seeded} seeded, ${skipped} skipped`);
   return { seeded, skipped };
+}
+
+export async function reseedLeaderboardActivityEvents(): Promise<void> {
+  await seedLeaderboardActivityEvents({ force: true });
 }
 
 export async function backfillLeaderboardDemoData(): Promise<void> {
