@@ -6,6 +6,7 @@ import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
 import { getAIEvents } from '../services/perplexity-events.service';
 import { askStockQuestion } from '../services/perplexity-qa.service';
 import { getHistoricalCAGRs } from '../services/historical-cagr.service';
+import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
 
 interface PriceResult {
   price: number;
@@ -363,5 +364,18 @@ export async function getHistoricalCAGRHandler(req: Request, res: Response): Pro
   } catch (error) {
     console.error('Error fetching historical CAGR:', error);
     res.status(500).json({ error: 'Failed to fetch historical CAGR data' });
+  }
+}
+
+export async function getHeatmapHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const validPeriods: HeatmapPeriod[] = ['1D', '1W', '1M', '3M', '6M', '1Y'];
+    const periodParam = ((req.query.period as string) || '1D').toUpperCase() as HeatmapPeriod;
+    const period = validPeriods.includes(periodParam) ? periodParam : '1D';
+    const data = await getHeatmapData(period);
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching heatmap data:', error);
+    res.status(500).json({ error: 'Failed to fetch heatmap data' });
   }
 }

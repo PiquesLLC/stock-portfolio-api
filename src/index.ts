@@ -10,6 +10,7 @@ import { checkMilestoneAlerts } from './services/milestone.service';
 import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
+import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -175,6 +176,19 @@ const server = app.listen(config.port, async () => {
       console.error('[AV Fundamentals] Rotation error:', (err as Error).message);
     }
   }, 6 * 60 * 60 * 1000);
+
+  // Heatmap fundamentals backfill â€” refresh heatmap tickers (missing/stale) on startup + daily
+  console.log('[Heatmap Fundamentals] Backfill scheduled');
+  setTimeout(() => {
+    backfillHeatmapFundamentals().catch(err =>
+      console.error('[Heatmap Fundamentals] Startup backfill failed:', (err as Error).message)
+    );
+  }, 150000); // 150s delay after startup
+  setInterval(() => {
+    backfillHeatmapFundamentals().catch(err =>
+      console.error('[Heatmap Fundamentals] Backfill error:', (err as Error).message)
+    );
+  }, 24 * 60 * 60 * 1000);
 
   // Milestone alerts (52w high/low, ATH/ATL) â€” using Yahoo Finance for accurate 52w data
   console.log('[Milestone Scheduler] Running every 30 minutes');
