@@ -572,7 +572,41 @@ export async function reconstructPortfolioHistoryHiRes(
     }
   }
 
+  // Gap-fill: when consecutive points are more than 1.5× the expected interval
+  // apart, linearly interpolate to keep the chart smooth and continuous.
+  const expectedMs = parseIntervalMs(yahooInterval);
+  if (expectedMs > 0 && points.length >= 2) {
+    const filled: { time: number; value: number }[] = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const gap = points[i].time - points[i - 1].time;
+      if (gap > expectedMs * 1.5) {
+        const steps = Math.round(gap / expectedMs);
+        for (let s = 1; s < steps; s++) {
+          const t = points[i - 1].time + s * expectedMs;
+          const frac = s / steps;
+          const v = points[i - 1].value + frac * (points[i].value - points[i - 1].value);
+          filled.push({ time: Math.round(t), value: v });
+        }
+      }
+      filled.push(points[i]);
+    }
+    return filled;
+  }
+
   return points;
+}
+
+/** Parse interval string like '5m', '15m', '1h', '1d' to milliseconds */
+function parseIntervalMs(interval: string): number {
+  const match = interval.match(/^(\d+)(m|h|d)$/);
+  if (!match) return 0;
+  const n = parseInt(match[1], 10);
+  switch (match[2]) {
+    case 'm': return n * 60_000;
+    case 'h': return n * 3_600_000;
+    case 'd': return n * 86_400_000;
+    default: return 0;
+  }
 }
 
 // ---- User-specific snapshot functions ----
