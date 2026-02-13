@@ -1,6 +1,7 @@
 import prisma from '../utils/prisma';
 import { subSectorGroups } from '../utils/sectors';
 import { backfillDemoUserSnapshots } from './snapshot.service';
+import { followUser } from './follow.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -157,6 +158,62 @@ export async function seedLeaderboardActivityEvents(
 
 export async function reseedLeaderboardActivityEvents(): Promise<void> {
   await seedLeaderboardActivityEvents({ force: true });
+}
+
+export async function seedLeaderboardFollows(
+  options: { force?: boolean } = {}
+): Promise<{ seeded: number; skipped: number }> {
+  const users = await prisma.user.findMany({
+    where: {
+      leaderboardEligible: true,
+      id: { not: DEFAULT_USER_ID },
+    },
+    select: { id: true, displayName: true },
+  });
+
+  if (users.length === 0) return { seeded: 0, skipped: 0 };
+
+  if (options.force) {
+    await prisma.follow.deleteMany({
+      where: {
+        OR: [
+          { followerId: DEFAULT_USER_ID },
+          { followerId: { in: users.map(u => u.id) } },
+        ],
+      },
+    });
+  }
+
+  let seeded = 0;
+  let skipped = 0;
+
+  // System user follows all leaderboard users so the feed has activity.
+  for (const user of users) {
+    try {
+      await followUser(DEFAULT_USER_ID, user.id);
+      seeded++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  // Each demo user follows 3-5 other demo users for richer social graphs.
+  for (const user of users) {
+    const candidates = users.filter(u => u.id !== user.id);
+    const count = Math.min(candidates.length, randInt(3, 5));
+    const targets = pickRandom(candidates, count);
+    for (const target of targets) {
+      try {
+        await followUser(user.id, target.id);
+        seeded++;
+      } catch {
+        skipped++;
+      }
+    }
+  }
+
+  console.log(`[Demo Follows] Done: ${seeded} seeded, ${skipped} skipped`);
+  return { seeded, skipped };
 }
 
 export async function backfillLeaderboardDemoData(): Promise<void> {

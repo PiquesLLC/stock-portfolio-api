@@ -36,6 +36,26 @@ routes/*.routes.ts → controllers/*.controller.ts → services/*.service.ts
 
 The following areas have been extensively tuned over many iterations to handle edge cases around market hours, data quality, and chart rendering. **Do NOT modify this logic unless Jon specifically asks AND you fully understand the consequences.**
 
+### CRITICAL RULE — NEVER FILTER PRE-MARKET DATA FROM 1D CHARTS
+
+This mistake has been made multiple times and broken the app:
+1. Added REG-only session filtering to chart points → reverted
+2. Added a 9:30 AM ET filter on the UI side → reverted
+3. Same pattern attempted again → reverted
+
+The 1D chart MUST always include data from **4:00 AM ET to 8:00 PM ET** (full extended hours). Users rely on pre-market movement starting at 1 AM PST / 4 AM ET.
+
+**NEVER:**
+- Filter chart points to only REG session
+- Add filters like `.filter(p => p.time >= marketOpenMs)` where marketOpen = 9:30 AM
+- Gate live value appends behind `session === 'REG'`
+- Change `minActualRatio` below `0.5` in `reconstructPortfolioHistoryHiRes`
+- Narrow the chart x-axis to 9:30 AM–4:00 PM ET
+
+If pre-market data looks ugly (flat line, spike, sparse points), fix the **visual rendering** (opacity, smoothing, interpolation). **Do NOT remove data.**
+
+Applies to: `snapshot.service.ts`, `portfolio.controller.ts`, `watchlist.controller.ts`, `market.service.ts`, `PortfolioValueChart.tsx`, and any code that touches 1D chart data.
+
 ### 1. The 1D Chart Handler (`portfolio.controller.ts` → `getChartHandler`, period === '1D')
 
 This is the most sensitive code in the entire API. It reconstructs today's portfolio value chart from per-ticker intraday candles and has been carefully tuned.

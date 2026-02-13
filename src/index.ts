@@ -63,9 +63,10 @@ async function ensureDefaultUserLeaderboard(): Promise<void> {
   }
 }
 
-// One-time cleanup: remove migrated holdings from non-system users
-// (the old migration function incorrectly copied demo holdings to real users)
+// One-time cleanup: remove migrated holdings from non-system users.
+// Disabled by default to preserve demo users; enable via CLEANUP_MIGRATED_HOLDINGS=true if needed.
 async function cleanupMigratedHoldings(): Promise<void> {
+  if (process.env.CLEANUP_MIGRATED_HOLDINGS !== 'true') return;
   const result = await prisma.holding.deleteMany({
     where: { userId: { not: DEFAULT_USER_ID } },
   });
