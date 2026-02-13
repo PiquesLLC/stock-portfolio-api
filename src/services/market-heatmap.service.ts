@@ -1,6 +1,6 @@
 import NodeCache from 'node-cache';
 import prisma from '../utils/prisma';
-import { subSectorGroups } from '../utils/sectors';
+import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
 import { yahooGet } from '../utils/yahoo-http';
 
@@ -162,10 +162,13 @@ async function fetchPeriodChanges(
   return changes;
 }
 
-export async function getHeatmapData(period: HeatmapPeriod = '1D'): Promise<HeatmapResponse> {
-  const cacheKey = `heatmap-${period}`;
+export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: MarketIndex): Promise<HeatmapResponse> {
+  const cacheKey = `heatmap-${period}-${index || 'all'}`;
   const cached = heatmapCache.get<HeatmapResponse>(cacheKey);
   if (cached) return cached;
+
+  // Filter by index if specified
+  const indexFilter = index ? INDEX_SETS[index] : null;
 
   // Collect all tickers from sub-sector groups
   const allTickers: string[] = [];
@@ -214,7 +217,13 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D'): Promise<Heat
     const subSectorList: HeatmapSubSector[] = [];
 
     for (const [subName, subTickers] of Object.entries(subSectors)) {
-      const stocks: HeatmapStock[] = subTickers.map((ticker) => {
+      // Filter tickers by index membership if specified
+      const filteredSubTickers = indexFilter
+        ? subTickers.filter(t => indexFilter.has(t.toUpperCase()))
+        : subTickers;
+      if (filteredSubTickers.length === 0) continue;
+
+      const stocks: HeatmapStock[] = filteredSubTickers.map((ticker) => {
         const upper = ticker.toUpperCase();
         const quote = quotes.get(upper);
         const overview = fundamentalsMap.get(upper);
@@ -272,8 +281,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D'): Promise<Heat
     };
   });
 
+  // Remove empty sectors (can happen when filtering by index)
+  const filteredSectors = sectors.filter(s => s.stocks.length > 0);
+
   const response: HeatmapResponse = {
-    sectors,
+    sectors: filteredSectors,
     period,
     generated: Date.now(),
   };

@@ -7,6 +7,7 @@ import { getAIEvents } from '../services/perplexity-events.service';
 import { askStockQuestion } from '../services/perplexity-qa.service';
 import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
+import { MarketIndex } from '../utils/sectors';
 
 interface PriceResult {
   price: number;
@@ -372,7 +373,12 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
     const validPeriods: HeatmapPeriod[] = ['1D', '1W', '1M', '3M', '6M', '1Y'];
     const periodParam = ((req.query.period as string) || '1D').toUpperCase() as HeatmapPeriod;
     const period = validPeriods.includes(periodParam) ? periodParam : '1D';
-    const data = await getHeatmapData(period);
+
+    const validIndexes: MarketIndex[] = ['SP500', 'DOW30', 'NASDAQ100'];
+    const indexParam = (req.query.index as string)?.toUpperCase() as MarketIndex | undefined;
+    const index = indexParam && validIndexes.includes(indexParam) ? indexParam : undefined;
+
+    const data = await getHeatmapData(period, index);
     res.json(data);
   } catch (error) {
     console.error('Error fetching heatmap data:', error);
