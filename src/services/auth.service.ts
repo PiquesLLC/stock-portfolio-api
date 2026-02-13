@@ -74,9 +74,6 @@ export async function rotateRefreshToken(
   }
 
   if (stored.revokedAt) {
-    // Grace period: if revoked less than 30 seconds ago, this is likely a
-    // concurrent request that raced with the first refresh — not a reuse attack.
-    // Just return null without nuking all tokens.
     const msSinceRevoked = Date.now() - stored.revokedAt.getTime();
     if (msSinceRevoked > 30_000) {
       // Genuine reuse attack — revoke the entire family for safety
@@ -84,8 +81,21 @@ export async function rotateRefreshToken(
         where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      return null;
     }
-    return null;
+
+    // Grace period: revoked less than 30s ago — concurrent request that raced
+    // with the first refresh. Issue new tokens using the latest valid refresh token.
+    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    const accessToken = generateAccessToken(payload);
+    const latestValid = await prisma.refreshToken.findFirst({
+      where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const refreshToken = latestValid
+      ? latestValid.token
+      : await generateRefreshToken(stored.userId);
+    return { accessToken, refreshToken, payload };
   }
 
   // Revoke the old token
