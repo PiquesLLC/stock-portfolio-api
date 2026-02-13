@@ -789,6 +789,13 @@ const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
     inceptionDate: 'Jul 10, 2000',
     numberOfHoldings: 47,
   },
+  IGV: {
+    description: 'iShares Expanded Tech-Software Sector ETF tracks the S&P North American Expanded Technology Software Index, providing exposure to North American software companies. The fund invests in companies involved in systems software, application software, home entertainment software, and interactive media. Top holdings typically include Microsoft, Salesforce, Adobe, Intuit, and ServiceNow. IGV offers targeted exposure to the software industry, which benefits from recurring revenue models, cloud computing growth, and enterprise digital transformation. The fund is managed by BlackRock.',
+    category: 'Technology',
+    fundFamily: 'iShares',
+    inceptionDate: 'Jul 10, 2001',
+    numberOfHoldings: 120,
+  },
 };
 
 /**
