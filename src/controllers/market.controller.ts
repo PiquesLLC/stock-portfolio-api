@@ -7,6 +7,7 @@ import { getAIEvents } from '../services/perplexity-events.service';
 import { askStockQuestion } from '../services/perplexity-qa.service';
 import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
+import { getEarningsTrack } from '../services/earnings-track.service';
 import { MarketIndex } from '../utils/sectors';
 
 interface PriceResult {
@@ -398,5 +399,17 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
   } catch (error) {
     console.error(`[Nala Score] Error for ${req.params.ticker}:`, error);
     res.status(500).json({ error: 'Failed to compute Nala Score' });
+  }
+}
+
+export async function getEarningsTrackHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) { res.status(400).json({ error: 'Missing ticker' }); return; }
+    const track = await getEarningsTrack(ticker);
+    res.json(track);
+  } catch (error) {
+    console.error(`[Earnings Track] Error for ${req.params.ticker}:`, error);
+    res.status(500).json({ error: 'Failed to compute earnings track record' });
   }
 }

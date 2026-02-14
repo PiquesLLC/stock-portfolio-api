@@ -18,6 +18,7 @@ import {
   markAnomalyReadHandler,
   markAllAnomaliesReadHandler,
 } from '../controllers/anomaly.controller';
+import { getTaxHarvestHandler } from '../controllers/tax-harvest.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
@@ -33,6 +34,9 @@ router.get('/behavior', heavyReadLimiter, getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
 router.post('/daily-report/regenerate', regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
+
+// Tax-Loss Harvesting
+router.get('/tax-harvest', heavyReadLimiter, getTaxHarvestHandler);
 
 // Anomaly Detection
 router.get('/anomalies', getAnomaliesHandler);

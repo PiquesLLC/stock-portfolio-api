@@ -8,7 +8,7 @@ import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
-import { detectAnomalies } from './services/anomaly-detection.service';
+import { detectAnomalies, detectDividendChanges } from './services/anomaly-detection.service';
 import { getMarketSession } from './utils/market-hours';
 import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
@@ -279,6 +279,19 @@ const server = app.listen(config.port, async () => {
       );
     }
   }, 15 * 60 * 1000);
+
+  // Dividend change detection — every 6 hours (aligned with dividend sync)
+  console.log('[Dividend Change Detection] Running every 6 hours');
+  setTimeout(() => {
+    detectDividendChanges().catch(err =>
+      console.error('[Dividend Change Detection] Init failed:', err.message)
+    );
+  }, 60000);
+  setInterval(() => {
+    detectDividendChanges().catch(err =>
+      console.error('[Dividend Change Detection] Error:', err.message)
+    );
+  }, 6 * 60 * 60 * 1000);
 });
 
 process.on('SIGTERM', () => {

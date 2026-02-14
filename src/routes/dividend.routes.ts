@@ -15,6 +15,7 @@ import {
   updateDripSettingsHandler,
 } from '../controllers/dividend.controller';
 import { getDividendGrowthRatesHandler } from '../controllers/dividend-growth.controller';
+import { getCalendarICS } from '../controllers/calendar.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { mutationLimiter } from '../middleware/rateLimiter';
 
@@ -49,6 +50,9 @@ router.post('/sync', mutationLimiter, requireAuth, syncHandler);
 
 // Backfill missed dividend postings - requires auth
 router.post('/backfill', mutationLimiter, requireAuth, backfillHandler);
+
+// Calendar export (iCal)
+router.get('/calendar.ics', getCalendarICS);
 
 // Backward compat: GET / returns events, POST / adds event
 router.get('/', getEventsHandler);

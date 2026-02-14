@@ -293,3 +293,63 @@ export async function detectAnomalies(): Promise<void> {
 
   console.log(`[Anomaly Detection] Created ${created} new events (${candidates.length - created} on cooldown)`);
 }
+
+/**
+ * Detect dividend increases/decreases for held tickers.
+ * Creates AnomalyEvent with type 'dividend_change'.
+ */
+export async function detectDividendChanges(): Promise<void> {
+  console.log('[Dividend Change Detection] Running scan...');
+
+  const holdings = await getHoldings();
+  if (holdings.length === 0) return;
+
+  let created = 0;
+  for (const holding of holdings) {
+    const ticker = holding.ticker;
+
+    // Get the last 2 regular dividend events for this ticker
+    const events = await prisma.dividendEvent.findMany({
+      where: { ticker, dividendType: 'regular' },
+      orderBy: { exDate: 'desc' },
+      take: 2,
+    });
+
+    if (events.length < 2) continue;
+
+    const [latest, previous] = events;
+    if (latest.amountPerShare === previous.amountPerShare) continue;
+
+    const onCooldown = await checkCooldown(ticker, 'dividend_change');
+    if (onCooldown) continue;
+
+    const changeAmount = latest.amountPerShare - previous.amountPerShare;
+    const changePct = (changeAmount / previous.amountPerShare) * 100;
+    const direction = changeAmount > 0 ? 'raised' : 'cut';
+
+    // Estimate annual frequency from gap between ex-dates
+    const daysBetween = Math.abs(latest.exDate.getTime() - previous.exDate.getTime()) / (1000 * 60 * 60 * 24);
+    const estimatedFrequency = daysBetween < 45 ? 12 : daysBetween < 120 ? 4 : daysBetween < 200 ? 2 : 1;
+
+    const annualImpact = changeAmount * holding.shares * estimatedFrequency;
+    const severity = Math.abs(changePct) >= 20 ? 'critical' : Math.abs(changePct) >= 10 ? 'warning' : 'info';
+
+    await prisma.anomalyEvent.create({
+      data: {
+        userId: SYSTEM_USER_ID,
+        ticker,
+        type: 'dividend_change',
+        severity,
+        title: `${ticker} ${direction} dividend ${Math.abs(changePct).toFixed(1)}%`,
+        description: `${ticker} ${direction} its dividend from $${previous.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`,
+        analysis: null,
+        citations: null,
+        value: changePct,
+        threshold: 0,
+      },
+    });
+    created++;
+  }
+
+  console.log(`[Dividend Change Detection] Created ${created} alerts`);
+}
