@@ -485,3 +485,23 @@ model MilestoneEvent {
   @@index([read])
   @@index([createdAt])
 }
+
+model AnomalyEvent {
+  id          String   @id @default(uuid())
+  userId      String?
+  ticker      String
+  type        String   // volume_spike, price_spike, drawdown, sector_divergence, concentration
+  severity    String   // info, warning, critical
+  title       String
+  description String
+  analysis    String?
+  citations   String?
+  value       Float?
+  threshold   Float?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([ticker, createdAt])
+  @@index([read, createdAt])
+}

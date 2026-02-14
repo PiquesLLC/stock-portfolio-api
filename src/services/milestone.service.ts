@@ -1,6 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
+import { getMarketSession } from '../utils/market-hours';
 
 
 
@@ -19,6 +20,16 @@ interface TickerHolders {
  * Automatically checks every holding across all users - no manual alert setup required.
  */
 export async function checkMilestoneAlerts(): Promise<void> {
+  // Skip on weekends — prices are stale Friday closes, not real milestones
+  const session = getMarketSession();
+  if (session === 'CLOSED') {
+    const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+    if (etDay === 'Sat' || etDay === 'Sun') {
+      console.log('[Milestone] Skipping — market closed (weekend)');
+      return;
+    }
+  }
+
   console.log('[Milestone] Starting automatic check for all holdings...');
 
   try {

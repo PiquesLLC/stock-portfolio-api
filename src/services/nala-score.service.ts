@@ -400,35 +400,16 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
 
   const overview = fundamentals.overview;
   const currentPrice = quote?.currentPrice ?? 0;
-  const isETF = !overview || (!overview.sector && !overview.industry) || overview.sector === 'N/A';
 
-  if (isETF) {
-    // ETFs lack individual fundamentals — return minimal response
-    const momentum = await scoreMomentum(upper, overview, currentPrice);
-    const dividends = await scoreDividends(upper, overview);
-    const composite = Math.round(momentum.score * 0.55 + dividends.score * 0.45);
-    const result: NalaScoreResponse = {
-      ticker: upper,
-      composite,
-      grade: gradeFromScore(composite),
-      dimensions: {
-        value: buildDimension('Value', 0.25, []),
-        quality: buildDimension('Quality', 0.25, []),
-        growth: buildDimension('Growth', 0.20, []),
-        dividends,
-        momentum,
-      },
-      keyInsights: ['ETF — scored on Momentum and Dividends only (individual fundamentals not available).'],
-      dataAge: fundamentals.dataAge,
-      isETF: true,
-      availableDimensions: ['Momentum', 'Dividends'],
-      lastUpdated: new Date().toISOString(),
-    };
-    insightsCache.set(cacheKey, result, 86400);
-    return result;
-  }
+  // Detect real ETFs by name patterns (not by missing data)
+  const name = (overview?.name ?? '').toUpperCase();
+  const isETF = overview != null && (
+    name.includes(' ETF') || name.includes(' FUND') || name.includes(' TRUST') ||
+    name.includes('ISHARES') || name.includes('VANGUARD') || name.includes('SPDR') ||
+    (overview.sector === 'N/A' && overview.industry === 'N/A' && name.length > 0)
+  );
 
-  // Full scoring for individual stocks
+  // Always score all 5 dimensions — missing data gets neutral 12.5/25 per sub-metric
   const [value, quality, growth, dividends, momentum] = await Promise.all([
     scoreValue(overview, currentPrice),
     scoreQuality(fundamentals),
@@ -455,6 +436,7 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
 
   const topDim = Object.values(dimensions).sort((a, b) => b.score - a.score)[0];
   const keyInsights: string[] = [];
+  if (isETF) keyInsights.push(`${upper} is an ETF — some dimensions use neutral defaults where individual fundamentals are unavailable.`);
   keyInsights.push(`${upper} scores ${composite}/100 (${gradeFromScore(composite)}) — strongest in ${topDim.name}.`);
   for (const s of strengths) keyInsights.push(`${s.explanation}`);
   for (const w of weaknesses) keyInsights.push(`Watch: ${w.explanation}`);
@@ -466,7 +448,7 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
     dimensions,
     keyInsights,
     dataAge: fundamentals.dataAge,
-    isETF: false,
+    isETF,
     availableDimensions: ['Value', 'Quality', 'Growth', 'Dividends', 'Momentum'],
     lastUpdated: new Date().toISOString(),
   };

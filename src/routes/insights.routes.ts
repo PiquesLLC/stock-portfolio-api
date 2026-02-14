@@ -12,6 +12,12 @@ import {
   explainBriefingHandler,
   getEarningsSummaryHandler,
 } from '../controllers/insights.controller';
+import {
+  getAnomaliesHandler,
+  getUnreadAnomalyCountHandler,
+  markAnomalyReadHandler,
+  markAllAnomaliesReadHandler,
+} from '../controllers/anomaly.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
@@ -27,5 +33,11 @@ router.get('/behavior', heavyReadLimiter, getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
 router.post('/daily-report/regenerate', regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
+
+// Anomaly Detection
+router.get('/anomalies', getAnomaliesHandler);
+router.get('/anomalies/unread-count', getUnreadAnomalyCountHandler);
+router.patch('/anomalies/:id/read', markAnomalyReadHandler);
+router.post('/anomalies/mark-all-read', markAllAnomaliesReadHandler);
 
 export default router;

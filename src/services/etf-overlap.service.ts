@@ -50,7 +50,7 @@ export async function getEtfOverlap(userId?: string | null) {
   }
 
   const etfs: any[] = [];
-  const exposureMap = new Map<string, { total: number; sources: Array<{ source: string; etf?: string }> }>();
+  const exposureMap = new Map<string, { total: number; sources: Array<{ source: string; etf?: string; value: number }> }>();
 
   let portfolioValue = 0;
 
@@ -65,7 +65,7 @@ export async function getEtfOverlap(userId?: string | null) {
     if (!etfHoldings) {
       const existing = exposureMap.get(ticker) ?? { total: 0, sources: [] };
       existing.total += value;
-      existing.sources.push({ source: 'direct' });
+      existing.sources.push({ source: 'direct', value: round(value, 2) });
       exposureMap.set(ticker, existing);
       continue;
     }
@@ -80,7 +80,7 @@ export async function getEtfOverlap(userId?: string | null) {
     for (const h of topHoldings) {
       const existing = exposureMap.get(h.ticker) ?? { total: 0, sources: [] };
       existing.total += h.exposureValue;
-      existing.sources.push({ source: 'etf', etf: ticker });
+      existing.sources.push({ source: 'etf', etf: ticker, value: h.exposureValue });
       exposureMap.set(h.ticker, existing);
     }
 

@@ -8,6 +8,8 @@ import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
+import { detectAnomalies } from './services/anomaly-detection.service';
+import { getMarketSession } from './utils/market-hours';
 import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
@@ -258,6 +260,25 @@ const server = app.listen(config.port, async () => {
       console.error('[Milestone Scheduler] Error:', err.message)
     );
   }, 30 * 60 * 1000);
+
+  // AI Anomaly Detection — check every 15 minutes during market hours
+  console.log('[Anomaly Detection] Running every 15 minutes (market hours only)');
+  setTimeout(() => {
+    const session = getMarketSession();
+    if (session === 'PRE' || session === 'REG' || session === 'POST') {
+      detectAnomalies().catch(err =>
+        console.error('[Anomaly Detection] Startup check failed:', err.message)
+      );
+    }
+  }, 120000); // 2 min delay
+  setInterval(async () => {
+    const session = getMarketSession();
+    if (session === 'PRE' || session === 'REG' || session === 'POST') {
+      await detectAnomalies().catch(err =>
+        console.error('[Anomaly Detection] Error:', err.message)
+      );
+    }
+  }, 15 * 60 * 1000);
 });
 
 process.on('SIGTERM', () => {

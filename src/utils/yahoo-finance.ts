@@ -335,6 +335,96 @@ const ETF_STATIC_DATA: Record<string, ETFHoldingsData> = {
     asOfDate: '2026-01-30',
     isETF: true,
   },
+  EEM: {
+    topHoldings: [
+      { symbol: 'TSM', holdingName: 'Taiwan Semiconductor', holdingPercent: 9.82 },
+      { symbol: 'BABA', holdingName: 'Alibaba', holdingPercent: 3.41 },
+      { symbol: 'TCEHY', holdingName: 'Tencent', holdingPercent: 3.28 },
+      { symbol: 'RELIANCE.NS', holdingName: 'Reliance Industries', holdingPercent: 1.72 },
+      { symbol: 'PDD', holdingName: 'PDD Holdings', holdingPercent: 1.56 },
+      { symbol: 'MRVL', holdingName: 'Marvell Technology', holdingPercent: 1.32 },
+      { symbol: 'INFY', holdingName: 'Infosys', holdingPercent: 1.21 },
+      { symbol: 'JD', holdingName: 'JD.com', holdingPercent: 1.08 },
+      { symbol: 'VALE', holdingName: 'Vale', holdingPercent: 0.98 },
+      { symbol: 'NU', holdingName: 'Nu Holdings', holdingPercent: 0.94 },
+    ],
+    sectorWeightings: [
+      { sector: 'Technology', weight: 24.50 },
+      { sector: 'Financial Services', weight: 22.10 },
+      { sector: 'Consumer Cyclical', weight: 13.80 },
+      { sector: 'Communication Services', weight: 10.20 },
+      { sector: 'Basic Materials', weight: 7.40 },
+      { sector: 'Energy', weight: 5.90 },
+      { sector: 'Industrials', weight: 5.60 },
+      { sector: 'Consumer Defensive', weight: 4.80 },
+      { sector: 'Healthcare', weight: 3.20 },
+      { sector: 'Utilities', weight: 1.50 },
+      { sector: 'Real Estate', weight: 1.00 },
+    ],
+    totalHoldingsPercent: 25.32,
+    asOfDate: '2026-01-30',
+    isETF: true,
+  },
+  EWJ: {
+    topHoldings: [
+      { symbol: 'TM', holdingName: 'Toyota Motor', holdingPercent: 5.12 },
+      { symbol: 'SONY', holdingName: 'Sony Group', holdingPercent: 3.84 },
+      { symbol: 'MUFG', holdingName: 'Mitsubishi UFJ', holdingPercent: 3.21 },
+      { symbol: 'HMC', holdingName: 'Honda Motor', holdingPercent: 1.98 },
+      { symbol: 'SMFG', holdingName: 'Sumitomo Mitsui', holdingPercent: 1.87 },
+      { symbol: 'NMR', holdingName: 'Nomura Holdings', holdingPercent: 1.45 },
+      { symbol: 'MFG', holdingName: 'Mizuho Financial', holdingPercent: 1.32 },
+      { symbol: 'NTDOY', holdingName: 'Nintendo', holdingPercent: 1.28 },
+      { symbol: 'IX', holdingName: 'ORIX Corp', holdingPercent: 1.15 },
+      { symbol: 'KYOCY', holdingName: 'Kyocera', holdingPercent: 0.98 },
+    ],
+    sectorWeightings: [
+      { sector: 'Industrials', weight: 22.30 },
+      { sector: 'Financial Services', weight: 16.80 },
+      { sector: 'Technology', weight: 14.60 },
+      { sector: 'Consumer Cyclical', weight: 13.90 },
+      { sector: 'Healthcare', weight: 8.50 },
+      { sector: 'Communication Services', weight: 7.80 },
+      { sector: 'Basic Materials', weight: 6.10 },
+      { sector: 'Consumer Defensive', weight: 4.50 },
+      { sector: 'Real Estate', weight: 3.20 },
+      { sector: 'Energy', weight: 1.50 },
+      { sector: 'Utilities', weight: 0.80 },
+    ],
+    totalHoldingsPercent: 22.20,
+    asOfDate: '2026-01-30',
+    isETF: true,
+  },
+  EWZ: {
+    topHoldings: [
+      { symbol: 'VALE', holdingName: 'Vale', holdingPercent: 12.45 },
+      { symbol: 'PBR', holdingName: 'Petrobras', holdingPercent: 8.92 },
+      { symbol: 'ITUB', holdingName: 'Itau Unibanco', holdingPercent: 6.78 },
+      { symbol: 'BBD', holdingName: 'Bradesco', holdingPercent: 4.21 },
+      { symbol: 'NU', holdingName: 'Nu Holdings', holdingPercent: 3.87 },
+      { symbol: 'BSBR', holdingName: 'Banco Santander Brasil', holdingPercent: 2.95 },
+      { symbol: 'ABEV', holdingName: 'Ambev', holdingPercent: 2.67 },
+      { symbol: 'SBS', holdingName: 'SABESP', holdingPercent: 2.34 },
+      { symbol: 'ELP', holdingName: 'Eletrobras', holdingPercent: 2.12 },
+      { symbol: 'CIG', holdingName: 'CEMIG', holdingPercent: 1.89 },
+    ],
+    sectorWeightings: [
+      { sector: 'Financial Services', weight: 28.50 },
+      { sector: 'Basic Materials', weight: 15.20 },
+      { sector: 'Energy', weight: 14.80 },
+      { sector: 'Consumer Defensive', weight: 10.30 },
+      { sector: 'Utilities', weight: 9.40 },
+      { sector: 'Industrials', weight: 7.50 },
+      { sector: 'Consumer Cyclical', weight: 5.60 },
+      { sector: 'Technology', weight: 4.20 },
+      { sector: 'Healthcare', weight: 2.30 },
+      { sector: 'Communication Services', weight: 1.40 },
+      { sector: 'Real Estate', weight: 0.80 },
+    ],
+    totalHoldingsPercent: 48.20,
+    asOfDate: '2026-01-30',
+    isETF: true,
+  },
   XBI: {
     topHoldings: [
       { symbol: 'VRTX', holdingName: 'Vertex Pharmaceuticals', holdingPercent: 2.45 },
@@ -358,53 +448,178 @@ const ETF_STATIC_DATA: Record<string, ETFHoldingsData> = {
 };
 
 /**
- * Fetch ETF holdings and sector weightings
- * Uses static data for common ETFs since Yahoo Finance API has been restricted
+ * Try to dynamically fetch ETF holdings from Yahoo Finance quoteSummary API.
+ */
+async function fetchETFHoldingsYahoo(ticker: string): Promise<ETFHoldingsData | null> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=topHoldings,fundProfile`;
+    const response = await yahooGet(url, 8000);
+    const data = response.data as YahooQuoteSummaryResponse;
+    const result = data?.quoteSummary?.result?.[0];
+    if (!result?.topHoldings?.holdings || result.topHoldings.holdings.length === 0) return null;
+
+    const th = result.topHoldings;
+    const topHoldings: ETFHolding[] = th.holdings
+      .filter((h: any) => h.symbol && h.holdingPercent?.raw > 0)
+      .slice(0, 15)
+      .map((h: any) => ({
+        symbol: h.symbol,
+        holdingName: h.holdingName || h.symbol,
+        holdingPercent: Math.round(h.holdingPercent.raw * 10000) / 100,
+      }));
+
+    const sectorWeightings: ETFSectorWeighting[] = [];
+    if (th.sectorWeightings) {
+      for (const sectorObj of th.sectorWeightings) {
+        for (const [key, val] of Object.entries(sectorObj)) {
+          if (val && typeof val === 'object' && 'raw' in val) {
+            const sectorName = SECTOR_NAME_MAP[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const weight = Math.round((val as { raw: number }).raw * 10000) / 100;
+            if (weight > 0) sectorWeightings.push({ sector: sectorName, weight });
+          }
+        }
+      }
+    }
+    sectorWeightings.sort((a, b) => b.weight - a.weight);
+
+    const totalHoldingsPercent = topHoldings.reduce((sum, h) => sum + h.holdingPercent, 0);
+    console.log(`[ETF Holdings] Yahoo dynamic for ${ticker}: ${topHoldings.length} holdings`);
+    return {
+      topHoldings, sectorWeightings,
+      totalHoldingsPercent: Math.round(totalHoldingsPercent * 100) / 100,
+      asOfDate: new Date().toISOString().slice(0, 10),
+      isETF: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Use Perplexity to fetch ETF holdings for any ETF.
+ * This handles foreign ETFs, obscure ETFs, and any ETF that Yahoo can't provide data for.
+ */
+async function fetchETFHoldingsPerplexity(ticker: string): Promise<ETFHoldingsData | null> {
+  try {
+    const { callPerplexity, extractJson } = await import('../utils/perplexity');
+
+    const resp = await callPerplexity([
+      {
+        role: 'system',
+        content: 'You are a financial data assistant. Return ONLY valid JSON, no markdown fences, no explanation.',
+      },
+      {
+        role: 'user',
+        content: `What are the top 10 holdings of the ETF "${ticker}" with their approximate percentage weights? Include their US-listed ticker symbols where possible. Also include the top sector weightings.
+
+Return JSON in this exact format:
+{
+  "holdings": [
+    {"symbol": "AAPL", "name": "Apple Inc", "weight": 7.5},
+    {"symbol": "MSFT", "name": "Microsoft", "weight": 6.2}
+  ],
+  "sectors": [
+    {"sector": "Technology", "weight": 30.5},
+    {"sector": "Financial Services", "weight": 18.2}
+  ]
+}
+
+Use the most recent data available. For foreign stocks, use their US ADR ticker if one exists (e.g., TSM for Taiwan Semiconductor, BABA for Alibaba). If no US ticker exists, use the local exchange ticker.`,
+      },
+    ], { timeout: 30000 });
+
+    if (!resp?.content) return null;
+
+    const jsonStr = extractJson(resp.content);
+    const parsed = JSON.parse(jsonStr);
+
+    if (!parsed.holdings || !Array.isArray(parsed.holdings) || parsed.holdings.length === 0) return null;
+
+    const topHoldings: ETFHolding[] = parsed.holdings
+      .filter((h: any) => h.symbol && h.weight > 0)
+      .slice(0, 15)
+      .map((h: any) => ({
+        symbol: String(h.symbol).toUpperCase(),
+        holdingName: h.name || h.symbol,
+        holdingPercent: Number(h.weight) || 0,
+      }));
+
+    const sectorWeightings: ETFSectorWeighting[] = (parsed.sectors || [])
+      .filter((s: any) => s.sector && s.weight > 0)
+      .map((s: any) => ({
+        sector: String(s.sector),
+        weight: Number(s.weight) || 0,
+      }))
+      .sort((a: ETFSectorWeighting, b: ETFSectorWeighting) => b.weight - a.weight);
+
+    const totalHoldingsPercent = topHoldings.reduce((sum, h) => sum + h.holdingPercent, 0);
+
+    console.log(`[ETF Holdings] Perplexity for ${ticker}: ${topHoldings.length} holdings, ${sectorWeightings.length} sectors`);
+    return {
+      topHoldings,
+      sectorWeightings,
+      totalHoldingsPercent: Math.round(totalHoldingsPercent * 100) / 100,
+      asOfDate: new Date().toISOString().slice(0, 10),
+      isETF: true,
+    };
+  } catch (err: any) {
+    console.error(`[ETF Holdings] Perplexity failed for ${ticker}:`, err.message);
+    return null;
+  }
+}
+
+// Longer cache for Perplexity-fetched data (24 hours) to minimize API calls
+const etfPerplexityCache = new NodeCache({ stdTTL: 86400 });
+
+/**
+ * Fetch ETF holdings and sector weightings.
+ * Priority: cache → static data → Yahoo API → Perplexity AI → known ETF empty shell
  */
 export async function getETFHoldings(ticker: string): Promise<ETFHoldingsData | null> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `etf-holdings:${upperTicker}`;
 
-  // Check cache first
+  // 1. Check short-lived cache
   const cached = etfHoldingsCache.get<ETFHoldingsData>(cacheKey);
-  if (cached) {
-    return cached;
+  if (cached) return cached;
+
+  // 2. Check Perplexity long-lived cache (24hr)
+  const perplexityCached = etfPerplexityCache.get<ETFHoldingsData>(cacheKey);
+  if (perplexityCached) {
+    etfHoldingsCache.set(cacheKey, perplexityCached);
+    return perplexityCached;
   }
 
-  // Check if we have static data for this ETF
+  // 3. Static hardcoded data (fastest, no API call)
   if (ETF_STATIC_DATA[upperTicker]) {
     const data = ETF_STATIC_DATA[upperTicker];
     etfHoldingsCache.set(cacheKey, data);
     return data;
   }
 
-  // Check if it's a known ETF but we don't have data
-  if (KNOWN_ETFS.has(upperTicker)) {
-    const data: ETFHoldingsData = {
-      topHoldings: [],
-      sectorWeightings: [],
-      totalHoldingsPercent: 0,
-      asOfDate: null,
-      isETF: true,
-    };
-    etfHoldingsCache.set(cacheKey, data);
-    return data;
+  // 4. Try Yahoo Finance quoteSummary (free, may be restricted)
+  const yahoo = await fetchETFHoldingsYahoo(upperTicker);
+  if (yahoo && yahoo.topHoldings.length > 0) {
+    etfHoldingsCache.set(cacheKey, yahoo);
+    return yahoo;
   }
 
-  // Try to detect ETF status from chart endpoint (which still works)
-  try {
-    const response = await yahooGet(
-      `${YAHOO_BASE_URL}/${upperTicker}?interval=1d&range=5d`,
-      5000
-    );
-
-    const result = response.data.chart.result?.[0];
-    if (result) {
-      // Can't reliably detect ETF from chart endpoint, assume not an ETF
-      return null;
+  // 5. Use Perplexity AI for known ETFs without data (handles foreign, obscure, any ETF)
+  if (KNOWN_ETFS.has(upperTicker)) {
+    const perplexity = await fetchETFHoldingsPerplexity(upperTicker);
+    if (perplexity && perplexity.topHoldings.length > 0) {
+      etfHoldingsCache.set(cacheKey, perplexity);
+      etfPerplexityCache.set(cacheKey, perplexity); // Cache for 24 hours
+      return perplexity;
     }
-  } catch {
-    // Failed to fetch - not an ETF or ticker doesn't exist
+
+    // Perplexity also failed — return empty shell
+    const empty: ETFHoldingsData = {
+      topHoldings: [], sectorWeightings: [],
+      totalHoldingsPercent: 0, asOfDate: null, isETF: true,
+    };
+    etfHoldingsCache.set(cacheKey, empty);
+    return empty;
   }
 
   return null;
