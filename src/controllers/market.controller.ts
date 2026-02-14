@@ -385,3 +385,18 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
     res.status(500).json({ error: 'Failed to fetch heatmap data' });
   }
 }
+
+// ── Nala Score ──────────────────────────────────────────────────
+import { getNalaScore } from '../services/nala-score.service';
+
+export async function getNalaScoreHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const ticker = req.params.ticker?.toUpperCase();
+    if (!ticker) { res.status(400).json({ error: 'Missing ticker' }); return; }
+    const score = await getNalaScore(ticker);
+    res.json(score);
+  } catch (error) {
+    console.error(`[Nala Score] Error for ${req.params.ticker}:`, error);
+    res.status(500).json({ error: 'Failed to compute Nala Score' });
+  }
+}

@@ -16,6 +16,7 @@ import {
   clearPortfolioHandler,
   importPortfolioScreenshotHandler,
 } from '../controllers/portfolio.controller';
+import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
@@ -34,6 +35,7 @@ router.get('/projections', getProjectionsHandler);
 router.get('/projections/current-pace', getCurrentPaceHandler);
 router.get('/metrics', getMetricsHandler);
 router.get('/summary', getSummaryHandler);
+router.get('/etf-overlap', optionalAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', requireAuth, upload.single('file'), importPortfolioCsvHandler);
