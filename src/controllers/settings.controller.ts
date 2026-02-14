@@ -27,6 +27,7 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
       res.json({
         cashBalance: Math.round((userSettings?.cashBalance ?? 0) * 100) / 100,
         marginDebt: Math.round((userSettings?.marginDebt ?? 0) * 100) / 100,
+        cashInterestRate: Math.round((userSettings?.cashInterestRate ?? 0) * 100) / 100,
       });
     } else {
       // Legacy: global settings
@@ -34,6 +35,7 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
       res.json({
         cashBalance: Math.round(settings.cashBalance * 100) / 100,
         marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
+        cashInterestRate: Math.round((settings.cashInterestRate ?? 0) * 100) / 100,
       });
     }
   } catch (error) {
@@ -48,13 +50,14 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
 export async function updateSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.query.userId as string | undefined;
-    const { cashBalance, marginDebt } = req.body;
+    const { cashBalance, marginDebt, cashInterestRate } = req.body;
 
     console.log('[Settings Debug] updateSettings called:');
     console.log('[Settings Debug]   userId from query:', userId);
     console.log('[Settings Debug]   req.user?.userId:', req.user?.userId);
     console.log('[Settings Debug]   cashBalance:', cashBalance);
     console.log('[Settings Debug]   marginDebt:', marginDebt);
+    console.log('[Settings Debug]   cashInterestRate:', cashInterestRate);
 
     // SECURITY: Verify ownership - user can only update their own settings
     if (userId && req.user?.userId !== userId) {
@@ -73,14 +76,19 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       res.status(400).json({ error: 'Invalid marginDebt: must be a non-negative number' });
       return;
     }
+    if (cashInterestRate !== undefined && (typeof cashInterestRate !== 'number' || cashInterestRate < 0 || cashInterestRate > 100)) {
+      res.status(400).json({ error: 'Invalid cashInterestRate: must be between 0 and 100' });
+      return;
+    }
 
-    if (cashBalance === undefined && marginDebt === undefined) {
-      res.status(400).json({ error: 'At least one of cashBalance or marginDebt must be provided' });
+    if (cashBalance === undefined && marginDebt === undefined && cashInterestRate === undefined) {
+      res.status(400).json({ error: 'At least one of cashBalance, marginDebt, or cashInterestRate must be provided' });
       return;
     }
 
     const roundedCash = cashBalance !== undefined ? Math.round(cashBalance * 100) / 100 : undefined;
     const roundedMargin = marginDebt !== undefined ? Math.round(marginDebt * 100) / 100 : undefined;
+    const roundedRate = cashInterestRate !== undefined ? Math.round(cashInterestRate * 100) / 100 : undefined;
 
     if (userId) {
       // User-specific settings
@@ -88,13 +96,19 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       const updateData: Record<string, number> = {};
       if (roundedCash !== undefined) updateData.cashBalance = roundedCash;
       if (roundedMargin !== undefined) updateData.marginDebt = roundedMargin;
+      if (roundedRate !== undefined) updateData.cashInterestRate = roundedRate;
 
       console.log('[Settings Debug] Update data:', updateData);
 
       const userSettings = await prisma.userSettings.upsert({
         where: { userId },
         update: updateData,
-        create: { userId, cashBalance: roundedCash ?? 0, marginDebt: roundedMargin ?? 0 },
+        create: {
+          userId,
+          cashBalance: roundedCash ?? 0,
+          marginDebt: roundedMargin ?? 0,
+          cashInterestRate: roundedRate ?? 0,
+        },
       });
 
       console.log('[Settings Debug] Updated userSettings:', {
@@ -105,13 +119,15 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       res.json({
         cashBalance: Math.round(userSettings.cashBalance * 100) / 100,
         marginDebt: Math.round((userSettings.marginDebt ?? 0) * 100) / 100,
+        cashInterestRate: Math.round((userSettings.cashInterestRate ?? 0) * 100) / 100,
       });
     } else {
       // Legacy: global settings
-      const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin });
+      const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin, cashInterestRate: roundedRate });
       res.json({
         cashBalance: Math.round(settings.cashBalance * 100) / 100,
         marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
+        cashInterestRate: Math.round((settings.cashInterestRate ?? 0) * 100) / 100,
       });
     }
   } catch (error) {
@@ -292,6 +308,44 @@ export async function cleanupSnapshotsHandler(req: Request, res: Response): Prom
   } catch (error) {
     console.error('Error cleaning up snapshots:', error);
     res.status(500).json({ error: 'Failed to cleanup snapshots' });
+  }
+}
+
+export async function getCashInterestAccrualHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.query.userId as string | undefined;
+
+    if (userId && req.user?.userId !== userId) {
+      res.status(403).json({ error: 'Access denied. You can only view your own settings.' });
+      return;
+    }
+
+    let cashBalance = 0;
+    let cashInterestRate = 0;
+
+    if (userId) {
+      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+      cashBalance = userSettings?.cashBalance ?? 0;
+      cashInterestRate = userSettings?.cashInterestRate ?? 0;
+    } else {
+      const settings = await getSettings();
+      cashBalance = settings.cashBalance ?? 0;
+      cashInterestRate = settings.cashInterestRate ?? 0;
+    }
+
+    const dailyAccrual = cashBalance * (cashInterestRate / 100) / 365;
+    const annualAccrual = cashBalance * (cashInterestRate / 100);
+
+    res.json({
+      cashBalance: Math.round(cashBalance * 100) / 100,
+      cashInterestRate: Math.round(cashInterestRate * 100) / 100,
+      dailyAccrual: Math.round(dailyAccrual * 100) / 100,
+      annualAccrual: Math.round(annualAccrual * 100) / 100,
+      asOf: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error calculating cash interest accrual:', error);
+    res.status(500).json({ error: 'Failed to calculate cash interest accrual' });
   }
 }
 

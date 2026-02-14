@@ -33,6 +33,14 @@ export async function addDividendEvent(req: Request, res: Response): Promise<voi
       res.status(400).json({ error: 'Invalid amountPerShare' });
       return;
     }
+    if (dividendType !== undefined) {
+      const normalized = typeof dividendType === 'string' ? dividendType.toLowerCase() : '';
+      const allowed = ['cash', 'drip', 'regular'];
+      if (!allowed.includes(normalized)) {
+        res.status(400).json({ error: 'Invalid dividendType. Must be cash, drip, or regular' });
+        return;
+      }
+    }
 
     const event = await createDividendEvent({
       ticker,
@@ -40,7 +48,7 @@ export async function addDividendEvent(req: Request, res: Response): Promise<voi
       payDate,
       amountPerShare,
       recordDate,
-      dividendType,
+      dividendType: typeof dividendType === 'string' ? dividendType.toLowerCase() : dividendType,
       source: 'manual',
     });
     res.status(201).json(event);

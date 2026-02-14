@@ -14,6 +14,7 @@ import {
   getDripSettingsHandler,
   updateDripSettingsHandler,
 } from '../controllers/dividend.controller';
+import { getDividendGrowthRatesHandler } from '../controllers/dividend-growth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { mutationLimiter } from '../middleware/rateLimiter';
 
@@ -35,6 +36,9 @@ router.get('/reinvestments', getReinvestmentsHandler);
 
 // Summary
 router.get('/summary', getSummaryHandler);
+
+// Growth rates
+router.get('/growth-rates', getDividendGrowthRatesHandler);
 
 // DRIP Settings (GET public, PUT requires auth)
 router.get('/drip', getDripSettingsHandler);

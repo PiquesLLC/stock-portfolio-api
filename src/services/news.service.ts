@@ -59,6 +59,26 @@ function isMarketRelevant(item: MarketNewsItem): boolean {
 
 const tickerNewsCache = new NodeCache({ stdTTL: 300 }); // 5 min
 
+export function invalidateMarketNewsCache(): void {
+  newsCache.del('market-news');
+}
+
+export function invalidateTickerNewsCache(tickers?: string[] | string): void {
+  if (!tickers) {
+    tickerNewsCache.flushAll();
+    return;
+  }
+  const list = Array.isArray(tickers) ? tickers : [tickers];
+  for (const t of list) {
+    tickerNewsCache.del(`news-${t.toUpperCase()}`);
+  }
+}
+
+export function invalidateAllNewsCache(): void {
+  newsCache.flushAll();
+  tickerNewsCache.flushAll();
+}
+
 export async function fetchTickerNews(ticker: string, limit = 30): Promise<MarketNewsItem[]> {
   const upper = ticker.toUpperCase();
   const cached = tickerNewsCache.get<MarketNewsItem[]>(`news-${upper}`);

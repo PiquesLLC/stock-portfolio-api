@@ -95,10 +95,21 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
         posted++;
         console.log(`[Dividend Post] Credited $${amountGross} to ${holding.userId ?? 'default'} for ${event.ticker} (${sharesEligible} shares Ã— $${event.amountPerShare})`);
 
-        // Auto-reinvest if DRIP is enabled
+        const dividendType = (event.dividendType ?? 'regular').toLowerCase();
+        const isDripEvent = dividendType === 'drip';
+
+        // Auto-reinvest rules:
+        // - drip: always reinvest
+        // - cash: never reinvest
+        // - regular/unknown: respect user DRIP setting (backward compatible)
         try {
-          const dripEnabled = await isDripEnabled(holding.userId ?? null);
-          if (dripEnabled) {
+          const shouldReinvest = isDripEvent
+            ? true
+            : dividendType === 'cash'
+              ? false
+              : await isDripEnabled(holding.userId ?? null);
+
+          if (shouldReinvest) {
             // Get the credit we just created to get its ID
             const newCredit = await prisma.dividendCredit.findFirst({
               where: {

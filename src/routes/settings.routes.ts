@@ -11,6 +11,7 @@ import {
   cleanupSnapshotsHandler,
   activateTrackingHandler,
   restartTrackingHandler,
+  getCashInterestAccrualHandler,
 } from '../controllers/settings.controller';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 
@@ -27,5 +28,6 @@ router.delete('/ytd', requireAuth, clearYtdHandler);
 router.post('/cleanup-snapshots', requireAuth, cleanupSnapshotsHandler);
 router.post('/tracking/activate', requireAuth, activateTrackingHandler);
 router.post('/tracking/restart', requireAuth, restartTrackingHandler);
+router.get('/cash-interest/accrual', optionalAuth, getCashInterestAccrualHandler);
 
 export default router;

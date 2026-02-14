@@ -22,6 +22,13 @@ export const insightsCache = new NodeCache({ stdTTL: 86400 });
 let rateLimitedUntil: number = 0;
 let searchRateLimitedUntil: number = 0; // Separate rate limit for search so background jobs don't block it
 
+// Track last successful Finnhub response (ms since epoch)
+let lastFinnhubSuccessMs = 0;
+
+function markFinnhubSuccess(): void {
+  lastFinnhubSuccessMs = Date.now();
+}
+
 // Retry configuration
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -44,6 +51,7 @@ async function fetchFromFinnhub(ticker: string): Promise<FinnhubQuote> {
     },
     timeout: 5000,
   });
+  markFinnhubSuccess();
   return response.data;
 }
 
@@ -217,6 +225,17 @@ export function clearAllCaches(): void {
   backupCache.flushAll();
 }
 
+export function getFinnhubStatus(): { lastSuccessMs: number; rateLimitedUntil: number; cache: { primaryKeys: number; backupKeys: number } } {
+  return {
+    lastSuccessMs: lastFinnhubSuccessMs,
+    rateLimitedUntil,
+    cache: {
+      primaryKeys: cache.keys().length,
+      backupKeys: backupCache.keys().length,
+    },
+  };
+}
+
 // For testing: check if a ticker has backup cached data
 export function hasBackupCache(ticker: string): boolean {
   return backupCache.has(`quote:${ticker.toUpperCase()}`);
@@ -299,6 +318,8 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
         partial: true,
       };
     }
+
+    markFinnhubSuccess();
 
     // Calculate daily returns
     const returns: number[] = [];

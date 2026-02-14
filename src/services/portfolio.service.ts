@@ -103,11 +103,19 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
   if (input.marginDebt !== undefined) {
     updateData.marginDebt = input.marginDebt;
   }
+  if (input.cashInterestRate !== undefined) {
+    updateData.cashInterestRate = input.cashInterestRate;
+  }
 
   const result = await prisma.settings.upsert({
     where: { id: 'default' },
     update: updateData,
-    create: { id: 'default', cashBalance: input.cashBalance ?? 0, marginDebt: input.marginDebt ?? 0 },
+    create: {
+      id: 'default',
+      cashBalance: input.cashBalance ?? 0,
+      marginDebt: input.marginDebt ?? 0,
+      cashInterestRate: input.cashInterestRate ?? 0,
+    },
   });
 
   // Sync to the user's UserSettings so user profile matches main portfolio
@@ -115,7 +123,12 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
   await prisma.userSettings.upsert({
     where: { userId },
     update: updateData,
-    create: { userId, cashBalance: input.cashBalance ?? 0, marginDebt: input.marginDebt ?? 0 },
+    create: {
+      userId,
+      cashBalance: input.cashBalance ?? 0,
+      marginDebt: input.marginDebt ?? 0,
+      cashInterestRate: input.cashInterestRate ?? 0,
+    },
   });
 
   return result as Settings;

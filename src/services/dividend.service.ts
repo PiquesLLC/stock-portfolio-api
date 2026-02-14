@@ -24,6 +24,7 @@ export interface DividendEventInput {
 }
 
 export async function createDividendEvent(input: DividendEventInput) {
+  const normalizedType = input.dividendType ? input.dividendType.toLowerCase() : undefined;
   return prisma.dividendEvent.upsert({
     where: {
       ticker_exDate_amountPerShare: {
@@ -38,14 +39,14 @@ export async function createDividendEvent(input: DividendEventInput) {
       payDate: new Date(input.payDate),
       amountPerShare: input.amountPerShare,
       recordDate: input.recordDate ? new Date(input.recordDate) : null,
-      dividendType: input.dividendType ?? 'regular',
+      dividendType: normalizedType ?? 'regular',
       source: input.source ?? 'manual',
       status: 'confirmed',
     },
     update: {
       payDate: new Date(input.payDate),
       recordDate: input.recordDate ? new Date(input.recordDate) : undefined,
-      dividendType: input.dividendType ?? undefined,
+      dividendType: normalizedType ?? undefined,
       source: input.source ?? 'manual',
       status: 'confirmed',
     },

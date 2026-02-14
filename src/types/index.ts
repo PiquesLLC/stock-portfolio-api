@@ -31,6 +31,7 @@ export interface Settings {
   id: string;
   cashBalance: number;
   marginDebt: number;
+  cashInterestRate: number;
   updatedAt: Date;
 
   // Baseline tracking
@@ -58,6 +59,7 @@ export interface YtdInput {
 export interface SettingsUpdateInput {
   cashBalance?: number;
   marginDebt?: number;
+  cashInterestRate?: number;
 }
 
 export interface BaselineInput {

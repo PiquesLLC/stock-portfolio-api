@@ -12,6 +12,7 @@ import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
+import { sendEarningsAlerts } from './services/notifications.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -231,6 +232,19 @@ const server = app.listen(config.port, async () => {
       console.error('[Heatmap Fundamentals] Backfill error:', (err as Error).message)
     );
   }, 24 * 60 * 60 * 1000);
+
+  // Earnings alerts — audit log for upcoming earnings (every 6 hours)
+  console.log('[Notifications] Earnings alerts scheduled');
+  setTimeout(() => {
+    sendEarningsAlerts().catch(err =>
+      console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
+    );
+  }, 90000); // 90s delay after startup
+  setInterval(() => {
+    sendEarningsAlerts().catch(err =>
+      console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
+    );
+  }, 6 * 60 * 60 * 1000);
 
   // Milestone alerts (52w high/low, ATH/ATL) â€” using Yahoo Finance for accurate 52w data
   console.log('[Milestone Scheduler] Running every 30 minutes');

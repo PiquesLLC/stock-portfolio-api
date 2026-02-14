@@ -76,6 +76,7 @@ model User {
   lots                   Lot[]
   dividendReinvestments  DividendReinvestment[]
   refreshTokens          RefreshToken[]
+  notificationAuditLogs  NotificationAuditLog[]
 }
 
 model Watchlist {
@@ -126,6 +127,7 @@ model UserSettings {
   cashBalance Float    @default(0)
   marginDebt  Float    @default(0)
   dripEnabled Boolean  @default(false)
+  cashInterestRate Float @default(0)
   updatedAt   DateTime @updatedAt
 }
 
@@ -133,6 +135,7 @@ model Settings {
   id          String   @id @default("default")
   cashBalance Float    @default(0)
   marginDebt  Float    @default(0)
+  cashInterestRate Float @default(0)
   updatedAt   DateTime @updatedAt
 
   // Baseline tracking for performance measurement
@@ -153,6 +156,25 @@ model Settings {
 
   // Dividend Reinvestment Plan (DRIP) settings
   dripEnabled Boolean @default(false)
+}
+
+model NotificationAuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  status    String
+  channel   String?
+  title     String?
+  message   String?
+  refKey    String?
+  payload   String?
+  sentAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, type, sentAt])
+  @@unique([userId, type, refKey])
 }
 
 model HoldingSnapshot {

@@ -110,6 +110,7 @@ let yahooCookie = '';
 let yahooCrumb = '';
 let yahooCookieExpiry = 0;
 let cookieAttempts = 0;
+let lastYahooSuccessMs = 0;
 
 const YAHOO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -185,10 +186,21 @@ export async function yahooGet(url: string, timeout = 5000) {
     const finalUrl = url + (url.includes('?') ? '&' : '?') + `crumb=${encodeURIComponent(yahooCrumb)}`;
     const q2Url = finalUrl.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com');
     try {
-      return await axios.get(q2Url, { timeout, headers });
+        const resp = await axios.get(q2Url, { timeout, headers });
+        lastYahooSuccessMs = Date.now();
+        return resp;
     } catch { /* fall through */ }
   }
 
   if (yahooCookie) headers['Cookie'] = yahooCookie;
-  return await axios.get(url, { timeout, headers });
+  const resp = await axios.get(url, { timeout, headers });
+  lastYahooSuccessMs = Date.now();
+  return resp;
+}
+
+export function getYahooStatus(): { lastSuccessMs: number; cookieExpiryMs: number } {
+  return {
+    lastSuccessMs: lastYahooSuccessMs,
+    cookieExpiryMs: yahooCookieExpiry,
+  };
 }

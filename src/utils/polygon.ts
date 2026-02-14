@@ -19,6 +19,14 @@ const RATE_LIMIT_BACKOFF_MS = 60000; // 1 minute backoff on 429
 // Track if we have access to premium endpoints
 let hasPremiumAccess: boolean | null = null;
 
+// Track last successful Polygon response (ms since epoch)
+let lastPolygonSuccessMs = 0;
+
+
+function markPolygonSuccess(): void {
+  lastPolygonSuccessMs = Date.now();
+}
+
 // Polygon Previous Day response type (free tier)
 interface PolygonPrevDayResult {
   T: string; // ticker
@@ -153,6 +161,8 @@ async function fetchPrevDayQuote(ticker: string): Promise<Quote | null> {
       return null;
     }
 
+    markPolygonSuccess();
+
     const result = response.data.results[0];
     const price = result.c; // close price
     const prevClose = result.c; // For prev day, close IS the prev close
@@ -274,6 +284,7 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
       );
 
       if (response.data.status === 'OK' || response.data.status === 'DELAYED') {
+        markPolygonSuccess();
         hasPremiumAccess = true;
         console.log('[Polygon] Using premium snapshot endpoint');
 
@@ -563,5 +574,14 @@ export function getPolygonCacheStats(): { primary: number; backup: number } {
   return {
     primary: cache.keys().length,
     backup: backupCache.keys().length,
+  };
+}
+
+export function getPolygonStatus(): { lastSuccessMs: number; rateLimitedUntil: number; hasPremiumAccess: boolean | null; cache: { primary: number; backup: number } } {
+  return {
+    lastSuccessMs: lastPolygonSuccessMs,
+    rateLimitedUntil: rateLimitBackoffUntil,
+    hasPremiumAccess,
+    cache: getPolygonCacheStats(),
   };
 }

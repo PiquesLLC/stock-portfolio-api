@@ -361,7 +361,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   const stabilityCalc: string[] = [
     'Score starts at 25/25.',
     'Measures consistency of monthly dividend income using coefficient of variation (CV = std dev / mean).',
-    'CV > 50% â†’ 5/25, CV > 40% â†’ 10/25, CV > 30% â†’ 15/25, CV > 20% â†’ 20/25, CV â‰¤ 20% â†’ 25/25.',
+    'CV > 50% = 5/25, CV > 40% = 10/25, CV > 30% = 15/25, CV > 20% = 20/25, CV <= 20% = 25/25.',
   ];
   const stabilityEvidence: string[] = [];
   const stabilityDrivers: { label: string; value: string; impact: string }[] = [];
@@ -390,12 +390,12 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
       stabilityDrivers.push({ label: 'CV', value: `${(cv * 100).toFixed(1)}%`, impact: 'Score 20/25 (>20% threshold)' });
     } else {
       stabilityScore = 25;
-      stabilityDrivers.push({ label: 'CV', value: `${(cv * 100).toFixed(1)}%`, impact: 'Full score â€” very stable income' });
+      stabilityDrivers.push({ label: 'CV', value: `${(cv * 100).toFixed(1)}%`, impact: 'Full score -- very stable income' });
     }
   } else if (creditsByMonth.size < 3) {
     stabilityScore = 10;
     stabilityEvidence.push(`Only ${creditsByMonth.size} month(s) of data available.`);
-    stabilityDrivers.push({ label: 'Data', value: `${creditsByMonth.size} months`, impact: 'Insufficient data â€” default score 10/25' });
+    stabilityDrivers.push({ label: 'Data', value: `${creditsByMonth.size} months`, impact: 'Insufficient data -- default score 10/25' });
     stabilityFixes.push('Continue tracking to build more dividend history.');
   }
 
@@ -404,7 +404,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   const growthCalc: string[] = [
     'Score starts at 15/25 (default when no YoY data).',
     'Compares dividend income this year vs last year.',
-    'YoY â‰¥ 20% â†’ 25/25, â‰¥ 10% â†’ 22/25, â‰¥ 5% â†’ 20/25, â‰¥ 0% â†’ 15/25, â‰¥ -10% â†’ 10/25, < -10% â†’ 5/25.',
+    'YoY >= 20% = 25/25, >= 10% = 22/25, >= 5% = 20/25, >= 0% = 15/25, >= -10% = 10/25, < -10% = 5/25.',
   ];
   const growthEvidence: string[] = [];
   const growthDrivers: { label: string; value: string; impact: string }[] = [];
@@ -417,13 +417,13 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
 
     if (yoyChangePct >= 20) {
       growthScore = 25;
-      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Full score â€” excellent growth' });
+      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Full score -- excellent growth' });
     } else if (yoyChangePct >= 10) {
       growthScore = 22;
-      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Score 22/25 (â‰¥10% growth)' });
+      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Score 22/25 (>=10% growth)' });
     } else if (yoyChangePct >= 5) {
       growthScore = 20;
-      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Score 20/25 (â‰¥5% growth)' });
+      growthDrivers.push({ label: 'YoY Change', value: `+${yoyChangePct.toFixed(1)}%`, impact: 'Score 20/25 (>=5% growth)' });
     } else if (yoyChangePct >= 0) {
       growthScore = 15;
       growthDrivers.push({ label: 'YoY Change', value: `${yoyChangePct.toFixed(1)}%`, impact: 'Score 15/25 (flat/slight growth)' });
@@ -443,7 +443,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
     }
   } else {
     growthEvidence.push('Not enough historical data for YoY comparison.');
-    growthDrivers.push({ label: 'Data', value: 'N/A', impact: 'Default score 15/25 â€” no YoY comparison available' });
+    growthDrivers.push({ label: 'Data', value: 'N/A', impact: 'Default score 15/25 -- no YoY comparison available' });
   }
 
   // Coverage (0-25): % of holdings that pay dividends
@@ -454,7 +454,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   let coverageScore = 5;
   const coverageCalc: string[] = [
     'Measures what percentage of your holdings pay dividends.',
-    'â‰¥ 80% â†’ 25/25, â‰¥ 60% â†’ 20/25, â‰¥ 40% â†’ 15/25, â‰¥ 20% â†’ 10/25, < 20% â†’ 5/25.',
+    '>= 80% = 25/25, >= 60% = 20/25, >= 40% = 15/25, >= 20% = 10/25, < 20% = 5/25.',
   ];
   const coverageEvidence: string[] = [];
   const coverageDrivers: { label: string; value: string; impact: string }[] = [];
@@ -466,17 +466,17 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
 
   if (coverageRatio >= 0.8) {
     coverageScore = 25;
-    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Full score â€” most holdings pay dividends' });
+    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Full score -- most holdings pay dividends' });
   } else if (coverageRatio >= 0.6) {
     coverageScore = 20;
-    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 20/25 (â‰¥60% coverage)' });
+    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 20/25 (>=60% coverage)' });
   } else if (coverageRatio >= 0.4) {
     coverageScore = 15;
-    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 15/25 (â‰¥40% coverage)' });
+    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 15/25 (>=40% coverage)' });
     coverageFixes.push('Consider adding dividend-paying stocks to increase income coverage.');
   } else if (coverageRatio >= 0.2) {
     coverageScore = 10;
-    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 10/25 (â‰¥20% coverage)' });
+    coverageDrivers.push({ label: 'Coverage', value: `${(coverageRatio * 100).toFixed(0)}%`, impact: 'Score 10/25 (>=20% coverage)' });
     coverageFixes.push('Most holdings don\'t pay dividends. Add income-generating assets.');
   } else {
     coverageScore = 5;
@@ -488,7 +488,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   let diversificationScore = 25;
   const divCalc: string[] = [
     'Measures how spread out your dividend income is across sources.',
-    'Top 1 source > 60% â†’ 5/25, > 50% â†’ 10/25, > 40% â†’ 15/25, > 30% â†’ 20/25, â‰¤ 30% â†’ 25/25.',
+    'Top 1 source > 60% = 5/25, > 50% = 10/25, > 40% = 15/25, > 30% = 20/25, <= 30% = 25/25.',
     'Also penalized if fewer than 5 dividend sources.',
   ];
   const divEvidence: string[] = [];
@@ -520,7 +520,7 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
     divDrivers.push({ label: 'Top 1 concentration', value: `${top1Percent.toFixed(1)}%`, impact: 'Score 20/25 (>30% threshold)' });
   } else {
     diversificationScore = 25;
-    divDrivers.push({ label: 'Top 1 concentration', value: `${top1Percent.toFixed(1)}%`, impact: 'Full score â€” well diversified' });
+    divDrivers.push({ label: 'Top 1 concentration', value: `${top1Percent.toFixed(1)}%`, impact: 'Full score -- well diversified' });
   }
 
   // Adjust for number of dividend sources

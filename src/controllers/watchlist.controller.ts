@@ -16,6 +16,7 @@ import {
   reconstructPortfolioHistoryHiRes,
 } from '../services/snapshot.service';
 import { fetchPrices } from '../services/market.service';
+import { invalidateAllNewsCache, invalidateTickerNewsCache } from '../services/news.service';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'] as const;
@@ -107,6 +108,9 @@ export async function deleteWatchlistHandler(req: AuthRequest, res: Response): P
       res.status(404).json({ error: 'Watchlist not found' });
       return;
     }
+    try {
+      invalidateAllNewsCache();
+    } catch { /* non-critical */ }
     res.status(204).send();
   } catch (error) {
     console.error('Watchlist delete error:', error);
@@ -136,6 +140,9 @@ export async function addWatchlistHoldingHandler(req: AuthRequest, res: Response
       res.status(404).json({ error: 'Watchlist not found' });
       return;
     }
+    try {
+      invalidateTickerNewsCache(ticker);
+    } catch { /* non-critical */ }
     res.status(201).json(holding);
   } catch (error) {
     console.error('Watchlist holding add error:', error);
@@ -161,6 +168,9 @@ export async function updateWatchlistHoldingHandler(req: AuthRequest, res: Respo
       res.status(404).json({ error: 'Watchlist holding not found' });
       return;
     }
+    try {
+      invalidateTickerNewsCache(ticker);
+    } catch { /* non-critical */ }
     res.json(updated);
   } catch (error) {
     console.error('Watchlist holding update error:', error);
@@ -176,6 +186,9 @@ export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Respo
       res.status(404).json({ error: 'Watchlist holding not found' });
       return;
     }
+    try {
+      invalidateTickerNewsCache(ticker);
+    } catch { /* non-critical */ }
     res.status(204).send();
   } catch (error) {
     console.error('Watchlist holding delete error:', error);
