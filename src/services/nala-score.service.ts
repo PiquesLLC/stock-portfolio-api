@@ -317,7 +317,7 @@ async function scoreDividends(ticker: string, overview: ParsedOverview | null): 
 
 // ── MOMENTUM Dimension ─────────────────────────────────────────
 
-async function scoreMomentum(ticker: string, overview: ParsedOverview | null, currentPrice: number): Promise<NalaDimension> {
+async function scoreMomentum(ticker: string, overview: ParsedOverview | null, currentPrice: number, prefetchedCandles?: { close: number }[]): Promise<NalaDimension> {
   // 52-week range position
   const high52 = overview?.fiftyTwoWeekHigh;
   const low52 = overview?.fiftyTwoWeekLow;
@@ -332,7 +332,7 @@ async function scoreMomentum(ticker: string, overview: ParsedOverview | null, cu
   // 6-month price performance from daily candles
   let sixMonthReturn: number | null = null;
   try {
-    const candles = await fetchDailyCandles(ticker, 180);
+    const candles = prefetchedCandles ?? await fetchDailyCandles(ticker, 180);
     if (candles.length >= 2) {
       const oldPrice = candles[0].close;
       const newPrice = candles[candles.length - 1].close;
@@ -454,7 +454,7 @@ function scoreETFDiversification(about: AssetAbout | null, metrics: StockMetrics
 
 // ── ETF: Performance Dimension ───────────────────────────────
 
-async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null, currentPrice: number): Promise<NalaDimension> {
+async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null, currentPrice: number, prefetchedCandles?: { close: number }[]): Promise<NalaDimension> {
   // 52-week position
   const high52 = metrics?.week52High;
   const low52 = metrics?.week52Low;
@@ -470,7 +470,7 @@ async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null,
   let sixMonthReturn: number | null = null;
   let threeMonthReturn: number | null = null;
   try {
-    const candles = await fetchDailyCandles(ticker, 180);
+    const candles = prefetchedCandles ?? await fetchDailyCandles(ticker, 180);
     if (candles.length >= 2) {
       const oldPrice = candles[0].close;
       const newPrice = candles[candles.length - 1].close;
@@ -576,11 +576,13 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
   const cached = insightsCache.get<NalaScoreResponse>(cacheKey);
   if (cached) return cached;
 
-  // Fetch all data in parallel: AV fundamentals, Yahoo details + about
-  const [fundamentals, details, about] = await Promise.all([
+  // Fetch Yahoo data first (fast); AV fundamentals in parallel
+  // Pre-fetch daily candles once to avoid duplicate API calls in scoring functions
+  const [fundamentals, details, about, dailyCandles] = await Promise.all([
     getCompanyFundamentals(upper),
     fetchStockDetails(upper).catch(() => null),
     getAssetAbout(upper).catch(() => null),
+    fetchDailyCandles(upper, 180).catch(() => []),
   ]);
 
   const metrics = details?.metrics ?? null;
@@ -600,9 +602,9 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
     const [costEfficiency, diversification, performance, dividends, momentum] = await Promise.all([
       Promise.resolve(scoreETFCostEfficiency(metrics, about)),
       Promise.resolve(scoreETFDiversification(about, metrics)),
-      scoreETFPerformance(upper, metrics, currentPrice),
+      scoreETFPerformance(upper, metrics, currentPrice, dailyCandles),
       scoreDividends(upper, enriched),
-      scoreMomentum(upper, enriched, currentPrice),
+      scoreMomentum(upper, enriched, currentPrice, dailyCandles),
     ]);
 
     dimensions = {
@@ -621,7 +623,7 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
       Promise.resolve(scoreQuality(fundamentals)),
       Promise.resolve(scoreGrowth(fundamentals)),
       scoreDividends(upper, enriched),
-      scoreMomentum(upper, enriched, currentPrice),
+      scoreMomentum(upper, enriched, currentPrice, dailyCandles),
     ]);
 
     dimensions = { value, quality, growth, dividends, momentum };
