@@ -15,6 +15,10 @@ export interface WatchlistSummary {
   totalPLPercent: number;
   dayChange: number;
   dayChangePercent: number;
+  regularDayChange: number;
+  regularDayChangePercent: number;
+  afterHoursChange: number;
+  afterHoursChangePercent: number;
   holdingsCount: number;
 }
 
@@ -150,6 +154,10 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
   let totalValue = 0;
   let totalCost = 0;
   let dayChange = 0;
+  let regularDayChange = 0;
+  let afterHoursChange = 0;
+  let regularHoldingsValue = 0;
+  let previousHoldingsValue = 0;
 
   const holdings: WatchlistHoldingView[] = watchlist.holdings.map(h => {
     const upperTicker = h.ticker.toUpperCase();
@@ -173,6 +181,14 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
     if (hasValidPrice) {
       totalValue += currentValue;
       dayChange += holdingDayChange;
+
+      // Split regular vs after-hours using regularClose when available
+      const regClose = (quote as any)?.regularClose ?? currentPrice;
+      const regValue = h.shares * regClose;
+      regularDayChange += regValue - previousValue;
+      afterHoursChange += currentValue - regValue;
+      regularHoldingsValue += regValue;
+      previousHoldingsValue += previousValue;
     }
     totalCost += holdingCost;
 
@@ -198,6 +214,9 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
   const previousTotalValue = totalValue - dayChange;
   const dayChangePercent = previousTotalValue > 0 ? (dayChange / previousTotalValue) * 100 : 0;
 
+  const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
+  const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
+
   const summary: WatchlistSummary = {
     totalValue,
     totalCost,
@@ -205,6 +224,10 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
     totalPLPercent,
     dayChange,
     dayChangePercent,
+    regularDayChange,
+    regularDayChangePercent,
+    afterHoursChange,
+    afterHoursChangePercent,
     holdingsCount: watchlist.holdings.length,
   };
 
