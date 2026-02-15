@@ -45,9 +45,16 @@ const SYSTEM_PROMPT = `You are a portfolio analyst writing a concise daily morni
 }
 Return 3-5 top stories and 2-3 watch items. Focus on what's actionable and relevant to the user's holdings.`;
 
+function isWeekendET(): boolean {
+  const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+  return etDay === 'Sat' || etDay === 'Sun';
+}
+
 export async function getDailyReport(): Promise<DailyReportResponse> {
   const cached = reportCache.get<DailyReportResponse>(DAILY_REPORT_CACHE_KEY);
   if (cached) return { ...cached, cached: true };
+
+  const weekend = isWeekendET();
 
   // Gather data in parallel
   const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
@@ -137,16 +144,21 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     ? `UPCOMING EARNINGS THIS WEEK: ${upcomingEarnings.join(', ')}`
     : 'UPCOMING EARNINGS THIS WEEK: None';
 
+  const weekendNote = weekend
+    ? `NOTE: Markets are closed today (weekend). Focus on the week ahead — upcoming catalysts, earnings, macro events. Do NOT reference "today's" price movements; instead recap last week and preview next week.\n\n`
+    : '';
+
   const userMessage =
-    `Today is ${formattedDate}. Generate my daily portfolio briefing.\n\n` +
+    `Today is ${formattedDate}. Generate my ${weekend ? 'weekend' : 'daily'} portfolio briefing.\n\n` +
+    weekendNote +
     `MY PORTFOLIO (${portfolio.holdings.length} holdings, total value $${portfolio.netEquity.toFixed(0)}):\n` +
     `${holdingsSummary}\n` +
-    `Yesterday's change: $${portfolio.dayChange.toFixed(0)} (${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%)\n\n` +
+    `${weekend ? 'Last session' : 'Yesterday'}'s change: $${portfolio.dayChange.toFixed(0)} (${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%)\n\n` +
     `MARKET HEADLINES:\n${newsSummary}\n\n` +
     `ECONOMIC SNAPSHOT:\n${economicSummary}\n\n` +
     `${earningsSummaryLine}\n\n` +
     `Give me 3-5 top stories relevant to my portfolio and the broader market.\n` +
-    `Give me 2-3 things to watch today.`;
+    `Give me 2-3 things to ${weekend ? 'watch next week' : 'watch today'}.`;
 
   const buildFallback = (): DailyReportResponse => {
     const dayChange = portfolio.dayChangePercent ?? 0;
