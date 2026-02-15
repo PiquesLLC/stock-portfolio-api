@@ -18,6 +18,12 @@ import { sendEarningsAlerts } from './services/notifications.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
+/** Returns true on Saturday/Sunday ET — used to skip notification-generating jobs on weekends */
+function isWeekendET(): boolean {
+  const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+  return etDay === 'Sat' || etDay === 'Sun';
+}
+
 // Ensure the legacy default user exists (many services reference this hardcoded ID)
 async function ensureDefaultUser(): Promise<void> {
   const existing = await prisma.user.findUnique({ where: { id: DEFAULT_USER_ID } });
@@ -134,23 +140,30 @@ const server = app.listen(config.port, async () => {
     );
   }, 60000); // 60s delay after startup
 
-  // Dividend sync â€” fetch dividend events from Yahoo Finance on startup + every 6 hours
-  syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));
+  // Dividend sync â€" fetch dividend events from Yahoo Finance on startup + every 6 hours (skip weekends)
+  if (!isWeekendET()) {
+    syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));
+  }
   setInterval(() => {
+    if (isWeekendET()) return;
     syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Error:', err));
   }, 6 * 60 * 60 * 1000);
 
-  // Dividend posting â€” check for payable dividends every hour (today's date only)
-  postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
-  // NOTE: backfillMissedDividends removed â€” it double-counts dividends already
+  // Dividend posting â€" check for payable dividends every hour (skip weekends — no pay dates)
+  if (!isWeekendET()) {
+    postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
+  }
+  // NOTE: backfillMissedDividends removed â€" it double-counts dividends already
   // reflected in historical stock prices, inflating portfolio value via DRIP.
   setInterval(() => {
+    if (isWeekendET()) return;
     postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
   }, 60 * 60 * 1000);
 
-  // Price alert evaluation â€” check every 60 seconds
+  // Price alert evaluation â€" check every 60 seconds (skip weekends — prices are stale)
   console.log('[Price Alert Scheduler] Running every 60s');
   setInterval(() => {
+    if (isWeekendET()) return;
     evaluatePriceAlerts().catch(err =>
       console.error('[Price Alerts] Error:', err.message)
     );
@@ -235,14 +248,16 @@ const server = app.listen(config.port, async () => {
     );
   }, 24 * 60 * 60 * 1000);
 
-  // Earnings alerts — audit log for upcoming earnings (every 6 hours)
+  // Earnings alerts — audit log for upcoming earnings (every 6 hours, skip weekends)
   console.log('[Notifications] Earnings alerts scheduled');
   setTimeout(() => {
+    if (isWeekendET()) return;
     sendEarningsAlerts().catch(err =>
       console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
     );
   }, 90000); // 90s delay after startup
   setInterval(() => {
+    if (isWeekendET()) return;
     sendEarningsAlerts().catch(err =>
       console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
     );
@@ -280,14 +295,16 @@ const server = app.listen(config.port, async () => {
     }
   }, 15 * 60 * 1000);
 
-  // Dividend change detection — every 6 hours (aligned with dividend sync)
+  // Dividend change detection — every 6 hours (skip weekends — no new dividend data)
   console.log('[Dividend Change Detection] Running every 6 hours');
   setTimeout(() => {
+    if (isWeekendET()) return;
     detectDividendChanges().catch(err =>
       console.error('[Dividend Change Detection] Init failed:', err.message)
     );
   }, 60000);
   setInterval(() => {
+    if (isWeekendET()) return;
     detectDividendChanges().catch(err =>
       console.error('[Dividend Change Detection] Error:', err.message)
     );

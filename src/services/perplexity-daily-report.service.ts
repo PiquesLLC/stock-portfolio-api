@@ -9,6 +9,15 @@ import { getEarningsSummary } from './earnings-summary.service';
 const reportCache = new NodeCache({ stdTTL: 14400 });
 const DAILY_REPORT_CACHE_KEY = 'daily-report';
 
+// Non-ticker acronyms that Perplexity sometimes returns as "relatedTickers"
+const TICKER_BLACKLIST = new Set([
+  'YTD', 'QTD', 'MTD', 'ATH', 'ATL', 'EPS', 'ROE', 'ROA', 'ROI', 'NAV', 'AUM',
+  'DCF', 'FCF', 'EBIT', 'WACC', 'CAGR', 'GAAP', 'IFRS',
+  'CPI', 'GDP', 'PCE', 'PPI', 'PMI', 'ISM', 'FOMC', 'FED', 'SEC', 'IPO', 'ETF',
+  'NYSE', 'YOY', 'QOQ', 'MOM', 'BPS', 'CEO', 'CFO', 'COO', 'CTO',
+  'SK', 'AI', 'EV', 'IV', 'PE', 'PB', 'PS',
+]);
+
 export interface DailyReportResponse {
   generatedAt: string;
   greeting: string;
@@ -177,7 +186,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
         body: String(s.body || '').slice(0, 300),
         sentiment: ['positive', 'negative', 'neutral'].includes(s.sentiment) ? s.sentiment : 'neutral',
         relatedTickers: Array.isArray(s.relatedTickers)
-          ? s.relatedTickers.filter((t: any) => typeof t === 'string')
+          ? s.relatedTickers.filter((t: any) => typeof t === 'string' && t.length >= 1 && !TICKER_BLACKLIST.has(t.toUpperCase()))
           : [],
       })),
       watchToday: (parsed.watchToday || []).slice(0, 4).map((w: any) => String(w || '').slice(0, 300)),
