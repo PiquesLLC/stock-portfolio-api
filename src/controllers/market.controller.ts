@@ -152,8 +152,8 @@ export async function getHourlyCandles(req: Request, res: Response): Promise<voi
       res.status(400).json({ error: 'Missing ticker parameter' });
       return;
     }
-    if (period !== '1W' && period !== '1M') {
-      res.status(400).json({ error: 'Period must be 1W or 1M' });
+    if (period !== '1W' && period !== '1M' && period !== 'YTD') {
+      res.status(400).json({ error: 'Period must be 1W, 1M, or YTD' });
       return;
     }
     const candles = await fetchHourlyCandles(ticker, period);
