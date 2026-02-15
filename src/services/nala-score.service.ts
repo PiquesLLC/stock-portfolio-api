@@ -18,7 +18,9 @@
 import { insightsCache } from '../utils/finnhub';
 import { getCompanyFundamentals, FundamentalsResponse, ParsedOverview } from './fundamentals.service';
 import { getAnalystSnapshot } from './analyst.service';
-import { fetchFastQuote, fetchDailyCandles } from './market.service';
+import { fetchDailyCandles, fetchStockDetails } from './market.service';
+import { getAssetAbout } from '../utils/yahoo-finance';
+import { StockMetrics, AssetAbout } from '../types';
 import prisma from '../utils/prisma';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -45,13 +47,7 @@ export interface NalaScoreResponse {
   ticker: string;
   composite: number;
   grade: NalaGrade;
-  dimensions: {
-    value: NalaDimension;
-    quality: NalaDimension;
-    growth: NalaDimension;
-    dividends: NalaDimension;
-    momentum: NalaDimension;
-  };
+  dimensions: Record<string, NalaDimension>;
   keyInsights: string[];
   dataAge: 'fresh' | 'cached' | 'stale';
   isETF: boolean;
@@ -383,6 +379,194 @@ async function scoreMomentum(ticker: string, overview: ParsedOverview | null, cu
   ]);
 }
 
+// ── ETF: Cost Efficiency Dimension ────────────────────────────
+
+function scoreETFCostEfficiency(metrics: StockMetrics | null, about: AssetAbout | null): NalaDimension {
+  // Expense Ratio (lower = better) — already stored as percentage (0.0945 = 0.0945%)
+  const er = metrics?.expenseRatio;
+  const erScore = er == null ? NEUTRAL
+    : er <= 0.05 ? 25 : er <= 0.10 ? 22 : er <= 0.20 ? 18 : er <= 0.50 ? 14 : er <= 1.0 ? 10 : 5;
+
+  // AUM (bigger = more liquid)
+  const aum = metrics?.aumB;
+  const aumScore = aum == null ? NEUTRAL
+    : aum >= 100 ? 25 : aum >= 50 ? 22 : aum >= 10 ? 18 : aum >= 1 ? 14 : aum >= 0.1 ? 10 : 5;
+
+  // Holdings Count
+  const holdings = about?.numberOfHoldings;
+  const holdingsScore = holdings == null ? NEUTRAL
+    : holdings >= 500 ? 25 : holdings >= 100 ? 22 : holdings >= 50 ? 18 : holdings >= 25 ? 14 : holdings >= 10 ? 10 : 5;
+
+  // Fund Maturity (inception age in years)
+  let ageYears: number | null = null;
+  if (about?.inceptionDate) {
+    try {
+      const inception = new Date(about.inceptionDate);
+      if (!isNaN(inception.getTime())) {
+        ageYears = (Date.now() - inception.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+  const ageScore = ageYears == null ? NEUTRAL
+    : ageYears >= 20 ? 25 : ageYears >= 10 ? 22 : ageYears >= 5 ? 18 : ageYears >= 3 ? 14 : ageYears >= 1 ? 10 : 5;
+
+  return buildDimension('Cost Efficiency', 0.25, [
+    { name: 'Expense Ratio', score: erScore, maxScore: 25, rawValue: er != null ? `${er.toFixed(2)}%` : 'N/A', explanation: er != null ? (er <= 0.10 ? 'Ultra-low cost fund' : er <= 0.30 ? 'Competitive expense ratio' : er <= 0.75 ? 'Moderate costs' : 'Above-average costs') : 'Expense ratio unavailable' },
+    { name: 'Fund Size (AUM)', score: aumScore, maxScore: 25, rawValue: aum != null ? `$${aum >= 1 ? aum.toFixed(0) : aum.toFixed(1)}B` : 'N/A', explanation: aum != null ? (aum >= 50 ? 'Massive, highly liquid fund' : aum >= 10 ? 'Large, well-established fund' : aum >= 1 ? 'Mid-size fund' : 'Small fund — check liquidity') : 'AUM data unavailable' },
+    { name: 'Holdings Count', score: holdingsScore, maxScore: 25, rawValue: holdings != null ? `${holdings}` : 'N/A', explanation: holdings != null ? (holdings >= 500 ? 'Broadly diversified' : holdings >= 100 ? 'Well-diversified' : holdings >= 25 ? 'Moderately concentrated' : 'Concentrated ETF') : 'Holdings data unavailable' },
+    { name: 'Track Record', score: ageScore, maxScore: 25, rawValue: ageYears != null ? `${Math.floor(ageYears)} yrs` : 'N/A', explanation: ageYears != null ? (ageYears >= 10 ? 'Long-established fund' : ageYears >= 5 ? 'Proven track record' : ageYears >= 1 ? 'Relatively new fund' : 'Very new — limited history') : 'Inception date unavailable' },
+  ]);
+}
+
+// ── ETF: Diversification Dimension ───────────────────────────
+
+function scoreETFDiversification(about: AssetAbout | null, metrics: StockMetrics | null): NalaDimension {
+  const category = about?.category ?? '';
+
+  // Category breadth scoring
+  const isBroadMarket = /blend|total|market|composite|500|index|core/i.test(category);
+  const isSectorSpecific = /sector|tech|health|energy|financ|real estate|utilities|communication/i.test(category);
+  const isIntl = /international|global|emerging|foreign|world|europe|asia|pacific|japan/i.test(category);
+  const categoryScore = isBroadMarket ? 25 : isIntl ? 20 : category ? 15 : isSectorSpecific ? 12 : NEUTRAL;
+
+  // Holdings depth
+  const holdings = about?.numberOfHoldings;
+  const holdingsScore = holdings == null ? NEUTRAL
+    : holdings >= 500 ? 25 : holdings >= 100 ? 22 : holdings >= 50 ? 18 : holdings >= 25 ? 14 : holdings >= 10 ? 10 : 5;
+
+  // Underlying P/E (from Yahoo metrics)
+  const pe = metrics?.peRatio;
+  const peScore = pe == null ? NEUTRAL
+    : pe <= 15 ? 25 : pe <= 20 ? 22 : pe <= 25 ? 18 : pe <= 30 ? 14 : pe <= 40 ? 10 : 6;
+
+  // Yield as income potential
+  const divYield = metrics?.dividendYield;
+  const divScore = divYield == null ? NEUTRAL
+    : divYield >= 4.0 ? 25 : divYield >= 3.0 ? 22 : divYield >= 2.0 ? 18 : divYield >= 1.0 ? 14 : divYield >= 0.5 ? 10 : 6;
+
+  return buildDimension('Diversification', 0.25, [
+    { name: 'Category Breadth', score: categoryScore, maxScore: 25, rawValue: category || 'Unknown', explanation: isBroadMarket ? 'Broad market exposure' : isIntl ? 'International diversification' : isSectorSpecific ? 'Sector-specific — concentrated' : 'Moderate category breadth' },
+    { name: 'Holdings Depth', score: holdingsScore, maxScore: 25, rawValue: holdings != null ? `${holdings}` : 'N/A', explanation: holdings != null ? (holdings >= 500 ? 'Deeply diversified across holdings' : holdings >= 50 ? 'Good number of underlying holdings' : 'Few underlying holdings') : 'Holdings data unavailable' },
+    { name: 'Underlying Valuation', score: peScore, maxScore: 25, rawValue: pe != null ? `${pe.toFixed(1)}x` : 'N/A', explanation: pe != null ? (pe <= 20 ? 'Attractive underlying valuations' : pe <= 30 ? 'Fair underlying valuations' : 'Expensive underlying valuations') : 'P/E data unavailable' },
+    { name: 'Income Potential', score: divScore, maxScore: 25, rawValue: divYield != null ? `${divYield.toFixed(1)}%` : 'N/A', explanation: divYield != null ? (divYield >= 3.0 ? 'Strong income generation' : divYield >= 1.0 ? 'Moderate income yield' : 'Low income focus') : 'Yield data unavailable' },
+  ]);
+}
+
+// ── ETF: Performance Dimension ───────────────────────────────
+
+async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null, currentPrice: number): Promise<NalaDimension> {
+  // 52-week position
+  const high52 = metrics?.week52High;
+  const low52 = metrics?.week52Low;
+  let position52: number | null = null;
+  if (high52 != null && low52 != null && high52 > low52 && currentPrice > 0) {
+    position52 = ((currentPrice - low52) / (high52 - low52)) * 100;
+  }
+  const posScore = position52 == null ? NEUTRAL
+    : position52 >= 90 ? 25 : position52 >= 75 ? 22 : position52 >= 50 ? 18
+    : position52 >= 30 ? 12 : position52 >= 15 ? 8 : 4;
+
+  // 6-month return from candles
+  let sixMonthReturn: number | null = null;
+  let threeMonthReturn: number | null = null;
+  try {
+    const candles = await fetchDailyCandles(ticker, 180);
+    if (candles.length >= 2) {
+      const oldPrice = candles[0].close;
+      const newPrice = candles[candles.length - 1].close;
+      if (oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
+
+      // 3-month return from midpoint
+      const mid = Math.floor(candles.length / 2);
+      if (mid > 0 && candles[mid].close > 0) {
+        threeMonthReturn = ((newPrice - candles[mid].close) / candles[mid].close) * 100;
+      }
+    }
+  } catch { /* candles unavailable */ }
+
+  const returnScore = sixMonthReturn == null ? NEUTRAL
+    : sixMonthReturn >= 30 ? 25 : sixMonthReturn >= 20 ? 22 : sixMonthReturn >= 10 ? 18
+    : sixMonthReturn >= 0 ? 14 : sixMonthReturn >= -10 ? 10 : sixMonthReturn >= -20 ? 6 : 3;
+
+  const recentScore = threeMonthReturn == null ? NEUTRAL
+    : threeMonthReturn >= 15 ? 25 : threeMonthReturn >= 10 ? 22 : threeMonthReturn >= 5 ? 18
+    : threeMonthReturn >= 0 ? 14 : threeMonthReturn >= -5 ? 10 : threeMonthReturn >= -10 ? 6 : 3;
+
+  // Beta stability
+  const beta = metrics?.beta;
+  const betaScore = beta == null ? NEUTRAL
+    : (beta >= 0.8 && beta <= 1.2) ? 25
+    : (beta >= 0.5 && beta < 0.8) ? 22
+    : (beta > 1.2 && beta <= 1.5) ? 20
+    : beta < 0.5 ? 18
+    : (beta > 1.5 && beta <= 2.0) ? 12 : 6;
+
+  return buildDimension('Performance', 0.20, [
+    { name: '52-Week Position', score: posScore, maxScore: 25, rawValue: position52 != null ? fmt(position52, '%') : 'N/A', explanation: position52 != null ? (position52 >= 75 ? 'Trading near 52-week high' : position52 >= 40 ? 'Mid-range of 52-week' : 'Near 52-week low') : '52-week data unavailable' },
+    { name: '6-Month Return', score: returnScore, maxScore: 25, rawValue: fmt(sixMonthReturn, '%'), explanation: sixMonthReturn != null ? (sixMonthReturn >= 20 ? 'Strong recent performance' : sixMonthReturn >= 0 ? 'Positive trend' : 'Negative performance') : 'Price history unavailable' },
+    { name: '3-Month Return', score: recentScore, maxScore: 25, rawValue: fmt(threeMonthReturn, '%'), explanation: threeMonthReturn != null ? (threeMonthReturn >= 10 ? 'Strong short-term momentum' : threeMonthReturn >= 0 ? 'Positive short-term trend' : 'Recent underperformance') : 'Recent data unavailable' },
+    { name: 'Beta Stability', score: betaScore, maxScore: 25, rawValue: beta != null ? fmt(beta) : 'N/A', explanation: beta != null ? (beta >= 0.8 && beta <= 1.2 ? 'Moves in line with market' : beta > 1.5 ? 'Significantly more volatile' : beta < 0.5 ? 'Very low volatility' : 'Moderate volatility') : 'Beta unavailable' },
+  ]);
+}
+
+// ── Enriched Overview (AV + Yahoo fallback) ─────────────────────
+
+function enrichOverview(
+  overview: ParsedOverview | null,
+  metrics: StockMetrics | null,
+): ParsedOverview | null {
+  if (!overview && !metrics) return null;
+
+  // Start with AV overview or empty shell
+  const base: ParsedOverview = overview ?? {
+    name: '', description: '', sector: 'N/A', industry: 'N/A',
+    marketCap: null, peRatio: null, pegRatio: null, forwardPE: null,
+    eps: null, profitMargin: null, returnOnEquity: null, revenueTTM: null,
+    dividendYield: null, beta: null, analystTargetPrice: null,
+    fiftyTwoWeekHigh: null, fiftyTwoWeekLow: null,
+    bookValue: null, sharesOutstanding: null,
+  };
+
+  if (!metrics) return base;
+
+  // Fill gaps from Yahoo metrics
+  if (base.peRatio == null && metrics.peRatio != null) base.peRatio = metrics.peRatio;
+  if (base.eps == null && metrics.eps != null) base.eps = metrics.eps;
+  if (base.beta == null && metrics.beta != null) base.beta = metrics.beta;
+  if (base.fiftyTwoWeekHigh == null && metrics.week52High != null) base.fiftyTwoWeekHigh = metrics.week52High;
+  if (base.fiftyTwoWeekLow == null && metrics.week52Low != null) base.fiftyTwoWeekLow = metrics.week52Low;
+  if (base.dividendYield == null && metrics.dividendYield != null) {
+    base.dividendYield = metrics.dividendYield / 100; // Yahoo stores as pct, AV stores as decimal
+  }
+
+  return base;
+}
+
+// ── ETF Detection ──────────────────────────────────────────────
+
+function detectETF(
+  overview: ParsedOverview | null,
+  about: AssetAbout | null,
+  metrics: StockMetrics | null,
+): boolean {
+  // Yahoo data is the most reliable signal
+  if (about?.category) return true;
+  if (about?.fundFamily) return true;
+  if (metrics?.expenseRatio != null) return true;
+  if (about?.numberOfHoldings != null && about.numberOfHoldings > 0) return true;
+
+  // Fallback: AV name patterns
+  if (overview) {
+    const name = (overview.name ?? '').toUpperCase();
+    if (name.includes(' ETF') || name.includes(' FUND') || name.includes(' TRUST') ||
+        name.includes('ISHARES') || name.includes('VANGUARD') || name.includes('SPDR')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ── Main Score Function ────────────────────────────────────────
 
 export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
@@ -392,39 +576,61 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
   const cached = insightsCache.get<NalaScoreResponse>(cacheKey);
   if (cached) return cached;
 
-  // Fetch all data in parallel
-  const [fundamentals, quote] = await Promise.all([
+  // Fetch all data in parallel: AV fundamentals, Yahoo details + about
+  const [fundamentals, details, about] = await Promise.all([
     getCompanyFundamentals(upper),
-    fetchFastQuote(upper),
+    fetchStockDetails(upper).catch(() => null),
+    getAssetAbout(upper).catch(() => null),
   ]);
 
-  const overview = fundamentals.overview;
-  const currentPrice = quote?.currentPrice ?? 0;
+  const metrics = details?.metrics ?? null;
+  const currentPrice = details?.quote?.currentPrice ?? 0;
 
-  // Detect real ETFs by name patterns (not by missing data)
-  const name = (overview?.name ?? '').toUpperCase();
-  const isETF = overview != null && (
-    name.includes(' ETF') || name.includes(' FUND') || name.includes(' TRUST') ||
-    name.includes('ISHARES') || name.includes('VANGUARD') || name.includes('SPDR') ||
-    (overview.sector === 'N/A' && overview.industry === 'N/A' && name.length > 0)
-  );
+  // Create enriched overview (AV data + Yahoo fallback)
+  const enriched = enrichOverview(fundamentals.overview, metrics);
+  const isETF = detectETF(fundamentals.overview, about, metrics);
 
-  // Always score all 5 dimensions — missing data gets neutral 12.5/25 per sub-metric
-  const [value, quality, growth, dividends, momentum] = await Promise.all([
-    scoreValue(overview, currentPrice),
-    scoreQuality(fundamentals),
-    scoreGrowth(fundamentals),
-    scoreDividends(upper, overview),
-    scoreMomentum(upper, overview, currentPrice),
-  ]);
+  let dimensions: Record<string, NalaDimension>;
+  let availableDimensions: string[];
 
-  const dimensions = { value, quality, growth, dividends, momentum };
+  if (isETF) {
+    // ── ETF Scoring Path ──
+    // ETF-specific: Cost Efficiency (25%), Diversification (25%), Performance (20%)
+    // Shared: Dividends (15%), Momentum (15%) — using enriched overview
+    const [costEfficiency, diversification, performance, dividends, momentum] = await Promise.all([
+      Promise.resolve(scoreETFCostEfficiency(metrics, about)),
+      Promise.resolve(scoreETFDiversification(about, metrics)),
+      scoreETFPerformance(upper, metrics, currentPrice),
+      scoreDividends(upper, enriched),
+      scoreMomentum(upper, enriched, currentPrice),
+    ]);
+
+    dimensions = {
+      costEfficiency,
+      diversification,
+      performance,
+      dividends,
+      momentum,
+    };
+    availableDimensions = ['Cost Efficiency', 'Diversification', 'Performance', 'Dividends', 'Momentum'];
+  } else {
+    // ── Stock Scoring Path ──
+    // Uses enriched overview so Yahoo fills AV gaps
+    const [value, quality, growth, dividends, momentum] = await Promise.all([
+      Promise.resolve(scoreValue(enriched, currentPrice)),
+      Promise.resolve(scoreQuality(fundamentals)),
+      Promise.resolve(scoreGrowth(fundamentals)),
+      scoreDividends(upper, enriched),
+      scoreMomentum(upper, enriched, currentPrice),
+    ]);
+
+    dimensions = { value, quality, growth, dividends, momentum };
+    availableDimensions = ['Value', 'Quality', 'Growth', 'Dividends', 'Momentum'];
+  }
+
+  // Compute weighted composite
   const composite = Math.round(
-    value.score * value.weight +
-    quality.score * quality.weight +
-    growth.score * growth.weight +
-    dividends.score * dividends.weight +
-    momentum.score * momentum.weight
+    Object.values(dimensions).reduce((sum, d) => sum + d.score * d.weight, 0)
   );
 
   // Generate key insights
@@ -436,7 +642,7 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
 
   const topDim = Object.values(dimensions).sort((a, b) => b.score - a.score)[0];
   const keyInsights: string[] = [];
-  if (isETF) keyInsights.push(`${upper} is an ETF — some dimensions use neutral defaults where individual fundamentals are unavailable.`);
+  if (isETF) keyInsights.push(`${upper} is an ETF — scored on Cost Efficiency, Diversification, Performance, Dividends, and Momentum.`);
   keyInsights.push(`${upper} scores ${composite}/100 (${gradeFromScore(composite)}) — strongest in ${topDim.name}.`);
   for (const s of strengths) keyInsights.push(`${s.explanation}`);
   for (const w of weaknesses) keyInsights.push(`Watch: ${w.explanation}`);
@@ -449,7 +655,7 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
     keyInsights,
     dataAge: fundamentals.dataAge,
     isETF,
-    availableDimensions: ['Value', 'Quality', 'Growth', 'Dividends', 'Momentum'],
+    availableDimensions,
     lastUpdated: new Date().toISOString(),
   };
 
