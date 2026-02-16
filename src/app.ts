@@ -20,15 +20,15 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", ...config.allowedOrigins],
+      connectSrc: ["'self'", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       workerSrc: ["'self'"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "blob:", "https:"],
-      frameSrc: ["'none'"],
+      frameSrc: ["https://cdn.plaid.com"],
     },
   },
   // HSTS: enforce HTTPS for 1 year, include subdomains
