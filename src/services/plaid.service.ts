@@ -35,7 +35,11 @@ export async function createLinkToken(userId: string): Promise<string> {
 export async function exchangePublicToken(
   userId: string,
   publicToken: string
-): Promise<{ itemId: string; accounts: Array<{ id: string; name: string | null; mask: string | null; type: string | null }> }> {
+): Promise<{
+  itemId: string;
+  accounts: Array<{ id: string; name: string | null; mask: string | null; type: string | null }>;
+  sync: { created: number; updated: number; skipped: number; tickers: string[] } | null;
+}> {
   const response = await plaidClient.itemPublicTokenExchange({
     public_token: publicToken,
   });
@@ -99,6 +103,15 @@ export async function exchangePublicToken(
     return item;
   });
 
+  let sync: { created: number; updated: number; skipped: number; tickers: string[] } | null = null;
+  try {
+    const { syncHoldingsFromPlaid } = await import('./plaid-sync.service');
+    sync = await syncHoldingsFromPlaid(plaidItem.id, userId);
+  } catch {
+    // Non-critical: account link succeeds even if initial sync fails.
+    console.error('[Plaid] Initial holdings sync failed');
+  }
+
   return {
     itemId: plaidItem.id,
     accounts: plaidAccounts.map((a) => ({
@@ -107,6 +120,7 @@ export async function exchangePublicToken(
       mask: a.mask,
       type: a.type,
     })),
+    sync,
   };
 }
 

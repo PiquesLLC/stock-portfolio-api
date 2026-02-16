@@ -3,6 +3,7 @@ export interface Holding {
   ticker: string;
   shares: number;
   averageCost: number;
+  source?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -11,6 +12,7 @@ export interface HoldingInput {
   ticker: string;
   shares: number;
   averageCost: number;
+  source?: 'manual' | 'plaid' | 'csv';
 }
 
 export interface PortfolioSnapshot {

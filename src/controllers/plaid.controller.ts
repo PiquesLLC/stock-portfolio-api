@@ -4,6 +4,7 @@ import { createLinkToken, exchangePublicToken, getPlaidItems, disconnectPlaidIte
 import { exchangeTokenSchema, disconnectItemSchema, webhookPayloadSchema } from '../validators/plaid.validators';
 import { config } from '../config';
 import { verifyPlaidWebhook } from '../utils/plaid-webhook-verify';
+import { syncHoldingsFromPlaid } from '../services/plaid-sync.service';
 
 /**
  * POST /plaid/link-token
@@ -90,6 +91,25 @@ export async function getHoldingsHandler(req: AuthRequest, res: Response) {
   } catch (err) {
     console.error('[Plaid] Holdings fetch failed');
     res.status(500).json({ error: 'Failed to fetch holdings' });
+  }
+}
+
+/**
+ * POST /plaid/items/:itemId/sync
+ * Manually sync holdings from a linked brokerage into local holdings.
+ */
+export async function syncHoldingsHandler(req: AuthRequest, res: Response) {
+  try {
+    const parsed = disconnectItemSchema.safeParse({ itemId: req.params.itemId });
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request' });
+    }
+
+    const result = await syncHoldingsFromPlaid(parsed.data.itemId, req.user!.userId);
+    res.json({ result });
+  } catch {
+    console.error('[Plaid] Holdings sync failed');
+    res.status(500).json({ error: 'Failed to sync holdings' });
   }
 }
 

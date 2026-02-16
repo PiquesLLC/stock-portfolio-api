@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createLinkTokenHandler, exchangeTokenHandler, getItemsHandler, disconnectItemHandler, getHoldingsHandler, webhookHandler } from '../controllers/plaid.controller';
+import { createLinkTokenHandler, exchangeTokenHandler, getItemsHandler, disconnectItemHandler, getHoldingsHandler, syncHoldingsHandler, webhookHandler } from '../controllers/plaid.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { mutationLimiter, webhookLimiter } from '../middleware/rateLimiter';
 import { requireMfaAssurance } from '../middleware/mfa-assurance.middleware';
@@ -18,6 +18,9 @@ router.get('/items', requireAuth, getItemsHandler);
 
 // GET /plaid/items/:itemId/holdings - Fetch holdings from linked brokerage
 router.get('/items/:itemId/holdings', requireAuth, getHoldingsHandler);
+
+// POST /plaid/items/:itemId/sync - Re-sync holdings from linked brokerage
+router.post('/items/:itemId/sync', mutationLimiter, requireAuth, syncHoldingsHandler);
 
 // DELETE /plaid/items/:itemId - Disconnect a linked account (sensitive — requires MFA)
 router.delete('/items/:itemId', mutationLimiter, requireAuth, requireMfaAssurance, disconnectItemHandler);

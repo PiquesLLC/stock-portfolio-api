@@ -12,6 +12,7 @@ model Holding {
   ticker      String
   shares      Float
   averageCost Float
+  source      String?  @default("manual")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   userId      String?
