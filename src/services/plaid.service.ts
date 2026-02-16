@@ -183,6 +183,36 @@ export async function disconnectPlaidItem(plaidItemId: string, userId: string): 
 }
 
 /**
+ * Fetch investment holdings from Plaid for a linked item.
+ * Returns securities and holdings data for the frontend to display or sync.
+ */
+export async function getInvestmentHoldings(plaidItemId: string, userId: string) {
+  const accessToken = await getDecryptedAccessToken(plaidItemId, userId);
+  if (!accessToken) throw new Error('Plaid item not found or inactive');
+
+  const response = await plaidClient.investmentsHoldingsGet({ access_token: accessToken });
+
+  const { accounts, holdings, securities } = response.data;
+
+  // Build a lookup map for securities by security_id
+  const secMap = new Map(securities.map((s) => [s.security_id, s]));
+
+  return holdings.map((h) => {
+    const sec = secMap.get(h.security_id);
+    return {
+      ticker: sec?.ticker_symbol || null,
+      name: sec?.name || null,
+      quantity: h.quantity,
+      costBasis: h.cost_basis,
+      currentValue: h.institution_value,
+      currentPrice: h.institution_price,
+      accountId: h.account_id,
+      type: sec?.type || null,
+    };
+  });
+}
+
+/**
  * Handle Plaid webhook updates (item status changes, errors, etc.)
  */
 export async function handleItemWebhook(

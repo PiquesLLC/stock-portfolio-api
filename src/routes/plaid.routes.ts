@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createLinkTokenHandler, exchangeTokenHandler, getItemsHandler, disconnectItemHandler, webhookHandler } from '../controllers/plaid.controller';
+import { createLinkTokenHandler, exchangeTokenHandler, getItemsHandler, disconnectItemHandler, getHoldingsHandler, webhookHandler } from '../controllers/plaid.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { mutationLimiter } from '../middleware/rateLimiter';
 
@@ -14,6 +14,9 @@ router.post('/exchange-token', mutationLimiter, requireAuth, exchangeTokenHandle
 
 // GET /plaid/items - List linked accounts
 router.get('/items', requireAuth, getItemsHandler);
+
+// GET /plaid/items/:itemId/holdings - Fetch holdings from linked brokerage
+router.get('/items/:itemId/holdings', requireAuth, getHoldingsHandler);
 
 // DELETE /plaid/items/:itemId - Disconnect a linked account
 router.delete('/items/:itemId', mutationLimiter, requireAuth, disconnectItemHandler);

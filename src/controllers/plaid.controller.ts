@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
-import { createLinkToken, exchangePublicToken, getPlaidItems, disconnectPlaidItem, handleItemWebhook } from '../services/plaid.service';
+import { createLinkToken, exchangePublicToken, getPlaidItems, disconnectPlaidItem, handleItemWebhook, getInvestmentHoldings } from '../services/plaid.service';
 import { exchangeTokenSchema, disconnectItemSchema } from '../validators/plaid.validators';
 import { config } from '../config';
 
@@ -70,6 +70,25 @@ export async function disconnectItemHandler(req: AuthRequest, res: Response) {
   } catch (err: any) {
     console.error('[Plaid] Disconnect error:', err.message);
     res.status(500).json({ error: 'Failed to disconnect account' });
+  }
+}
+
+/**
+ * GET /plaid/items/:itemId/holdings
+ * Fetch investment holdings from a linked brokerage.
+ */
+export async function getHoldingsHandler(req: AuthRequest, res: Response) {
+  try {
+    const parsed = disconnectItemSchema.safeParse({ itemId: req.params.itemId });
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0].message });
+    }
+
+    const holdings = await getInvestmentHoldings(parsed.data.itemId, req.user!.userId);
+    res.json({ holdings });
+  } catch (err: any) {
+    console.error('[Plaid] Holdings error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch holdings' });
   }
 }
 
