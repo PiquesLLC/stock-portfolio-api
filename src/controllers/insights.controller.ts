@@ -29,7 +29,7 @@ export async function getHealthHandler(req: Request, res: Response): Promise<voi
     const healthScore = await getHealthScore();
     res.json(healthScore);
   } catch (error) {
-    console.error('Error getting health score:', error);
+    console.error('Error getting health score:');
     res.status(500).json({
       error: 'Failed to calculate health score',
       partial: true,
@@ -49,7 +49,7 @@ export async function getAttributionHandler(req: Request, res: Response): Promis
     const attribution = await getAttribution(window);
     res.json(attribution);
   } catch (error) {
-    console.error('Error getting attribution:', error);
+    console.error('Error getting attribution:');
     res.status(500).json({
       error: 'Failed to get attribution',
       partial: true,
@@ -62,7 +62,7 @@ export async function getLeakDetectorHandler(req: Request, res: Response): Promi
     const leaks = await getLeakDetector();
     res.json(leaks);
   } catch (error) {
-    console.error('Error getting leak detector:', error);
+    console.error('Error getting leak detector:');
     res.status(500).json({
       error: 'Failed to analyze correlations',
       correlationClusters: [],
@@ -78,7 +78,7 @@ export async function getRiskForecastHandler(req: Request, res: Response): Promi
     const riskForecast = await getRiskForecast();
     res.json(riskForecast);
   } catch (error) {
-    console.error('Error getting risk forecast:', error);
+    console.error('Error getting risk forecast:');
     res.status(500).json({
       error: 'Failed to calculate risk forecast',
       expectedAnnualVol: null,
@@ -104,7 +104,7 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
     const incomeInsights = await getIncomeInsights(window);
     res.json(incomeInsights);
   } catch (error) {
-    console.error('Error getting income insights:', error);
+    console.error('Error getting income insights:');
     res.status(500).json({
       error: 'Failed to get income insights',
       healthScore: { overall: 0, breakdown: { stability: 0, growth: 0, coverage: 0, diversification: 0 }, grade: 'Poor' },
@@ -128,7 +128,7 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
     const briefing = await getPortfolioBriefing();
     res.json(briefing);
   } catch (error) {
-    console.error('Error getting portfolio briefing:', error);
+    console.error('Error getting portfolio briefing:');
     res.status(500).json({
       error: 'Failed to generate briefing',
       generatedAt: new Date().toISOString(),
@@ -147,7 +147,7 @@ export async function getBehaviorHandler(req: Request, res: Response): Promise<v
     const behavior = await getBehaviorInsights();
     res.json(behavior);
   } catch (error) {
-    console.error('Error getting behavior insights:', error);
+    console.error('Error getting behavior insights:');
     res.status(500).json({
       error: 'Failed to generate behavior insights',
       generatedAt: new Date().toISOString(),
@@ -166,7 +166,7 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
     const report = await getDailyReport();
     res.json(report);
   } catch (error) {
-    console.error('Daily report error:', error);
+    console.error('Daily report error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
       greeting: 'Good morning!',
@@ -184,7 +184,7 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
     const result = await getEarningsSummary();
     res.json(result);
   } catch (error) {
-    console.error('Earnings summary error:', error);
+    console.error('Earnings summary error:');
     res.status(500).json({
       results: [],
       partial: true,
@@ -198,7 +198,7 @@ export async function regenerateDailyReportHandler(req: Request, res: Response):
     const report = await regenerateDailyReport();
     res.json(report);
   } catch (error) {
-    console.error('Daily report regenerate error:', error);
+    console.error('Daily report regenerate error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
       greeting: 'Good morning!',

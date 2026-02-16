@@ -19,7 +19,7 @@ export async function getAlertsHandler(req: AuthRequest, res: Response): Promise
     const alerts = await getUserAlerts(req.user.userId);
     res.json(alerts);
   } catch (error) {
-    console.error('Error getting alerts:', error);
+    console.error('Error getting alerts:');
     res.status(500).json({ error: 'Failed to get alerts' });
   }
 }
@@ -41,7 +41,7 @@ export async function updateAlertHandler(req: AuthRequest, res: Response): Promi
     }
     res.json(alert);
   } catch (error) {
-    console.error('Error updating alert:', error);
+    console.error('Error updating alert:');
     res.status(500).json({ error: 'Failed to update alert' });
   }
 }
@@ -56,7 +56,7 @@ export async function getEventsHandler(req: AuthRequest, res: Response): Promise
     const events = await getAlertEvents(req.user.userId);
     res.json(events);
   } catch (error) {
-    console.error('Error getting alert events:', error);
+    console.error('Error getting alert events:');
     res.status(500).json({ error: 'Failed to get alert events' });
   }
 }
@@ -71,7 +71,7 @@ export async function getUnreadCountHandler(req: AuthRequest, res: Response): Pr
     const count = await getUnreadCount(req.user.userId);
     res.json({ count });
   } catch (error) {
-    console.error('Error getting unread count:', error);
+    console.error('Error getting unread count:');
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }
@@ -82,7 +82,7 @@ export async function markReadHandler(req: AuthRequest, res: Response): Promise<
     await markEventRead(req.params.id, req.user!.userId);
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error marking event read:', error);
+    console.error('Error marking event read:');
     res.status(500).json({ error: 'Failed to mark event read' });
   }
 }
@@ -93,7 +93,7 @@ export async function markAllReadHandler(req: AuthRequest, res: Response): Promi
     await markAllRead(req.user!.userId);
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error marking all read:', error);
+    console.error('Error marking all read:');
     res.status(500).json({ error: 'Failed to mark all read' });
   }
 }

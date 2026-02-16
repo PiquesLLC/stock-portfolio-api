@@ -6,7 +6,7 @@ export async function getTaxHarvestHandler(_req: Request, res: Response): Promis
     const result = await getTaxHarvestSuggestions();
     res.json(result);
   } catch (error) {
-    console.error('[Tax Harvest] Error:', error);
+    console.error('[Tax Harvest] Error:');
     res.status(500).json({ error: 'Failed to compute tax harvest suggestions' });
   }
 }

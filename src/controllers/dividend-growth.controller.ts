@@ -16,7 +16,7 @@ export async function getDividendGrowthRatesHandler(req: AuthRequest, res: Respo
     );
     res.json(data);
   } catch (error) {
-    console.error('Error fetching dividend growth rates:', error);
+    console.error('Error fetching dividend growth rates:');
     res.status(500).json({ error: 'Failed to fetch dividend growth rates' });
   }
 }

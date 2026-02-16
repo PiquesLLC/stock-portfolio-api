@@ -85,7 +85,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       paceProjection,
     });
   } catch (error) {
-    console.error('Error fetching portfolio:', error);
+    console.error('Error fetching portfolio:');
     res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
 }
@@ -119,7 +119,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       await recordCompositionChange('holding_update');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
-      console.warn('[Snapshot] Reset failed after holding update:', err);
+      console.warn('[Snapshot] Reset failed after holding update:');
     }
 
     // Auto-create transaction for TWR tracking (unless skipTransaction is set)
@@ -161,7 +161,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
 
     res.status(201).json(holding);
   } catch (error) {
-    console.error('Error adding holding:', error);
+    console.error('Error adding holding:');
     res.status(500).json({ error: 'Failed to add holding' });
   }
 }
@@ -187,7 +187,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       await recordCompositionChange('holding_remove');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
-      console.warn('[Snapshot] Reset failed after holding removal:', err);
+      console.warn('[Snapshot] Reset failed after holding removal:');
     }
 
     // Auto-create withdrawal transaction for TWR tracking
@@ -212,7 +212,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       res.status(404).json({ error: 'Holding not found' });
       return;
     }
-    console.error('Error removing holding:', error);
+    console.error('Error removing holding:');
     res.status(500).json({ error: 'Failed to remove holding' });
   }
 }
@@ -239,7 +239,7 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     const settings = await updateCashBalance(cashBalance);
     res.json({ cashBalance: settings.cashBalance });
   } catch (error) {
-    console.error('Error updating cash balance:', error);
+    console.error('Error updating cash balance:');
     res.status(500).json({ error: 'Failed to update cash balance' });
   }
 }
@@ -249,7 +249,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
     const snapshots = await getAllSnapshots();
     res.json(snapshots);
   } catch (error) {
-    console.error('Error fetching history:', error);
+    console.error('Error fetching history:');
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 }
@@ -284,7 +284,7 @@ export async function getProjectionsHandler(req: Request, res: Response): Promis
 
     res.json(projections);
   } catch (error) {
-    console.error('Error calculating projections:', error);
+    console.error('Error calculating projections:');
     res.status(500).json({ error: 'Failed to calculate projections' });
   }
 }
@@ -303,7 +303,7 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
     const metrics = await getMetrics(lookback);
     res.json(metrics);
   } catch (error) {
-    console.error('Error calculating metrics:', error);
+    console.error('Error calculating metrics:');
     res.status(500).json({ error: 'Failed to calculate metrics' });
   }
 }
@@ -460,7 +460,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     res.json({ points, periodStartValue, period });
   } catch (error) {
-    console.error('Error fetching chart data:', error);
+    console.error('Error fetching chart data:');
     res.status(500).json({ error: 'Failed to fetch chart data' });
   }
 }
@@ -481,7 +481,7 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
     const result = await getCurrentPaceProjection(window);
     res.json(result);
   } catch (error) {
-    console.error('Error calculating current pace:', error);
+    console.error('Error calculating current pace:');
     res.status(500).json({ error: 'Failed to calculate current pace' });
   }
 }
@@ -527,7 +527,7 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
     const result = await getPerformanceComparison(window, benchmark, userId || null);
     res.json(result);
   } catch (error) {
-    console.error('Error fetching performance:', error);
+    console.error('Error fetching performance:');
     res.status(500).json({ error: 'Failed to fetch performance data' });
   }
 }
@@ -547,7 +547,7 @@ export async function getTickerActivity(req: AuthRequest, res: Response): Promis
     const events = await getUserActivityByTicker(userId, ticker);
     res.json(events);
   } catch (error) {
-    console.error('Error fetching ticker activity:', error);
+    console.error('Error fetching ticker activity:');
     res.status(500).json({ error: 'Failed to fetch ticker activity' });
   }
 }
@@ -665,7 +665,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       skippedRows,
     });
   } catch (error) {
-    console.error('CSV import parse error:', error);
+    console.error('CSV import parse error:');
     res.status(500).json({ error: 'Failed to parse CSV' });
   }
 }
@@ -726,12 +726,12 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       await recordCompositionChange(mode === 'replace' ? 'import_replace' : 'import_merge');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
-      console.warn('[Snapshot] Reset failed after import confirm:', err);
+      console.warn('[Snapshot] Reset failed after import confirm:');
     }
 
     res.json({ added, updated, removed });
   } catch (error) {
-    console.error('Import confirm error:', error);
+    console.error('Import confirm error:');
     res.status(500).json({ error: 'Failed to apply import' });
   }
 }
@@ -754,12 +754,12 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       await recordCompositionChange('portfolio_clear');
       await resetSnapshotsForCompositionChange();
     } catch (err) {
-      console.warn('[Snapshot] Reset failed after clear portfolio:', err);
+      console.warn('[Snapshot] Reset failed after clear portfolio:');
     }
 
     res.json({ cleared: true, holdingsRemoved: deleted.count });
   } catch (error) {
-    console.error('Clear portfolio error:', error);
+    console.error('Clear portfolio error:');
     res.status(500).json({ error: 'Failed to clear portfolio' });
   }
 }
@@ -809,7 +809,7 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
 
     res.json(responsePayload);
   } catch (error) {
-    console.error('Screenshot OCR error:', error);
+    console.error('Screenshot OCR error:');
     if (String((error as Error)?.message || '').includes('HEIC conversion failed')) {
       res.status(400).json({ error: 'Unsupported image format. Please upload PNG or JPG.' });
       return;

@@ -67,7 +67,7 @@ export async function getPrices(req: Request, res: Response): Promise<void> {
 
     res.json(response);
   } catch (error) {
-    console.error('Error fetching prices:', error);
+    console.error('Error fetching prices:');
     res.status(500).json({ error: 'Failed to fetch prices' });
   }
 }
@@ -84,7 +84,7 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
     const quote = await fetchQuote(ticker);
     res.json(quote);
   } catch (error) {
-    console.error('Error fetching quote:', error);
+    console.error('Error fetching quote:');
     res.status(500).json({ error: 'Failed to fetch quote' });
   }
 }
@@ -109,7 +109,7 @@ export async function getFastQuote(req: Request, res: Response): Promise<void> {
     }
     res.json(quote);
   } catch (error) {
-    console.error('Error fetching fast quote:', error);
+    console.error('Error fetching fast quote:');
     res.status(500).json({ error: 'Failed to fetch quote' });
   }
 }
@@ -124,7 +124,7 @@ export async function getStockDetails(req: Request, res: Response): Promise<void
     const details = await fetchStockDetails(ticker);
     res.json(details);
   } catch (error) {
-    console.error('Error fetching stock details:', error);
+    console.error('Error fetching stock details:');
     res.status(500).json({ error: 'Failed to fetch stock details' });
   }
 }
@@ -139,7 +139,7 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
     const candles = await fetchIntradayCandles(ticker);
     res.json({ ticker, candles });
   } catch (error) {
-    console.error('Error fetching intraday data:', error);
+    console.error('Error fetching intraday data:');
     res.status(500).json({ error: 'Failed to fetch intraday data' });
   }
 }
@@ -159,7 +159,7 @@ export async function getHourlyCandles(req: Request, res: Response): Promise<voi
     const candles = await fetchHourlyCandles(ticker, period);
     res.json({ ticker, candles });
   } catch (error) {
-    console.error('Error fetching hourly candles:', error);
+    console.error('Error fetching hourly candles:');
     res.status(500).json({ error: 'Failed to fetch hourly data' });
   }
 }
@@ -180,7 +180,7 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
     const candles = await fetchDailyCandles(ticker, days);
     res.json({ ticker, candles });
   } catch (error) {
-    console.error('Error fetching daily candles:', error);
+    console.error('Error fetching daily candles:');
     res.status(500).json({ error: 'Failed to fetch daily data' });
   }
 }
@@ -206,7 +206,7 @@ export async function searchSymbols(req: Request, res: Response): Promise<void> 
     const response = await searchTickers(query, heldTickers);
     res.json(response);
   } catch (error) {
-    console.error('Error searching symbols:', error);
+    console.error('Error searching symbols:');
     res.status(500).json({ error: 'Failed to search symbols' });
   }
 }
@@ -217,7 +217,7 @@ export async function getMarketNews(req: Request, res: Response): Promise<void> 
     const news = await fetchMarketNews(limit);
     res.json(news);
   } catch (error) {
-    console.error('Error fetching market news:', error);
+    console.error('Error fetching market news:');
     res.status(500).json({ error: 'Failed to fetch news' });
   }
 }
@@ -230,7 +230,7 @@ export async function getTickerNews(req: Request, res: Response): Promise<void> 
     const news = await fetchTickerNews(ticker, limit);
     res.json(news);
   } catch (error) {
-    console.error('Error fetching ticker news:', error);
+    console.error('Error fetching ticker news:');
     res.status(500).json({ error: 'Failed to fetch ticker news' });
   }
 }
@@ -256,7 +256,7 @@ export async function getBenchmarkClosesHandler(req: Request, res: Response): Pr
     }));
     res.json({ ticker, candles });
   } catch (error) {
-    console.error('Error fetching benchmark closes:', error);
+    console.error('Error fetching benchmark closes:');
     res.status(500).json({ error: 'Failed to fetch benchmark data' });
   }
 }
@@ -277,7 +277,7 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
 
     res.json(holdings);
   } catch (error) {
-    console.error('Error fetching ETF holdings:', error);
+    console.error('Error fetching ETF holdings:');
     res.status(500).json({ error: 'Failed to fetch ETF holdings' });
   }
 }
@@ -290,7 +290,7 @@ export async function getAIEventsHandler(req: Request, res: Response): Promise<v
     const result = await getAIEvents(ticker, days);
     res.json(result);
   } catch (error) {
-    console.error('Error fetching AI events:', error);
+    console.error('Error fetching AI events:');
     res.status(500).json({ error: 'Failed to fetch AI events' });
   }
 }
@@ -311,7 +311,7 @@ export async function getAssetAboutHandler(req: Request, res: Response): Promise
 
     res.json(about);
   } catch (error) {
-    console.error('Error fetching asset about:', error);
+    console.error('Error fetching asset about:');
     res.status(500).json({ error: 'Failed to fetch asset about data' });
   }
 }
@@ -338,7 +338,7 @@ export async function askStockQuestionHandler(req: Request, res: Response): Prom
       res.status(429).json({ error: 'Rate limited. Please wait a moment.' });
       return;
     }
-    console.error('Error in stock Q&A:', error);
+    console.error('Error in stock Q&A:');
     res.status(500).json({ error: 'Failed to get answer' });
   }
 }
@@ -364,7 +364,7 @@ export async function getHistoricalCAGRHandler(req: Request, res: Response): Pro
     const cagrs = await getHistoricalCAGRs(tickers);
     res.json({ cagrs });
   } catch (error) {
-    console.error('Error fetching historical CAGR:', error);
+    console.error('Error fetching historical CAGR:');
     res.status(500).json({ error: 'Failed to fetch historical CAGR data' });
   }
 }
@@ -382,7 +382,7 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
     const data = await getHeatmapData(period, index);
     res.json(data);
   } catch (error) {
-    console.error('Error fetching heatmap data:', error);
+    console.error('Error fetching heatmap data:');
     res.status(500).json({ error: 'Failed to fetch heatmap data' });
   }
 }
@@ -397,7 +397,7 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
     const score = await getNalaScore(ticker);
     res.json(score);
   } catch (error) {
-    console.error(`[Nala Score] Error for ${req.params.ticker}:`, error);
+    console.error(`[Nala Score] Error for ${req.params.ticker}:`);
     res.status(500).json({ error: 'Failed to compute Nala Score' });
   }
 }
@@ -409,7 +409,7 @@ export async function getEarningsTrackHandler(req: Request, res: Response): Prom
     const track = await getEarningsTrack(ticker);
     res.json(track);
   } catch (error) {
-    console.error(`[Earnings Track] Error for ${req.params.ticker}:`, error);
+    console.error(`[Earnings Track] Error for ${req.params.ticker}:`);
     res.status(500).json({ error: 'Failed to compute earnings track record' });
   }
 }

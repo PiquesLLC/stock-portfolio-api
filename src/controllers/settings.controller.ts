@@ -40,7 +40,7 @@ export async function getSettingsHandler(req: AuthRequest, res: Response): Promi
       });
     }
   } catch (error) {
-    console.error('Error fetching settings:', error);
+    console.error('Error fetching settings:');
     res.status(500).json({ error: 'Failed to fetch settings' });
   }
 }
@@ -100,7 +100,7 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       cashInterestRate: Math.round((userSettings.cashInterestRate ?? 0) * 100) / 100,
     });
   } catch (error) {
-    console.error('Error updating settings:', error);
+    console.error('Error updating settings:');
     res.status(500).json({ error: 'Failed to update settings' });
   }
 }
@@ -124,7 +124,7 @@ export async function setBaselineHandler(req: Request, res: Response): Promise<v
       baselineType: settings.baselineType,
     });
   } catch (error) {
-    console.error('Error setting baseline:', error);
+    console.error('Error setting baseline:');
     res.status(500).json({ error: 'Failed to set baseline' });
   }
 }
@@ -162,7 +162,7 @@ export async function setBrokerLifetimeHandler(req: Request, res: Response): Pro
       brokerLifetimeAsOf: settings.brokerLifetimeAsOf,
     });
   } catch (error) {
-    console.error('Error setting broker lifetime:', error);
+    console.error('Error setting broker lifetime:');
     res.status(500).json({ error: 'Failed to set broker lifetime data' });
   }
 }
@@ -172,7 +172,7 @@ export async function clearBrokerLifetimeHandler(req: Request, res: Response): P
     await clearBrokerLifetime();
     res.status(204).send();
   } catch (error) {
-    console.error('Error clearing broker lifetime:', error);
+    console.error('Error clearing broker lifetime:');
     res.status(500).json({ error: 'Failed to clear broker lifetime data' });
   }
 }
@@ -185,7 +185,7 @@ export async function getYtdHandler(req: Request, res: Response): Promise<void> 
       ytdNetContributions: settings.ytdNetContributions ?? null,
     });
   } catch (error) {
-    console.error('Error fetching YTD settings:', error);
+    console.error('Error fetching YTD settings:');
     res.status(500).json({ error: 'Failed to fetch YTD settings' });
   }
 }
@@ -211,7 +211,7 @@ export async function setYtdHandler(req: Request, res: Response): Promise<void> 
       ytdNetContributions: settings.ytdNetContributions,
     });
   } catch (error) {
-    console.error('Error setting YTD data:', error);
+    console.error('Error setting YTD data:');
     res.status(500).json({ error: 'Failed to set YTD data' });
   }
 }
@@ -221,7 +221,7 @@ export async function clearYtdHandler(req: Request, res: Response): Promise<void
     await clearYtdData();
     res.status(204).send();
   } catch (error) {
-    console.error('Error clearing YTD data:', error);
+    console.error('Error clearing YTD data:');
     res.status(500).json({ error: 'Failed to clear YTD data' });
   }
 }
@@ -231,7 +231,7 @@ export async function getSummaryHandler(req: Request, res: Response): Promise<vo
     const summary = await getPerformanceSummary();
     res.json(summary);
   } catch (error) {
-    console.error('Error fetching summary:', error);
+    console.error('Error fetching summary:');
     res.status(500).json({ error: 'Failed to fetch performance summary' });
   }
 }
@@ -244,7 +244,7 @@ export async function activateTrackingHandler(req: Request, res: Response): Prom
       trackingStartDate: settings.trackingStartDate,
     });
   } catch (error) {
-    console.error('Error activating tracking:', error);
+    console.error('Error activating tracking:');
     res.status(500).json({ error: 'Failed to activate tracking' });
   }
 }
@@ -257,7 +257,7 @@ export async function restartTrackingHandler(req: Request, res: Response): Promi
       trackingStartDate: settings.trackingStartDate,
     });
   } catch (error) {
-    console.error('Error restarting tracking:', error);
+    console.error('Error restarting tracking:');
     res.status(500).json({ error: 'Failed to restart tracking' });
   }
 }
@@ -275,7 +275,7 @@ export async function cleanupSnapshotsHandler(req: Request, res: Response): Prom
       snapshotsAfter: countAfter,
     });
   } catch (error) {
-    console.error('Error cleaning up snapshots:', error);
+    console.error('Error cleaning up snapshots:');
     res.status(500).json({ error: 'Failed to cleanup snapshots' });
   }
 }
@@ -308,7 +308,7 @@ export async function getCashInterestAccrualHandler(req: AuthRequest, res: Respo
       asOf: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error calculating cash interest accrual:', error);
+    console.error('Error calculating cash interest accrual:');
     res.status(500).json({ error: 'Failed to calculate cash interest accrual' });
   }
 }

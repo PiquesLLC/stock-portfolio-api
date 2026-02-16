@@ -12,7 +12,7 @@ export async function listGoalsHandler(req: Request, res: Response): Promise<voi
     const goals = await getAllGoalsWithProgress();
     res.json(goals);
   } catch (error) {
-    console.error('Error listing goals:', error);
+    console.error('Error listing goals:');
     res.status(500).json({ error: 'Failed to list goals' });
   }
 }
@@ -29,7 +29,7 @@ export async function getGoalHandler(req: Request, res: Response): Promise<void>
 
     res.json(goal);
   } catch (error) {
-    console.error('Error getting goal:', error);
+    console.error('Error getting goal:');
     res.status(500).json({ error: 'Failed to get goal' });
   }
 }
@@ -70,7 +70,7 @@ export async function createGoalHandler(req: Request, res: Response): Promise<vo
 
     res.status(201).json(goal);
   } catch (error) {
-    console.error('Error creating goal:', error);
+    console.error('Error creating goal:');
     res.status(500).json({ error: 'Failed to create goal' });
   }
 }
@@ -117,7 +117,7 @@ export async function updateGoalHandler(req: Request, res: Response): Promise<vo
       res.status(404).json({ error: 'Goal not found' });
       return;
     }
-    console.error('Error updating goal:', error);
+    console.error('Error updating goal:');
     res.status(500).json({ error: 'Failed to update goal' });
   }
 }
@@ -132,7 +132,7 @@ export async function deleteGoalHandler(req: Request, res: Response): Promise<vo
       res.status(404).json({ error: 'Goal not found' });
       return;
     }
-    console.error('Error deleting goal:', error);
+    console.error('Error deleting goal:');
     res.status(500).json({ error: 'Failed to delete goal' });
   }
 }

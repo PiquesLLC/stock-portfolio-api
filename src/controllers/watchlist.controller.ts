@@ -26,7 +26,7 @@ export async function listWatchlistsHandler(req: AuthRequest, res: Response): Pr
     const data = await getWatchlists(SYSTEM_USER_ID);
     res.json(data);
   } catch (error) {
-    console.error('Watchlist list error:', error);
+    console.error('Watchlist list error:');
     res.status(500).json({ error: 'Failed to load watchlists' });
   }
 }
@@ -41,7 +41,7 @@ export async function getWatchlistHandler(req: AuthRequest, res: Response): Prom
     }
     res.json(watchlist);
   } catch (error) {
-    console.error('Watchlist detail error:', error);
+    console.error('Watchlist detail error:');
     res.status(500).json({ error: 'Failed to load watchlist' });
   }
 }
@@ -67,7 +67,7 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
       res.status(409).json({ error: 'Watchlist name already exists' });
       return;
     }
-    console.error('Watchlist create error:', error);
+    console.error('Watchlist create error:');
     res.status(500).json({ error: 'Failed to create watchlist' });
   }
 }
@@ -95,7 +95,7 @@ export async function updateWatchlistHandler(req: AuthRequest, res: Response): P
       res.status(409).json({ error: 'Watchlist name already exists' });
       return;
     }
-    console.error('Watchlist update error:', error);
+    console.error('Watchlist update error:');
     res.status(500).json({ error: 'Failed to update watchlist' });
   }
 }
@@ -113,7 +113,7 @@ export async function deleteWatchlistHandler(req: AuthRequest, res: Response): P
     } catch { /* non-critical */ }
     res.status(204).send();
   } catch (error) {
-    console.error('Watchlist delete error:', error);
+    console.error('Watchlist delete error:');
     res.status(500).json({ error: 'Failed to delete watchlist' });
   }
 }
@@ -145,7 +145,7 @@ export async function addWatchlistHoldingHandler(req: AuthRequest, res: Response
     } catch { /* non-critical */ }
     res.status(201).json(holding);
   } catch (error) {
-    console.error('Watchlist holding add error:', error);
+    console.error('Watchlist holding add error:');
     res.status(500).json({ error: 'Failed to add watchlist holding' });
   }
 }
@@ -173,7 +173,7 @@ export async function updateWatchlistHoldingHandler(req: AuthRequest, res: Respo
     } catch { /* non-critical */ }
     res.json(updated);
   } catch (error) {
-    console.error('Watchlist holding update error:', error);
+    console.error('Watchlist holding update error:');
     res.status(500).json({ error: 'Failed to update watchlist holding' });
   }
 }
@@ -191,7 +191,7 @@ export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Respo
     } catch { /* non-critical */ }
     res.status(204).send();
   } catch (error) {
-    console.error('Watchlist holding delete error:', error);
+    console.error('Watchlist holding delete error:');
     res.status(500).json({ error: 'Failed to delete watchlist holding' });
   }
 }
@@ -270,7 +270,7 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
     const periodStartValue = points.length > 0 ? points[0].value : 0;
     res.json({ points, periodStartValue, period });
   } catch (error) {
-    console.error('Watchlist chart error:', error);
+    console.error('Watchlist chart error:');
     res.status(500).json({
       error: 'Failed to fetch watchlist chart',
     });

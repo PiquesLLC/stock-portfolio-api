@@ -89,7 +89,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.json({ user: result.user });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error:');
     res.status(500).json({ error: 'Login failed' });
   }
 }
@@ -154,7 +154,7 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
 
     res.json(user);
   } catch (error) {
-    console.error('Me error:', error);
+    console.error('Me error:');
     res.status(500).json({ error: 'Failed to get user info' });
   }
 }
@@ -186,7 +186,7 @@ export async function setPasswordHandler(req: AuthRequest, res: Response): Promi
 
     res.json({ message: 'Password set successfully' });
   } catch (error) {
-    console.error('Set password error:', error);
+    console.error('Set password error:');
     res.status(500).json({ error: 'Failed to set password' });
   }
 }
@@ -206,7 +206,7 @@ export async function hasPasswordHandler(req: Request, res: Response): Promise<v
     const has = await hasPassword(username);
     res.json({ hasPassword: has });
   } catch (error) {
-    console.error('Has password error:', error);
+    console.error('Has password error:');
     res.json({ hasPassword: true });
   }
 }
@@ -245,7 +245,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.status(201).json({ user: result.user });
   } catch (error) {
-    console.error('Signup error:', error);
+    console.error('Signup error:');
     res.status(500).json({ error: 'Failed to create account' });
   }
 }
@@ -265,7 +265,7 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
     const exists = await usernameExists(username);
     res.json({ available: !exists });
   } catch (error) {
-    console.error('Check username error:', error);
+    console.error('Check username error:');
     res.status(500).json({ error: 'Failed to check username' });
   }
 }
@@ -297,7 +297,7 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
     await revokeAllRefreshTokens(req.user.userId);
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
-    console.error('Change password error:', error);
+    console.error('Change password error:');
     res.status(500).json({ error: 'Failed to change password' });
   }
 }
@@ -391,7 +391,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
     clearAllAuthCookies(res, req);
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
-    console.error('Delete account error:', error);
+    console.error('Delete account error:');
     res.status(500).json({ error: 'Failed to delete account' });
   }
 }
@@ -424,7 +424,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.json({ message: 'Token refreshed successfully' });
   } catch (error) {
-    console.error('Refresh token error:', error);
+    console.error('Refresh token error:');
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 }
