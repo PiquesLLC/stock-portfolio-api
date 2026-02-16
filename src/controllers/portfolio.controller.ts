@@ -356,12 +356,14 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         }
       }
 
-      // Fill the gap between last Polygon candle (~15min delayed) and now
-      // using recent snapshots recorded every 60 seconds
+      // Fill the gap between last Yahoo candle (~15min delayed) and now
+      // using recent snapshots recorded every 60 seconds.
+      // Cap at 4 hours to avoid bridging across overnight/weekend/holiday gaps —
+      // Yahoo candles already contain the complete last trading session.
       if (points.length > 0) {
         const lastCandleTime = points[points.length - 1].time;
         const gapMs = now - lastCandleTime;
-        if (gapMs > 5 * 60 * 1000) { // gap > 5 minutes
+        if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
           const snapshots = await getSnapshotsAfter(new Date(lastCandleTime));
           for (const s of snapshots) {
             const t = s.timestamp.getTime();
@@ -372,8 +374,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         }
       }
 
-      // Append live value
-      if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+      // Append live value only if we're within the same session (gap < 4 hours).
+      // On weekends/holidays, the Yahoo candles are the complete picture.
+      const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+      if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
         points.push({ time: now, value: liveValue });
       }
 

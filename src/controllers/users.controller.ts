@@ -186,8 +186,10 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
         }
       }
 
-      // Append live value
-      if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+      // Append live value only if we're within the same session (gap < 4 hours).
+      // On weekends/holidays, the Yahoo candles are the complete picture.
+      const lastPtTime = points.length > 0 ? points[points.length - 1].time : 0;
+      if (points.length === 0 || (now - lastPtTime > 5000 && now - lastPtTime < 4 * 3600000)) {
         points.push({ time: now, value: liveValue });
       }
 
