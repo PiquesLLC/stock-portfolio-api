@@ -85,7 +85,7 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
   const cached = yahooIntradayCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
-  // Polygon.io primary — 5-minute bars for the last 2 trading days
+  // Polygon.io primary — 5-minute bars for the last trading day
   const today = new Date().toISOString().split('T')[0];
   const daysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0]; // 5 days covers weekends
   const pg = await fetchPolygonAggs(upperTicker, 5, 'minute', daysAgo, today, 60);
