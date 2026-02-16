@@ -127,7 +127,7 @@ export async function getDecryptedAccessToken(plaidItemId: string, userId: strin
  */
 export async function getPlaidItems(userId: string) {
   return prisma.plaidItem.findMany({
-    where: { userId },
+    where: { userId, status: { not: 'revoked' } },
     select: {
       id: true,
       institutionId: true,
