@@ -37,11 +37,11 @@ export async function getUserAlerts(userId: string) {
   });
 }
 
-export async function updateAlert(alertId: string, data: { threshold?: number | null; enabled?: boolean }) {
-  return prisma.alert.update({
-    where: { id: alertId },
-    data,
-  });
+export async function updateAlert(alertId: string, data: { threshold?: number | null; enabled?: boolean }, userId: string) {
+  // Verify ownership
+  const alert = await prisma.alert.findFirst({ where: { id: alertId, userId } });
+  if (!alert) return null;
+  return prisma.alert.update({ where: { id: alertId }, data });
 }
 
 export async function getAlertEvents(userId: string, limit = 50) {
@@ -64,11 +64,13 @@ export async function getUnreadCount(userId: string): Promise<number> {
   });
 }
 
-export async function markEventRead(eventId: string) {
-  return prisma.alertEvent.update({
-    where: { id: eventId },
-    data: { read: true },
+export async function markEventRead(eventId: string, userId: string) {
+  // Verify event belongs to user's alert
+  const event = await prisma.alertEvent.findFirst({
+    where: { id: eventId, alert: { userId } },
   });
+  if (!event) return null;
+  return prisma.alertEvent.update({ where: { id: eventId }, data: { read: true } });
 }
 
 export async function markAllRead(userId: string) {

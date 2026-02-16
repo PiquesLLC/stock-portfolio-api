@@ -4,12 +4,13 @@ import {
   addTransactionHandler,
   deleteTransactionHandler,
 } from '../controllers/transaction.controller';
-import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
+import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-router.get('/', optionalAuth, getTransactionsHandler);
-router.post('/', requireAuth, addTransactionHandler);
-router.delete('/:id', requireAuth, deleteTransactionHandler);
+router.get('/', requireAuth, getTransactionsHandler);
+router.post('/', mutationLimiter, requireAuth, addTransactionHandler);
+router.delete('/:id', mutationLimiter, requireAuth, deleteTransactionHandler);
 
 export default router;

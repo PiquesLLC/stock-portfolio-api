@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import {
   createPriceAlert,
   getPriceAlerts,
@@ -11,11 +12,11 @@ import {
   PriceAlertCondition,
 } from '../services/priceAlert.service';
 
-// GET /price-alerts?ticker=X&userId=Y
-export async function getPriceAlertsHandler(req: Request, res: Response): Promise<void> {
+// GET /price-alerts?ticker=X
+export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const ticker = req.query.ticker as string | undefined;
-    const userId = req.query.userId as string | undefined;
+    const userId = req.user?.userId;
     const alerts = await getPriceAlerts(ticker, userId);
     res.json(alerts);
   } catch (error) {
@@ -25,10 +26,10 @@ export async function getPriceAlertsHandler(req: Request, res: Response): Promis
 }
 
 // GET /price-alerts/:id
-export async function getPriceAlertHandler(req: Request, res: Response): Promise<void> {
+export async function getPriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const alert = await getPriceAlertById(id);
+    const alert = await getPriceAlertById(id, req.user?.userId);
     if (!alert) {
       res.status(404).json({ error: 'Price alert not found' });
       return;
@@ -41,9 +42,9 @@ export async function getPriceAlertHandler(req: Request, res: Response): Promise
 }
 
 // POST /price-alerts
-export async function createPriceAlertHandler(req: Request, res: Response): Promise<void> {
+export async function createPriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { ticker, condition, targetPrice, percentChange, referencePrice, referencePriceType, repeatAlert, expiresAt, userId } = req.body;
+    const { ticker, condition, targetPrice, percentChange, referencePrice, referencePriceType, repeatAlert, expiresAt } = req.body;
 
     if (!ticker || !condition) {
       res.status(400).json({ error: 'ticker and condition are required' });
@@ -56,6 +57,7 @@ export async function createPriceAlertHandler(req: Request, res: Response): Prom
       return;
     }
 
+    // Always use authenticated user's ID — never accept from body
     const alert = await createPriceAlert({
       ticker,
       condition,
@@ -65,7 +67,7 @@ export async function createPriceAlertHandler(req: Request, res: Response): Prom
       referencePriceType,
       repeatAlert,
       expiresAt,
-      userId,
+      userId: req.user!.userId,
     });
 
     res.status(201).json(alert);
@@ -77,7 +79,7 @@ export async function createPriceAlertHandler(req: Request, res: Response): Prom
 }
 
 // PUT /price-alerts/:id
-export async function updatePriceAlertHandler(req: Request, res: Response): Promise<void> {
+export async function updatePriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
     const { targetPrice, percentChange, enabled } = req.body;
@@ -87,7 +89,12 @@ export async function updatePriceAlertHandler(req: Request, res: Response): Prom
     if (percentChange !== undefined) data.percentChange = percentChange;
     if (typeof enabled === 'boolean') data.enabled = enabled;
 
-    const alert = await updatePriceAlert(id, data);
+    // Ownership-scoped update
+    const alert = await updatePriceAlert(id, data, req.user!.userId);
+    if (!alert) {
+      res.status(404).json({ error: 'Price alert not found' });
+      return;
+    }
     res.json(alert);
   } catch (error) {
     console.error('Error updating price alert:', error);
@@ -96,10 +103,15 @@ export async function updatePriceAlertHandler(req: Request, res: Response): Prom
 }
 
 // DELETE /price-alerts/:id
-export async function deletePriceAlertHandler(req: Request, res: Response): Promise<void> {
+export async function deletePriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    await deletePriceAlert(id);
+    // Ownership-scoped delete
+    const deleted = await deletePriceAlert(id, req.user!.userId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Price alert not found' });
+      return;
+    }
     res.json({ ok: true });
   } catch (error) {
     console.error('Error deleting price alert:', error);
@@ -107,10 +119,10 @@ export async function deletePriceAlertHandler(req: Request, res: Response): Prom
   }
 }
 
-// GET /price-alerts/events?userId=X&limit=N
-export async function getPriceAlertEventsHandler(req: Request, res: Response): Promise<void> {
+// GET /price-alerts/events
+export async function getPriceAlertEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
+    const userId = req.user?.userId;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
     const events = await getPriceAlertEvents(limit, userId);
     res.json(events);
@@ -121,10 +133,10 @@ export async function getPriceAlertEventsHandler(req: Request, res: Response): P
 }
 
 // POST /price-alerts/events/:id/read
-export async function markEventReadHandler(req: Request, res: Response): Promise<void> {
+export async function markEventReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    await markEventRead(id);
+    await markEventRead(id, req.user!.userId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Error marking event read:', error);
@@ -132,10 +144,10 @@ export async function markEventReadHandler(req: Request, res: Response): Promise
   }
 }
 
-// GET /price-alerts/events/unread-count?userId=X
-export async function getUnreadCountHandler(req: Request, res: Response): Promise<void> {
+// GET /price-alerts/events/unread-count
+export async function getUnreadCountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
+    const userId = req.user?.userId;
     const count = await getUnreadCount(userId);
     res.json({ count });
   } catch (error) {

@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import {
   getUserAlerts,
   updateAlert,
@@ -8,15 +9,14 @@ import {
   markAllRead,
 } from '../services/alert.service';
 
-// GET /alerts?userId=X
-export async function getAlertsHandler(req: Request, res: Response): Promise<void> {
+// GET /alerts — uses authenticated user
+export async function getAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const alerts = await getUserAlerts(userId);
+    const alerts = await getUserAlerts(req.user.userId);
     res.json(alerts);
   } catch (error) {
     console.error('Error getting alerts:', error);
@@ -24,8 +24,8 @@ export async function getAlertsHandler(req: Request, res: Response): Promise<voi
   }
 }
 
-// PUT /alerts/:id
-export async function updateAlertHandler(req: Request, res: Response): Promise<void> {
+// PUT /alerts/:id — ownership-scoped
+export async function updateAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
     const { threshold, enabled } = req.body;
@@ -34,7 +34,11 @@ export async function updateAlertHandler(req: Request, res: Response): Promise<v
     if (threshold !== undefined) data.threshold = threshold;
     if (typeof enabled === 'boolean') data.enabled = enabled;
 
-    const alert = await updateAlert(id, data);
+    const alert = await updateAlert(id, data, req.user!.userId);
+    if (!alert) {
+      res.status(404).json({ error: 'Alert not found' });
+      return;
+    }
     res.json(alert);
   } catch (error) {
     console.error('Error updating alert:', error);
@@ -42,15 +46,14 @@ export async function updateAlertHandler(req: Request, res: Response): Promise<v
   }
 }
 
-// GET /alerts/events?userId=X
-export async function getEventsHandler(req: Request, res: Response): Promise<void> {
+// GET /alerts/events — uses authenticated user
+export async function getEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const events = await getAlertEvents(userId);
+    const events = await getAlertEvents(req.user.userId);
     res.json(events);
   } catch (error) {
     console.error('Error getting alert events:', error);
@@ -58,15 +61,14 @@ export async function getEventsHandler(req: Request, res: Response): Promise<voi
   }
 }
 
-// GET /alerts/events/unread-count?userId=X
-export async function getUnreadCountHandler(req: Request, res: Response): Promise<void> {
+// GET /alerts/events/unread-count — uses authenticated user
+export async function getUnreadCountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const count = await getUnreadCount(userId);
+    const count = await getUnreadCount(req.user.userId);
     res.json({ count });
   } catch (error) {
     console.error('Error getting unread count:', error);
@@ -74,11 +76,10 @@ export async function getUnreadCountHandler(req: Request, res: Response): Promis
   }
 }
 
-// POST /alerts/events/:id/read
-export async function markReadHandler(req: Request, res: Response): Promise<void> {
+// POST /alerts/events/:id/read — ownership-scoped
+export async function markReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    await markEventRead(id);
+    await markEventRead(req.params.id, req.user!.userId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Error marking event read:', error);
@@ -86,15 +87,10 @@ export async function markReadHandler(req: Request, res: Response): Promise<void
   }
 }
 
-// POST /alerts/events/read-all?userId=X
-export async function markAllReadHandler(req: Request, res: Response): Promise<void> {
+// POST /alerts/events/read-all — uses authenticated user
+export async function markAllReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
-      return;
-    }
-    await markAllRead(userId);
+    await markAllRead(req.user!.userId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Error marking all read:', error);

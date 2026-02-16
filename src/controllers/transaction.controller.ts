@@ -1,10 +1,11 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import { addTransaction, getTransactions, deleteTransaction } from '../services/transaction.service';
 
-export async function getTransactionsHandler(req: Request, res: Response): Promise<void> {
+export async function getTransactionsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
-    const transactions = await getTransactions(userId || null);
+    const userId = req.user?.userId || null;
+    const transactions = await getTransactions(userId);
     res.json(transactions);
   } catch (error) {
     console.error('Error fetching transactions:', error);
@@ -12,9 +13,9 @@ export async function getTransactionsHandler(req: Request, res: Response): Promi
   }
 }
 
-export async function addTransactionHandler(req: Request, res: Response): Promise<void> {
+export async function addTransactionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { type, amount, date, userId } = req.body;
+    const { type, amount, date } = req.body;
 
     if (!type || !['deposit', 'withdrawal'].includes(type)) {
       res.status(400).json({ error: 'type must be "deposit" or "withdrawal"' });
@@ -29,7 +30,8 @@ export async function addTransactionHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const tx = await addTransaction({ type, amount, date, userId });
+    // Always use authenticated user's ID
+    const tx = await addTransaction({ type, amount, date, userId: req.user!.userId });
     res.status(201).json(tx);
   } catch (error) {
     console.error('Error adding transaction:', error);
@@ -37,10 +39,15 @@ export async function addTransactionHandler(req: Request, res: Response): Promis
   }
 }
 
-export async function deleteTransactionHandler(req: Request, res: Response): Promise<void> {
+export async function deleteTransactionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    await deleteTransaction(id);
+    // Ownership-scoped delete
+    const deleted = await deleteTransaction(id, req.user!.userId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting transaction:', error);

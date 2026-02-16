@@ -12,13 +12,21 @@ if (!jwtSecret) {
 
 // In production, also require API keys
 if (process.env.NODE_ENV === 'production') {
-  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY', 'MFA_ENCRYPTION_KEY'];
+  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY', 'MFA_ENCRYPTION_KEY', 'PLAID_CLIENT_ID', 'PLAID_SECRET'];
   for (const key of requiredKeys) {
     if (!process.env[key]) {
       console.error(`FATAL: Missing required env var for production: ${key}`);
       process.exit(1);
     }
   }
+}
+
+// Validate MFA encryption key format at startup (must be 64-char hex = 32 bytes for AES-256)
+const mfaKey = process.env.MFA_ENCRYPTION_KEY || '';
+if (mfaKey && !/^[0-9a-fA-F]{64}$/.test(mfaKey)) {
+  console.error('FATAL: MFA_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes for AES-256-GCM)');
+  console.error('Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
 }
 
 export const config = {

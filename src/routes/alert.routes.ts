@@ -12,10 +12,10 @@ import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-// GET endpoints (user-specific via query param)
-router.get('/', getAlertsHandler);
-router.get('/events', getEventsHandler);
-router.get('/events/unread-count', getUnreadCountHandler);
+// All alert routes require auth — user derived from token, not query params
+router.get('/', requireAuth, getAlertsHandler);
+router.get('/events', requireAuth, getEventsHandler);
+router.get('/events/unread-count', requireAuth, getUnreadCountHandler);
 
 // Mutations require authentication + rate limiting
 router.put('/:id', mutationLimiter, requireAuth, updateAlertHandler);

@@ -1,4 +1,4 @@
-﻿import prisma from '../utils/prisma';
+import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
 
 
@@ -69,9 +69,9 @@ export async function getPriceAlerts(ticker?: string, userId?: string) {
   });
 }
 
-export async function getPriceAlertById(id: string) {
-  return prisma.priceAlert.findUnique({
-    where: { id },
+export async function getPriceAlertById(id: string, userId?: string) {
+  return prisma.priceAlert.findFirst({
+    where: { id, ...(userId ? { userId } : {}) },
     include: {
       events: {
         orderBy: { createdAt: 'desc' },
@@ -81,17 +81,19 @@ export async function getPriceAlertById(id: string) {
   });
 }
 
-export async function updatePriceAlert(id: string, data: UpdatePriceAlertInput) {
-  return prisma.priceAlert.update({
-    where: { id },
-    data,
-  });
+export async function updatePriceAlert(id: string, data: UpdatePriceAlertInput, userId: string) {
+  // Verify ownership first
+  const alert = await prisma.priceAlert.findFirst({ where: { id, userId } });
+  if (!alert) return null;
+  return prisma.priceAlert.update({ where: { id }, data });
 }
 
-export async function deletePriceAlert(id: string) {
-  await prisma.priceAlert.delete({
-    where: { id },
-  });
+export async function deletePriceAlert(id: string, userId: string): Promise<boolean> {
+  // Verify ownership first
+  const alert = await prisma.priceAlert.findFirst({ where: { id, userId } });
+  if (!alert) return false;
+  await prisma.priceAlert.delete({ where: { id } });
+  return true;
 }
 
 export async function getPriceAlertEvents(limit = 50, userId?: string) {
@@ -117,7 +119,12 @@ export async function getPriceAlertEvents(limit = 50, userId?: string) {
   });
 }
 
-export async function markEventRead(eventId: string) {
+export async function markEventRead(eventId: string, userId: string) {
+  // Verify event belongs to user's alert
+  const event = await prisma.priceAlertEvent.findFirst({
+    where: { id: eventId, priceAlert: { userId } },
+  });
+  if (!event) return null;
   return prisma.priceAlertEvent.update({
     where: { id: eventId },
     data: { read: true },
@@ -140,64 +147,47 @@ export async function getUnreadCount(userId?: string): Promise<number> {
 export async function evaluatePriceAlerts(): Promise<void> {
   const now = new Date();
 
-  // Get all enabled, non-triggered alerts (or repeat alerts that haven't triggered recently)
   const alerts = await prisma.priceAlert.findMany({
     where: {
       enabled: true,
       OR: [
         { triggered: false },
-        { repeatAlert: true }, // Include repeat alerts even if triggered before
+        { repeatAlert: true },
       ],
     },
   });
 
-  if (alerts.length === 0) {
-    return;
-  }
+  if (alerts.length === 0) return;
 
-  // Filter out expired alerts and disable them
   const activeAlerts = [];
   for (const alert of alerts) {
     if (alert.expiresAt && alert.expiresAt < now) {
-      // Disable expired alert
       await prisma.priceAlert.update({
         where: { id: alert.id },
         data: { enabled: false },
       });
-      console.log(`[Price Alerts] Expired and disabled: ${alert.ticker} alert`);
       continue;
     }
     activeAlerts.push(alert);
   }
 
-  if (activeAlerts.length === 0) {
-    return;
-  }
+  if (activeAlerts.length === 0) return;
 
-  // Get unique tickers
   const tickers = [...new Set(activeAlerts.map(a => a.ticker))];
-
-  // Fetch current quotes
   const { quotes, failedTickers } = await getPolygonQuotes(tickers);
 
   if (failedTickers.length > 0) {
     console.log(`[Price Alerts] Could not fetch quotes for: ${failedTickers.join(', ')}`);
   }
 
-  // Evaluate each alert
   for (const alert of activeAlerts) {
-    // For repeat alerts that already triggered, skip if triggered within last hour
     if (alert.repeatAlert && alert.triggered && alert.triggeredAt) {
       const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-      if (alert.triggeredAt > hourAgo) {
-        continue; // Don't spam repeat alerts
-      }
+      if (alert.triggeredAt > hourAgo) continue;
     }
 
     const quote = quotes.get(alert.ticker);
-    if (!quote) {
-      continue; // Skip if quote unavailable
-    }
+    if (!quote) continue;
 
     const currentPrice = quote.currentPrice;
     let triggered = false;
@@ -210,59 +200,44 @@ export async function evaluatePriceAlerts(): Promise<void> {
           message = `${alert.ticker} crossed above $${alert.targetPrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
         }
         break;
-
       case 'below':
         if (alert.targetPrice !== null && currentPrice <= alert.targetPrice) {
           triggered = true;
           message = `${alert.ticker} crossed below $${alert.targetPrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
         }
         break;
-
       case 'pct_up':
         if (alert.referencePrice !== null && alert.percentChange !== null) {
-          const targetPrice = alert.referencePrice * (1 + alert.percentChange / 100);
-          if (currentPrice >= targetPrice) {
+          const target = alert.referencePrice * (1 + alert.percentChange / 100);
+          if (currentPrice >= target) {
             triggered = true;
-            const actualPctChange = ((currentPrice - alert.referencePrice) / alert.referencePrice) * 100;
-            message = `${alert.ticker} up ${actualPctChange.toFixed(1)}% from $${alert.referencePrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
+            const actual = ((currentPrice - alert.referencePrice) / alert.referencePrice) * 100;
+            message = `${alert.ticker} up ${actual.toFixed(1)}% from $${alert.referencePrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
           }
         }
         break;
-
       case 'pct_down':
         if (alert.referencePrice !== null && alert.percentChange !== null) {
-          const targetPrice = alert.referencePrice * (1 - alert.percentChange / 100);
-          if (currentPrice <= targetPrice) {
+          const target = alert.referencePrice * (1 - alert.percentChange / 100);
+          if (currentPrice <= target) {
             triggered = true;
-            const actualPctChange = ((alert.referencePrice - currentPrice) / alert.referencePrice) * 100;
-            message = `${alert.ticker} down ${actualPctChange.toFixed(1)}% from $${alert.referencePrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
+            const actual = ((alert.referencePrice - currentPrice) / alert.referencePrice) * 100;
+            message = `${alert.ticker} down ${actual.toFixed(1)}% from $${alert.referencePrice.toFixed(2)} (now $${currentPrice.toFixed(2)})`;
           }
         }
         break;
     }
 
     if (triggered) {
-      // Update alert as triggered and create event
       await prisma.$transaction([
         prisma.priceAlert.update({
           where: { id: alert.id },
-          data: {
-            triggered: true,
-            triggeredAt: new Date(),
-          },
+          data: { triggered: true, triggeredAt: new Date() },
         }),
         prisma.priceAlertEvent.create({
-          data: {
-            priceAlertId: alert.id,
-            triggerPrice: currentPrice,
-            message,
-            read: false,
-          },
+          data: { priceAlertId: alert.id, triggerPrice: currentPrice, message, read: false },
         }),
       ]);
-
-      console.log(`[Price Alerts] Triggered: ${message}${alert.repeatAlert ? ' (repeat)' : ''}`);
     }
   }
 }
-

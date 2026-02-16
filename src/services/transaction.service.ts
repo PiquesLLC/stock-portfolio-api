@@ -1,4 +1,4 @@
-﻿import prisma from '../utils/prisma';
+import prisma from '../utils/prisma';
 
 
 
@@ -30,7 +30,10 @@ export async function getTransactions(userId?: string | null, since?: Date) {
   });
 }
 
-export async function deleteTransaction(id: string) {
-  return prisma.transaction.delete({ where: { id } });
+export async function deleteTransaction(id: string, userId: string): Promise<boolean> {
+  // Verify ownership before deleting
+  const tx = await prisma.transaction.findFirst({ where: { id, userId } });
+  if (!tx) return false;
+  await prisma.transaction.delete({ where: { id } });
+  return true;
 }
-
