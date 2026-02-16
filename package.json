@@ -23,6 +23,7 @@
     },
     "dependencies": {
         "@prisma/client": "^5.7.0",
+        "@types/qrcode": "^1.5.6",
         "axios": "^1.6.2",
         "bcryptjs": "^3.0.3",
         "cookie-parser": "^1.4.7",
@@ -35,7 +36,10 @@
         "jsonwebtoken": "^9.0.3",
         "multer": "^2.0.2",
         "node-cache": "^5.1.2",
+        "otpauth": "^9.5.0",
         "prisma": "^5.22.0",
+        "qrcode": "^1.5.4",
+        "resend": "^6.9.2",
         "sharp": "^0.34.5",
         "tesseract.js": "^7.0.0",
         "typescript": "^5.9.3",

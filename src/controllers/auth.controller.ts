@@ -12,7 +12,7 @@ function isCapacitorRequest(req: Request): boolean {
   return req.headers['x-capacitor'] === 'true';
 }
 
-function getCookieOptions(req: Request) {
+export function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);
   // Use 'lax' for same-origin (works reliably on iOS Safari/PWA), 'none' for Capacitor cross-origin
   const sameSite = capacitor ? 'none' as const : 'lax' as const;
@@ -77,6 +77,12 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // MFA required — return challenge instead of auth cookies
+    if ('mfaRequired' in result) {
+      res.json(result);
+      return;
+    }
+
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
@@ -91,19 +97,38 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
  * POST /auth/logout
  */
 export async function logoutHandler(req: AuthRequest, res: Response): Promise<void> {
-  if (req.cookies?.refreshToken) {
-    try {
-      const authToken = req.cookies?.authToken;
-      if (authToken) {
-        const jwt = await import('jsonwebtoken');
-        const decoded = jwt.default.decode(authToken) as { userId?: string } | null;
-        if (decoded?.userId) {
-          await revokeAllRefreshTokens(decoded.userId);
+  try {
+    let userId: string | undefined;
+
+    // Try access token first (signature-verified)
+    const authToken = req.cookies?.authToken;
+    if (authToken) {
+      const { verifyToken } = await import('../services/auth.service');
+      const payload = verifyToken(authToken);
+      if (payload?.userId) {
+        userId = payload.userId;
+      }
+    }
+
+    // Fallback: look up refresh token in DB to find the user
+    if (!userId) {
+      const refreshToken = req.cookies?.refreshToken;
+      if (refreshToken) {
+        const stored = await prisma.refreshToken.findUnique({
+          where: { token: refreshToken },
+          select: { userId: true },
+        });
+        if (stored) {
+          userId = stored.userId;
         }
       }
-    } catch {
-      // Best effort
     }
+
+    if (userId) {
+      await revokeAllRefreshTokens(userId);
+    }
+  } catch {
+    // Best effort — still clear cookies even if lookup fails
   }
 
   clearAllAuthCookies(res, req);
@@ -136,19 +161,25 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
 /**
  * POST /auth/set-password
  */
-export async function setPasswordHandler(req: Request, res: Response): Promise<void> {
+export async function setPasswordHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
     const parsed = setPasswordSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
 
-    const { username, password } = parsed.data;
-    const success = await setPassword(username, password);
+    // Use authenticated user's username, not body — prevents setting another user's password
+    const { password } = parsed.data;
+    const success = await setPassword(req.user.username, password);
 
     if (!success) {
-      res.status(404).json({ error: 'User not found' });
+      res.status(400).json({ error: 'Password is already set. Use change-password instead.' });
       return;
     }
 
@@ -198,7 +229,10 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await signup(username, displayName, password);
+    const result = await signup(username, displayName, password, {
+      ipAddress: req.ip || req.headers['x-forwarded-for']?.toString(),
+      userAgent: req.headers['user-agent'],
+    });
 
     if (!result) {
       res.status(500).json({ error: 'Failed to create account' });
@@ -302,15 +336,42 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
     }
 
     await prisma.$transaction(async (tx) => {
+      // Auth & sessions
       await tx.refreshToken.deleteMany({ where: { userId: user.id } });
+      // MFA
+      await tx.mfaMethod.deleteMany({ where: { userId: user.id } });
+      await tx.mfaChallenge.deleteMany({ where: { userId: user.id } });
+      await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
+      await tx.emailOtpCode.deleteMany({ where: { userId: user.id } });
+      // Social
       await tx.activityEvent.deleteMany({ where: { userId: user.id } });
       await tx.follow.deleteMany({ where: { followerId: user.id } });
       await tx.follow.deleteMany({ where: { followingId: user.id } });
+      // Alerts (children before parents)
       await tx.alertEvent.deleteMany({ where: { alert: { userId: user.id } } });
       await tx.alert.deleteMany({ where: { userId: user.id } });
+      await tx.priceAlertEvent.deleteMany({ where: { priceAlert: { userId: user.id } } });
+      await tx.priceAlert.deleteMany({ where: { userId: user.id } });
+      // Portfolio & holdings
       await tx.holding.deleteMany({ where: { userId: user.id } });
       await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
+      await tx.portfolioCompositionChange.deleteMany({ where: { userId: user.id } });
+      // Watchlists (WatchlistHolding cascades via onDelete: Cascade)
+      await tx.watchlist.deleteMany({ where: { userId: user.id } });
+      // Dividends & lots
+      await tx.dividendReinvestment.deleteMany({ where: { userId: user.id } });
+      await tx.dividendCredit.deleteMany({ where: { userId: user.id } });
+      await tx.lot.deleteMany({ where: { userId: user.id } });
+      await tx.transaction.deleteMany({ where: { userId: user.id } });
+      // Insights & notifications
+      await tx.milestoneEvent.deleteMany({ where: { userId: user.id } });
+      await tx.anomalyEvent.deleteMany({ where: { userId: user.id } });
+      await tx.notificationAuditLog.deleteMany({ where: { userId: user.id } });
+      await tx.leaderboardCache.deleteMany({ where: { userId: user.id } });
+      // Settings & consent
       await tx.userSettings.deleteMany({ where: { userId: user.id } });
+      await tx.consentRecord.deleteMany({ where: { userId: user.id } });
+      // Finally, delete the user
       await tx.user.delete({ where: { id: user.id } });
     });
 

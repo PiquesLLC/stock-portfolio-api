@@ -62,6 +62,8 @@ model User {
   showRegion             Boolean                @default(true)
   holdingsVisibility     String                 @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
   bio                    String?
+  email                  String?                @unique
+  emailVerified          Boolean                @default(false)
   holdings               Holding[]
   snapshots              PortfolioSnapshot[]
   settings               UserSettings?
@@ -77,6 +79,11 @@ model User {
   dividendReinvestments  DividendReinvestment[]
   refreshTokens          RefreshToken[]
   notificationAuditLogs  NotificationAuditLog[]
+  consentRecords         ConsentRecord[]
+  mfaMethods             MfaMethod[]
+  mfaChallenges          MfaChallenge[]
+  mfaBackupCodes         MfaBackupCode[]
+  emailOtpCodes          EmailOtpCode[]
 }
 
 model Watchlist {
@@ -117,6 +124,73 @@ model RefreshToken {
 
   @@index([userId])
   @@index([token])
+  @@index([expiresAt])
+}
+
+model ConsentRecord {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyVersion String
+  consentedAt   DateTime @default(now())
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, policyVersion])
+  @@index([userId])
+}
+
+model MfaMethod {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             String    // 'totp' | 'email'
+  secretCiphertext String?   // AES-256-GCM encrypted TOTP secret (null for email type)
+  enabled          Boolean   @default(false)
+  verifiedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+model MfaChallenge {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model MfaBackupCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EmailOtpCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
   @@index([expiresAt])
 }
 

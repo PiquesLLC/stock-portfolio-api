@@ -61,6 +61,42 @@ export const heavyReadLimiter = rateLimit({
 });
 
 /**
+ * Enumeration rate limiter - for check-username, has-password etc.
+ * Does NOT skip successful requests (unlike loginLimiter).
+ */
+export const enumerationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 20 : 200,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * MFA verification rate limiter - prevent brute force
+ * 5 attempts per 15 minutes in production
+ */
+export const mfaVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 5 : 50,
+  message: { error: 'Too many verification attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * MFA send rate limiter - prevent email spam
+ * 3 sends per 15 minutes in production
+ */
+export const mfaSendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 3 : 50,
+  message: { error: 'Too many code requests. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * Higher limits in dev to support pre-fetching and background tasks
  */

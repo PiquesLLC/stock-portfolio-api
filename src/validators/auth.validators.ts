@@ -27,10 +27,15 @@ export const signupSchema = z.object({
     .min(1, 'Display name is required')
     .max(50, 'Display name must be at most 50 characters'),
   password: passwordSchema,
+  acceptedPrivacyPolicy: z.literal(true, {
+    error: 'You must accept the Privacy Policy',
+  }),
+  acceptedTerms: z.literal(true, {
+    error: 'You must accept the Terms of Service',
+  }),
 });
 
 export const setPasswordSchema = z.object({
-  username: z.string({ error: 'Username is required' }).min(1, 'Username is required'),
   password: passwordSchema,
 });
 

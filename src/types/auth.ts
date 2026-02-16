@@ -24,6 +24,13 @@ export interface LoginResponse {
   };
 }
 
+export interface MfaChallengeResponse {
+  mfaRequired: true;
+  challengeToken: string;
+  methods: string[];
+  maskedEmail: string | null;
+}
+
 export interface SetPasswordRequest {
   username: string;
   password: string;

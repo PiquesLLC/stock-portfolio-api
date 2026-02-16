@@ -12,7 +12,7 @@ if (!jwtSecret) {
 
 // In production, also require API keys
 if (process.env.NODE_ENV === 'production') {
-  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY'];
+  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY', 'MFA_ENCRYPTION_KEY'];
   for (const key of requiredKeys) {
     if (!process.env[key]) {
       console.error(`FATAL: Missing required env var for production: ${key}`);
@@ -49,6 +49,10 @@ export const config = {
   // Perplexity API
   perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
 
+  // MFA
+  mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM
+  resendApiKey: process.env.RESEND_API_KEY || '',
+
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),
 
@@ -73,6 +77,14 @@ export const config = {
     api: {
       windowMs: 60 * 1000, // 1 minute
       maxAttempts: process.env.NODE_ENV === 'production' ? 200 : 1000,
+    },
+    mfaVerify: {
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      maxAttempts: process.env.NODE_ENV === 'production' ? 5 : 50,
+    },
+    mfaSend: {
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      maxAttempts: process.env.NODE_ENV === 'production' ? 3 : 20,
     },
   },
 

@@ -3,11 +3,13 @@ import jwt, { SignOptions, Secret, TokenExpiredError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { config } from '../config';
-import { JwtPayload, LoginResponse } from '../types/auth';
+import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
+import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
 
 
 
 const SALT_ROUNDS = 10;
+export const CURRENT_POLICY_VERSION = '1.0';
 
 /**
  * Hash a password using bcrypt
@@ -85,24 +87,42 @@ export async function rotateRefreshToken(
     }
 
     // Grace period: revoked less than 30s ago — concurrent request that raced
-    // with the first refresh. Issue new tokens using the latest valid refresh token.
+    // with the first refresh. Return latest valid token (never mint a new one).
     const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
     const accessToken = generateAccessToken(payload);
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
-    const refreshToken = latestValid
-      ? latestValid.token
-      : await generateRefreshToken(stored.userId);
-    return { accessToken, refreshToken, payload };
+    if (!latestValid) {
+      // Winner's token not yet visible — fail safely, client will retry
+      return null;
+    }
+    return { accessToken, refreshToken: latestValid.token, payload };
   }
 
-  // Revoke the old token
-  await prisma.refreshToken.update({
-    where: { id: stored.id },
+  // Atomically revoke the old token — only one concurrent request succeeds
+  const revoked = await prisma.refreshToken.updateMany({
+    where: { id: stored.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+
+  if (revoked.count === 0) {
+    // Another request already revoked it — try to return latest valid token (no minting)
+    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    const accessToken = generateAccessToken(payload);
+    // Wait briefly for the winner to create its replacement token
+    await new Promise(r => setTimeout(r, 50));
+    const latestValid = await prisma.refreshToken.findFirst({
+      where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!latestValid) {
+      // Winner hasn't created one yet or all tokens are revoked — fail safely
+      return null;
+    }
+    return { accessToken, refreshToken: latestValid.token, payload };
+  }
 
   const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
   const accessToken = generateAccessToken(payload);
@@ -151,12 +171,13 @@ export function verifyTokenDetailed(token: string): { payload: JwtPayload | null
 }
 
 /**
- * Login with username and password
+ * Login with username and password.
+ * Returns LoginResponse if no MFA, MfaChallengeResponse if MFA enabled, or null if invalid credentials.
  */
 export async function loginWithPassword(
   username: string,
   password: string
-): Promise<LoginResponse | null> {
+): Promise<LoginResponse | MfaChallengeResponse | null> {
   const user = await prisma.user.findUnique({
     where: { username },
     select: { id: true, username: true, displayName: true, passwordHash: true },
@@ -176,6 +197,20 @@ export async function loginWithPassword(
     return null;
   }
 
+  // Check if MFA is enabled — if so, return a challenge instead of tokens
+  const mfaEnabled = await hasMfaEnabled(user.id);
+  if (mfaEnabled) {
+    const challengeToken = await createMfaChallenge(user.id);
+    const methods = await getEnabledMethods(user.id);
+    const maskedEmail = await getMaskedEmail(user.id);
+    return {
+      mfaRequired: true,
+      challengeToken,
+      methods,
+      maskedEmail,
+    };
+  }
+
   const token = generateAccessToken({ userId: user.id, username: user.username });
   const refreshToken = await generateRefreshToken(user.id);
 
@@ -191,21 +226,28 @@ export async function loginWithPassword(
 }
 
 /**
- * Set or update password for an existing user
+ * Set password for a user who doesn't have one yet (migration path only).
+ * Rejects if user already has a password — use changePassword() instead.
  */
 export async function setPassword(username: string, password: string): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { username },
+    select: { id: true, passwordHash: true },
   });
 
   if (!user) {
     return false;
   }
 
+  // Only allow setting a password if one isn't already set
+  if (user.passwordHash) {
+    return false;
+  }
+
   const passwordHash = await hashPassword(password);
 
   await prisma.user.update({
-    where: { username },
+    where: { id: user.id },
     data: { passwordHash },
   });
 
@@ -282,7 +324,8 @@ export async function usernameExists(username: string): Promise<boolean> {
 export async function signup(
   username: string,
   displayName: string,
-  password: string
+  password: string,
+  consentMeta?: { ipAddress?: string; userAgent?: string }
 ): Promise<LoginResponse | null> {
   // Check if username already exists
   const existing = await prisma.user.findUnique({
@@ -296,26 +339,38 @@ export async function signup(
 
   const passwordHash = await hashPassword(password);
 
-  const user = await prisma.user.create({
-    data: {
-      username,
-      displayName,
-      passwordHash,
-      profilePublic: true,
-      leaderboardEligible: true,
-      trackingStartAt: new Date(),
-    },
-    select: { id: true, username: true, displayName: true },
-  });
+  const user = await prisma.$transaction(async (tx) => {
+    const newUser = await tx.user.create({
+      data: {
+        username,
+        displayName,
+        passwordHash,
+        profilePublic: true,
+        leaderboardEligible: true,
+        trackingStartAt: new Date(),
+      },
+      select: { id: true, username: true, displayName: true },
+    });
 
-  // Also create UserSettings for the new user
-  await prisma.userSettings.create({
-    data: {
-      userId: user.id,
-      cashBalance: 0,
-      marginDebt: 0,
-      dripEnabled: false,
-    },
+    await tx.userSettings.create({
+      data: {
+        userId: newUser.id,
+        cashBalance: 0,
+        marginDebt: 0,
+        dripEnabled: false,
+      },
+    });
+
+    await tx.consentRecord.create({
+      data: {
+        userId: newUser.id,
+        policyVersion: CURRENT_POLICY_VERSION,
+        ipAddress: consentMeta?.ipAddress,
+        userAgent: consentMeta?.userAgent,
+      },
+    });
+
+    return newUser;
   });
 
   const token = generateAccessToken({ userId: user.id, username: user.username });
