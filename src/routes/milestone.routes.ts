@@ -5,13 +5,15 @@ import {
   markMilestoneEventReadHandler,
   markAllMilestoneEventsReadHandler,
 } from '../controllers/milestone.controller';
+import { requireAuth } from '../middleware/auth.middleware';
+import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-// Events
-router.get('/events', getMilestoneEventsHandler);
-router.get('/events/unread-count', getUnreadMilestoneCountHandler);
-router.post('/events/:id/read', markMilestoneEventReadHandler);
-router.post('/events/read-all', markAllMilestoneEventsReadHandler);
+// All milestone routes require auth — userId derived from JWT
+router.get('/events', requireAuth, getMilestoneEventsHandler);
+router.get('/events/unread-count', requireAuth, getUnreadMilestoneCountHandler);
+router.post('/events/:id/read', mutationLimiter, requireAuth, markMilestoneEventReadHandler);
+router.post('/events/read-all', mutationLimiter, requireAuth, markAllMilestoneEventsReadHandler);
 
 export default router;

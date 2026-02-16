@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import {
   getMilestoneEvents,
   getUnreadMilestoneCount,
@@ -7,15 +8,14 @@ import {
 } from '../services/milestone.service';
 
 // GET /milestones/events?limit=N
-export async function getMilestoneEventsHandler(req: Request, res: Response): Promise<void> {
+export async function getMilestoneEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const events = await getMilestoneEvents(userId, limit);
+    const events = await getMilestoneEvents(req.user.userId, limit);
     res.json(events);
   } catch (error) {
     console.error('Error getting milestone events:', error);
@@ -23,15 +23,14 @@ export async function getMilestoneEventsHandler(req: Request, res: Response): Pr
   }
 }
 
-// GET /milestones/events/unread-count?userId=X
-export async function getUnreadMilestoneCountHandler(req: Request, res: Response): Promise<void> {
+// GET /milestones/events/unread-count
+export async function getUnreadMilestoneCountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const count = await getUnreadMilestoneCount(userId);
+    const count = await getUnreadMilestoneCount(req.user.userId);
     res.json({ count });
   } catch (error) {
     console.error('Error getting unread count:', error);
@@ -40,10 +39,18 @@ export async function getUnreadMilestoneCountHandler(req: Request, res: Response
 }
 
 // POST /milestones/events/:id/read
-export async function markMilestoneEventReadHandler(req: Request, res: Response): Promise<void> {
+export async function markMilestoneEventReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
     const { id } = req.params;
-    await markMilestoneEventRead(id);
+    const result = await markMilestoneEventRead(id, req.user.userId);
+    if (!result) {
+      res.status(404).json({ error: 'Milestone event not found' });
+      return;
+    }
     res.json({ ok: true });
   } catch (error) {
     console.error('Error marking event read:', error);
@@ -51,15 +58,14 @@ export async function markMilestoneEventReadHandler(req: Request, res: Response)
   }
 }
 
-// POST /milestones/events/read-all?userId=X
-export async function markAllMilestoneEventsReadHandler(req: Request, res: Response): Promise<void> {
+// POST /milestones/events/read-all
+export async function markAllMilestoneEventsReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string || req.body.userId;
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    await markAllMilestoneEventsRead(userId);
+    await markAllMilestoneEventsRead(req.user.userId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Error marking all events read:', error);

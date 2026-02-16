@@ -199,13 +199,18 @@ export async function getUnreadMilestoneCount(userId: string): Promise<number> {
 }
 
 /**
- * Mark a milestone event as read
+ * Mark a milestone event as read (with ownership verification)
  */
-export async function markMilestoneEventRead(eventId: string): Promise<void> {
+export async function markMilestoneEventRead(eventId: string, userId: string): Promise<boolean> {
+  const event = await prisma.milestoneEvent.findFirst({
+    where: { id: eventId, userId },
+  });
+  if (!event) return false;
   await prisma.milestoneEvent.update({
     where: { id: eventId },
     data: { read: true },
   });
+  return true;
 }
 
 /**

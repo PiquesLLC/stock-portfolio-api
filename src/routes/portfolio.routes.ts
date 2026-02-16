@@ -18,7 +18,7 @@ import {
 } from '../controllers/portfolio.controller';
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
-import { heavyReadLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 import multer from 'multer';
 
@@ -26,9 +26,9 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', optionalAuth, getPortfolioHandler);
-router.post('/holdings', requireAuth, addHolding);
-router.delete('/holdings/:ticker', requireAuth, removeHolding);
-router.put('/cash', requireAuth, setCashBalance);
+router.post('/holdings', mutationLimiter, requireAuth, addHolding);
+router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
+router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
 router.get('/history', heavyReadLimiter, getHistory);
 router.get('/history/chart', heavyReadLimiter, getChartHandler);
 router.get('/projections', getProjectionsHandler);
@@ -38,9 +38,9 @@ router.get('/summary', getSummaryHandler);
 router.get('/etf-overlap', optionalAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
-router.post('/import/csv', requireAuth, upload.single('file'), importPortfolioCsvHandler);
-router.post('/import/screenshot', requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
-router.post('/import/confirm', requireAuth, confirmPortfolioImportHandler);
-router.post('/clear', requireAuth, clearPortfolioHandler);
+router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);
+router.post('/import/screenshot', mutationLimiter, requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
+router.post('/import/confirm', mutationLimiter, requireAuth, confirmPortfolioImportHandler);
+router.post('/clear', mutationLimiter, requireAuth, clearPortfolioHandler);
 
 export default router;

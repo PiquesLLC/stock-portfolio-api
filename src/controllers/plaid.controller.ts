@@ -1,8 +1,9 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { createLinkToken, exchangePublicToken, getPlaidItems, disconnectPlaidItem, handleItemWebhook, getInvestmentHoldings } from '../services/plaid.service';
 import { exchangeTokenSchema, disconnectItemSchema } from '../validators/plaid.validators';
 import { config } from '../config';
+import { verifyPlaidWebhook } from '../utils/plaid-webhook-verify';
 
 /**
  * POST /plaid/link-token
@@ -94,20 +95,28 @@ export async function getHoldingsHandler(req: AuthRequest, res: Response) {
 
 /**
  * POST /plaid/webhook
- * Handle Plaid webhook callbacks. Verifies webhook signature.
+ * Handle Plaid webhook callbacks. Verifies webhook JWT signature.
+ *
+ * In sandbox mode, verification is skipped for testing.
+ * In development/production, the Plaid-Verification header JWT is verified
+ * against Plaid's public key endpoint and the request body hash is checked.
  */
-export async function webhookHandler(req: AuthRequest, res: Response) {
+export async function webhookHandler(req: Request, res: Response) {
   try {
     // Plaid signs webhooks with a JWT in the Plaid-Verification header.
-    // For sandbox, we skip verification. In production, verify the JWT.
     if (config.plaidEnv !== 'sandbox') {
       const plaidVerification = req.headers['plaid-verification'] as string;
       if (!plaidVerification) {
         return res.status(401).json({ error: 'Missing webhook verification' });
       }
-      // TODO: Implement full JWT verification using Plaid's public key endpoint
-      // For now, log a warning. This should be implemented before going to production.
-      console.warn('[Plaid] Webhook JWT verification not yet implemented — accepting in dev/sandbox');
+
+      // Verify JWT signature and body hash
+      const rawBody = JSON.stringify(req.body);
+      const isValid = await verifyPlaidWebhook(plaidVerification, rawBody);
+      if (!isValid) {
+        console.error('[Plaid] Webhook verification failed');
+        return res.status(401).json({ error: 'Webhook verification failed' });
+      }
     }
 
     const { webhook_type, webhook_code, item_id, error } = req.body;

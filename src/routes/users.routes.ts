@@ -13,6 +13,7 @@ import {
 } from '../controllers/social.controller';
 import { getUserIntelligenceHandler } from '../controllers/portfolioIntelligence.controller';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
+import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -28,10 +29,10 @@ router.get('/:userId/settings', requireAuth, getUserSettingsHandler); // Owner o
 router.get('/:userId/intelligence', optionalAuth, getUserIntelligenceHandler);
 
 // Protected endpoints (require authentication)
-router.post('/:userId/follow', requireAuth, followHandler);
-router.delete('/:userId/follow', requireAuth, unfollowHandler);
-router.put('/:userId/region', requireAuth, updateRegionHandler);
-router.put('/:userId/holdings-visibility', requireAuth, updateHoldingsVisibilityHandler);
-router.put('/:userId/settings', requireAuth, updateUserSettingsHandler);
+router.post('/:userId/follow', mutationLimiter, requireAuth, followHandler);
+router.delete('/:userId/follow', mutationLimiter, requireAuth, unfollowHandler);
+router.put('/:userId/region', mutationLimiter, requireAuth, updateRegionHandler);
+router.put('/:userId/holdings-visibility', mutationLimiter, requireAuth, updateHoldingsVisibilityHandler);
+router.put('/:userId/settings', mutationLimiter, requireAuth, updateUserSettingsHandler);
 
 export default router;

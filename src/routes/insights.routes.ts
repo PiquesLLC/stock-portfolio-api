@@ -19,7 +19,8 @@ import {
   markAllAnomaliesReadHandler,
 } from '../controllers/anomaly.controller';
 import { getTaxHarvestHandler } from '../controllers/tax-harvest.controller';
-import { heavyReadLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -29,10 +30,10 @@ router.get('/leak-detector', heavyReadLimiter, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, getIncomeInsightsHandler);
 router.get('/briefing', heavyReadLimiter, getBriefingHandler);
-router.post('/briefing/explain', explainBriefingHandler);
+router.post('/briefing/explain', mutationLimiter, requireAuth, explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
-router.post('/daily-report/regenerate', regenerateDailyReportHandler);
+router.post('/daily-report/regenerate', mutationLimiter, requireAuth, regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
 
 // Tax-Loss Harvesting
@@ -41,7 +42,7 @@ router.get('/tax-harvest', heavyReadLimiter, getTaxHarvestHandler);
 // Anomaly Detection
 router.get('/anomalies', getAnomaliesHandler);
 router.get('/anomalies/unread-count', getUnreadAnomalyCountHandler);
-router.patch('/anomalies/:id/read', markAnomalyReadHandler);
-router.post('/anomalies/mark-all-read', markAllAnomaliesReadHandler);
+router.patch('/anomalies/:id/read', mutationLimiter, requireAuth, markAnomalyReadHandler);
+router.post('/anomalies/mark-all-read', mutationLimiter, requireAuth, markAllAnomaliesReadHandler);
 
 export default router;
