@@ -13,7 +13,7 @@ export async function getAnomaliesHandler(req: Request, res: Response): Promise<
     });
     res.json(anomalies);
   } catch (error: any) {
-    console.error('Error fetching anomalies:', error.message);
+    console.error('Error fetching anomalies');
     res.status(500).json({ error: 'Failed to fetch anomalies' });
   }
 }
@@ -25,7 +25,7 @@ export async function getUnreadAnomalyCountHandler(req: Request, res: Response):
     });
     res.json({ count });
   } catch (error: any) {
-    console.error('Error fetching unread anomaly count:', error.message);
+    console.error('Error fetching unread anomaly count');
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }
@@ -38,7 +38,7 @@ export async function markAnomalyReadHandler(req: Request, res: Response): Promi
     });
     res.json({ success: true });
   } catch (error: any) {
-    console.error('Error marking anomaly read:', error.message);
+    console.error('Error marking anomaly read');
     res.status(500).json({ error: 'Failed to mark anomaly as read' });
   }
 }
@@ -51,7 +51,7 @@ export async function markAllAnomaliesReadHandler(req: Request, res: Response): 
     });
     res.json({ success: true });
   } catch (error: any) {
-    console.error('Error marking all anomalies read:', error.message);
+    console.error('Error marking all anomalies read');
     res.status(500).json({ error: 'Failed to mark all anomalies as read' });
   }
 }

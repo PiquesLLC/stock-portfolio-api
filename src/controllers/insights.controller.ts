@@ -222,7 +222,7 @@ export async function explainBriefingHandler(req: Request, res: Response): Promi
     const result = await explainBriefingSection(title, body);
     res.json(result);
   } catch (error: any) {
-    console.error('[Briefing Explain] Error:', error.message);
+    console.error('[Briefing Explain] Error');
     res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
   }
 }

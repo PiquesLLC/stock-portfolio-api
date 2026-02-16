@@ -6,6 +6,11 @@ import {
   updateGoal,
   deleteGoal,
 } from '../services/goals.service';
+import {
+  createGoalSchema,
+  goalIdParamSchema,
+  updateGoalSchema,
+} from '../validators/goals.validators';
 
 export async function listGoalsHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -19,7 +24,13 @@ export async function listGoalsHandler(req: Request, res: Response): Promise<voi
 
 export async function getGoalHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const parsedParams = goalIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+
+    const { id } = parsedParams.data;
     const goal = await getGoalWithProgress(id);
 
     if (!goal) {
@@ -36,33 +47,15 @@ export async function getGoalHandler(req: Request, res: Response): Promise<void>
 
 export async function createGoalHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { name, targetValue, monthlyContribution, deadline } = req.body;
-
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      res.status(400).json({ error: 'Name is required' });
+    const parsed = createGoalSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
 
-    if (typeof targetValue !== 'number' || targetValue <= 0) {
-      res.status(400).json({ error: 'Target value must be a positive number' });
-      return;
-    }
-
-    if (monthlyContribution !== undefined && (typeof monthlyContribution !== 'number' || monthlyContribution < 0)) {
-      res.status(400).json({ error: 'Monthly contribution must be a non-negative number' });
-      return;
-    }
-
-    if (deadline !== undefined && deadline !== null) {
-      const deadlineDate = new Date(deadline);
-      if (isNaN(deadlineDate.getTime())) {
-        res.status(400).json({ error: 'Invalid deadline date format' });
-        return;
-      }
-    }
-
+    const { name, targetValue, monthlyContribution, deadline } = parsed.data;
     const goal = await createGoal({
-      name: name.trim(),
+      name,
       targetValue,
       monthlyContribution,
       deadline,
@@ -77,35 +70,17 @@ export async function createGoalHandler(req: Request, res: Response): Promise<vo
 
 export async function updateGoalHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    const { name, targetValue, monthlyContribution, deadline } = req.body;
-
-    // Validate inputs if provided
-    if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0)) {
-      res.status(400).json({ error: 'Name must be a non-empty string' });
+    const parsedParams = goalIdParamSchema.safeParse(req.params);
+    const parsedBody = updateGoalSchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
 
-    if (targetValue !== undefined && (typeof targetValue !== 'number' || targetValue <= 0)) {
-      res.status(400).json({ error: 'Target value must be a positive number' });
-      return;
-    }
-
-    if (monthlyContribution !== undefined && (typeof monthlyContribution !== 'number' || monthlyContribution < 0)) {
-      res.status(400).json({ error: 'Monthly contribution must be a non-negative number' });
-      return;
-    }
-
-    if (deadline !== undefined && deadline !== null) {
-      const deadlineDate = new Date(deadline);
-      if (isNaN(deadlineDate.getTime())) {
-        res.status(400).json({ error: 'Invalid deadline date format' });
-        return;
-      }
-    }
-
+    const { id } = parsedParams.data;
+    const { name, targetValue, monthlyContribution, deadline } = parsedBody.data;
     const goal = await updateGoal(id, {
-      name: name?.trim(),
+      name,
       targetValue,
       monthlyContribution,
       deadline,
@@ -124,7 +99,13 @@ export async function updateGoalHandler(req: Request, res: Response): Promise<vo
 
 export async function deleteGoalHandler(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const parsedParams = goalIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+
+    const { id } = parsedParams.data;
     await deleteGoal(id);
     res.status(204).send();
   } catch (error: any) {

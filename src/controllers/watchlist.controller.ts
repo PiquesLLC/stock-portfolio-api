@@ -17,9 +17,17 @@ import {
 } from '../services/snapshot.service';
 import { fetchPrices } from '../services/market.service';
 import { invalidateAllNewsCache, invalidateTickerNewsCache } from '../services/news.service';
+import {
+  addWatchlistHoldingSchema,
+  createWatchlistSchema,
+  updateWatchlistHoldingSchema,
+  updateWatchlistSchema,
+  watchlistChartQuerySchema,
+  watchlistIdParamSchema,
+  watchlistIdTickerParamSchema,
+} from '../validators/watchlist.validators';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'] as const;
 
 export async function listWatchlistsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -33,7 +41,12 @@ export async function listWatchlistsHandler(req: AuthRequest, res: Response): Pr
 
 export async function getWatchlistHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const parsedParams = watchlistIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { id } = parsedParams.data;
     const watchlist = await getWatchlistDetail(id, SYSTEM_USER_ID);
     if (!watchlist) {
       res.status(404).json({ error: 'Watchlist not found' });
@@ -48,11 +61,12 @@ export async function getWatchlistHandler(req: AuthRequest, res: Response): Prom
 
 export async function createWatchlistHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { name, description, color } = req.body;
-    if (!name || typeof name !== 'string') {
-      res.status(400).json({ error: 'name is required' });
+    const parsedBody = createWatchlistSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { name, description, color } = parsedBody.data;
     const watchlist = await createWatchlist(SYSTEM_USER_ID, { name, description, color });
     res.status(201).json({
       id: watchlist.id,
@@ -74,8 +88,14 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
 
 export async function updateWatchlistHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    const { name, description, color } = req.body;
+    const parsedParams = watchlistIdParamSchema.safeParse(req.params);
+    const parsedBody = updateWatchlistSchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { id } = parsedParams.data;
+    const { name, description, color } = parsedBody.data;
     const updated = await updateWatchlist(id, SYSTEM_USER_ID, { name, description, color });
     if (!updated) {
       res.status(404).json({ error: 'Watchlist not found' });
@@ -102,7 +122,12 @@ export async function updateWatchlistHandler(req: AuthRequest, res: Response): P
 
 export async function deleteWatchlistHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const parsedParams = watchlistIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { id } = parsedParams.data;
     const removed = await deleteWatchlist(id, SYSTEM_USER_ID);
     if (!removed) {
       res.status(404).json({ error: 'Watchlist not found' });
@@ -120,20 +145,14 @@ export async function deleteWatchlistHandler(req: AuthRequest, res: Response): P
 
 export async function addWatchlistHoldingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    const { ticker, shares, averageCost } = req.body;
-    if (!ticker || typeof ticker !== 'string') {
-      res.status(400).json({ error: 'ticker is required' });
+    const parsedParams = watchlistIdParamSchema.safeParse(req.params);
+    const parsedBody = addWatchlistHoldingSchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    if (typeof shares !== 'number' || shares <= 0) {
-      res.status(400).json({ error: 'shares must be a positive number' });
-      return;
-    }
-    if (typeof averageCost !== 'number' || averageCost < 0) {
-      res.status(400).json({ error: 'averageCost must be non-negative' });
-      return;
-    }
+    const { id } = parsedParams.data;
+    const { ticker, shares, averageCost } = parsedBody.data;
 
     const holding = await addWatchlistHolding(id, SYSTEM_USER_ID, { ticker, shares, averageCost });
     if (!holding) {
@@ -152,16 +171,14 @@ export async function addWatchlistHoldingHandler(req: AuthRequest, res: Response
 
 export async function updateWatchlistHoldingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id, ticker } = req.params;
-    const { shares, averageCost } = req.body;
-    if (shares !== undefined && (typeof shares !== 'number' || shares <= 0)) {
-      res.status(400).json({ error: 'shares must be a positive number' });
+    const parsedParams = watchlistIdTickerParamSchema.safeParse(req.params);
+    const parsedBody = updateWatchlistHoldingSchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    if (averageCost !== undefined && (typeof averageCost !== 'number' || averageCost < 0)) {
-      res.status(400).json({ error: 'averageCost must be non-negative' });
-      return;
-    }
+    const { id, ticker } = parsedParams.data;
+    const { shares, averageCost } = parsedBody.data;
 
     const updated = await updateWatchlistHolding(id, SYSTEM_USER_ID, ticker, { shares, averageCost });
     if (!updated) {
@@ -180,7 +197,12 @@ export async function updateWatchlistHoldingHandler(req: AuthRequest, res: Respo
 
 export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id, ticker } = req.params;
+    const parsedParams = watchlistIdTickerParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { id, ticker } = parsedParams.data;
     const removed = await removeWatchlistHolding(id, SYSTEM_USER_ID, ticker);
     if (!removed) {
       res.status(404).json({ error: 'Watchlist holding not found' });
@@ -198,12 +220,16 @@ export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Respo
 
 export async function getWatchlistChartHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    const period = ((req.query.period as string) || '1D').toUpperCase();
-    if (!VALID_CHART_PERIODS.includes(period as typeof VALID_CHART_PERIODS[number])) {
-      res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
+    const parsedParams = watchlistIdParamSchema.safeParse(req.params);
+    const parsedQuery = watchlistChartQuerySchema.safeParse({
+      period: typeof req.query.period === 'string' ? req.query.period.toUpperCase() : undefined,
+    });
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { id } = parsedParams.data;
+    const period = parsedQuery.data.period || '1D';
 
     const watchlist = await prisma.watchlist.findFirst({
       where: { id, userId: SYSTEM_USER_ID },

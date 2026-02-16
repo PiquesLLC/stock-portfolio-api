@@ -9,6 +9,19 @@ import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
 import { getEarningsTrack } from '../services/earnings-track.service';
 import { MarketIndex } from '../utils/sectors';
+import {
+  aiEventsQuerySchema,
+  benchmarkParamSchema,
+  heatmapQuerySchema,
+  historicalCagrQuerySchema,
+  hourlyCandlesQuerySchema,
+  marketNewsQuerySchema,
+  pricesQuerySchema,
+  searchSymbolsQuerySchema,
+  stockQuestionSchema,
+  tickerNewsQuerySchema,
+  tickerParamSchema,
+} from '../validators/market.validators';
 
 interface PriceResult {
   price: number;
@@ -23,19 +36,12 @@ interface PriceResult {
 
 export async function getPrices(req: Request, res: Response): Promise<void> {
   try {
-    const tickersParam = req.query.tickers as string;
-
-    if (!tickersParam) {
-      res.status(400).json({ error: 'Missing required query parameter: tickers' });
+    const parsed = pricesQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-
-    const tickers = tickersParam.split(',').map((t) => t.trim().toUpperCase());
-
-    if (tickers.length === 0) {
-      res.status(400).json({ error: 'No valid tickers provided' });
-      return;
-    }
+    const { tickers } = parsed.data;
 
     const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers);
 
@@ -74,12 +80,12 @@ export async function getPrices(req: Request, res: Response): Promise<void> {
 
 export async function getQuote(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
 
     const quote = await fetchQuote(ticker);
     res.json(quote);
@@ -95,12 +101,12 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
  */
 export async function getFastQuote(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
 
     const quote = await fetchFastQuote(ticker);
     if (!quote) {
@@ -116,11 +122,12 @@ export async function getFastQuote(req: Request, res: Response): Promise<void> {
 
 export async function getStockDetails(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
     const details = await fetchStockDetails(ticker);
     res.json(details);
   } catch (error) {
@@ -131,11 +138,12 @@ export async function getStockDetails(req: Request, res: Response): Promise<void
 
 export async function getIntraday(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
     const candles = await fetchIntradayCandles(ticker);
     res.json({ ticker, candles });
   } catch (error) {
@@ -146,16 +154,16 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
 
 export async function getHourlyCandles(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    const period = req.query.period as string;
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    const parsedQuery = hourlyCandlesQuerySchema.safeParse({
+      period: typeof req.query.period === 'string' ? req.query.period.toUpperCase() : req.query.period,
+    });
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    if (period !== '1W' && period !== '1M' && period !== 'YTD') {
-      res.status(400).json({ error: 'Period must be 1W, 1M, or YTD' });
-      return;
-    }
+    const { ticker } = parsedParams.data;
+    const { period } = parsedQuery.data;
     const candles = await fetchHourlyCandles(ticker, period);
     res.json({ ticker, candles });
   } catch (error) {
@@ -166,12 +174,13 @@ export async function getHourlyCandles(req: Request, res: Response): Promise<voi
 
 export async function getDailyCandles(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    const period = (req.query.period as string)?.toUpperCase() || '3M';
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const ticker = parsedParams.data.ticker;
+    const period = (req.query.period as string)?.toUpperCase() || '3M';
     const daysMap: Record<string, number> = {
       '3M': 90, 'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
       '1Y': 365, 'ALL': 365 * 5,
@@ -187,8 +196,13 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
 
 export async function searchSymbols(req: Request, res: Response): Promise<void> {
   try {
-    const query = (req.query.q as string)?.trim();
-    const heldParam = req.query.held as string | undefined;
+    const parsed = searchSymbolsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const query = parsed.data.q?.trim();
+    const heldParam = parsed.data.held;
 
     // Parse held tickers from comma-separated list
     const heldTickers = heldParam
@@ -213,7 +227,12 @@ export async function searchSymbols(req: Request, res: Response): Promise<void> 
 
 export async function getMarketNews(req: Request, res: Response): Promise<void> {
   try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const parsed = marketNewsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const limit = parsed.data.limit ?? 20;
     const news = await fetchMarketNews(limit);
     res.json(news);
   } catch (error) {
@@ -224,9 +243,14 @@ export async function getMarketNews(req: Request, res: Response): Promise<void> 
 
 export async function getTickerNews(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
-    const limit = Math.min(parseInt(req.query.limit as string) || 30, 50);
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    const parsedQuery = tickerNewsQuerySchema.safeParse(req.query);
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { ticker } = parsedParams.data;
+    const limit = parsedQuery.data.limit ?? 30;
     const news = await fetchTickerNews(ticker, limit);
     res.json(news);
   } catch (error) {
@@ -237,12 +261,14 @@ export async function getTickerNews(req: Request, res: Response): Promise<void> 
 
 export async function getBenchmarkClosesHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    const validBenchmarks = ['SPY', 'QQQ', 'DIA'];
-    if (!ticker || !validBenchmarks.includes(ticker)) {
-      res.status(400).json({ error: `Invalid benchmark. Must be one of: ${validBenchmarks.join(', ')}` });
+    const parsed = benchmarkParamSchema.safeParse({
+      ticker: req.params.ticker?.toUpperCase(),
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
     const data = getBenchmarkCandles(ticker);
     if (!data) {
       res.json({ ticker, candles: [] });
@@ -263,11 +289,12 @@ export async function getBenchmarkClosesHandler(req: Request, res: Response): Pr
 
 export async function getETFHoldingsHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
 
     const holdings = await getETFHoldings(ticker);
     if (!holdings) {
@@ -284,9 +311,14 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
 
 export async function getAIEventsHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
-    const days = Math.min(parseInt(req.query.days as string) || 90, 7300); // up to ~20 years for MAX
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    const parsedQuery = aiEventsQuerySchema.safeParse(req.query);
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { ticker } = parsedParams.data;
+    const days = parsedQuery.data.days ?? 90;
     const result = await getAIEvents(ticker, days);
     res.json(result);
   } catch (error) {
@@ -297,11 +329,12 @@ export async function getAIEventsHandler(req: Request, res: Response): Promise<v
 
 export async function getAssetAboutHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { ticker } = parsed.data;
 
     const about = await getAssetAbout(ticker);
     if (!about) {
@@ -318,20 +351,16 @@ export async function getAssetAboutHandler(req: Request, res: Response): Promise
 
 export async function askStockQuestionHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) { res.status(400).json({ error: 'Ticker required' }); return; }
-
-    const { question } = req.body;
-    if (!question || typeof question !== 'string' || question.trim().length === 0) {
-      res.status(400).json({ error: 'Question is required' });
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    const parsedBody = stockQuestionSchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    if (question.length > 500) {
-      res.status(400).json({ error: 'Question too long (max 500 characters)' });
-      return;
-    }
+    const { ticker } = parsedParams.data;
+    const { question } = parsedBody.data;
 
-    const result = await askStockQuestion(ticker, question.trim());
+    const result = await askStockQuestion(ticker, question);
     res.json(result);
   } catch (error: any) {
     if (error.response?.status === 429) {
@@ -345,21 +374,12 @@ export async function askStockQuestionHandler(req: Request, res: Response): Prom
 
 export async function getHistoricalCAGRHandler(req: Request, res: Response): Promise<void> {
   try {
-    const tickersParam = req.query.tickers as string;
-    if (!tickersParam) {
-      res.status(400).json({ error: 'Missing required query parameter: tickers' });
+    const parsed = historicalCagrQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-
-    const tickers = tickersParam.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
-    if (tickers.length === 0) {
-      res.status(400).json({ error: 'No valid tickers provided' });
-      return;
-    }
-    if (tickers.length > 50) {
-      res.status(400).json({ error: 'Too many tickers (max 50)' });
-      return;
-    }
+    const { tickers } = parsed.data;
 
     const cagrs = await getHistoricalCAGRs(tickers);
     res.json({ cagrs });
@@ -371,13 +391,16 @@ export async function getHistoricalCAGRHandler(req: Request, res: Response): Pro
 
 export async function getHeatmapHandler(req: Request, res: Response): Promise<void> {
   try {
-    const validPeriods: HeatmapPeriod[] = ['1D', '1W', '1M', '3M', '6M', '1Y'];
-    const periodParam = ((req.query.period as string) || '1D').toUpperCase() as HeatmapPeriod;
-    const period = validPeriods.includes(periodParam) ? periodParam : '1D';
-
-    const validIndexes: MarketIndex[] = ['SP500', 'DOW30', 'NASDAQ100'];
-    const indexParam = (req.query.index as string)?.toUpperCase() as MarketIndex | undefined;
-    const index = indexParam && validIndexes.includes(indexParam) ? indexParam : undefined;
+    const parsed = heatmapQuerySchema.safeParse({
+      period: typeof req.query.period === 'string' ? req.query.period.toUpperCase() : undefined,
+      index: typeof req.query.index === 'string' ? req.query.index.toUpperCase() : undefined,
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const period = (parsed.data.period || '1D') as HeatmapPeriod;
+    const index = parsed.data.index as MarketIndex | undefined;
 
     const data = await getHeatmapData(period, index);
     res.json(data);
@@ -392,8 +415,9 @@ import { getNalaScore } from '../services/nala-score.service';
 
 export async function getNalaScoreHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) { res.status(400).json({ error: 'Missing ticker' }); return; }
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) { res.status(400).json({ error: 'Invalid request' }); return; }
+    const { ticker } = parsed.data;
     const score = await getNalaScore(ticker);
     res.json(score);
   } catch (error) {
@@ -404,8 +428,9 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
 
 export async function getEarningsTrackHandler(req: Request, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    if (!ticker) { res.status(400).json({ error: 'Missing ticker' }); return; }
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) { res.status(400).json({ error: 'Invalid request' }); return; }
+    const { ticker } = parsed.data;
     const track = await getEarningsTrack(ticker);
     res.json(track);
   } catch (error) {

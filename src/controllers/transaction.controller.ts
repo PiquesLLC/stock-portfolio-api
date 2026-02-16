@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { addTransaction, getTransactions, deleteTransaction } from '../services/transaction.service';
+import { addTransactionSchema, transactionIdParamSchema } from '../validators/transaction.validators';
 
 export async function getTransactionsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -15,20 +16,12 @@ export async function getTransactionsHandler(req: AuthRequest, res: Response): P
 
 export async function addTransactionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { type, amount, date } = req.body;
-
-    if (!type || !['deposit', 'withdrawal'].includes(type)) {
-      res.status(400).json({ error: 'type must be "deposit" or "withdrawal"' });
+    const parsed = addTransactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    if (typeof amount !== 'number' || amount <= 0) {
-      res.status(400).json({ error: 'amount must be a positive number' });
-      return;
-    }
-    if (!date) {
-      res.status(400).json({ error: 'date is required (ISO format)' });
-      return;
-    }
+    const { type, amount, date } = parsed.data;
 
     // Always use authenticated user's ID
     const tx = await addTransaction({ type, amount, date, userId: req.user!.userId });
@@ -41,7 +34,12 @@ export async function addTransactionHandler(req: AuthRequest, res: Response): Pr
 
 export async function deleteTransactionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const parsed = transactionIdParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { id } = parsed.data;
     // Ownership-scoped delete
     const deleted = await deleteTransaction(id, req.user!.userId);
     if (!deleted) {

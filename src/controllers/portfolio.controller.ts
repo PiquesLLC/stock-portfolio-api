@@ -24,6 +24,12 @@ import { getPerformanceComparison, PerformanceWindow } from '../services/benchma
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 import { parse as parseCsv } from 'csv-parse/sync';
+import {
+  addHoldingSchema,
+  removeHoldingParamsSchema,
+  removeHoldingQuerySchema,
+  setCashBalanceSchema,
+} from '../validators/portfolio.validators';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -92,22 +98,12 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
 
 export async function addHolding(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { ticker, shares, averageCost, skipTransaction } = req.body;
-
-    if (!ticker || typeof ticker !== 'string') {
-      res.status(400).json({ error: 'Missing or invalid ticker' });
+    const parsed = addHoldingSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
-
-    if (typeof shares !== 'number' || shares <= 0) {
-      res.status(400).json({ error: 'Invalid shares: must be a positive number' });
-      return;
-    }
-
-    if (typeof averageCost !== 'number' || averageCost <= 0) {
-      res.status(400).json({ error: 'Invalid averageCost: must be a positive number' });
-      return;
-    }
+    const { ticker, shares, averageCost, skipTransaction } = parsed.data;
 
     // Check if this is an update vs new add
     // Always use system/default portfolio â€” auth is for access control only
@@ -168,13 +164,14 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
 
 export async function removeHolding(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const ticker = req.params.ticker?.toUpperCase();
-    const skipTransaction = req.query.skipTransaction === 'true';
-
-    if (!ticker) {
-      res.status(400).json({ error: 'Missing ticker parameter' });
+    const parsedParams = removeHoldingParamsSchema.safeParse(req.params);
+    const parsedQuery = removeHoldingQuerySchema.safeParse(req.query);
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const ticker = parsedParams.data.ticker.toUpperCase();
+    const skipTransaction = parsedQuery.data.skipTransaction === 'true';
 
     // Get the holding before deletion to know the cost basis
     // Always use system/default portfolio â€” auth is for access control only
@@ -219,12 +216,12 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
 
 export async function setCashBalance(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { cashBalance } = req.body;
-
-    if (typeof cashBalance !== 'number' || cashBalance < 0) {
-      res.status(400).json({ error: 'Invalid cashBalance: must be a non-negative number' });
+    const parsed = setCashBalanceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
       return;
     }
+    const { cashBalance } = parsed.data;
 
     // Update user-specific cash if authenticated
     const authUserId = req.user?.userId;
