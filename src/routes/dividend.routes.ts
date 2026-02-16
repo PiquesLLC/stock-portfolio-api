@@ -21,41 +21,41 @@ import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-// Events (GET public, mutations require auth + rate limiting)
-router.get('/events', getEventsHandler);
-router.get('/events/upcoming', getUpcomingHandler);
+// Events — all require auth (user-scoped data)
+router.get('/events', requireAuth, getEventsHandler);
+router.get('/events/upcoming', requireAuth, getUpcomingHandler);
 router.post('/events', mutationLimiter, requireAuth, addDividendEvent);
 router.delete('/events/:id', mutationLimiter, requireAuth, removeEvent);
 
-// Credits (posted dividends)
-router.get('/credits', getCreditsHandler);
-router.get('/credits/:id/timeline', getTimelineHandler);
+// Credits (posted dividends) — require auth
+router.get('/credits', requireAuth, getCreditsHandler);
+router.get('/credits/:id/timeline', requireAuth, getTimelineHandler);
 router.post('/credits/:id/reinvest', mutationLimiter, requireAuth, reinvestHandler);
 
-// Reinvestments
-router.get('/reinvestments', getReinvestmentsHandler);
+// Reinvestments — require auth
+router.get('/reinvestments', requireAuth, getReinvestmentsHandler);
 
-// Summary
-router.get('/summary', getSummaryHandler);
+// Summary — require auth
+router.get('/summary', requireAuth, getSummaryHandler);
 
-// Growth rates
-router.get('/growth-rates', getDividendGrowthRatesHandler);
+// Growth rates — require auth (user-scoped analytics)
+router.get('/growth-rates', requireAuth, getDividendGrowthRatesHandler);
 
-// DRIP Settings (GET public, PUT requires auth)
-router.get('/drip', getDripSettingsHandler);
+// DRIP Settings — require auth
+router.get('/drip', requireAuth, getDripSettingsHandler);
 router.put('/drip', mutationLimiter, requireAuth, updateDripSettingsHandler);
 
-// Sync (trigger manual fetch from Yahoo) - requires auth
+// Sync (trigger manual fetch from Yahoo) — requires auth
 router.post('/sync', mutationLimiter, requireAuth, syncHandler);
 
-// Backfill missed dividend postings - requires auth
+// Backfill missed dividend postings — requires auth
 router.post('/backfill', mutationLimiter, requireAuth, backfillHandler);
 
-// Calendar export (iCal)
+// Calendar export (iCal) — public (user adds to calendar app)
 router.get('/calendar.ics', getCalendarICS);
 
 // Backward compat: GET / returns events, POST / adds event
-router.get('/', getEventsHandler);
+router.get('/', requireAuth, getEventsHandler);
 router.post('/', mutationLimiter, requireAuth, addDividendEvent);
 
 export default router;

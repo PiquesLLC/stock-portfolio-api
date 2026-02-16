@@ -110,8 +110,8 @@ export async function webhookHandler(req: Request, res: Response) {
         return res.status(401).json({ error: 'Missing webhook verification' });
       }
 
-      // Verify JWT signature and body hash
-      const rawBody = JSON.stringify(req.body);
+      // Verify JWT signature and body hash using captured raw bytes
+      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
       const isValid = await verifyPlaidWebhook(plaidVerification, rawBody);
       if (!isValid) {
         console.error('[Plaid] Webhook verification failed');

@@ -35,7 +35,7 @@ router.get('/projections', getProjectionsHandler);
 router.get('/projections/current-pace', getCurrentPaceHandler);
 router.get('/metrics', getMetricsHandler);
 router.get('/summary', getSummaryHandler);
-router.get('/etf-overlap', optionalAuth, getEtfOverlapHandler);
+router.get('/etf-overlap', requireAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);

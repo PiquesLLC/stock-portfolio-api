@@ -1,15 +1,17 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import { getDividendGrowthRates } from '../services/dividend-growth.service';
 
-export async function getDividendGrowthRatesHandler(req: Request, res: Response): Promise<void> {
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
+export async function getDividendGrowthRatesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId } = req.query;
     const excludeCurrentYearParam = req.query.excludeCurrentYear as string | undefined;
     const excludeCurrentYear = excludeCurrentYearParam === undefined
       ? true
       : excludeCurrentYearParam.toLowerCase() !== 'false';
     const data = await getDividendGrowthRates(
-      userId as string | undefined ?? null,
+      SYSTEM_USER_ID,
       { excludeCurrentYear }
     );
     res.json(data);

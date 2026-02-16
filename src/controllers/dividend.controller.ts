@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import {
   createDividendEvent,
   getDividendEvents,
@@ -15,9 +16,13 @@ import {
   updateDripSettings,
 } from '../services/drip.service';
 
+// Single-portfolio app: all data lives under the system user.
+// Auth is for access control only — never use client-supplied userId for lookups.
+const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
 // --- Events ---
 
-export async function addDividendEvent(req: Request, res: Response): Promise<void> {
+export async function addDividendEvent(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { ticker, exDate, payDate, amountPerShare, recordDate, dividendType } = req.body;
 
@@ -58,14 +63,14 @@ export async function addDividendEvent(req: Request, res: Response): Promise<voi
   }
 }
 
-export async function getEventsHandler(req: Request, res: Response): Promise<void> {
+export async function getEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { ticker, from, to, userId } = req.query;
+    const { ticker, from, to } = req.query;
     const events = await getDividendEvents({
       ticker: ticker as string | undefined,
       fromDate: from ? new Date(from as string) : undefined,
       toDate: to ? new Date(to as string) : undefined,
-      userId: userId as string | undefined ?? null,
+      userId: SYSTEM_USER_ID,
     });
     res.json(events);
   } catch (error) {
@@ -74,10 +79,9 @@ export async function getEventsHandler(req: Request, res: Response): Promise<voi
   }
 }
 
-export async function getUpcomingHandler(req: Request, res: Response): Promise<void> {
+export async function getUpcomingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId } = req.query;
-    const events = await getUpcomingDividendEvents(userId as string | undefined ?? null);
+    const events = await getUpcomingDividendEvents(SYSTEM_USER_ID);
     res.json(events);
   } catch (error) {
     console.error('Error fetching upcoming dividends:', error);
@@ -85,7 +89,7 @@ export async function getUpcomingHandler(req: Request, res: Response): Promise<v
   }
 }
 
-export async function removeEvent(req: Request, res: Response): Promise<void> {
+export async function removeEvent(req: AuthRequest, res: Response): Promise<void> {
   try {
     await deleteDividendEvent(req.params.id);
     res.status(204).send();
@@ -101,11 +105,11 @@ export async function removeEvent(req: Request, res: Response): Promise<void> {
 
 // --- Credits ---
 
-export async function getCreditsHandler(req: Request, res: Response): Promise<void> {
+export async function getCreditsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId, ticker } = req.query;
+    const { ticker } = req.query;
     const credits = await getDividendCredits(
-      userId as string | undefined ?? null,
+      SYSTEM_USER_ID,
       ticker as string | undefined,
     );
     res.json(credits);
@@ -115,10 +119,9 @@ export async function getCreditsHandler(req: Request, res: Response): Promise<vo
   }
 }
 
-export async function getSummaryHandler(req: Request, res: Response): Promise<void> {
+export async function getSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId } = req.query;
-    const summary = await getDividendSummary(userId as string | undefined ?? null);
+    const summary = await getDividendSummary(SYSTEM_USER_ID);
     res.json(summary);
   } catch (error) {
     console.error('Error fetching dividend summary:', error);
@@ -128,18 +131,16 @@ export async function getSummaryHandler(req: Request, res: Response): Promise<vo
 
 // --- Sync ---
 
-export async function syncHandler(req: Request, res: Response): Promise<void> {
+export async function syncHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { ticker } = req.body;
     if (ticker) {
       const count = await syncDividendEventsForTicker(ticker);
-      // After syncing new events, post any payable dividends + backfill missed ones
       const posted = await postDividendsForDate();
       const backfilled = await backfillMissedDividends();
       res.json({ ticker, eventsUpserted: count, posted: posted.posted, backfilled: backfilled.totalPosted });
     } else {
       const result = await syncAllHeldTickers();
-      // After syncing, post any payable dividends + backfill missed ones
       const posted = await postDividendsForDate();
       const backfilled = await backfillMissedDividends();
       res.json({ ...result, posted: posted.posted, backfilled: backfilled.totalPosted });
@@ -150,7 +151,7 @@ export async function syncHandler(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function backfillHandler(req: Request, res: Response): Promise<void> {
+export async function backfillHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const result = await backfillMissedDividends();
     res.json(result);
@@ -162,11 +163,11 @@ export async function backfillHandler(req: Request, res: Response): Promise<void
 
 // --- DRIP (Dividend Reinvestment) ---
 
-export async function getReinvestmentsHandler(req: Request, res: Response): Promise<void> {
+export async function getReinvestmentsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId, ticker } = req.query;
+    const { ticker } = req.query;
     const reinvestments = await getReinvestments(
-      userId as string | undefined ?? null,
+      SYSTEM_USER_ID,
       ticker as string | undefined
     );
     res.json(reinvestments);
@@ -176,7 +177,7 @@ export async function getReinvestmentsHandler(req: Request, res: Response): Prom
   }
 }
 
-export async function getTimelineHandler(req: Request, res: Response): Promise<void> {
+export async function getTimelineHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
     const timeline = await getDividendTimeline(id);
@@ -191,11 +192,11 @@ export async function getTimelineHandler(req: Request, res: Response): Promise<v
   }
 }
 
-export async function reinvestHandler(req: Request, res: Response): Promise<void> {
+export async function reinvestHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const { userId } = req.body;
-    const result = await reinvestDividend(id, userId ?? null);
+    // Always use system user — never accept userId from body
+    const result = await reinvestDividend(id, SYSTEM_USER_ID);
     res.json(result);
   } catch (error: any) {
     if (error?.message === 'Dividend credit not found') {
@@ -215,10 +216,9 @@ export async function reinvestHandler(req: Request, res: Response): Promise<void
   }
 }
 
-export async function getDripSettingsHandler(req: Request, res: Response): Promise<void> {
+export async function getDripSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId } = req.query;
-    const settings = await getDripSettings(userId as string | undefined ?? null);
+    const settings = await getDripSettings(SYSTEM_USER_ID);
     res.json(settings);
   } catch (error) {
     console.error('Error fetching DRIP settings:', error);
@@ -226,14 +226,15 @@ export async function getDripSettingsHandler(req: Request, res: Response): Promi
   }
 }
 
-export async function updateDripSettingsHandler(req: Request, res: Response): Promise<void> {
+export async function updateDripSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId, enabled } = req.body;
+    const { enabled } = req.body;
     if (typeof enabled !== 'boolean') {
       res.status(400).json({ error: 'enabled must be a boolean' });
       return;
     }
-    await updateDripSettings(userId ?? null, enabled);
+    // Always use system user — never accept userId from body
+    await updateDripSettings(SYSTEM_USER_ID, enabled);
     res.json({ enabled });
   } catch (error) {
     console.error('Error updating DRIP settings:', error);

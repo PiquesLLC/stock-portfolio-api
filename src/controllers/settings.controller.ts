@@ -17,9 +17,10 @@ import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapsho
 
 
 
-export async function getSettingsHandler(req: Request, res: Response): Promise<void> {
+export async function getSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
+    // Use authenticated user's ID if available, otherwise fall back to global settings
+    const userId = req.user?.userId;
 
     if (userId) {
       // User-specific settings from UserSettings
@@ -30,7 +31,7 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
         cashInterestRate: Math.round((userSettings?.cashInterestRate ?? 0) * 100) / 100,
       });
     } else {
-      // Legacy: global settings
+      // Legacy: global settings (unauthenticated fallback)
       const settings = await getSettings();
       res.json({
         cashBalance: Math.round(settings.cashBalance * 100) / 100,
@@ -40,31 +41,18 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
     }
   } catch (error) {
     console.error('Error fetching settings:', error);
-    res.status(500).json({
-      error: 'Failed to fetch settings',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
-    });
+    res.status(500).json({ error: 'Failed to fetch settings' });
   }
 }
 
 export async function updateSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
-    const { cashBalance, marginDebt, cashInterestRate } = req.body;
-
-    console.log('[Settings Debug] updateSettings called:');
-    console.log('[Settings Debug]   userId from query:', userId);
-    console.log('[Settings Debug]   req.user?.userId:', req.user?.userId);
-    console.log('[Settings Debug]   cashBalance:', cashBalance);
-    console.log('[Settings Debug]   marginDebt:', marginDebt);
-    console.log('[Settings Debug]   cashInterestRate:', cashInterestRate);
-
-    // SECURITY: Verify ownership - user can only update their own settings
-    if (userId && req.user?.userId !== userId) {
-      console.log('[Settings Debug] ACCESS DENIED - userId mismatch');
-      res.status(403).json({ error: 'Access denied. You can only update your own settings.' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
+    const userId = req.user.userId;
+    const { cashBalance, marginDebt, cashInterestRate } = req.body;
 
     // Validate inputs if provided
     if (cashBalance !== undefined && (typeof cashBalance !== 'number' || cashBalance < 0)) {
@@ -90,46 +78,27 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
     const roundedMargin = marginDebt !== undefined ? Math.round(marginDebt * 100) / 100 : undefined;
     const roundedRate = cashInterestRate !== undefined ? Math.round(cashInterestRate * 100) / 100 : undefined;
 
-    if (userId) {
-      // User-specific settings
-      console.log('[Settings Debug] Using USER-SPECIFIC path for userId:', userId);
-      const updateData: Record<string, number> = {};
-      if (roundedCash !== undefined) updateData.cashBalance = roundedCash;
-      if (roundedMargin !== undefined) updateData.marginDebt = roundedMargin;
-      if (roundedRate !== undefined) updateData.cashInterestRate = roundedRate;
+    const updateData: Record<string, number> = {};
+    if (roundedCash !== undefined) updateData.cashBalance = roundedCash;
+    if (roundedMargin !== undefined) updateData.marginDebt = roundedMargin;
+    if (roundedRate !== undefined) updateData.cashInterestRate = roundedRate;
 
-      console.log('[Settings Debug] Update data:', updateData);
+    const userSettings = await prisma.userSettings.upsert({
+      where: { userId },
+      update: updateData,
+      create: {
+        userId,
+        cashBalance: roundedCash ?? 0,
+        marginDebt: roundedMargin ?? 0,
+        cashInterestRate: roundedRate ?? 0,
+      },
+    });
 
-      const userSettings = await prisma.userSettings.upsert({
-        where: { userId },
-        update: updateData,
-        create: {
-          userId,
-          cashBalance: roundedCash ?? 0,
-          marginDebt: roundedMargin ?? 0,
-          cashInterestRate: roundedRate ?? 0,
-        },
-      });
-
-      console.log('[Settings Debug] Updated userSettings:', {
-        cashBalance: userSettings.cashBalance,
-        marginDebt: userSettings.marginDebt
-      });
-
-      res.json({
-        cashBalance: Math.round(userSettings.cashBalance * 100) / 100,
-        marginDebt: Math.round((userSettings.marginDebt ?? 0) * 100) / 100,
-        cashInterestRate: Math.round((userSettings.cashInterestRate ?? 0) * 100) / 100,
-      });
-    } else {
-      // Legacy: global settings
-      const settings = await updateSettings({ cashBalance: roundedCash, marginDebt: roundedMargin, cashInterestRate: roundedRate });
-      res.json({
-        cashBalance: Math.round(settings.cashBalance * 100) / 100,
-        marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
-        cashInterestRate: Math.round((settings.cashInterestRate ?? 0) * 100) / 100,
-      });
-    }
+    res.json({
+      cashBalance: Math.round(userSettings.cashBalance * 100) / 100,
+      marginDebt: Math.round((userSettings.marginDebt ?? 0) * 100) / 100,
+      cashInterestRate: Math.round((userSettings.cashInterestRate ?? 0) * 100) / 100,
+    });
   } catch (error) {
     console.error('Error updating settings:', error);
     res.status(500).json({ error: 'Failed to update settings' });
@@ -313,12 +282,7 @@ export async function cleanupSnapshotsHandler(req: Request, res: Response): Prom
 
 export async function getCashInterestAccrualHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string | undefined;
-
-    if (userId && req.user?.userId !== userId) {
-      res.status(403).json({ error: 'Access denied. You can only view your own settings.' });
-      return;
-    }
+    const userId = req.user?.userId;
 
     let cashBalance = 0;
     let cashInterestRate = 0;

@@ -61,7 +61,12 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({
+  // Capture raw body for webhook signature verification (Plaid)
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf.toString('utf-8');
+  },
+}));
 
 // Global rate limiting - 100 requests per minute
 app.use(apiLimiter);

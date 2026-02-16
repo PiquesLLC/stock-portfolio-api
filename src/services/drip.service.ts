@@ -87,9 +87,10 @@ export async function reinvestDividend(
   fillDate: Date;
   status: string;
 }> {
-  // Get the dividend credit
-  const credit = await prisma.dividendCredit.findUnique({
-    where: { id: creditId },
+  // Get the dividend credit — scoped to the authenticated user's holdings
+  const targetUserId = resolveUserId(userId);
+  const credit = await prisma.dividendCredit.findFirst({
+    where: { id: creditId, userId: targetUserId },
     include: { reinvestment: true },
   });
 
