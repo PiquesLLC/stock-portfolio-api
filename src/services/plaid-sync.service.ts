@@ -38,11 +38,26 @@ export async function syncHoldingsFromPlaid(plaidItemId: string, userId: string)
 
   const aggregated = new Map<string, { quantity: number; totalCostBasis: number }>();
 
+  // Security types we can't price or display — skip during sync
+  const SKIP_TYPES = new Set(['derivative', 'cryptocurrency']);
+  // Tickers that look like options contracts (e.g., NFLX180201C00355000) or internal IDs
+  const INVALID_TICKER_RE = /\d{6,}|^[A-Z]{1,5}\d{6}/;
+
   for (const plaidHolding of response.data.holdings) {
     const security = securitiesById.get(plaidHolding.security_id);
     const ticker = security?.ticker_symbol?.trim().toUpperCase();
 
     if (!ticker) {
+      skipped += 1;
+      continue;
+    }
+
+    // Skip options, crypto, and internal/non-tradable identifiers
+    if (SKIP_TYPES.has(security?.type ?? '')) {
+      skipped += 1;
+      continue;
+    }
+    if (INVALID_TICKER_RE.test(ticker) || ticker.length > 10) {
       skipped += 1;
       continue;
     }
