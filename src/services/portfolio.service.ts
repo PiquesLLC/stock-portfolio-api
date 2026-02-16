@@ -1,7 +1,9 @@
 ﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
-import { Holding, HoldingInput, HoldingWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
+import { Holding, HoldingInput, HoldingWithQuote, OptionWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
 import { getMarketSession } from '../utils/market-hours';
+import { getOptionQuotes } from './options.service';
+import { daysToExpiry, formatOptionDisplay } from '../utils/occ-parser';
 
 
 
@@ -140,6 +142,10 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
   const marginDebt = settings.marginDebt ?? 0;
   const session = getMarketSession();
 
+  // Split holdings into equities and options
+  const equityHoldings = holdings.filter(h => h.holdingType !== 'option');
+  const optionHoldings = holdings.filter(h => h.holdingType === 'option');
+
   if (holdings.length === 0) {
     // totalAssets = holdings + cash (NO marginDebt - used for performance tracking)
     const totalAssets = settings.cashBalance;
@@ -147,6 +153,7 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
     const netEquity = totalAssets - marginDebt;
     return {
       holdings: [],
+      options: [],
       cashBalance: settings.cashBalance,
       marginDebt,
       holdingsValue: 0,
@@ -173,8 +180,10 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
     };
   }
 
-  const tickers = holdings.map((h) => h.ticker);
-  const { quotes, staleCount, repricingCount, failedTickers, provider } = await fetchPrices(tickers, options);
+  const tickers = equityHoldings.map((h) => h.ticker);
+  const { quotes, staleCount, repricingCount, failedTickers, provider } = tickers.length > 0
+    ? await fetchPrices(tickers, options)
+    : { quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: [] as string[], provider: 'none' };
 
   let holdingsValue = 0;
   let regularHoldingsValue = 0;
@@ -186,7 +195,7 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
   let hasRepricingQuotes = repricingCount > 0;
   let unavailableCount = failedTickers.length;
 
-  const holdingsWithQuotes: HoldingWithQuote[] = holdings.map((holding) => {
+  const holdingsWithQuotes: HoldingWithQuote[] = equityHoldings.map((holding) => {
     const quote = quotes.get(holding.ticker);
     const priceUnavailable = !quote;
     const priceIsStale = quote?.isStale ?? false;
@@ -268,6 +277,70 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
   const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
   const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
 
+  // Price options via Finnhub option chain
+  let optionsWithQuotes: OptionWithQuote[] = [];
+  if (optionHoldings.length > 0) {
+    const optionPositions = optionHoldings
+      .filter(h => h.optionUnderlying && h.optionExpiry && h.optionStrike != null && h.optionType)
+      .map(h => ({
+        ticker: h.ticker,
+        underlying: h.optionUnderlying!,
+        expiry: h.optionExpiry!,
+        strike: h.optionStrike!,
+        type: h.optionType as 'call' | 'put',
+      }));
+
+    const optionQuotes = await getOptionQuotes(optionPositions);
+
+    optionsWithQuotes = optionHoldings.map(holding => {
+      const oq = optionQuotes.get(holding.ticker);
+      const priceUnavailable = !oq;
+      // Options are priced per share but traded in contracts of 100 shares
+      const price = oq ? oq.midPrice : 0;
+      const contractMultiplier = 100;
+      const currentValue = price * holding.shares * contractMultiplier;
+      const holdingTotalCost = holding.shares * holding.averageCost;
+      const profitLoss = priceUnavailable ? 0 : currentValue - holdingTotalCost;
+      const profitLossPercent = !priceUnavailable && holdingTotalCost > 0
+        ? (profitLoss / holdingTotalCost) * 100
+        : 0;
+
+      if (!priceUnavailable) {
+        holdingsValue += currentValue;
+        totalCost += holdingTotalCost;
+      }
+
+      const dte = holding.optionExpiry ? daysToExpiry(holding.optionExpiry) : 0;
+      const display = holding.optionUnderlying && holding.optionStrike != null && holding.optionExpiry && holding.optionType
+        ? formatOptionDisplay({
+            underlying: holding.optionUnderlying,
+            strike: holding.optionStrike,
+            expiry: holding.optionExpiry,
+            type: holding.optionType as 'call' | 'put',
+          })
+        : holding.ticker;
+
+      return {
+        ...holding,
+        currentPrice: price,
+        currentValue,
+        totalCost: holdingTotalCost,
+        profitLoss,
+        profitLossPercent,
+        bid: oq?.bid ?? 0,
+        ask: oq?.ask ?? 0,
+        impliedVolatility: oq?.impliedVolatility ?? 0,
+        openInterest: oq?.openInterest ?? 0,
+        volume: oq?.volume ?? 0,
+        change: oq?.change ?? 0,
+        percentChange: oq?.percentChange ?? 0,
+        daysToExpiry: dte,
+        displayName: display,
+        priceUnavailable,
+      };
+    });
+  }
+
   // Build quotes metadata
   const quotesMeta: QuotesMeta = {
     anyRepricing: hasRepricingQuotes || unavailableCount > 0,
@@ -279,6 +352,7 @@ export async function getPortfolio(options?: { preferPolygon?: boolean }): Promi
 
   return {
     holdings: holdingsWithQuotes,
+    options: optionsWithQuotes,
     cashBalance: settings.cashBalance,
     marginDebt,
     holdingsValue,

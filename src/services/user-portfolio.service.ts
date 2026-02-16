@@ -25,6 +25,7 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
   if (holdings.length === 0) {
     return {
       holdings: [],
+      options: [],
       cashBalance,
       marginDebt,
       holdingsValue: 0,
@@ -134,6 +135,7 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
 
   return {
     holdings: enrichedHoldings,
+    options: [],
     cashBalance,
     marginDebt,
     holdingsValue,

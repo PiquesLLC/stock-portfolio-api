@@ -2,6 +2,7 @@ import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } fro
 import { config } from '../config';
 import { encrypt, decrypt } from '../utils/encryption';
 import prisma from '../utils/prisma';
+import type { SyncResult } from './plaid-sync.service';
 
 const plaidConfig = new Configuration({
   basePath: PlaidEnvironments[config.plaidEnv],
@@ -38,7 +39,7 @@ export async function exchangePublicToken(
 ): Promise<{
   itemId: string;
   accounts: Array<{ id: string; name: string | null; mask: string | null; type: string | null }>;
-  sync: { created: number; updated: number; skipped: number; tickers: string[] } | null;
+  sync: SyncResult | null;
 }> {
   const response = await plaidClient.itemPublicTokenExchange({
     public_token: publicToken,
@@ -103,7 +104,7 @@ export async function exchangePublicToken(
     return item;
   });
 
-  let sync: { created: number; updated: number; skipped: number; tickers: string[] } | null = null;
+  let sync: SyncResult | null = null;
   try {
     const { syncHoldingsFromPlaid } = await import('./plaid-sync.service');
     sync = await syncHoldingsFromPlaid(plaidItem.id, userId);

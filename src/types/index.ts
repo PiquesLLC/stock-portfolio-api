@@ -4,6 +4,11 @@ export interface Holding {
   shares: number;
   averageCost: number;
   source?: string | null;
+  holdingType?: string;
+  optionUnderlying?: string | null;
+  optionStrike?: number | null;
+  optionExpiry?: string | null;
+  optionType?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -151,6 +156,24 @@ export interface HoldingWithQuote extends Holding {
   session?: MarketSession;
 }
 
+export interface OptionWithQuote extends Holding {
+  currentPrice: number;       // mid-price or last price
+  currentValue: number;       // contracts * 100 * currentPrice
+  totalCost: number;          // contracts * averageCost
+  profitLoss: number;
+  profitLossPercent: number;
+  bid: number;
+  ask: number;
+  impliedVolatility: number;
+  openInterest: number;
+  volume: number;
+  change: number;
+  percentChange: number;
+  daysToExpiry: number;
+  displayName: string;        // e.g., "AAPL $230 Call 3/20/26"
+  priceUnavailable?: boolean;
+}
+
 export interface QuotesMeta {
   anyRepricing: boolean;
   quoteTimestamp: number;
@@ -161,6 +184,7 @@ export interface QuotesMeta {
 
 export interface Portfolio {
   holdings: HoldingWithQuote[];
+  options: OptionWithQuote[];
   cashBalance: number;
   marginDebt: number;
   holdingsValue: number;    // sum of all holdings market values
