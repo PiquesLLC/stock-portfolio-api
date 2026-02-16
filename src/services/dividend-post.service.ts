@@ -93,7 +93,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
         });
 
         posted++;
-        console.log(`[Dividend Post] Credited $${amountGross} to ${holding.userId ?? 'default'} for ${event.ticker} (${sharesEligible} shares Ã— $${event.amountPerShare})`);
+        console.log(`[Dividend Post] Credited dividend for ${event.ticker}`);
 
         const dividendType = (event.dividendType ?? 'regular').toLowerCase();
         const isDripEvent = dividendType === 'drip';
@@ -130,7 +130,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
           // Unique constraint violation â€” already posted, skip silently
           skipped++;
         } else {
-          console.error(`[Dividend Post] Error posting for ${event.ticker} user=${holding.userId}:`, err instanceof Error ? err.message : err);
+          console.error(`[Dividend Post] Error posting for ${event.ticker}:`, err instanceof Error ? err.message : err);
         }
       }
     }

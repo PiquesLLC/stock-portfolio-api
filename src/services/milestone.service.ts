@@ -163,7 +163,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
           });
 
           recentNotifications.set(notificationKey, now);
-          console.log(`[Milestone] ${message} (user: ${userId.slice(0, 8)}...)`);
+          console.log(`[Milestone] ${message}`);
         }
       }
 

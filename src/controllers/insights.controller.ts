@@ -107,7 +107,6 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
     console.error('Error getting income insights:', error);
     res.status(500).json({
       error: 'Failed to get income insights',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
       healthScore: { overall: 0, breakdown: { stability: 0, growth: 0, coverage: 0, diversification: 0 }, grade: 'Poor' },
       keyDrivers: [],
       liveIntelligence: { window: 'today', statement: 'Data unavailable', amountInWindow: 0 },
@@ -132,7 +131,6 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
     console.error('Error getting portfolio briefing:', error);
     res.status(500).json({
       error: 'Failed to generate briefing',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
       generatedAt: new Date().toISOString(),
       verdict: '',
       headline: 'Briefing temporarily unavailable.',
@@ -152,7 +150,6 @@ export async function getBehaviorHandler(req: Request, res: Response): Promise<v
     console.error('Error getting behavior insights:', error);
     res.status(500).json({
       error: 'Failed to generate behavior insights',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
       generatedAt: new Date().toISOString(),
       summary: 'Behavior insights temporarily unavailable.',
       insights: [],
@@ -178,7 +175,6 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
       topStories: [],
       watchToday: [],
       cached: false,
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
     });
   }
 }
@@ -192,7 +188,6 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
     res.status(500).json({
       results: [],
       partial: true,
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
     });
   }
 }

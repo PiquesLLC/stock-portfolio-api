@@ -135,11 +135,29 @@ export async function updateHoldingsVisibilityHandler(req: AuthRequest, res: Res
 export async function getUserChartHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const viewerId = req.user?.userId;
     const period = ((req.query.period as string) || '1D').toUpperCase();
 
     if (!VALID_CHART_PERIODS.includes(period)) {
       res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
       return;
+    }
+
+    // Privacy check: if viewer is not the owner, verify profile is public
+    const isOwner = viewerId === userId;
+    if (!isOwner) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePublic: true },
+      });
+      if (!targetUser) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      if (!targetUser.profilePublic) {
+        res.status(403).json({ error: 'This profile is private' });
+        return;
+      }
     }
 
     const portfolio = await getUserPortfolio(userId);

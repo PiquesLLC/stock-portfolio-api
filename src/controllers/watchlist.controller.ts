@@ -273,7 +273,6 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
     console.error('Watchlist chart error:', error);
     res.status(500).json({
       error: 'Failed to fetch watchlist chart',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
     });
   }
 }

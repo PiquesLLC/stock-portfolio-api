@@ -347,15 +347,15 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
   }
 }
 
-// GET /feed?userId=X&before=ISO
-export async function getFeedHandler(req: Request, res: Response): Promise<void> {
+// GET /feed?before=ISO
+export async function getFeedHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.query.userId as string;
-    const before = req.query.before as string | undefined;
-    if (!userId) {
-      res.status(400).json({ error: 'userId query param is required' });
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
+    const userId = req.user.userId;
+    const before = req.query.before as string | undefined;
     const events = await getFeed(userId, 50, before);
     res.json({ events });
   } catch (error) {

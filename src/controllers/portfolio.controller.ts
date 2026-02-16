@@ -39,6 +39,22 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
     let portfolio;
     if (userId) {
       // User-specific portfolio (public profile/leaderboard views only)
+      // Privacy check: if viewer is not the owner, verify profile is public
+      const viewerId = req.user?.userId;
+      if (viewerId !== userId) {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { profilePublic: true },
+        });
+        if (!targetUser) {
+          res.status(404).json({ error: 'User not found' });
+          return;
+        }
+        if (!targetUser.profilePublic) {
+          res.status(403).json({ error: 'This profile is private' });
+          return;
+        }
+      }
       portfolio = await getUserPortfolio(userId);
       if (!portfolio) {
         res.status(404).json({ error: 'User not found' });
@@ -70,10 +86,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
     });
   } catch (error) {
     console.error('Error fetching portfolio:', error);
-    res.status(500).json({
-      error: 'Failed to fetch portfolio',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
-    });
+    res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
 }
 
@@ -122,9 +135,8 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
           type: transactionType,
           amount: Math.abs(costBasisDiff),
           date: new Date().toISOString(),
-          userId: req.body.userId ?? undefined,
+          userId: req.user?.userId,
         });
-        console.log(`[Holding] Auto-created ${transactionType} of $${Math.abs(costBasisDiff).toFixed(2)} for ${ticker.toUpperCase()} change`);
       }
     }
 
@@ -185,7 +197,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
         amount: costBasis,
         date: new Date().toISOString(),
       });
-      console.log(`[Holding] Auto-created withdrawal of $${costBasis.toFixed(2)} for removing ${ticker}`);
+      console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
     }
 
     // Fire activity event using authenticated user ID
@@ -445,10 +457,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     res.json({ points, periodStartValue, period });
   } catch (error) {
     console.error('Error fetching chart data:', error);
-    res.status(500).json({
-      error: 'Failed to fetch chart data',
-      ...(process.env.NODE_ENV !== 'production' ? { details: (error as Error)?.message } : {}),
-    });
+    res.status(500).json({ error: 'Failed to fetch chart data' });
   }
 }
 
@@ -476,7 +485,7 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
 const VALID_PERF_WINDOWS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
 const VALID_BENCHMARKS = ['SPY', 'QQQ', 'DIA'];
 
-export async function getPerformanceHandler(req: Request, res: Response): Promise<void> {
+export async function getPerformanceHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const window = ((req.query.window as string) || '1M').toUpperCase() as PerformanceWindow;
     const benchmark = ((req.query.benchmark as string) || 'SPY').toUpperCase();
@@ -490,6 +499,25 @@ export async function getPerformanceHandler(req: Request, res: Response): Promis
     if (!VALID_BENCHMARKS.includes(benchmark)) {
       res.status(400).json({ error: `Invalid benchmark. Must be one of: ${VALID_BENCHMARKS.join(', ')}` });
       return;
+    }
+
+    // Privacy check: if userId provided and viewer is not the owner, verify profile is public
+    if (userId) {
+      const viewerId = req.user?.userId;
+      if (viewerId !== userId) {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { profilePublic: true },
+        });
+        if (!targetUser) {
+          res.status(404).json({ error: 'User not found' });
+          return;
+        }
+        if (!targetUser.profilePublic) {
+          res.status(403).json({ error: 'This profile is private' });
+          return;
+        }
+      }
     }
 
     const result = await getPerformanceComparison(window, benchmark, userId || null);

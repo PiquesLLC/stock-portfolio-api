@@ -13,7 +13,7 @@ router.use('/mfa', mfaRoutes);
 router.post('/login', loginLimiter, loginHandler);
 
 // POST /auth/logout - Clear auth cookies and revoke refresh tokens
-router.post('/logout', logoutHandler);
+router.post('/logout', mutationLimiter, logoutHandler);
 
 // POST /auth/refresh - Exchange refresh token for new access + refresh tokens
 router.post('/refresh', apiLimiter, refreshHandler);
