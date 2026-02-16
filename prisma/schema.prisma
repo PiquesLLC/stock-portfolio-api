@@ -88,6 +88,7 @@ model User {
   priceAlerts            PriceAlert[]
   milestoneEvents        MilestoneEvent[]
   anomalyEvents          AnomalyEvent[]
+  plaidItems             PlaidItem[]
 }
 
 model Watchlist {
@@ -586,4 +587,41 @@ model AnomalyEvent {
   @@index([userId])
   @@index([ticker, createdAt])
   @@index([read, createdAt])
+}
+
+// Plaid Link items — access tokens encrypted at rest via AES-256-GCM
+model PlaidItem {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plaidItemId       String   @unique  // Plaid's item_id
+  accessTokenEnc    String             // AES-256-GCM encrypted access_token (iv:ciphertext:tag)
+  institutionId     String?
+  institutionName   String?
+  consentExpiresAt  DateTime?
+  status            String   @default("active") // active | suspended | revoked | error
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  plaidAccounts     PlaidAccount[]
+
+  @@index([userId])
+}
+
+// Plaid accounts linked to a PlaidItem
+model PlaidAccount {
+  id              String    @id @default(uuid())
+  plaidItemId     String
+  plaidItem       PlaidItem @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  plaidAccountId  String    @unique  // Plaid's account_id
+  name            String?
+  officialName    String?
+  type            String?   // depository, investment, credit, loan
+  subtype         String?   // checking, savings, 401k, etc.
+  mask            String?   // Last 4 digits
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([plaidItemId])
 }

@@ -53,6 +53,11 @@ export const config = {
   mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM
   resendApiKey: process.env.RESEND_API_KEY || '',
 
+  // Plaid
+  plaidClientId: process.env.PLAID_CLIENT_ID || '',
+  plaidSecret: process.env.PLAID_SECRET || '',
+  plaidEnv: (process.env.PLAID_ENV || 'sandbox') as 'sandbox' | 'development' | 'production',
+
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),
 

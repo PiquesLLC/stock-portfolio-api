@@ -62,7 +62,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     if (refreshToken) {
       rotateRefreshToken(refreshToken)
         .then((result) => {
-          if (result) {
+          if (result && result.accessToken) {
             const options = getCookieOptions(req);
             res.cookie('authToken', result.accessToken, {
               ...options,
@@ -75,7 +75,16 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
             req.user = result.payload;
             next();
           } else {
-            clearAuthCookies(res, req);
+            // Race-loser path returns empty accessToken — update refresh cookie but reject
+            if (result && result.refreshToken) {
+              const options = getCookieOptions(req);
+              res.cookie('refreshToken', result.refreshToken, {
+                ...options,
+                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+              });
+            } else {
+              clearAuthCookies(res, req);
+            }
             res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           }
         })
@@ -104,8 +113,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     if (refreshToken) {
       rotateRefreshToken(refreshToken)
         .then((result) => {
-          if (result) {
-            // Set new cookies
+          if (result && result.accessToken) {
             const options = getCookieOptions(req);
             res.cookie('authToken', result.accessToken, {
               ...options,
@@ -118,7 +126,15 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
             req.user = result.payload;
             next();
           } else {
-            clearAuthCookies(res, req);
+            if (result && result.refreshToken) {
+              const options = getCookieOptions(req);
+              res.cookie('refreshToken', result.refreshToken, {
+                ...options,
+                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+              });
+            } else {
+              clearAuthCookies(res, req);
+            }
             res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           }
         })
@@ -161,7 +177,7 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
       if (refreshToken) {
         rotateRefreshToken(refreshToken)
           .then((result) => {
-            if (result) {
+            if (result && result.accessToken) {
               const options = getCookieOptions(req);
               res.cookie('authToken', result.accessToken, {
                 ...options,
@@ -172,6 +188,13 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
                 maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
               });
               req.user = result.payload;
+            } else if (result && result.refreshToken) {
+              // Race-loser: update refresh cookie but don't authenticate
+              const options = getCookieOptions(req);
+              res.cookie('refreshToken', result.refreshToken, {
+                ...options,
+                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+              });
             }
             next();
           })

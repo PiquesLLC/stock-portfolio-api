@@ -37,6 +37,7 @@
         "multer": "^2.0.2",
         "node-cache": "^5.1.2",
         "otpauth": "^9.5.0",
+        "plaid": "^41.1.0",
         "prisma": "^5.22.0",
         "qrcode": "^1.5.4",
         "resend": "^6.9.2",
