@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createLinkTokenHandler, exchangeTokenHandler, getItemsHandler, disconnectItemHandler, getHoldingsHandler, webhookHandler } from '../controllers/plaid.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { mutationLimiter } from '../middleware/rateLimiter';
+import { mutationLimiter, webhookLimiter } from '../middleware/rateLimiter';
 import { requireMfaAssurance } from '../middleware/mfa-assurance.middleware';
 
 const router = Router();
@@ -23,6 +23,6 @@ router.get('/items/:itemId/holdings', requireAuth, getHoldingsHandler);
 router.delete('/items/:itemId', mutationLimiter, requireAuth, requireMfaAssurance, disconnectItemHandler);
 
 // POST /plaid/webhook - Plaid webhook (no auth — Plaid calls this directly, verified via JWT)
-router.post('/webhook', webhookHandler);
+router.post('/webhook', webhookLimiter, webhookHandler);
 
 export default router;

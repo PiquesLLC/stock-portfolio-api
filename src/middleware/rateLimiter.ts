@@ -97,6 +97,19 @@ export const mfaSendLimiter = rateLimit({
 });
 
 /**
+ * Webhook rate limiter - protect inbound webhook endpoint from abuse
+ * Generous threshold (60/min) since Plaid controls delivery cadence
+ * and the handler already verifies JWT + body SHA-256 before any mutation
+ */
+export const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  message: { error: 'Too many requests.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * Higher limits in dev to support pre-fetching and background tasks
  */
