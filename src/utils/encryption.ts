@@ -21,7 +21,14 @@ export function encrypt(plaintext: string): string {
 }
 
 export function decrypt(data: string): string {
-  const [ivHex, encHex, tagHex] = data.split(':');
+  const parts = data.split(':');
+  if (parts.length !== 3) {
+    throw new Error('Malformed ciphertext: expected iv:ciphertext:tag format');
+  }
+  const [ivHex, encHex, tagHex] = parts;
+  if (ivHex.length !== IV_LENGTH * 2 || tagHex.length !== 32) {
+    throw new Error('Malformed ciphertext: invalid IV or auth tag length');
+  }
   const iv = Buffer.from(ivHex, 'hex');
   const encrypted = Buffer.from(encHex, 'hex');
   const tag = Buffer.from(tagHex, 'hex');

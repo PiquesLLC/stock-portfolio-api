@@ -87,18 +87,17 @@ export async function rotateRefreshToken(
     }
 
     // Grace period: revoked less than 30s ago — concurrent request that raced
-    // with the first refresh. Return latest valid token (never mint a new one).
-    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
-    const accessToken = generateAccessToken(payload);
+    // with the first refresh. Return latest valid refresh token only — NO new
+    // access token. Client must use the new refresh token to get an access token.
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
     if (!latestValid) {
-      // Winner's token not yet visible — fail safely, client will retry
       return null;
     }
-    return { accessToken, refreshToken: latestValid.token, payload };
+    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    return { accessToken: '', refreshToken: latestValid.token, payload };
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds
@@ -108,20 +107,18 @@ export async function rotateRefreshToken(
   });
 
   if (revoked.count === 0) {
-    // Another request already revoked it — try to return latest valid token (no minting)
-    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
-    const accessToken = generateAccessToken(payload);
-    // Wait briefly for the winner to create its replacement token
+    // Another request already revoked it — return latest valid refresh token only,
+    // NO access token. Client must use the new refresh token to get an access token.
     await new Promise(r => setTimeout(r, 50));
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
     if (!latestValid) {
-      // Winner hasn't created one yet or all tokens are revoked — fail safely
       return null;
     }
-    return { accessToken, refreshToken: latestValid.token, payload };
+    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    return { accessToken: '', refreshToken: latestValid.token, payload };
   }
 
   const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
@@ -230,28 +227,15 @@ export async function loginWithPassword(
  * Rejects if user already has a password — use changePassword() instead.
  */
 export async function setPassword(username: string, password: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true, passwordHash: true },
-  });
-
-  if (!user) {
-    return false;
-  }
-
-  // Only allow setting a password if one isn't already set
-  if (user.passwordHash) {
-    return false;
-  }
-
   const passwordHash = await hashPassword(password);
 
-  await prisma.user.update({
-    where: { id: user.id },
+  // Atomic: only update if passwordHash is currently null
+  const result = await prisma.user.updateMany({
+    where: { username, passwordHash: null },
     data: { passwordHash },
   });
 
-  return true;
+  return result.count === 1;
 }
 
 /**

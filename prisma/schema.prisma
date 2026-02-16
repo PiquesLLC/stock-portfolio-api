@@ -84,6 +84,10 @@ model User {
   mfaChallenges          MfaChallenge[]
   mfaBackupCodes         MfaBackupCode[]
   emailOtpCodes          EmailOtpCode[]
+  leaderboardCaches      LeaderboardCache[]
+  priceAlerts            PriceAlert[]
+  milestoneEvents        MilestoneEvent[]
+  anomalyEvents          AnomalyEvent[]
 }
 
 model Watchlist {
@@ -418,6 +422,7 @@ model AlertEvent {
 model LeaderboardCache {
   id         String   @id @default(uuid())
   userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   window     String   // '1D' | '1W' | '1M' | 'YTD' | '1Y'
   twrPct     Float?
   flagged    Boolean  @default(false)
@@ -432,6 +437,7 @@ model LeaderboardCache {
 model PriceAlert {
   id                 String            @id @default(uuid())
   userId             String?
+  user               User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker             String
   condition          String            // 'above' | 'below' | 'pct_up' | 'pct_down'
   targetPrice        Float?            // For above/below
@@ -545,6 +551,7 @@ model AVDailyUsage {
 model MilestoneEvent {
   id            String   @id @default(uuid())
   userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker        String
   eventType     String   // '52w_high' | '52w_low' | 'ath' | 'atl'
   message       String
@@ -563,6 +570,7 @@ model MilestoneEvent {
 model AnomalyEvent {
   id          String   @id @default(uuid())
   userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker      String
   type        String   // volume_spike, price_spike, drawdown, sector_divergence, concentration
   severity    String   // info, warning, critical
