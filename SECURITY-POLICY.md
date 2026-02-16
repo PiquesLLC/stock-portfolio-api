@@ -1,6 +1,6 @@
 # Piques LLC — Information Security Policy
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Effective Date:** February 16, 2026
 **Last Reviewed:** February 16, 2026
 **Owner:** Jon Paul Piques, Founder & CEO
@@ -41,7 +41,7 @@ This policy covers:
 
 ### 3.1 User Authentication
 - **Passwords**: Minimum 8 characters, must include uppercase, lowercase, and numeric characters. Hashed using bcrypt with a cost factor of 10. Plaintext passwords are never stored or logged.
-- **Multi-Factor Authentication (MFA)**: Supported via TOTP (authenticator apps) and email-based OTP. Users may enable MFA for enhanced account security. MFA is enforced before accessing sensitive financial integrations (e.g., Plaid Link).
+- **Multi-Factor Authentication (MFA)**: Supported via TOTP (authenticator apps) and email-based OTP. Users may enable MFA for enhanced account security. MFA enforcement before sensitive financial integrations (e.g., Plaid Link) is planned for a future release; currently MFA is opt-in.
 - **Backup Codes**: 10 single-use recovery codes generated per MFA enrollment, stored as bcrypt hashes.
 - **Session Management**: JSON Web Tokens (JWT) with short-lived access tokens and rotating refresh tokens. Tokens stored in httpOnly, secure, sameSite cookies. Refresh tokens are single-use with atomic rotation to prevent replay attacks.
 
@@ -52,8 +52,8 @@ This policy covers:
 - **Secrets Management**: All secrets (API keys, encryption keys, JWT signing keys) are stored as environment variables in Railway's encrypted secrets store. Secrets are never committed to source code or logged.
 
 ### 3.3 Principle of Least Privilege
-- API endpoints enforce user-scoped access control. Users can only access their own data.
-- Ownership verification middleware prevents unauthorized cross-user data access (IDOR protection).
+- API endpoints enforce user-scoped access control. Authenticated user identity is derived from JWT tokens, not client-supplied parameters. Controllers use `req.user.userId` to scope all queries.
+- Ownership verification is enforced at the service layer: all read, update, and delete operations on user-specific resources (alerts, price alerts, transactions, Plaid items) verify that the resource belongs to the authenticated user before proceeding.
 - Sensitive operations (account deletion, MFA changes) require password re-verification.
 
 ---
@@ -71,7 +71,7 @@ This policy covers:
 - **MFA TOTP Secrets**: Encrypted using the same AES-256-GCM scheme.
 - **Passwords**: One-way hashed using bcrypt (not reversible).
 - **MFA Backup Codes & Email OTPs**: One-way hashed using bcrypt.
-- **Encryption Key Management**: The AES-256 encryption key is a 256-bit key stored as a 64-character hex string in environment variables. The key is validated at application startup — the application will not start if the key is missing or malformed in production.
+- **Encryption Key Management**: The AES-256 encryption key is a 256-bit key stored as a 64-character hex string in environment variables. The key format is validated at application startup (must be exactly 64 hex characters) — the application will not start if the key is missing in production or malformed in any environment.
 
 ### 4.3 Data Minimization
 - The Application only collects data necessary for its portfolio tracking functionality.
@@ -89,8 +89,9 @@ This policy covers:
 - **Consent Tracking**: Plaid consent expiration dates are tracked per linked item. Items approaching expiration are flagged for re-authorization.
 
 ### 5.2 Webhook Security
-- Plaid webhooks are received at a dedicated endpoint.
-- In production, webhook payloads are validated using Plaid's verification header (JWT signature verification).
+- Plaid webhooks are received at a dedicated endpoint (`/plaid/webhook`).
+- In sandbox/development mode, webhooks are accepted without signature verification for testing purposes.
+- In production, the webhook endpoint validates the `Plaid-Verification` header and rejects requests missing it. Full JWT signature verification using Plaid's public key rotation endpoint is in development and will be completed before production Plaid access is enabled.
 - Webhook processing is limited to item status updates (errors, consent expiration). No financial data is modified through webhooks.
 
 ### 5.3 Plaid Data Handling
@@ -104,7 +105,7 @@ This policy covers:
 ## 6. Application Security
 
 ### 6.1 Input Validation
-- All user-facing API endpoints validate input using Zod schema validation.
+- Security-critical API endpoints (authentication, MFA, Plaid token exchange, account deletion) validate input using Zod schema validation. Remaining endpoints use inline validation checks; migration to Zod is ongoing.
 - Database queries use Prisma ORM with parameterized queries, preventing SQL injection.
 - Content Security Policy (CSP) headers restrict script and resource loading to prevent XSS.
 
@@ -113,7 +114,7 @@ This policy covers:
 - **Signup**: 5 attempts per hour per IP.
 - **MFA Verification**: 5 attempts per 15 minutes per IP.
 - **MFA Code Sending**: 3 sends per 15 minutes per IP (prevents email spam).
-- **Mutations**: 30 requests per minute per IP for all POST/PUT/DELETE operations.
+- **Mutations**: 30 requests per minute per IP applied to POST/PUT/DELETE operations across all authenticated routes including alerts, price alerts, transactions, and Plaid endpoints.
 - **Username Enumeration**: 20 attempts per 15 minutes per IP.
 
 ### 6.3 Security Headers
@@ -126,7 +127,7 @@ This policy covers:
 
 ### 6.4 Error Handling
 - Production error responses return generic messages without stack traces or internal details.
-- Console logging in production never includes sensitive data (passwords, tokens, keys).
+- Error logging outputs error messages only; sensitive data (passwords, tokens, keys, user PII) is never included in log output. Debug-level logging is disabled in production.
 - Unhandled errors are caught by a global error handler that returns a safe 500 response.
 
 ---
@@ -135,7 +136,7 @@ This policy covers:
 
 ### 7.1 Dependency Scanning
 - **Dependabot**: Configured for weekly automated scans of npm dependencies (every Monday). Pull requests are created automatically for vulnerable or outdated packages, with a limit of 10 open PRs.
-- **npm audit**: Run periodically to identify known vulnerabilities in the dependency tree.
+- **npm audit**: Run before each deployment to identify known vulnerabilities in the dependency tree. As of the latest audit, the project has 0 known vulnerabilities.
 - **Patch Policy**: Critical and high-severity vulnerabilities are patched within 7 days. Medium-severity within 30 days.
 
 ### 7.2 Code Review
