@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { createLinkToken, exchangePublicToken, getPlaidItems, disconnectPlaidItem, handleItemWebhook, getInvestmentHoldings } from '../services/plaid.service';
-import { exchangeTokenSchema, disconnectItemSchema } from '../validators/plaid.validators';
+import { exchangeTokenSchema, disconnectItemSchema, webhookPayloadSchema } from '../validators/plaid.validators';
 import { config } from '../config';
 import { verifyPlaidWebhook } from '../utils/plaid-webhook-verify';
 
@@ -13,8 +13,8 @@ export async function createLinkTokenHandler(req: AuthRequest, res: Response) {
   try {
     const linkToken = await createLinkToken(req.user!.userId);
     res.json({ linkToken });
-  } catch (err: any) {
-    console.error('[Plaid] Link token error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Link token creation failed');
     res.status(500).json({ error: 'Failed to create link token' });
   }
 }
@@ -27,13 +27,13 @@ export async function exchangeTokenHandler(req: AuthRequest, res: Response) {
   try {
     const parsed = exchangeTokenSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.issues[0].message });
+      return res.status(400).json({ error: 'Invalid request' });
     }
 
     const result = await exchangePublicToken(req.user!.userId, parsed.data.publicToken);
     res.json(result);
-  } catch (err: any) {
-    console.error('[Plaid] Exchange token error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Token exchange failed');
     res.status(500).json({ error: 'Failed to link account' });
   }
 }
@@ -46,8 +46,8 @@ export async function getItemsHandler(req: AuthRequest, res: Response) {
   try {
     const items = await getPlaidItems(req.user!.userId);
     res.json({ items });
-  } catch (err: any) {
-    console.error('[Plaid] Get items error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Failed to retrieve items');
     res.status(500).json({ error: 'Failed to retrieve linked accounts' });
   }
 }
@@ -60,7 +60,7 @@ export async function disconnectItemHandler(req: AuthRequest, res: Response) {
   try {
     const parsed = disconnectItemSchema.safeParse({ itemId: req.params.itemId });
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.issues[0].message });
+      return res.status(400).json({ error: 'Invalid item ID' });
     }
 
     const success = await disconnectPlaidItem(parsed.data.itemId, req.user!.userId);
@@ -68,8 +68,8 @@ export async function disconnectItemHandler(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: 'Linked account not found' });
     }
     res.json({ success: true });
-  } catch (err: any) {
-    console.error('[Plaid] Disconnect error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Disconnect failed');
     res.status(500).json({ error: 'Failed to disconnect account' });
   }
 }
@@ -82,13 +82,13 @@ export async function getHoldingsHandler(req: AuthRequest, res: Response) {
   try {
     const parsed = disconnectItemSchema.safeParse({ itemId: req.params.itemId });
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.issues[0].message });
+      return res.status(400).json({ error: 'Invalid item ID' });
     }
 
     const holdings = await getInvestmentHoldings(parsed.data.itemId, req.user!.userId);
     res.json({ holdings });
-  } catch (err: any) {
-    console.error('[Plaid] Holdings error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Holdings fetch failed');
     res.status(500).json({ error: 'Failed to fetch holdings' });
   }
 }
@@ -110,25 +110,31 @@ export async function webhookHandler(req: Request, res: Response) {
         return res.status(401).json({ error: 'Missing webhook verification' });
       }
 
-      // Verify JWT signature and body hash using captured raw bytes
-      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+      // Use captured raw bytes — NEVER fall back to JSON.stringify (different bytes = hash mismatch)
+      const rawBody = (req as any).rawBody;
+      if (!rawBody) {
+        console.error('[Plaid] Webhook raw body not captured');
+        return res.status(500).json({ error: 'Webhook processing failed' });
+      }
+
       const isValid = await verifyPlaidWebhook(plaidVerification, rawBody);
       if (!isValid) {
-        console.error('[Plaid] Webhook verification failed');
+        console.error('[Plaid] Webhook signature verification failed');
         return res.status(401).json({ error: 'Webhook verification failed' });
       }
     }
 
-    const { webhook_type, webhook_code, item_id, error } = req.body;
-
-    if (!webhook_type || !webhook_code || !item_id) {
+    // Validate webhook payload schema
+    const parsed = webhookPayloadSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid webhook payload' });
     }
 
+    const { webhook_type, webhook_code, item_id, error } = parsed.data;
     await handleItemWebhook(webhook_type, webhook_code, item_id, error);
     res.json({ received: true });
-  } catch (err: any) {
-    console.error('[Plaid] Webhook error:', err.message);
+  } catch (err) {
+    console.error('[Plaid] Webhook processing error');
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 }

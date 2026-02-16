@@ -73,8 +73,7 @@ export async function createPriceAlertHandler(req: AuthRequest, res: Response): 
     res.status(201).json(alert);
   } catch (error) {
     console.error('Error creating price alert:', error);
-    const message = error instanceof Error ? error.message : 'Failed to create price alert';
-    res.status(400).json({ error: message });
+    res.status(400).json({ error: 'Failed to create price alert' });
   }
 }
 

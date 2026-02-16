@@ -250,7 +250,7 @@ export async function emailOtpSetupHandler(req: AuthRequest, res: Response): Pro
     res.json({ codeSent: true });
   } catch (error: any) {
     if (error.message?.includes('Email must be verified')) {
-      res.status(400).json({ error: error.message });
+      res.status(400).json({ error: 'Email must be verified before enabling email OTP' });
       return;
     }
     console.error('Email OTP setup error:', error);

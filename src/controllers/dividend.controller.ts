@@ -208,7 +208,7 @@ export async function reinvestHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
     if (error?.message?.includes('No holding found')) {
-      res.status(400).json({ error: error.message });
+      res.status(400).json({ error: 'No holding found for this ticker' });
       return;
     }
     console.error('Error reinvesting dividend:', error);

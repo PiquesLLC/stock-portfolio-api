@@ -50,7 +50,7 @@ export async function verifyPlaidWebhook(
     // 2. Get the public key (from cache or fetch from Plaid)
     const publicKey = await getPublicKey(kid);
     if (!publicKey) {
-      console.error('[Plaid Webhook] Failed to fetch public key for kid:', kid);
+      console.error('[Plaid Webhook] Failed to fetch public key');
       return false;
     }
 
@@ -69,13 +69,13 @@ export async function verifyPlaidWebhook(
     // 5. Verify token is not too old (5 minutes)
     const now = Math.floor(Date.now() / 1000);
     if (now - payload.iat > 5 * 60) {
-      console.error('[Plaid Webhook] Token too old (iat:', payload.iat, ', now:', now, ')');
+      console.error('[Plaid Webhook] Token expired (outside 5-minute window)');
       return false;
     }
 
     return true;
   } catch (err: any) {
-    console.error('[Plaid Webhook] Verification failed:', err.message);
+    console.error('[Plaid Webhook] Verification failed');
     return false;
   }
 }
@@ -104,7 +104,7 @@ async function getPublicKey(kid: string): Promise<crypto.KeyObject | null> {
     keyCache.set(kid, { key: keyObject, fetchedAt: Date.now() });
     return keyObject;
   } catch (err: any) {
-    console.error('[Plaid Webhook] Key fetch error:', err.message);
+    console.error('[Plaid Webhook] Key fetch failed');
     // Evict stale cache entry
     keyCache.delete(kid);
     return null;

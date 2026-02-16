@@ -34,8 +34,8 @@ export async function followHandler(req: AuthRequest, res: Response): Promise<vo
     await followUser(followerId, userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to follow';
-    res.status(400).json({ error: message });
+    console.error('Error following user:', error);
+    res.status(400).json({ error: 'Failed to follow user' });
   }
 }
 
