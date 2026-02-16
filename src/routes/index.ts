@@ -20,6 +20,7 @@ import fundamentalsRoutes from './fundamentals.routes';
 import nalaRoutes from './nala.routes';
 import watchlistRoutes from './watchlist.routes';
 import notificationsRoutes from './notifications.routes';
+import plaidRoutes from './plaid.routes';
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use('/fundamentals', fundamentalsRoutes);
 router.use('/nala', nalaRoutes);
 router.use('/watchlists', watchlistRoutes);
 router.use('/notifications', notificationsRoutes);
+router.use('/plaid', plaidRoutes);
 
 export default router;

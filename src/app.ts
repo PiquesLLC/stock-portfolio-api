@@ -31,6 +31,11 @@ app.use(helmet({
       frameSrc: ["'none'"],
     },
   },
+  // HSTS: enforce HTTPS for 1 year, include subdomains
+  strictTransportSecurity: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
 }));
 
 // CORS configuration - locked down to specific origins
