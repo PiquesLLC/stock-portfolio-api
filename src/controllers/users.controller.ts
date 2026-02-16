@@ -71,7 +71,7 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
       portfolio.totalPL,
       portfolio.totalPLPercent,
       portfolio.netEquity,
-    ).catch(e => console.error('User snapshot error:', e));
+    ).catch(() => console.error('User snapshot error'));
 
     // Apply holdings visibility filter for non-owner viewers
     if (!isOwner) {

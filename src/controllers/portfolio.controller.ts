@@ -76,7 +76,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         portfolio.totalPL,
         portfolio.totalPLPercent,
         portfolio.netEquity,
-      ).catch(e => console.error('User snapshot error:', e));
+      ).catch(() => console.error('User snapshot error'));
     } else {
       // Default portfolio â€” the main portfolio data (all users see this)
       await createSnapshotIfNeeded();
