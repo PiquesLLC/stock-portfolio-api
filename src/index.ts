@@ -116,9 +116,12 @@ const server = app.listen(config.port, async () => {
       console.log('[Init] Billing routes disabled');
     }
   } catch (error) {
-    console.error('[Init] Billing deploy safety check failed');
-    server.close(() => process.exit(1));
-    return;
+    if (config.nodeEnv === 'production') {
+      console.error('[Init] Billing deploy safety check failed — exiting');
+      server.close(() => process.exit(1));
+      return;
+    }
+    console.warn('[Init] Billing deploy safety check failed (non-fatal in dev)');
   }
 
   // Ensure default system user exists before any schedulers run
