@@ -636,3 +636,13 @@ model PlaidAccount {
 
   @@index([plaidItemId])
 }
+
+// Stripe webhook idempotency records
+model BillingWebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
+}

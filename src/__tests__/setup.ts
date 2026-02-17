@@ -12,6 +12,7 @@ vi.mock('../utils/prisma', () => {
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
     },
     userSettings: {
@@ -34,6 +35,10 @@ vi.mock('../utils/prisma', () => {
     follow: { deleteMany: vi.fn() },
     alert: { deleteMany: vi.fn() },
     alertEvent: { deleteMany: vi.fn() },
+    billingWebhookEvent: {
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     $transaction: vi.fn((fn: any) => fn(mockPrisma)),
   };
 

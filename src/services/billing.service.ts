@@ -4,6 +4,15 @@ import { config } from '../config';
 
 export type PlanTier = 'free' | 'pro' | 'premium';
 
+interface BillingWebhookEventDelegate {
+  create(args: { data: { eventId: string; eventType: string } }): Promise<unknown>;
+  deleteMany(args: { where: { eventId: string } }): Promise<unknown>;
+}
+
+function getBillingWebhookEventDelegate(): BillingWebhookEventDelegate {
+  return (prisma as unknown as { billingWebhookEvent: BillingWebhookEventDelegate }).billingWebhookEvent;
+}
+
 function getStripeClient(): Stripe {
   if (!config.stripeSecretKey) {
     throw new Error('Stripe is not configured');
@@ -106,86 +115,110 @@ async function updateUserPlanByCustomer(
 }
 
 export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
+  const billingWebhookEvent = getBillingWebhookEventDelegate();
+  try {
+    await billingWebhookEvent.create({
+      data: {
+        eventId: event.id,
+        eventType: event.type,
+      },
+    });
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002') {
+      // Duplicate webhook delivery; already processed.
+      return;
+    }
+    throw error;
+  }
+
   const stripe = getStripeClient();
 
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const stripeCustomerId = typeof session.customer === 'string' ? session.customer : null;
-      const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
-      const userId = session.metadata?.userId;
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const stripeCustomerId = typeof session.customer === 'string' ? session.customer : null;
+        const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
+        const userId = session.metadata?.userId;
 
-      if (!stripeCustomerId || !stripeSubscriptionId) return;
-      const { plan, periodEnd } = await resolvePlanFromSubscription(stripe, stripeSubscriptionId);
+        if (!stripeCustomerId || !stripeSubscriptionId) return;
+        const { plan, periodEnd } = await resolvePlanFromSubscription(stripe, stripeSubscriptionId);
 
-      if (userId) {
-        await prisma.user.update({
-          where: { id: userId },
-          data: {
+        if (userId) {
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              plan,
+              stripeCustomerId,
+              stripeSubscriptionId,
+              planStartedAt: new Date(),
+              planExpiresAt: periodEnd,
+            },
+          });
+        } else {
+          await updateUserPlanByCustomer(stripeCustomerId, {
             plan,
-            stripeCustomerId,
             stripeSubscriptionId,
             planStartedAt: new Date(),
             planExpiresAt: periodEnd,
-          },
-        });
-      } else {
+          });
+        }
+        return;
+      }
+
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : null;
+        if (!stripeCustomerId) return;
+        const firstItem = subscription.items.data[0];
+        const priceId = firstItem?.price?.id ?? null;
+        const plan = resolvePlanFromPriceId(priceId);
+        const periodEnd = firstItem?.current_period_end
+          ? new Date(firstItem.current_period_end * 1000)
+          : null;
+
         await updateUserPlanByCustomer(stripeCustomerId, {
           plan,
-          stripeSubscriptionId,
-          planStartedAt: new Date(),
+          stripeSubscriptionId: subscription.id,
           planExpiresAt: periodEnd,
+          planStartedAt: new Date(subscription.start_date * 1000),
         });
+        return;
       }
-      return;
+
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : null;
+        if (!stripeCustomerId) return;
+        await updateUserPlanByCustomer(stripeCustomerId, {
+          plan: 'free',
+          stripeSubscriptionId: null,
+          planExpiresAt: null,
+        });
+        return;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : null;
+        if (!stripeCustomerId) return;
+        const gracePeriodEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+        await prisma.user.updateMany({
+          where: { stripeCustomerId, plan: { not: 'free' } },
+          data: { planExpiresAt: gracePeriodEnd },
+        });
+        return;
+      }
+
+      default:
+        return;
     }
-
-    case 'customer.subscription.updated': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : null;
-      if (!stripeCustomerId) return;
-      const firstItem = subscription.items.data[0];
-      const priceId = firstItem?.price?.id ?? null;
-      const plan = resolvePlanFromPriceId(priceId);
-      const periodEnd = firstItem?.current_period_end
-        ? new Date(firstItem.current_period_end * 1000)
-        : null;
-
-      await updateUserPlanByCustomer(stripeCustomerId, {
-        plan,
-        stripeSubscriptionId: subscription.id,
-        planExpiresAt: periodEnd,
-        planStartedAt: new Date(subscription.start_date * 1000),
-      });
-      return;
-    }
-
-    case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : null;
-      if (!stripeCustomerId) return;
-      await updateUserPlanByCustomer(stripeCustomerId, {
-        plan: 'free',
-        stripeSubscriptionId: null,
-        planExpiresAt: null,
-      });
-      return;
-    }
-
-    case 'invoice.payment_failed': {
-      const invoice = event.data.object as Stripe.Invoice;
-      const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : null;
-      if (!stripeCustomerId) return;
-      const gracePeriodEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-      await prisma.user.updateMany({
-        where: { stripeCustomerId, plan: { not: 'free' } },
-        data: { planExpiresAt: gracePeriodEnd },
-      });
-      return;
-    }
-
-    default:
-      return;
+  } catch (error) {
+    // Allow Stripe retries by removing idempotency marker when processing fails.
+    await billingWebhookEvent.deleteMany({
+      where: { eventId: event.id },
+    });
+    throw error;
   }
 }
 
