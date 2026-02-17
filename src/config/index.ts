@@ -59,7 +59,7 @@ export const config = {
   refreshTokenExpiresInDays: parseInt(process.env.REFRESH_TOKEN_EXPIRES_IN_DAYS || '30', 10),
 
   // Alpha Vantage API
-  alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || '',
+  alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || process.env.ALPHA_VANTAGE_KEY || '',
   alphaVantageDailyLimit: parseInt(process.env.AV_DAILY_LIMIT || '25', 10),
 
   // Perplexity API
@@ -77,8 +77,10 @@ export const config = {
   // Stripe billing
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-  stripePricePro: process.env.STRIPE_PRICE_PRO || '',
-  stripePricePremium: process.env.STRIPE_PRICE_PREMIUM || '',
+  stripeProMonthlyPriceId: process.env.STRIPE_PRO_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_PRO || '',
+  stripeProYearlyPriceId: process.env.STRIPE_PRO_YEARLY_PRICE_ID || '',
+  stripePremiumMonthlyPriceId: process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_PREMIUM || '',
+  stripePremiumYearlyPriceId: process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID || '',
   stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173/settings/billing',
 
   // CORS - allowed origins for API requests

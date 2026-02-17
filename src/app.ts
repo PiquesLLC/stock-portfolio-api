@@ -61,12 +61,20 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(express.json({
+const jsonParser = express.json({
   // Capture raw body for webhook signature verification (Plaid)
   verify: (req: any, _res, buf) => {
     req.rawBody = buf.toString('utf-8');
   },
-}));
+});
+app.use((req, res, next) => {
+  // Stripe webhook uses route-level express.raw() for signature verification.
+  if (req.path === '/billing/webhook') {
+    next();
+    return;
+  }
+  jsonParser(req, res, next);
+});
 
 // Global rate limiting - 100 requests per minute
 app.use(apiLimiter);

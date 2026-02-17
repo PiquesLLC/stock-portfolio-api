@@ -733,6 +733,10 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
 
     res.json({ added, updated, removed });
   } catch (error) {
+    if (error instanceof PlanLimitError) {
+      res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
+      return;
+    }
     console.error('Import confirm error:');
     res.status(500).json({ error: 'Failed to apply import' });
   }

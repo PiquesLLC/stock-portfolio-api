@@ -22,8 +22,18 @@ function getStripeClient(): Stripe {
 
 function resolvePlanFromPriceId(priceId: string | null): PlanTier {
   if (!priceId) return 'free';
-  if (config.stripePricePremium && priceId === config.stripePricePremium) return 'premium';
-  if (config.stripePricePro && priceId === config.stripePricePro) return 'pro';
+  if (
+    (config.stripePremiumMonthlyPriceId && priceId === config.stripePremiumMonthlyPriceId) ||
+    (config.stripePremiumYearlyPriceId && priceId === config.stripePremiumYearlyPriceId)
+  ) {
+    return 'premium';
+  }
+  if (
+    (config.stripeProMonthlyPriceId && priceId === config.stripeProMonthlyPriceId) ||
+    (config.stripeProYearlyPriceId && priceId === config.stripeProYearlyPriceId)
+  ) {
+    return 'pro';
+  }
   return 'free';
 }
 

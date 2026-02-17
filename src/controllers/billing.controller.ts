@@ -58,14 +58,13 @@ export async function billingWebhookHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const rawBody = (req as Request & { rawBody?: string }).rawBody;
-    if (!rawBody) {
+    if (!Buffer.isBuffer(req.body)) {
       res.status(500).json({ error: 'Webhook processing failed' });
       return;
     }
 
     const stripe = new Stripe(config.stripeSecretKey);
-    const event = stripe.webhooks.constructEvent(rawBody, signature, config.stripeWebhookSecret);
+    const event = stripe.webhooks.constructEvent(req.body, signature, config.stripeWebhookSecret);
     await handleWebhookEvent(event);
     res.json({ received: true });
   } catch {

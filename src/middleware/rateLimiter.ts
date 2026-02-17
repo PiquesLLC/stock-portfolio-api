@@ -50,6 +50,17 @@ export const mutationLimiter = rateLimit({
 });
 
 /**
+ * Billing mutation limiter - stricter than generic mutation endpoints.
+ */
+export const billingMutationLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 10 : 50,
+  message: { error: 'Too many billing requests. Please try again shortly.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Heavy read limiter - protect expensive GET endpoints (charts, AI, news, etc.)
  */
 export const heavyReadLimiter = rateLimit({
@@ -104,6 +115,17 @@ export const mfaSendLimiter = rateLimit({
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 60,
+  message: { error: 'Too many requests.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * Billing webhook limiter - separate profile for Stripe webhook traffic.
+ */
+export const billingWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: process.env.NODE_ENV === 'production' ? 120 : 300,
   message: { error: 'Too many requests.' },
   standardHeaders: true,
   legacyHeaders: false,

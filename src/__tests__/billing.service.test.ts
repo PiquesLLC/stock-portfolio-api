@@ -38,8 +38,10 @@ vi.mock('../config', () => ({
   config: {
     stripeSecretKey: 'sk_test_123',
     stripeWebhookSecret: 'whsec_123',
-    stripePricePro: 'price_pro',
-    stripePricePremium: 'price_premium',
+    stripeProMonthlyPriceId: 'price_pro',
+    stripeProYearlyPriceId: 'price_pro_yearly',
+    stripePremiumMonthlyPriceId: 'price_premium',
+    stripePremiumYearlyPriceId: 'price_premium_yearly',
     stripeReturnUrl: 'http://localhost:5173/settings/billing',
   },
 }));
