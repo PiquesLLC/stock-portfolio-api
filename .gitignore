@@ -27,3 +27,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Windows artifacts
+nul
+
+# Temp/test scripts
+test_*.csv
+test_*.js
+refresh-*.js
+temp_*.js
+*.traineddata
