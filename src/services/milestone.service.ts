@@ -107,10 +107,10 @@ export async function checkMilestoneAlerts(): Promise<void> {
 
       // Check milestones and create events for each user who holds this ticker
       const milestones = [
-        { type: '52w_high', threshold: week52High, check: (p: number, t: number) => p >= t * 0.995, isHigh: true },
-        { type: '52w_low', threshold: week52Low, check: (p: number, t: number) => p <= t * 1.005, isHigh: false },
-        { type: 'ath', threshold: allTimeHigh, check: (p: number, t: number) => p >= t * 0.995, isHigh: true },
-        { type: 'atl', threshold: allTimeLow, check: (p: number, t: number) => t > 0 && p <= t * 1.005, isHigh: false },
+        { type: '52w_high', threshold: week52High, check: (p: number, t: number) => p >= t * 0.998, isHigh: true },
+        { type: '52w_low', threshold: week52Low, check: (p: number, t: number) => p <= t * 1.002, isHigh: false },
+        { type: 'ath', threshold: allTimeHigh, check: (p: number, t: number) => p >= t, isHigh: true },
+        { type: 'atl', threshold: allTimeLow, check: (p: number, t: number) => t > 0 && p <= t, isHigh: false },
       ];
 
       for (const { type, threshold, check, isHigh } of milestones) {
