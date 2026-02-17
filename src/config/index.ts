@@ -13,13 +13,15 @@ if (!jwtSecret) {
 // In production, also require API keys
 if (process.env.NODE_ENV === 'production') {
   const billingEnabled = process.env.BILLING_ENABLED !== 'false';
+  const plaidEnabled = process.env.PLAID_ENABLED !== 'false';
   const requiredKeys = [
     'FINNHUB_API_KEY',
     'POLYGON_API_KEY',
     'MFA_ENCRYPTION_KEY',
-    'PLAID_CLIENT_ID',
-    'PLAID_SECRET',
   ];
+  if (plaidEnabled) {
+    requiredKeys.push('PLAID_CLIENT_ID', 'PLAID_SECRET');
+  }
   if (billingEnabled) {
     requiredKeys.push(
       'STRIPE_SECRET_KEY',
