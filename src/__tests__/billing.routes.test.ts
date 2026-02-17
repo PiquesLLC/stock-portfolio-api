@@ -76,6 +76,11 @@ describe('billing routes', () => {
       planExpiresAt: null,
       stripeCustomerId: null,
       stripeSubscriptionId: null,
+      subscriptionStatus: null,
+      cancelAtPeriodEnd: false,
+      currentPeriodEnd: null,
+      isGracePeriod: false,
+      graceEndsAt: null,
     });
     handleWebhookEventMock.mockResolvedValue(undefined);
     constructEventMock.mockReturnValue({

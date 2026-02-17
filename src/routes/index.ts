@@ -22,6 +22,7 @@ import watchlistRoutes from './watchlist.routes';
 import notificationsRoutes from './notifications.routes';
 import plaidRoutes from './plaid.routes';
 import billingRoutes from './billing.routes';
+import { config } from '../config';
 
 const router = Router();
 
@@ -47,6 +48,8 @@ router.use('/nala', nalaRoutes);
 router.use('/watchlists', watchlistRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/plaid', plaidRoutes);
-router.use('/billing', billingRoutes);
+if (config.billingEnabled) {
+  router.use('/billing', billingRoutes);
+}
 
 export default router;

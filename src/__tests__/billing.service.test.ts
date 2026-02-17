@@ -47,6 +47,7 @@ vi.mock('../config', () => ({
 }));
 
 import { handleWebhookEvent } from '../services/billing.service';
+import { getBillingStatus } from '../services/billing.service';
 
 describe('billing webhook handling', () => {
   beforeEach(() => {
@@ -56,6 +57,8 @@ describe('billing webhook handling', () => {
     prismaMock.user.update.mockResolvedValue({});
     prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
     subscriptionsRetrieveMock.mockResolvedValue({
+      status: 'active',
+      cancel_at_period_end: false,
       items: {
         data: [
           {
@@ -198,5 +201,36 @@ describe('billing webhook handling', () => {
     expect(subscriptionsRetrieveMock).not.toHaveBeenCalled();
     expect(prismaMock.user.update).not.toHaveBeenCalled();
     expect(prismaMock.billingWebhookEvent.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns lifecycle fields for billing status', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      plan: 'pro',
+      planStartedAt: new Date('2026-02-01T00:00:00.000Z'),
+      planExpiresAt: new Date('2026-03-01T00:00:00.000Z'),
+      stripeCustomerId: 'cus_status_1',
+      stripeSubscriptionId: 'sub_status_1',
+    });
+    subscriptionsRetrieveMock.mockResolvedValue({
+      status: 'past_due',
+      cancel_at_period_end: true,
+      items: {
+        data: [
+          {
+            price: { id: 'price_pro' },
+            current_period_end: 1735000000,
+          },
+        ],
+      },
+    });
+
+    const result = await getBillingStatus('user_status_1');
+
+    expect(result.plan).toBe('pro');
+    expect(result.subscriptionStatus).toBe('past_due');
+    expect(result.cancelAtPeriodEnd).toBe(true);
+    expect(result.currentPeriodEnd).toBeInstanceOf(Date);
+    expect(result.isGracePeriod).toBe(true);
+    expect(result.graceEndsAt).toBeInstanceOf(Date);
   });
 });

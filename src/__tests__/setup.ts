@@ -38,6 +38,7 @@ vi.mock('../utils/prisma', () => {
     billingWebhookEvent: {
       create: vi.fn(),
       deleteMany: vi.fn(),
+      count: vi.fn(),
     },
     $transaction: vi.fn((fn: any) => fn(mockPrisma)),
   };

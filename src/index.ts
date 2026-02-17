@@ -15,6 +15,7 @@ import { refreshEconomicIndicators, refreshInternationalIndicators } from './ser
 import { rotateTickerFundamentals } from './services/fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { sendEarningsAlerts } from './services/notifications.service';
+import { assertBillingDeploySafety } from './services/billing.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -106,6 +107,19 @@ async function getAllHeldTickers(): Promise<string[]> {
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
+
+  try {
+    await assertBillingDeploySafety();
+    if (config.billingEnabled) {
+      console.log('[Init] Billing deploy safety check passed');
+    } else {
+      console.log('[Init] Billing routes disabled');
+    }
+  } catch (error) {
+    console.error('[Init] Billing deploy safety check failed');
+    server.close(() => process.exit(1));
+    return;
+  }
 
   // Ensure default system user exists before any schedulers run
   await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
@@ -318,7 +332,6 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
-
 
 
 

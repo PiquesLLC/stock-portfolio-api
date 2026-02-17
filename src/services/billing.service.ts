@@ -7,6 +7,7 @@ export type PlanTier = 'free' | 'pro' | 'premium';
 interface BillingWebhookEventDelegate {
   create(args: { data: { eventId: string; eventType: string } }): Promise<unknown>;
   deleteMany(args: { where: { eventId: string } }): Promise<unknown>;
+  count(args?: { where?: { eventId?: string } }): Promise<number>;
 }
 
 function getBillingWebhookEventDelegate(): BillingWebhookEventDelegate {
@@ -232,12 +233,36 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
   }
 }
 
+export async function assertBillingDeploySafety(): Promise<void> {
+  if (!config.billingEnabled) {
+    return;
+  }
+
+  const missing: string[] = [];
+  if (!config.stripeSecretKey) missing.push('STRIPE_SECRET_KEY');
+  if (!config.stripeWebhookSecret) missing.push('STRIPE_WEBHOOK_SECRET');
+  if (!config.stripeProMonthlyPriceId) missing.push('STRIPE_PRO_MONTHLY_PRICE_ID');
+  if (!config.stripePremiumMonthlyPriceId) missing.push('STRIPE_PREMIUM_MONTHLY_PRICE_ID');
+
+  if (missing.length > 0) {
+    throw new Error(`Billing is enabled but missing env vars: ${missing.join(', ')}`);
+  }
+
+  // Verifies db push/migrations created the idempotency table before accepting traffic.
+  await getBillingWebhookEventDelegate().count();
+}
+
 export async function getBillingStatus(userId: string): Promise<{
   plan: string;
   planStartedAt: Date | null;
   planExpiresAt: Date | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+  subscriptionStatus: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: Date | null;
+  isGracePeriod: boolean;
+  graceEndsAt: Date | null;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -254,5 +279,34 @@ export async function getBillingStatus(userId: string): Promise<{
     throw new Error('User not found');
   }
 
-  return user;
+  let subscriptionStatus: string | null = null;
+  let cancelAtPeriodEnd = false;
+  let currentPeriodEnd: Date | null = null;
+
+  if (user.stripeSubscriptionId && config.stripeSecretKey) {
+    try {
+      const stripe = getStripeClient();
+      const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+      subscriptionStatus = subscription.status ?? null;
+      cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+      const firstItem = subscription.items.data[0];
+      currentPeriodEnd = firstItem?.current_period_end
+        ? new Date(firstItem.current_period_end * 1000)
+        : null;
+    } catch {
+      console.error('[Billing] Failed to refresh subscription lifecycle');
+    }
+  }
+
+  const isGracePeriod = subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid';
+  const graceEndsAt = isGracePeriod ? user.planExpiresAt : null;
+
+  return {
+    ...user,
+    subscriptionStatus,
+    cancelAtPeriodEnd,
+    currentPeriodEnd,
+    isGracePeriod,
+    graceEndsAt,
+  };
 }
