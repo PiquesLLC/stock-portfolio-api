@@ -30,7 +30,7 @@ router.post('/holdings', mutationLimiter, requireAuth, addHolding);
 router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
 router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
 router.get('/history', heavyReadLimiter, getHistory);
-router.get('/history/chart', heavyReadLimiter, getChartHandler);
+router.get('/history/chart', heavyReadLimiter, optionalAuth, getChartHandler);
 router.get('/projections', getProjectionsHandler);
 router.get('/projections/current-pace', getCurrentPaceHandler);
 router.get('/metrics', getMetricsHandler);

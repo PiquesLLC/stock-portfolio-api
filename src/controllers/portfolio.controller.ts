@@ -36,6 +36,7 @@ const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
+const FREE_CHART_PERIODS = new Set(['1D', '1W', '1M']);
 
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -321,6 +322,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const period = ((req.query.period as string) || '1D').toUpperCase();
     if (!VALID_CHART_PERIODS.includes(period)) {
       res.status(400).json({ error: `Invalid period. Must be one of: ${VALID_CHART_PERIODS.join(', ')}` });
+      return;
+    }
+
+    const plan = req.user?.plan ?? 'free';
+    const isProOrHigher = plan === 'pro' || plan === 'premium';
+    if (!isProOrHigher && !FREE_CHART_PERIODS.has(period)) {
+      res.status(403).json({ error: 'upgrade_required', requiredPlan: 'pro' });
       return;
     }
 
