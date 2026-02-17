@@ -4,7 +4,7 @@ import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usern
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, deleteAccountSchema, formatZodError } from '../validators/auth.validators';
-import { disconnectPlaidItem } from '../services/plaid.service';
+import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
 
 
 
@@ -336,13 +336,13 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       return;
     }
 
-    // Revoke Plaid access tokens before deleting (best effort — API call outside transaction)
+    // Revoke all Plaid access tokens before deleting (best effort — failures should not block deletion)
     const plaidItems = await prisma.plaidItem.findMany({
-      where: { userId: user.id, status: 'active' },
+      where: { userId: user.id },
       select: { id: true },
     });
     for (const item of plaidItems) {
-      try { await disconnectPlaidItem(item.id, user.id); } catch { /* best effort */ }
+      await revokePlaidItemTokenBestEffort(item.id, user.id);
     }
 
     await prisma.$transaction(async (tx) => {

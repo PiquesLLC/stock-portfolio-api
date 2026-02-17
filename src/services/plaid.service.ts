@@ -198,6 +198,28 @@ export async function disconnectPlaidItem(plaidItemId: string, userId: string): 
 }
 
 /**
+ * Best-effort revoke Plaid access token for a linked item.
+ * Does not throw on failure and is safe to call during account deletion.
+ */
+export async function revokePlaidItemTokenBestEffort(plaidItemId: string, userId: string): Promise<void> {
+  const item = await prisma.plaidItem.findFirst({
+    where: { id: plaidItemId, userId },
+    select: { accessTokenEnc: true },
+  });
+
+  if (!item) {
+    return;
+  }
+
+  try {
+    const accessToken = decrypt(item.accessTokenEnc);
+    await plaidClient.itemRemove({ access_token: accessToken });
+  } catch {
+    console.error('[Plaid] Token revocation failed during account deletion');
+  }
+}
+
+/**
  * Fetch investment holdings from Plaid for a linked item.
  * Returns securities and holdings data for the frontend to display or sync.
  */
