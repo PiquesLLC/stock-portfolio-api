@@ -11,6 +11,7 @@ import {
   getUnreadCount,
   PriceAlertCondition,
 } from '../services/priceAlert.service';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 // GET /price-alerts?ticker=X
 export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -72,6 +73,10 @@ export async function createPriceAlertHandler(req: AuthRequest, res: Response): 
 
     res.status(201).json(alert);
   } catch (error) {
+    if (error instanceof PlanLimitError) {
+      res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
+      return;
+    }
     console.error('Error creating price alert:');
     res.status(400).json({ error: 'Failed to create price alert' });
   }

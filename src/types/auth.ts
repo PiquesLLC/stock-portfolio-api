@@ -3,6 +3,8 @@ import { Request } from 'express';
 export interface JwtPayload {
   userId: string;
   username: string;
+  plan?: string;
+  planExpiresAt?: string | null;
 }
 
 export interface AuthRequest extends Request {
@@ -21,6 +23,8 @@ export interface LoginResponse {
     id: string;
     username: string;
     displayName: string;
+    plan?: string;
+    planExpiresAt?: Date | null;
   };
 }
 

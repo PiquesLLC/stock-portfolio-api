@@ -68,7 +68,7 @@ export async function rotateRefreshToken(
 ): Promise<{ accessToken: string; refreshToken: string; payload: JwtPayload } | null> {
   const stored = await prisma.refreshToken.findUnique({
     where: { token: oldToken },
-    include: { user: { select: { id: true, username: true } } },
+    include: { user: { select: { id: true, username: true, plan: true, planExpiresAt: true } } },
   });
 
   if (!stored || stored.expiresAt < new Date()) {
@@ -96,7 +96,12 @@ export async function rotateRefreshToken(
     if (!latestValid) {
       return null;
     }
-    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    const payload: JwtPayload = {
+      userId: stored.user.id,
+      username: stored.user.username,
+      plan: stored.user.plan,
+      planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+    };
     return { accessToken: '', refreshToken: latestValid.token, payload };
   }
 
@@ -117,11 +122,21 @@ export async function rotateRefreshToken(
     if (!latestValid) {
       return null;
     }
-    const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+    const payload: JwtPayload = {
+      userId: stored.user.id,
+      username: stored.user.username,
+      plan: stored.user.plan,
+      planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+    };
     return { accessToken: '', refreshToken: latestValid.token, payload };
   }
 
-  const payload: JwtPayload = { userId: stored.user.id, username: stored.user.username };
+  const payload: JwtPayload = {
+    userId: stored.user.id,
+    username: stored.user.username,
+    plan: stored.user.plan,
+    planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+  };
   const accessToken = generateAccessToken(payload);
   const refreshToken = await generateRefreshToken(stored.userId);
 
@@ -177,7 +192,7 @@ export async function loginWithPassword(
 ): Promise<LoginResponse | MfaChallengeResponse | null> {
   const user = await prisma.user.findUnique({
     where: { username },
-    select: { id: true, username: true, displayName: true, passwordHash: true },
+    select: { id: true, username: true, displayName: true, passwordHash: true, plan: true, planExpiresAt: true },
   });
 
   if (!user) {
@@ -208,7 +223,12 @@ export async function loginWithPassword(
     };
   }
 
-  const token = generateAccessToken({ userId: user.id, username: user.username });
+  const token = generateAccessToken({
+    userId: user.id,
+    username: user.username,
+    plan: user.plan,
+    planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+  });
   const refreshToken = await generateRefreshToken(user.id);
 
   return {
@@ -218,6 +238,8 @@ export async function loginWithPassword(
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      plan: user.plan,
+      planExpiresAt: user.planExpiresAt,
     },
   };
 }
@@ -244,7 +266,7 @@ export async function setPassword(username: string, password: string): Promise<b
 export async function getUserById(userId: string) {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, displayName: true },
+    select: { id: true, username: true, displayName: true, plan: true, planExpiresAt: true },
   });
 }
 
@@ -333,7 +355,7 @@ export async function signup(
         leaderboardEligible: true,
         trackingStartAt: new Date(),
       },
-      select: { id: true, username: true, displayName: true },
+      select: { id: true, username: true, displayName: true, plan: true, planExpiresAt: true },
     });
 
     await tx.userSettings.create({
@@ -357,7 +379,12 @@ export async function signup(
     return newUser;
   });
 
-  const token = generateAccessToken({ userId: user.id, username: user.username });
+  const token = generateAccessToken({
+    userId: user.id,
+    username: user.username,
+    plan: user.plan,
+    planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+  });
   const refreshToken = await generateRefreshToken(user.id);
 
   return {
@@ -367,6 +394,8 @@ export async function signup(
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      plan: user.plan,
+      planExpiresAt: user.planExpiresAt,
     },
   };
 }

@@ -21,6 +21,7 @@ import nalaRoutes from './nala.routes';
 import watchlistRoutes from './watchlist.routes';
 import notificationsRoutes from './notifications.routes';
 import plaidRoutes from './plaid.routes';
+import billingRoutes from './billing.routes';
 
 const router = Router();
 
@@ -46,5 +47,6 @@ router.use('/nala', nalaRoutes);
 router.use('/watchlists', watchlistRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/plaid', plaidRoutes);
+router.use('/billing', billingRoutes);
 
 export default router;

@@ -58,6 +58,11 @@ model User {
   username               String                 @unique
   displayName            String
   passwordHash           String?
+  plan                   String                 @default("free")
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  planExpiresAt          DateTime?
+  planStartedAt          DateTime?
   createdAt              DateTime               @default(now())
   trackingActive         Boolean                @default(false)
   trackingStartAt        DateTime?

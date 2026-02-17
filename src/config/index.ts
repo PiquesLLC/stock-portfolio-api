@@ -12,7 +12,15 @@ if (!jwtSecret) {
 
 // In production, also require API keys
 if (process.env.NODE_ENV === 'production') {
-  const requiredKeys = ['FINNHUB_API_KEY', 'POLYGON_API_KEY', 'MFA_ENCRYPTION_KEY', 'PLAID_CLIENT_ID', 'PLAID_SECRET'];
+  const requiredKeys = [
+    'FINNHUB_API_KEY',
+    'POLYGON_API_KEY',
+    'MFA_ENCRYPTION_KEY',
+    'PLAID_CLIENT_ID',
+    'PLAID_SECRET',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+  ];
   for (const key of requiredKeys) {
     if (!process.env[key]) {
       console.error(`FATAL: Missing required env var for production: ${key}`);
@@ -65,6 +73,13 @@ export const config = {
   plaidClientId: process.env.PLAID_CLIENT_ID || '',
   plaidSecret: process.env.PLAID_SECRET || '',
   plaidEnv: (process.env.PLAID_ENV || 'sandbox') as 'sandbox' | 'development' | 'production',
+
+  // Stripe billing
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+  stripePricePro: process.env.STRIPE_PRICE_PRO || '',
+  stripePricePremium: process.env.STRIPE_PRICE_PREMIUM || '',
+  stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173/settings/billing',
 
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),

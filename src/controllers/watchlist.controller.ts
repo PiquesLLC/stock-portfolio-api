@@ -26,6 +26,7 @@ import {
   watchlistIdParamSchema,
   watchlistIdTickerParamSchema,
 } from '../validators/watchlist.validators';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -77,6 +78,10 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
       createdAt: watchlist.createdAt,
     });
   } catch (error: any) {
+    if (error instanceof PlanLimitError) {
+      res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
+      return;
+    }
     if (error?.code === 'P2002') {
       res.status(409).json({ error: 'Watchlist name already exists' });
       return;

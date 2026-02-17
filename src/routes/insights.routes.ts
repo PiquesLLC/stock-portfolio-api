@@ -21,6 +21,7 @@ import {
 import { getTaxHarvestHandler } from '../controllers/tax-harvest.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requirePlan } from '../middleware/plan.middleware';
 
 const router = Router();
 
@@ -30,10 +31,10 @@ router.get('/leak-detector', heavyReadLimiter, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, getIncomeInsightsHandler);
 router.get('/briefing', heavyReadLimiter, getBriefingHandler);
-router.post('/briefing/explain', mutationLimiter, requireAuth, explainBriefingHandler);
+router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('pro'), explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
-router.post('/daily-report/regenerate', mutationLimiter, requireAuth, regenerateDailyReportHandler);
+router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('pro'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
 
 // Tax-Loss Harvesting

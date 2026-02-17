@@ -2,6 +2,7 @@ import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import NodeCache from 'node-cache';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -245,6 +246,18 @@ export async function createWatchlist(
   userId: string = SYSTEM_USER_ID,
   input: { name: string; description?: string; color?: string }
 ) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { plan: true },
+  });
+  const plan = user?.plan ?? 'free';
+  if (plan === 'free') {
+    const count = await prisma.watchlist.count({ where: { userId } });
+    if (count >= 1) {
+      throw new PlanLimitError(1, 'free');
+    }
+  }
+
   return prisma.watchlist.create({
     data: {
       userId,

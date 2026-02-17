@@ -30,6 +30,7 @@ import {
   removeHoldingQuerySchema,
   setCashBalanceSchema,
 } from '../validators/portfolio.validators';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -157,6 +158,10 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
 
     res.status(201).json(holding);
   } catch (error) {
+    if (error instanceof PlanLimitError) {
+      res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
+      return;
+    }
     console.error('Error adding holding:');
     res.status(500).json({ error: 'Failed to add holding' });
   }

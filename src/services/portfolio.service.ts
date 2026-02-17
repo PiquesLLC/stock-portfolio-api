@@ -4,6 +4,7 @@ import { Holding, HoldingInput, HoldingWithQuote, OptionWithQuote, Portfolio, Se
 import { getMarketSession } from '../utils/market-hours';
 import { getOptionQuotes } from './options.service';
 import { daysToExpiry, formatOptionDisplay } from '../utils/occ-parser';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 
 
@@ -32,6 +33,18 @@ export async function upsertHolding(input: HoldingInput, userId?: string): Promi
         averageCost: input.averageCost,
       },
     });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: uid },
+    select: { plan: true },
+  });
+  const plan = user?.plan ?? 'free';
+  if (plan === 'free') {
+    const currentCount = await prisma.holding.count({ where: { userId: uid } });
+    if (currentCount >= 25) {
+      throw new PlanLimitError(25, 'free');
+    }
   }
 
   return prisma.holding.create({

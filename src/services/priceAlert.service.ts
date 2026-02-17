@@ -1,5 +1,6 @@
 import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
+import { PlanLimitError } from '../utils/plan-limit.error';
 
 
 
@@ -33,6 +34,20 @@ export async function createPriceAlert(input: CreatePriceAlertInput) {
   }
   if ((condition === 'pct_up' || condition === 'pct_down') && percentChange === undefined) {
     throw new Error('percentChange is required for pct_up/pct_down conditions');
+  }
+
+  if (userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plan: true },
+    });
+    const plan = user?.plan ?? 'free';
+    if (plan === 'free') {
+      const count = await prisma.priceAlert.count({ where: { userId } });
+      if (count >= 3) {
+        throw new PlanLimitError(3, 'free');
+      }
+    }
   }
 
   return prisma.priceAlert.create({
