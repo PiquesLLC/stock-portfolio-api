@@ -407,11 +407,22 @@ const searchCache = new NodeCache({ stdTTL: 86400 });
 // ADV (Average Daily Volume) cache with 24-hour TTL
 const advCache = new NodeCache({ stdTTL: 86400 });
 
+// Market cap cache (billions USD) with 24-hour TTL
+const marketCapCache = new NodeCache({ stdTTL: 86400 });
+
 // Track ADV fetch queue to avoid duplicate fetches
 const advFetchQueue = new Set<string>();
 
+// Track market cap fetch queue to avoid duplicate fetches
+const marketCapFetchQueue = new Set<string>();
+
 // Track tickers that failed ADV fetch (don't retry for 24h)
 const advFailedCache = new NodeCache({ stdTTL: 86400 });
+
+// Track tickers that failed market cap fetch (don't retry for 24h)
+const marketCapFailedCache = new NodeCache({ stdTTL: 86400 });
+
+const SEARCH_MARKET_CAP_ENRICH_LIMIT = 10;
 
 // Finnhub symbol search response interface
 interface FinnhubSearchResult {
@@ -559,10 +570,17 @@ const POPULARITY_OVERRIDES: Record<string, { marketCapB: number; isPopular: bool
  */
 function getPopularityData(ticker: string): { marketCapB?: number; avgVolume?: number; isPopular: boolean } {
   const upperTicker = ticker.toUpperCase();
+  const cachedMarketCapB = getCachedMarketCapB(upperTicker);
   const override = POPULARITY_OVERRIDES[upperTicker];
+
+  if (cachedMarketCapB !== undefined) {
+    return { marketCapB: cachedMarketCapB, isPopular: override?.isPopular || false };
+  }
+
   if (override) {
     return { marketCapB: override.marketCapB, isPopular: override.isPopular };
   }
+
   const adv = getCachedAdv(upperTicker);
   return { avgVolume: adv, isPopular: false };
 }
@@ -715,6 +733,18 @@ export function setCachedAdv(ticker: string, adv: number): void {
   advCache.set(`adv:${ticker.toUpperCase()}`, adv);
 }
 
+function getCachedMarketCapB(ticker: string): number | undefined {
+  return marketCapCache.get<number>(`mcap:${ticker.toUpperCase()}`);
+}
+
+function setCachedMarketCapB(ticker: string, marketCapB: number): void {
+  marketCapCache.set(`mcap:${ticker.toUpperCase()}`, marketCapB);
+}
+
+interface FinnhubProfileMarketCap {
+  marketCapitalization?: number;
+}
+
 /**
  * Check if ADV fetch is pending for a ticker
  */
@@ -778,6 +808,52 @@ export async function queueAdvFetches(tickers: string[]): Promise<void> {
         }
       } finally {
         advFetchQueue.delete(upperTicker);
+      }
+    })();
+  }
+}
+
+/**
+ * Queue market cap fetches for tickers (non-blocking, runs in background)
+ * Uses finnhub-queue for rate limiting and caches values for 24h
+ */
+export async function queueMarketCapFetches(tickers: string[]): Promise<void> {
+  const { finnhubQueue } = await import('./finnhub-queue');
+
+  for (const ticker of tickers) {
+    const upperTicker = ticker.toUpperCase();
+
+    if (
+      marketCapCache.has(`mcap:${upperTicker}`) ||
+      marketCapFailedCache.has(`mcap-fail:${upperTicker}`) ||
+      marketCapFetchQueue.has(upperTicker)
+    ) {
+      continue;
+    }
+
+    marketCapFetchQueue.add(upperTicker);
+
+    // Fire and forget - don't block search latency
+    (async () => {
+      try {
+        const data = await finnhubQueue.request<FinnhubProfileMarketCap>('/stock/profile2', {
+          symbol: upperTicker,
+        });
+        const marketCapitalizationM = data?.marketCapitalization;
+        if (typeof marketCapitalizationM === 'number' && marketCapitalizationM > 0) {
+          // Finnhub returns millions USD. Convert to billions USD.
+          setCachedMarketCapB(upperTicker, marketCapitalizationM / 1000);
+          return;
+        }
+        marketCapFailedCache.set(`mcap-fail:${upperTicker}`, true);
+      } catch (error) {
+        marketCapFailedCache.set(`mcap-fail:${upperTicker}`, true);
+        const msg = error instanceof Error ? error.message : 'unknown';
+        if (!msg.includes('ACCESS_DENIED')) {
+          console.log(`[MCap] Failed for ${upperTicker}: ${msg}`);
+        }
+      } finally {
+        marketCapFetchQueue.delete(upperTicker);
       }
     })();
   }
@@ -1190,6 +1266,17 @@ export async function searchSymbols(
   // Take top 10
   const results = enhancedResults.slice(0, 10);
 
+  // Enrich market cap in background for top search results that are still missing it
+  const tickersMissingMarketCap = results
+    .filter(r => !r.marketCapB)
+    .slice(0, SEARCH_MARKET_CAP_ENRICH_LIMIT)
+    .map(r => r.symbol);
+  if (tickersMissingMarketCap.length > 0) {
+    void queueMarketCapFetches(tickersMissingMarketCap).catch(() => {
+      console.log('[MCap] Failed to queue market cap fetches');
+    });
+  }
+
   // Queue ADV fetches for US tickers that don't have popularity data
   const tickersNeedingData = results
     .filter(r => !r.marketCapB && !r.avgVolume)
@@ -1213,6 +1300,12 @@ export function clearAdvCache(): void {
   advCache.flushAll();
   advFailedCache.flushAll();
   advFetchQueue.clear();
+}
+
+export function clearMarketCapCache(): void {
+  marketCapCache.flushAll();
+  marketCapFailedCache.flushAll();
+  marketCapFetchQueue.clear();
 }
 
 // ============================================================================
