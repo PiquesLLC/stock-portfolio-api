@@ -43,11 +43,14 @@ function parseExampleKeys(filePath) {
 
 const exampleKeys = parseExampleKeys(envExamplePath);
 const envVars = { ...readEnvFile(envPath), ...process.env };
+const billingEnabled = String(envVars.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
+const plaidEnabled = String(envVars.PLAID_ENABLED ?? 'true').toLowerCase() !== 'false';
 
 const optionalKeys = new Set([
   'JWT_REFRESH_SECRET',
   'READ_ONLY',
   'BILLING_ENABLED',
+  'PLAID_ENABLED',
   'ALLOWED_ORIGINS',
   'AV_DAILY_LIMIT',
   'RESEND_API_KEY',
@@ -59,34 +62,52 @@ const optionalKeys = new Set([
   'CLEANUP_MIGRATED_HOLDINGS',
 ]);
 
+if (!billingEnabled) {
+  optionalKeys.add('STRIPE_SECRET_KEY');
+  optionalKeys.add('STRIPE_WEBHOOK_SECRET');
+  optionalKeys.add('STRIPE_PRO_MONTHLY_PRICE_ID');
+  optionalKeys.add('STRIPE_PRO_YEARLY_PRICE_ID');
+  optionalKeys.add('STRIPE_PREMIUM_MONTHLY_PRICE_ID');
+  optionalKeys.add('STRIPE_PREMIUM_YEARLY_PRICE_ID');
+  optionalKeys.add('STRIPE_RETURN_URL');
+}
+
+if (!plaidEnabled) {
+  optionalKeys.add('PLAID_CLIENT_ID');
+  optionalKeys.add('PLAID_SECRET');
+  optionalKeys.add('PLAID_ENV');
+}
+
 const missingFromEnv = exampleKeys.filter(
   (key) => !optionalKeys.has(key) && (!(key in envVars) || String(envVars[key]).trim() === '')
 );
 const extraInEnv = Object.keys(envVars).filter((key) => !exampleKeys.includes(key));
-
-const billingEnabled = String(envVars.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
 const criticalAlways = [
   'DATABASE_URL',
   'JWT_SECRET',
   'FINNHUB_API_KEY',
   'POLYGON_API_KEY',
   'MFA_ENCRYPTION_KEY',
-  'PLAID_CLIENT_ID',
-  'PLAID_SECRET',
 ];
+const criticalPlaid = ['PLAID_CLIENT_ID', 'PLAID_SECRET'];
 const criticalBilling = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
   'STRIPE_PRO_MONTHLY_PRICE_ID',
   'STRIPE_PREMIUM_MONTHLY_PRICE_ID',
 ];
-const criticalKeys = billingEnabled ? [...criticalAlways, ...criticalBilling] : criticalAlways;
+const criticalKeys = [
+  ...criticalAlways,
+  ...(plaidEnabled ? criticalPlaid : []),
+  ...(billingEnabled ? criticalBilling : []),
+];
 const missingCritical = criticalKeys.filter((key) => !(key in envVars) || String(envVars[key]).trim() === '');
 
 console.log('=== Environment Parity Check ===');
 console.log(`Source of truth: ${envExamplePath}`);
 console.log(`Checked runtime env + ${fs.existsSync(envPath) ? '.env' : '(no .env file found)'}`);
 console.log(`Billing enabled: ${billingEnabled}`);
+console.log(`Plaid enabled: ${plaidEnabled}`);
 console.log('');
 
 if (missingFromEnv.length === 0) {

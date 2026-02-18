@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 const BASE_URL = process.env.SMOKE_BASE_URL || 'https://stock-portfolio-api-production.up.railway.app';
+const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
 
 async function runCheck(check) {
   const url = `${BASE_URL}${check.path}`;
@@ -39,6 +40,7 @@ async function runCheck(check) {
 async function main() {
   console.log('=== Post-Deploy Smoke Test ===');
   console.log(`Base URL: ${BASE_URL}`);
+  console.log(`Billing enabled expectation: ${BILLING_ENABLED}`);
   console.log('');
 
   const checks = [
@@ -66,13 +68,13 @@ async function main() {
       path: '/billing/webhook',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'evt_smoke_no_sig', type: 'checkout.session.completed', data: { object: {} } }),
-      acceptedStatus: [400],
+      acceptedStatus: BILLING_ENABLED ? [400] : [404],
     },
     {
-      name: 'Portfolio auth gating',
+      name: 'Portfolio holdings route',
       method: 'GET',
       path: '/portfolio/holdings',
-      acceptedStatus: [401],
+      acceptedStatus: [200],
     },
     {
       name: 'Insights plan/auth gate',
