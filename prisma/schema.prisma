@@ -133,11 +133,13 @@ model RefreshToken {
   id        String   @id @default(uuid())
   token     String   @unique
   userId    String
+  family    String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   revokedAt DateTime?
   createdAt DateTime @default(now())
 
+  @@index([family])
   @@index([userId])
   @@index([token])
   @@index([expiresAt])

@@ -5,11 +5,44 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
+import { sendEmailVerification } from './email.service';
 
 
 
 const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
+const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+const EMAIL_VERIFY_MAX_ATTEMPTS = 5;
+const EMAIL_RESEND_LIMIT_PER_HOUR = 3;
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function generateEmailOtpCode(): string {
+  return String(crypto.randomInt(100000, 999999));
+}
+
+async function issueEmailVerificationCode(userId: string, email: string): Promise<void> {
+  const code = generateEmailOtpCode();
+  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+
+  await prisma.emailOtpCode.updateMany({
+    where: { userId, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  await prisma.emailOtpCode.create({
+    data: { userId, codeHash, expiresAt },
+  });
+
+  try {
+    await sendEmailVerification(email, code);
+  } catch {
+    console.error('Email verification send failed');
+  }
+}
 
 /**
  * Hash a password using bcrypt
@@ -47,13 +80,14 @@ export function generateToken(payload: JwtPayload): string {
 /**
  * Generate a cryptographically random refresh token and store it in the database
  */
-export async function generateRefreshToken(userId: string): Promise<string> {
+export async function generateRefreshToken(userId: string, family?: string): Promise<string> {
   const token = crypto.randomBytes(64).toString('hex');
+  const tokenFamily = family ?? crypto.randomUUID();
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + config.refreshTokenExpiresInDays);
 
   await prisma.refreshToken.create({
-    data: { token, userId, expiresAt },
+    data: { token, userId, family: tokenFamily, expiresAt },
   });
 
   return token;
@@ -74,13 +108,14 @@ export async function rotateRefreshToken(
   if (!stored || stored.expiresAt < new Date()) {
     return null;
   }
+  const tokenFamily = stored.family ?? stored.id;
 
   if (stored.revokedAt) {
     const msSinceRevoked = Date.now() - stored.revokedAt.getTime();
     if (msSinceRevoked > 30_000) {
       // Genuine reuse attack — revoke the entire family for safety
       await prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, revokedAt: null },
+        where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       return null;
@@ -90,7 +125,7 @@ export async function rotateRefreshToken(
     // with the first refresh. Return latest valid refresh token only — NO new
     // access token. Client must use the new refresh token to get an access token.
     const latestValid = await prisma.refreshToken.findFirst({
-      where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
     if (!latestValid) {
@@ -116,7 +151,7 @@ export async function rotateRefreshToken(
     // NO access token. Client must use the new refresh token to get an access token.
     await new Promise(r => setTimeout(r, 50));
     const latestValid = await prisma.refreshToken.findFirst({
-      where: { userId: stored.userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
     if (!latestValid) {
@@ -138,7 +173,7 @@ export async function rotateRefreshToken(
     planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
   };
   const accessToken = generateAccessToken(payload);
-  const refreshToken = await generateRefreshToken(stored.userId);
+  const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
 
   return { accessToken, refreshToken, payload };
 }
@@ -192,7 +227,16 @@ export async function loginWithPassword(
 ): Promise<LoginResponse | MfaChallengeResponse | null> {
   const user = await prisma.user.findUnique({
     where: { username },
-    select: { id: true, username: true, displayName: true, passwordHash: true, plan: true, planExpiresAt: true },
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      email: true,
+      emailVerified: true,
+      passwordHash: true,
+      plan: true,
+      planExpiresAt: true,
+    },
   });
 
   if (!user) {
@@ -238,6 +282,8 @@ export async function loginWithPassword(
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      email: user.email,
+      emailVerified: user.emailVerified,
       plan: user.plan,
       planExpiresAt: user.planExpiresAt,
     },
@@ -266,7 +312,7 @@ export async function setPassword(username: string, password: string): Promise<b
 export async function getUserById(userId: string) {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, displayName: true, plan: true, planExpiresAt: true },
+    select: { id: true, username: true, displayName: true, email: true, emailVerified: true, plan: true, planExpiresAt: true },
   });
 }
 
@@ -324,15 +370,27 @@ export async function usernameExists(username: string): Promise<boolean> {
   return !!user;
 }
 
+export async function emailExists(email: string): Promise<boolean> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true },
+  });
+  return !!user;
+}
+
 /**
  * Create a new user account with password
  */
 export async function signup(
   username: string,
+  email: string,
   displayName: string,
   password: string,
   consentMeta?: { ipAddress?: string; userAgent?: string }
 ): Promise<LoginResponse | null> {
+  const normalizedEmail = normalizeEmail(email);
+
   // Check if username already exists
   const existing = await prisma.user.findUnique({
     where: { username },
@@ -343,19 +401,37 @@ export async function signup(
     return null;
   }
 
+  const existingEmail = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true },
+  });
+  if (existingEmail) {
+    return null;
+  }
+
   const passwordHash = await hashPassword(password);
 
   const user = await prisma.$transaction(async (tx) => {
     const newUser = await tx.user.create({
       data: {
         username,
+        email: normalizedEmail,
+        emailVerified: false,
         displayName,
         passwordHash,
         profilePublic: true,
         leaderboardEligible: true,
         trackingStartAt: new Date(),
       },
-      select: { id: true, username: true, displayName: true, plan: true, planExpiresAt: true },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        email: true,
+        emailVerified: true,
+        plan: true,
+        planExpiresAt: true,
+      },
     });
 
     await tx.userSettings.create({
@@ -386,6 +462,7 @@ export async function signup(
     planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
   });
   const refreshToken = await generateRefreshToken(user.id);
+  await issueEmailVerificationCode(user.id, normalizedEmail);
 
   return {
     token,
@@ -394,9 +471,123 @@ export async function signup(
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      email: user.email,
+      emailVerified: user.emailVerified,
       plan: user.plan,
       planExpiresAt: user.planExpiresAt,
     },
   };
+}
+
+export async function verifyEmailCode(
+  email: string,
+  code: string
+): Promise<{ success: boolean; remainingAttempts: number; error?: 'INVALID_OR_EXPIRED' | 'TOO_MANY_ATTEMPTS' }> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true, emailVerified: true },
+  });
+  if (!user) {
+    return { success: false, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS, error: 'INVALID_OR_EXPIRED' };
+  }
+  if (user.emailVerified) {
+    return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS };
+  }
+
+  const otp = await prisma.emailOtpCode.findFirst({
+    where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!otp) {
+    return { success: false, remainingAttempts: 0, error: 'INVALID_OR_EXPIRED' };
+  }
+
+  const failedAttempts = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'email_verification_failed',
+      sentAt: { gte: otp.createdAt },
+    },
+  });
+  const remainingBefore = EMAIL_VERIFY_MAX_ATTEMPTS - failedAttempts;
+  if (remainingBefore <= 0) {
+    return { success: false, remainingAttempts: 0, error: 'TOO_MANY_ATTEMPTS' };
+  }
+
+  const match = await bcrypt.compare(code, otp.codeHash);
+  if (!match) {
+    await prisma.notificationAuditLog.create({
+      data: {
+        userId: user.id,
+        type: 'email_verification_failed',
+        status: 'failed',
+        channel: 'email',
+        refKey: crypto.randomUUID(),
+      },
+    });
+    return {
+      success: false,
+      remainingAttempts: Math.max(0, remainingBefore - 1),
+      error: 'INVALID_OR_EXPIRED',
+    };
+  }
+
+  const usedAt = new Date();
+  await prisma.$transaction([
+    prisma.emailOtpCode.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt },
+    }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerified: true },
+    }),
+  ]);
+
+  return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS };
+}
+
+export async function resendVerificationEmail(
+  email: string
+): Promise<{ success: boolean; error?: 'ALREADY_VERIFIED' | 'RATE_LIMIT' }> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true, emailVerified: true },
+  });
+
+  // Return success for unknown email to avoid account enumeration.
+  if (!user) {
+    return { success: true };
+  }
+  if (user.emailVerified) {
+    return { success: false, error: 'ALREADY_VERIFIED' };
+  }
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const resentCount = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'email_verification_resent',
+      sentAt: { gte: oneHourAgo },
+    },
+  });
+  if (resentCount >= EMAIL_RESEND_LIMIT_PER_HOUR) {
+    return { success: false, error: 'RATE_LIMIT' };
+  }
+
+  await issueEmailVerificationCode(user.id, normalizedEmail);
+  await prisma.notificationAuditLog.create({
+    data: {
+      userId: user.id,
+      type: 'email_verification_resent',
+      status: 'sent',
+      channel: 'email',
+      refKey: crypto.randomUUID(),
+    },
+  });
+
+  return { success: true };
 }
 

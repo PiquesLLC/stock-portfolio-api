@@ -320,6 +320,12 @@ export async function detectDividendChanges(): Promise<void> {
     const [latest, previous] = events;
     if (latest.amountPerShare === previous.amountPerShare) continue;
 
+    // Only alert on recent dividend changes — skip if the latest ex-date
+    // is more than 7 days old. Without this, the same old dividend change
+    // triggers new notifications every cooldown cycle.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (latest.exDate < sevenDaysAgo) continue;
+
     const onCooldown = await checkCooldown(ticker, 'dividend_change');
     if (onCooldown) continue;
 

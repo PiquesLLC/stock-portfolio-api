@@ -23,6 +23,8 @@ export interface LoginResponse {
     id: string;
     username: string;
     displayName: string;
+    email?: string | null;
+    emailVerified?: boolean;
     plan?: string;
     planExpiresAt?: Date | null;
   };

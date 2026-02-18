@@ -1,9 +1,32 @@
 ﻿import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
-import { loginWithPassword, setPassword, getUserById, hasPassword, signup, usernameExists, changePassword, verifyPassword, rotateRefreshToken, revokeAllRefreshTokens } from '../services/auth.service';
+import {
+  loginWithPassword,
+  setPassword,
+  getUserById,
+  hasPassword,
+  signup,
+  usernameExists,
+  emailExists,
+  changePassword,
+  verifyPassword,
+  rotateRefreshToken,
+  revokeAllRefreshTokens,
+  verifyEmailCode,
+  resendVerificationEmail,
+} from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
-import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, deleteAccountSchema, formatZodError } from '../validators/auth.validators';
+import {
+  loginSchema,
+  signupSchema,
+  setPasswordSchema,
+  changePasswordSchema,
+  deleteAccountSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
+  formatZodError,
+} from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
 
 
@@ -222,7 +245,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const { username, displayName, password } = parsed.data;
+    const { username, email, displayName, password } = parsed.data;
 
     const exists = await usernameExists(username);
     if (exists) {
@@ -230,7 +253,13 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await signup(username, displayName, password, {
+    const emailTaken = await emailExists(email);
+    if (emailTaken) {
+      res.status(409).json({ error: 'Email is already in use' });
+      return;
+    }
+
+    const result = await signup(username, email, displayName, password, {
       ipAddress: req.ip || req.headers['x-forwarded-for']?.toString(),
       userAgent: req.headers['user-agent'],
     });
@@ -243,10 +272,75 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.status(201).json({ user: result.user });
+    res.status(201).json({
+      user: result.user,
+      emailVerificationRequired: !result.user.emailVerified,
+    });
   } catch (_error) {
     console.error('Signup error:');
     res.status(500).json({ error: 'Failed to create account' });
+  }
+}
+
+/**
+ * POST /auth/verify-email
+ */
+export async function verifyEmailHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = verifyEmailSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const { email, code } = parsed.data;
+    const result = await verifyEmailCode(email, code);
+
+    if (!result.success) {
+      if (result.error === 'TOO_MANY_ATTEMPTS') {
+        res.status(429).json({ error: 'Too many verification attempts', remainingAttempts: 0 });
+        return;
+      }
+      res.status(400).json({ error: 'Invalid or expired verification code', remainingAttempts: result.remainingAttempts });
+      return;
+    }
+
+    res.json({ message: 'Email verified successfully' });
+  } catch (_error) {
+    console.error('Verify email error:');
+    res.status(500).json({ error: 'Failed to verify email' });
+  }
+}
+
+/**
+ * POST /auth/resend-verification
+ */
+export async function resendVerificationHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = resendVerificationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const { email } = parsed.data;
+    const result = await resendVerificationEmail(email);
+
+    if (!result.success) {
+      if (result.error === 'RATE_LIMIT') {
+        res.status(429).json({ error: 'Too many resend attempts. Please try again later.' });
+        return;
+      }
+      if (result.error === 'ALREADY_VERIFIED') {
+        res.status(400).json({ error: 'Email is already verified' });
+        return;
+      }
+    }
+
+    res.json({ message: 'If this email is registered, a verification code was sent.' });
+  } catch (_error) {
+    console.error('Resend verification error:');
+    res.status(500).json({ error: 'Failed to resend verification code' });
   }
 }
 
@@ -428,4 +522,3 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 }
-

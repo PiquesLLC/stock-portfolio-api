@@ -7,10 +7,14 @@ import { __mockPrisma as prismaMock } from '../utils/prisma';
 
 // Rate Limiter Mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Disable rate limiters in tests
-vi.mock('../middleware/rateLimiter', () => {
+vi.mock('../middleware/rateLimiter', async () => {
+  const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
   const passthrough = (req: any, res: any, next: any) => next();
   return {
+    ...actual,
     loginLimiter: passthrough,
+    mfaVerifyLimiter: passthrough,
+    mfaSendLimiter: passthrough,
     setPasswordLimiter: passthrough,
     signupLimiter: passthrough,
     mutationLimiter: passthrough,
@@ -362,6 +366,18 @@ describe('Auth Service', () => {
         })
       );
     });
+
+    it('should persist the provided token family', async () => {
+      prismaMock.refreshToken.create.mockResolvedValue({ token: 'stored-token' });
+
+      await generateRefreshToken('user-1', 'family-1');
+
+      expect(prismaMock.refreshToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'user-1', family: 'family-1' }),
+        })
+      );
+    });
   });
 
   // â”€â”€ Refresh Token Rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -371,11 +387,12 @@ describe('Auth Service', () => {
         id: 'rt-1',
         token: 'old-token',
         userId: 'user-1',
+        family: 'family-1',
         revokedAt: null,
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice' },
       });
-      prismaMock.refreshToken.update.mockResolvedValue({});
+      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
 
       const result = await rotateRefreshToken('old-token');
@@ -396,6 +413,7 @@ describe('Auth Service', () => {
         id: 'rt-2',
         token: 'revoked-token',
         userId: 'user-1',
+        family: 'family-1',
         revokedAt: new Date(Date.now() - 60_000),
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice' },
@@ -406,7 +424,7 @@ describe('Auth Service', () => {
       expect(result).toBeNull();
       expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: 'user-1', revokedAt: null }),
+          where: expect.objectContaining({ userId: 'user-1', family: 'family-1', revokedAt: null }),
         })
       );
     });
@@ -416,6 +434,7 @@ describe('Auth Service', () => {
         id: 'rt-2b',
         token: 'revoked-token-recent',
         userId: 'user-1',
+        family: 'family-1',
         revokedAt: new Date(Date.now() - 5_000),
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice' },
@@ -431,6 +450,7 @@ describe('Auth Service', () => {
         id: 'rt-3',
         token: 'expired-token',
         userId: 'user-1',
+        family: 'family-1',
         revokedAt: null,
         expiresAt: new Date(Date.now() - 86400000), // expired yesterday
         user: { id: 'user-1', username: 'alice' },
