@@ -72,7 +72,32 @@ npm run smoke:test
 
 # Override smoke test target URL
 SMOKE_BASE_URL=http://localhost:3001 npm run smoke:test
+
+# Run full signup -> verify -> AI gate flow
+SMOKE_RUN_SIGNUP_FLOW=true SMOKE_SIGNUP_EMAIL=qa+smoke@example.com npm run smoke:test
+
+# Force verification code (if helper is unavailable)
+SMOKE_RUN_SIGNUP_FLOW=true SMOKE_SIGNUP_EMAIL=qa+smoke@example.com SMOKE_VERIFY_CODE=123456 npm run smoke:test
 ```
+
+## Smoke Flow Flags
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `SMOKE_RUN_SIGNUP_FLOW` | Optional | Set `true` to run signup/email-verification flow |
+| `SMOKE_SIGNUP_EMAIL` | Required when flow enabled | Email used for test account signup |
+| `SMOKE_SIGNUP_PASSWORD` | Optional | Password for flow account (default `StrongPass123`) |
+| `SMOKE_VERIFY_CODE` | Optional | Manually provide OTP code for verification step |
+| `TEST_HELPER_KEY` | Optional | Header value for non-prod OTP helper endpoint |
+
+When `SMOKE_VERIFY_CODE` is not provided, the smoke script attempts:
+`GET /auth/test/verification-code?email=...` (non-production only).
+
+Helper endpoint behavior:
+- Available only when `NODE_ENV !== production`
+- Optional header auth via `x-test-helper-key` if `TEST_HELPER_KEY` is configured
+- Route: `GET /auth/test/verification-code?email=...`
+- Intended for CI/local smoke automation only
 
 ## Expected Smoke Test Results
 

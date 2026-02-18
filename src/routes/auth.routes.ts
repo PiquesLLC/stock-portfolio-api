@@ -12,6 +12,7 @@ import {
   refreshHandler,
   verifyEmailHandler,
   resendVerificationHandler,
+  testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter } from '../middleware/rateLimiter';
@@ -48,6 +49,9 @@ router.post('/verify-email', apiLimiter, verifyEmailHandler);
 
 // POST /auth/resend-verification - Resend signup email OTP
 router.post('/resend-verification', mutationLimiter, resendVerificationHandler);
+
+// GET /auth/test/verification-code - Non-production helper for CI/local smoke tests
+router.get('/test/verification-code', apiLimiter, testGetVerificationCodeHandler);
 
 // GET /auth/check-username/:username - Check if username is available (rate limited to prevent enumeration)
 router.get('/check-username/:username', enumerationLimiter, checkUsernameHandler);

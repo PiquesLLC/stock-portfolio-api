@@ -5,6 +5,7 @@ const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? 'true').toLowerCas
 const RUN_SIGNUP_FLOW = String(process.env.SMOKE_RUN_SIGNUP_FLOW ?? 'false').toLowerCase() === 'true';
 const SIGNUP_EMAIL = process.env.SMOKE_SIGNUP_EMAIL || '';
 const VERIFY_CODE = process.env.SMOKE_VERIFY_CODE || '';
+const TEST_HELPER_KEY = process.env.TEST_HELPER_KEY || '';
 const SIGNUP_PASSWORD = process.env.SMOKE_SIGNUP_PASSWORD || 'StrongPass123';
 
 function parseSetCookies(setCookies) {
@@ -122,13 +123,29 @@ async function runSignupVerificationFlow() {
     console.log(`[PASS] POST /auth/resend-verification -> ${resend.response.status}`);
   }
 
-  if (!VERIFY_CODE) {
-    console.log('[SKIP] Verification step skipped (set SMOKE_VERIFY_CODE to run unlock assertion)');
+  let verificationCode = VERIFY_CODE;
+  if (!verificationCode) {
+    const helperHeaders = {};
+    if (TEST_HELPER_KEY) {
+      helperHeaders['x-test-helper-key'] = TEST_HELPER_KEY;
+    }
+    const helper = await requestJson(`/auth/test/verification-code?email=${encodeURIComponent(email)}`, {
+      method: 'GET',
+      headers: helperHeaders,
+    });
+    if (helper.response.status === 200 && typeof helper.body?.code === 'string') {
+      verificationCode = helper.body.code;
+      console.log('[PASS] GET /auth/test/verification-code -> 200');
+    }
+  }
+
+  if (!verificationCode) {
+    console.log('[SKIP] Verification step skipped (set SMOKE_VERIFY_CODE or enable /auth/test/verification-code helper)');
   } else {
     const verify = await requestJson('/auth/verify-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code: VERIFY_CODE }),
+      body: JSON.stringify({ email, code: verificationCode }),
     });
     if (verify.response.status !== 200) {
       console.log(`[FAIL] POST /auth/verify-email -> ${verify.response.status} (expected 200)`);

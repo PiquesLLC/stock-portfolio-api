@@ -28,6 +28,7 @@ import {
   formatZodError,
 } from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
+import { getCapturedEmailVerificationCode } from '../services/email.service';
 
 
 
@@ -342,6 +343,39 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
     console.error('Resend verification error:');
     res.status(500).json({ error: 'Failed to resend verification code' });
   }
+}
+
+/**
+ * GET /auth/test/verification-code?email=...
+ * Non-production helper endpoint for CI/local smoke tests.
+ */
+export async function testGetVerificationCodeHandler(req: Request, res: Response): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+
+  const configuredKey = process.env.TEST_HELPER_KEY;
+  const providedKey = req.headers['x-test-helper-key'];
+  const provided = Array.isArray(providedKey) ? providedKey[0] : providedKey;
+  if (configuredKey && provided !== configuredKey) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+
+  const email = typeof req.query.email === 'string' ? req.query.email : '';
+  if (!email || !email.includes('@')) {
+    res.status(400).json({ error: 'Invalid request' });
+    return;
+  }
+
+  const code = getCapturedEmailVerificationCode(email);
+  if (!code) {
+    res.status(404).json({ error: 'Code not available' });
+    return;
+  }
+
+  res.json({ code });
 }
 
 /**

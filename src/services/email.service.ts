@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import { config } from '../config';
 
 let resend: Resend | null = null;
+const capturedEmailVerificationCodes = new Map<string, { code: string; expiresAt: number }>();
 
 function getResend(): Resend {
   if (!resend) {
@@ -33,6 +34,14 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
 }
 
 export async function sendEmailVerification(to: string, code: string): Promise<void> {
+  // Non-production capture for CI/local smoke tests.
+  if (process.env.NODE_ENV !== 'production') {
+    capturedEmailVerificationCodes.set(to.trim().toLowerCase(), {
+      code,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+  }
+
   const r = getResend();
   await r.emails.send({
     from: 'Nala <noreply@piques.io>',
@@ -49,4 +58,20 @@ export async function sendEmailVerification(to: string, code: string): Promise<v
       </div>
     `,
   });
+}
+
+export function getCapturedEmailVerificationCode(email: string): string | null {
+  if (process.env.NODE_ENV === 'production') {
+    return null;
+  }
+  const key = email.trim().toLowerCase();
+  const captured = capturedEmailVerificationCodes.get(key);
+  if (!captured) {
+    return null;
+  }
+  if (captured.expiresAt < Date.now()) {
+    capturedEmailVerificationCodes.delete(key);
+    return null;
+  }
+  return captured.code;
 }
