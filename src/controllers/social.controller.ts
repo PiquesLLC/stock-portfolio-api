@@ -121,6 +121,8 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
         showRegion: true,
         holdingsVisibility: true,
         bio: true,
+        plan: true,
+        planStartedAt: true,
       },
     });
 
@@ -363,4 +365,3 @@ export async function getFeedHandler(req: AuthRequest, res: Response): Promise<v
     res.status(500).json({ error: 'Failed to get feed' });
   }
 }
-
