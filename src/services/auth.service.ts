@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
-import { sendEmailVerification } from './email.service';
+import { sendEmailVerification, sendPasswordResetEmail } from './email.service';
 
 
 
@@ -14,6 +14,8 @@ export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
 const EMAIL_VERIFY_MAX_ATTEMPTS = 5;
 const EMAIL_RESEND_LIMIT_PER_HOUR = 3;
+const PASSWORD_RESET_MAX_ATTEMPTS = 5;
+const PASSWORD_RESET_REQUEST_LIMIT_PER_HOUR = 3;
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -41,6 +43,27 @@ async function issueEmailVerificationCode(userId: string, email: string): Promis
     await sendEmailVerification(email, code);
   } catch {
     console.error('Email verification send failed');
+  }
+}
+
+async function issuePasswordResetCode(userId: string, email: string): Promise<void> {
+  const code = generateEmailOtpCode();
+  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+
+  await prisma.emailOtpCode.updateMany({
+    where: { userId, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  await prisma.emailOtpCode.create({
+    data: { userId, codeHash, expiresAt },
+  });
+
+  try {
+    await sendPasswordResetEmail(email, code);
+  } catch {
+    console.error('Password reset send failed');
   }
 }
 
@@ -589,5 +612,113 @@ export async function resendVerificationEmail(
   });
 
   return { success: true };
+}
+
+export async function requestPasswordReset(email: string): Promise<{ success: true }> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true, email: true },
+  });
+
+  if (!user?.email) {
+    return { success: true };
+  }
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const requestCount = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'password_reset_requested',
+      sentAt: { gte: oneHourAgo },
+    },
+  });
+
+  if (requestCount < PASSWORD_RESET_REQUEST_LIMIT_PER_HOUR) {
+    await issuePasswordResetCode(user.id, user.email);
+    await prisma.notificationAuditLog.create({
+      data: {
+        userId: user.id,
+        type: 'password_reset_requested',
+        status: 'sent',
+        channel: 'email',
+        refKey: crypto.randomUUID(),
+      },
+    });
+  }
+
+  return { success: true };
+}
+
+export async function resetPasswordWithCode(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<{ success: boolean; remainingAttempts: number; error?: 'INVALID_OR_EXPIRED' | 'TOO_MANY_ATTEMPTS' }> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true },
+  });
+  if (!user) {
+    return { success: false, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS, error: 'INVALID_OR_EXPIRED' };
+  }
+
+  const otp = await prisma.emailOtpCode.findFirst({
+    where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!otp) {
+    return { success: false, remainingAttempts: 0, error: 'INVALID_OR_EXPIRED' };
+  }
+
+  const failedAttempts = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'password_reset_failed',
+      sentAt: { gte: otp.createdAt },
+    },
+  });
+  const remainingBefore = PASSWORD_RESET_MAX_ATTEMPTS - failedAttempts;
+  if (remainingBefore <= 0) {
+    return { success: false, remainingAttempts: 0, error: 'TOO_MANY_ATTEMPTS' };
+  }
+
+  const match = await bcrypt.compare(code, otp.codeHash);
+  if (!match) {
+    await prisma.notificationAuditLog.create({
+      data: {
+        userId: user.id,
+        type: 'password_reset_failed',
+        status: 'failed',
+        channel: 'email',
+        refKey: crypto.randomUUID(),
+      },
+    });
+    return {
+      success: false,
+      remainingAttempts: Math.max(0, remainingBefore - 1),
+      error: 'INVALID_OR_EXPIRED',
+    };
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.emailOtpCode.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: now },
+    }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: now },
+    }),
+  ]);
+
+  return { success: true, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS };
 }
 

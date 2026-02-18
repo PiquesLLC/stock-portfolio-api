@@ -58,6 +58,16 @@ export const resendVerificationSchema = z.object({
   email: z.string({ error: 'Email is required' }).email('Please enter a valid email address').max(255),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string({ error: 'Email is required' }).email('Please enter a valid email address').max(255),
+});
+
+export const resetPasswordSchema = z.object({
+  email: z.string({ error: 'Email is required' }).email('Please enter a valid email address').max(255),
+  code: z.string({ error: 'Code is required' }).regex(/^\d{6}$/, 'Code must be 6 digits'),
+  newPassword: passwordSchema,
+});
+
 /**
  * Format a ZodError into a single error string (first issue message).
  */

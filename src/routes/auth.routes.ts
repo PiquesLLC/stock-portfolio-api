@@ -12,10 +12,12 @@ import {
   refreshHandler,
   verifyEmailHandler,
   resendVerificationHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
   testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter } from '../middleware/rateLimiter';
+import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
 
 const router = Router();
@@ -49,6 +51,12 @@ router.post('/verify-email', apiLimiter, verifyEmailHandler);
 
 // POST /auth/resend-verification - Resend signup email OTP
 router.post('/resend-verification', mutationLimiter, resendVerificationHandler);
+
+// POST /auth/forgot-password - Request password reset OTP
+router.post('/forgot-password', mfaSendLimiter, forgotPasswordHandler);
+
+// POST /auth/reset-password - Reset password with OTP
+router.post('/reset-password', mfaVerifyLimiter, resetPasswordHandler);
 
 // GET /auth/test/verification-code - Non-production helper for CI/local smoke tests
 router.get('/test/verification-code', apiLimiter, testGetVerificationCodeHandler);

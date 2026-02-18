@@ -14,6 +14,8 @@ import {
   revokeAllRefreshTokens,
   verifyEmailCode,
   resendVerificationEmail,
+  requestPasswordReset,
+  resetPasswordWithCode,
 } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
@@ -25,6 +27,8 @@ import {
   deleteAccountSchema,
   verifyEmailSchema,
   resendVerificationSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   formatZodError,
 } from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
@@ -342,6 +346,56 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
   } catch (_error) {
     console.error('Resend verification error:');
     res.status(500).json({ error: 'Failed to resend verification code' });
+  }
+}
+
+/**
+ * POST /auth/forgot-password
+ */
+export async function forgotPasswordHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = forgotPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    await requestPasswordReset(parsed.data.email);
+    res.json({ message: 'If this email is registered, a reset code was sent.' });
+  } catch (_error) {
+    console.error('Forgot password error:');
+    res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+}
+
+/**
+ * POST /auth/reset-password
+ */
+export async function resetPasswordHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const { email, code, newPassword } = parsed.data;
+    const result = await resetPasswordWithCode(email, code, newPassword);
+
+    if (!result.success) {
+      if (result.error === 'TOO_MANY_ATTEMPTS') {
+        res.status(429).json({ error: 'Too many reset attempts', remainingAttempts: 0 });
+        return;
+      }
+      res.status(400).json({ error: 'Invalid or expired reset code', remainingAttempts: result.remainingAttempts });
+      return;
+    }
+
+    clearAllAuthCookies(res, req);
+    res.json({ message: 'Password reset successfully' });
+  } catch (_error) {
+    console.error('Reset password error:');
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 }
 
