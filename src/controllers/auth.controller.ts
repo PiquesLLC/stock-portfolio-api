@@ -12,6 +12,7 @@ import {
   verifyPassword,
   rotateRefreshToken,
   revokeAllRefreshTokens,
+  revokeRefreshTokenFamily,
   verifyEmailCode,
   resendVerificationEmail,
   requestPasswordReset,
@@ -127,34 +128,10 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
  */
 export async function logoutHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    let userId: string | undefined;
-
-    // Try access token first (signature-verified)
-    const authToken = req.cookies?.authToken;
-    if (authToken) {
-      const { verifyToken } = await import('../services/auth.service');
-      const payload = verifyToken(authToken);
-      if (payload?.userId) {
-        userId = payload.userId;
-      }
-    }
-
-    // Fallback: look up refresh token in DB to find the user
-    if (!userId) {
-      const refreshToken = req.cookies?.refreshToken;
-      if (refreshToken) {
-        const stored = await prisma.refreshToken.findUnique({
-          where: { token: refreshToken },
-          select: { userId: true },
-        });
-        if (stored) {
-          userId = stored.userId;
-        }
-      }
-    }
-
-    if (userId) {
-      await revokeAllRefreshTokens(userId);
+    // Only revoke the current device's token family, not all sessions
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) {
+      await revokeRefreshTokenFamily(refreshToken);
     }
   } catch {
     // Best effort — still clear cookies even if lookup fails

@@ -2,12 +2,11 @@
 
 
 
-const ALERT_TYPES = ['drawdown', 'sector_exposure', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
+const ALERT_TYPES = ['drawdown', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
 type AlertType = (typeof ALERT_TYPES)[number];
 
 const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
   { type: 'drawdown', threshold: 10 },        // Alert if drawdown > 10%
-  { type: 'sector_exposure', threshold: 35 },  // Alert if any sector > 35%
   { type: 'underperform_spy', threshold: 7 },  // Alert after 7 consecutive days underperforming SPY
   { type: '52w_high', threshold: null },
   { type: '52w_low', threshold: null },
@@ -98,9 +97,6 @@ export async function evaluateAlerts(userId: string): Promise<void> {
         case 'drawdown':
           await checkDrawdown(alert.id, userId, alert.threshold ?? 10);
           break;
-        case 'sector_exposure':
-          await checkSectorExposure(alert.id, userId, alert.threshold ?? 35);
-          break;
         // 52w_high, 52w_low, underperform_spy would need candle data
         // Skipping complex checks for now â€” they can be added when candle cache is richer
       }
@@ -151,38 +147,4 @@ async function checkDrawdown(alertId: string, userId: string, thresholdPct: numb
   }
 }
 
-async function checkSectorExposure(alertId: string, userId: string, thresholdPct: number): Promise<void> {
-  // Check single-holding concentration as a proxy for sector exposure
-  const holdings = await prisma.holding.findMany({
-    where: { userId },
-  });
-
-  if (holdings.length === 0) return;
-
-  const totalValue = holdings.reduce((s, h) => s + h.shares * h.averageCost, 0);
-  if (totalValue === 0) return;
-
-  for (const h of holdings) {
-    const weight = ((h.shares * h.averageCost) / totalValue) * 100;
-    if (weight >= thresholdPct) {
-      const recent = await prisma.alertEvent.findFirst({
-        where: {
-          alertId,
-          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        },
-      });
-
-      if (!recent) {
-        await prisma.alertEvent.create({
-          data: {
-            alertId,
-            message: `${h.ticker} represents ${weight.toFixed(1)}% of portfolio (threshold: ${thresholdPct}%)`,
-            data: JSON.stringify({ ticker: h.ticker, weight, threshold: thresholdPct }),
-          },
-        });
-      }
-      break;
-    }
-  }
-}
 

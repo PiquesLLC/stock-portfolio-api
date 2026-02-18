@@ -202,7 +202,24 @@ export async function rotateRefreshToken(
 }
 
 /**
- * Revoke all refresh tokens for a user (e.g., on logout or password change)
+ * Revoke a single refresh token family (e.g., on logout — only affects current device)
+ */
+export async function revokeRefreshTokenFamily(refreshTokenValue: string): Promise<void> {
+  const stored = await prisma.refreshToken.findUnique({
+    where: { token: refreshTokenValue },
+    select: { userId: true, family: true, id: true },
+  });
+  if (!stored) return;
+
+  const family = stored.family ?? stored.id;
+  await prisma.refreshToken.updateMany({
+    where: { userId: stored.userId, family, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
+/**
+ * Revoke all refresh tokens for a user (e.g., on password change)
  */
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
   await prisma.refreshToken.updateMany({
