@@ -47,8 +47,8 @@ export async function askStockQuestion(
       citations: resp.citations,
       answeredAt: new Date().toISOString(),
     };
-  } catch (error: any) {
-    console.error(`[Perplexity Q&A] Error for ${upperTicker}:`, error.message);
+  } catch (_error) {
+    console.error(`[Perplexity Q&A] Error for ${upperTicker}`);
     return {
       ticker: upperTicker,
       question,

@@ -152,8 +152,8 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
     }
     console.log(`[Perplexity Briefing] Generated ${result.sections.length} sections for ${portfolio.holdings.length} holdings`);
     return result;
-  } catch (error: any) {
-    console.error('[Perplexity Briefing] Error:', error.message);
+  } catch (_error) {
+    console.error('[Perplexity Briefing] Error');
     return buildFallback();
   }
 }

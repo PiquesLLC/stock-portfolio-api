@@ -386,9 +386,8 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
     let parsed: any;
     try {
       parsed = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      console.error('[Nala AI] JSON parse error:', (parseErr as Error).message);
-      console.error('[Nala AI] Raw content (first 500):', resp.content.slice(0, 500));
+    } catch (_parseErr) {
+      console.error('[Nala AI] JSON parse error');
       return await buildFallbackNala(question, strategyInfo, userId);
     }
 
@@ -399,8 +398,8 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
     if (stocks.length > 0) {
       try {
         stocks = await enrichWithLocalData(stocks, userId);
-      } catch (enrichErr) {
-        console.warn('[Nala AI] Enrichment error (non-fatal):', (enrichErr as Error).message);
+      } catch (_enrichErr) {
+        console.warn('[Nala AI] Enrichment error (non-fatal)');
       }
     }
 
@@ -421,10 +420,9 @@ export async function askNala(question: string, userId?: string): Promise<NalaRe
 
     console.log(`[Nala AI] Returned ${result.stocks.length} stocks, ${result.citations.length} citations`);
     return result;
-  } catch (error: any) {
-    console.error('[Nala AI] Error:', error.message);
+  } catch (_error) {
+    console.error('[Nala AI] Error');
     return await buildFallbackNala(question, strategyInfo, userId);
   }
 }
-
 

@@ -82,9 +82,8 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     let parsed: any;
     try {
       parsed = JSON.parse(jsonStr);
-    } catch (parseErr: any) {
-      console.error(`[Perplexity] JSON parse failed for ${upper}:`, parseErr.message);
-      console.error(`[Perplexity] Content (first 300 chars):`, resp.content.slice(0, 300));
+    } catch (_parseErr) {
+      console.error(`[Perplexity] JSON parse failed for ${upper}`);
       return { ticker: upper, events: [] };
     }
 
@@ -129,7 +128,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     } else if (error.response?.status === 401) {
       console.error(`[Perplexity] Invalid API key`);
     } else {
-      console.error(`[Perplexity] Error for ${upper}:`, error.message);
+      console.error(`[Perplexity] Error for ${upper}`);
     }
     return { ticker: upper, events: [] };
   }

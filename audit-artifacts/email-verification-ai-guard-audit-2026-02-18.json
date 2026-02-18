@@ -1,0 +1,142 @@
+{
+  "generatedAt": "2026-02-18",
+  "scope": [
+    "signup email verification smoke flow",
+    "verify/resend route tests",
+    "route-level email verification guard",
+    "perplexity log hygiene"
+  ],
+  "checks": [
+    {
+      "id": "smoke_signup_flow",
+      "status": "PASS",
+      "evidence": [
+        "scripts/smoke-test.js:5",
+        "scripts/smoke-test.js:61",
+        "scripts/smoke-test.js:96",
+        "scripts/smoke-test.js:140",
+        "scripts/smoke-test.js:224"
+      ]
+    },
+    {
+      "id": "verify_resend_routes_mounted",
+      "status": "PASS",
+      "evidence": [
+        "src/routes/auth.routes.ts:47",
+        "src/routes/auth.routes.ts:50"
+      ]
+    },
+    {
+      "id": "verify_resend_route_tests",
+      "status": "PASS",
+      "evidence": [
+        "src/__tests__/auth.email-verification.routes.test.ts",
+        "vitest: 6 passed"
+      ]
+    },
+    {
+      "id": "ai_route_email_guard_middleware",
+      "status": "PASS",
+      "evidence": [
+        "src/middleware/email-verification.middleware.ts:5",
+        "src/routes/market.routes.ts:23",
+        "src/routes/market.routes.ts:24",
+        "src/routes/insights.routes.ts:34",
+        "src/routes/insights.routes.ts:35",
+        "src/routes/insights.routes.ts:36"
+      ]
+    },
+    {
+      "id": "controller_guard_fallback",
+      "status": "PASS",
+      "evidence": [
+        "src/controllers/market.controller.ts:332",
+        "src/controllers/market.controller.ts:381",
+        "src/controllers/insights.controller.ts:138",
+        "src/controllers/insights.controller.ts:165",
+        "src/controllers/insights.controller.ts:248"
+      ]
+    },
+    {
+      "id": "perplexity_log_hygiene",
+      "status": "PASS",
+      "evidence": [
+        "src/services/perplexity-qa.service.ts",
+        "src/services/perplexity-events.service.ts",
+        "src/services/perplexity-briefing.service.ts",
+        "src/services/perplexity-behavior.service.ts",
+        "src/services/perplexity-daily-report.service.ts",
+        "src/services/nala-research.service.ts"
+      ]
+    },
+    {
+      "id": "typescript_compile",
+      "status": "PASS",
+      "evidence": [
+        "npx.cmd tsc --noEmit"
+      ]
+    }
+  ],
+  "routePolicy": [
+    {
+      "route": "/market/stock/:ticker/ai-events",
+      "method": "GET",
+      "chain": [
+        "heavyReadLimiter",
+        "requireAuth",
+        "requireEmailVerifiedForAi",
+        "requirePlan('premium')",
+        "getAIEventsHandler"
+      ],
+      "status": "PASS"
+    },
+    {
+      "route": "/market/stock/:ticker/ask",
+      "method": "POST",
+      "chain": [
+        "mutationLimiter",
+        "requireAuth",
+        "requireEmailVerifiedForAi",
+        "requirePlan('premium')",
+        "askStockQuestionHandler"
+      ],
+      "status": "PASS"
+    },
+    {
+      "route": "/insights/briefing",
+      "method": "GET",
+      "chain": [
+        "heavyReadLimiter",
+        "requireAuth",
+        "requireEmailVerifiedForAi",
+        "requirePlan('premium')",
+        "getBriefingHandler"
+      ],
+      "status": "PASS"
+    },
+    {
+      "route": "/insights/briefing/explain",
+      "method": "POST",
+      "chain": [
+        "mutationLimiter",
+        "requireAuth",
+        "requireEmailVerifiedForAi",
+        "requirePlan('pro')",
+        "explainBriefingHandler"
+      ],
+      "status": "PASS"
+    },
+    {
+      "route": "/insights/behavior",
+      "method": "GET",
+      "chain": [
+        "heavyReadLimiter",
+        "requireAuth",
+        "requireEmailVerifiedForAi",
+        "requirePlan('premium')",
+        "getBehaviorHandler"
+      ],
+      "status": "PASS"
+    }
+  ]
+}
