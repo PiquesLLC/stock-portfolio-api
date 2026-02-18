@@ -74,7 +74,7 @@ export async function verifyPlaidWebhook(
     }
 
     return true;
-  } catch (err: any) {
+  } catch (_err) {
     console.error('[Plaid Webhook] Verification failed');
     return false;
   }
@@ -103,7 +103,7 @@ async function getPublicKey(kid: string): Promise<crypto.KeyObject | null> {
 
     keyCache.set(kid, { key: keyObject, fetchedAt: Date.now() });
     return keyObject;
-  } catch (err: any) {
+  } catch (_err) {
     console.error('[Plaid Webhook] Key fetch failed');
     // Evict stale cache entry
     keyCache.delete(kid);

@@ -115,7 +115,7 @@ const server = app.listen(config.port, async () => {
     } else {
       console.log('[Init] Billing routes disabled');
     }
-  } catch (error) {
+  } catch (_error) {
     if (config.nodeEnv === 'production') {
       console.error('[Init] Billing deploy safety check failed — exiting');
       server.close(() => process.exit(1));

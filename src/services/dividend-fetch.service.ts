@@ -117,8 +117,8 @@ export async function fetchUpcomingDividend(ticker: string): Promise<ParsedDivid
     if (!cal) return null;
 
     const exDate = cal.exDividendDate?.raw;
-    const divAmount = cal.dividendRate?.raw; // annual rate
-    const divPerShare = cal.dividendDate?.raw ? null : null; // not directly available per-quarter
+    const _divAmount = cal.dividendRate?.raw; // annual rate
+    const _divPerShare = cal.dividendDate?.raw ? null : null; // not directly available per-quarter
 
     // Try to get per-share from trailingAnnualDividendRate / frequency
     // Or use the last quarterly amount from historical data

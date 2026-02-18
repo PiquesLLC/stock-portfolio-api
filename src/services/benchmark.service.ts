@@ -16,7 +16,7 @@ import {
   SnapshotPoint,
   CashflowEvent,
 } from '../utils/finance-math';
-import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkCloses, getBenchmarkReturnWithQuote, getBenchmarkCandles } from '../utils/candle-cache';
+import { getBenchmarkReturns, getBenchmarkTotalReturn, getBenchmarkTotalReturnFromDate, getBenchmarkReturnWithQuote, getBenchmarkCandles } from '../utils/candle-cache';
 import { reconstructPortfolioHistory } from './snapshot.service';
 import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';

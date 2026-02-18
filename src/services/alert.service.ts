@@ -3,7 +3,7 @@
 
 
 const ALERT_TYPES = ['drawdown', 'sector_exposure', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
-type AlertType = typeof ALERT_TYPES[number];
+type AlertType = (typeof ALERT_TYPES)[number];
 
 const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
   { type: 'drawdown', threshold: 10 },        // Alert if drawdown > 10%

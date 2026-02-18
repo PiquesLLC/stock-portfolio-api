@@ -13,7 +13,6 @@ import {
   fetchTreasuryYield,
   fetchUnemployment,
   fetchGDP,
-  parseAVNumber,
   AVEconomicData,
 } from '../utils/alpha-vantage';
 import { fetchWorldBankIndicator } from '../utils/world-bank';

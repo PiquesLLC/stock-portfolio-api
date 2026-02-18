@@ -12,10 +12,9 @@ import {
   Portfolio,
 } from '../types';
 import { getPortfolio, getHoldings } from './portfolio.service';
-import { getSnapshotsAfter, getAllSnapshots, getBaselineSnapshot, getOldestSnapshot, reconstructPortfolioHistory } from './snapshot.service';
+import { getSnapshotsAfter, getAllSnapshots, reconstructPortfolioHistory } from './snapshot.service';
 import { getTotalDividendsBetween } from './dividend.service';
 
-import { getMultipleCandlesGradual } from '../utils/candle-cache';
 import { config } from '../config';
 
 // Horizon periods in years

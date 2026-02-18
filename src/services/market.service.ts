@@ -1,10 +1,9 @@
-import { getQuote, getQuotes, QuotesResult, searchSymbols, getStockProfile, getStockMetrics, getHistoricalCandles } from '../utils/finnhub';
+import { getQuote, getQuotes, QuotesResult, searchSymbols, getStockProfile, getStockMetrics } from '../utils/finnhub';
 import { getPolygonQuotes, getPolygonQuote } from '../utils/polygon';
 import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsResponse } from '../types';
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
-import axios from 'axios';
 import NodeCache from 'node-cache';
-import { yahooGet, fetchPolygonAggs, fetchFinnhubCandles } from '../utils/yahoo-http';
+import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday

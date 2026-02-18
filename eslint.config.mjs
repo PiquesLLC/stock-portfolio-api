@@ -17,7 +17,7 @@ export default [
     rules: {
       // Catch real bugs
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-console': 'off',
       'no-constant-condition': 'error',
       'no-duplicate-case': 'error',

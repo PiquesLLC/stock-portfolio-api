@@ -3,7 +3,6 @@
  * Provides dividend-focused analytics for the Income tab.
  */
 
-import prisma from '../utils/prisma';
 import { getPortfolio } from './portfolio.service';
 import { getDividendSummary, getDividendCredits } from './dividend-post.service';
 import { insightsCache } from '../utils/finnhub';
@@ -187,7 +186,6 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   }
 
   // Cash Flow calculations
-  const totalAllTime = summary.totalAllTime;
   const totalYTD = summary.totalYTD;
   const totalThisYear = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
   const totalLastYear = creditsLastYear.reduce((sum, c) => sum + c.amountGross, 0);
@@ -265,7 +263,6 @@ export async function getIncomeInsights(window: IncomeWindow = 'today'): Promise
   }
 
   // Count consecutive months with income
-  const sortedMonths = Array.from(creditsByMonth.keys()).sort().reverse();
   let consecutiveMonths = 0;
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   let checkMonth = currentMonthKey;

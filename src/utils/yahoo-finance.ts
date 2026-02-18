@@ -1731,7 +1731,7 @@ export async function getAssetAbout(ticker: string): Promise<AssetAbout | null> 
         };
       }
     }
-  } catch (err) {
+  } catch (_err) {
     // FinnHub failed, continue with static data
   }
 

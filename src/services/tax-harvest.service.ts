@@ -8,7 +8,7 @@ import prisma from '../utils/prisma';
 import { getHoldings } from './portfolio.service';
 import { fetchPrices } from './market.service';
 import { getSector } from '../utils/sectors';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity } from '../utils/perplexity';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 const cache = new NodeCache({ stdTTL: 3600 }); // 1-hour cache

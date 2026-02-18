@@ -28,7 +28,7 @@ export async function getHealthHandler(req: Request, res: Response): Promise<voi
   try {
     const healthScore = await getHealthScore();
     res.json(healthScore);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting health score:');
     res.status(500).json({
       error: 'Failed to calculate health score',
@@ -48,7 +48,7 @@ export async function getAttributionHandler(req: Request, res: Response): Promis
 
     const attribution = await getAttribution(window);
     res.json(attribution);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting attribution:');
     res.status(500).json({
       error: 'Failed to get attribution',
@@ -61,7 +61,7 @@ export async function getLeakDetectorHandler(req: Request, res: Response): Promi
   try {
     const leaks = await getLeakDetector();
     res.json(leaks);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting leak detector:');
     res.status(500).json({
       error: 'Failed to analyze correlations',
@@ -77,7 +77,7 @@ export async function getRiskForecastHandler(req: Request, res: Response): Promi
   try {
     const riskForecast = await getRiskForecast();
     res.json(riskForecast);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting risk forecast:');
     res.status(500).json({
       error: 'Failed to calculate risk forecast',
@@ -103,7 +103,7 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
 
     const incomeInsights = await getIncomeInsights(window);
     res.json(incomeInsights);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting income insights:');
     res.status(500).json({
       error: 'Failed to get income insights',
@@ -127,7 +127,7 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
     if (!requirePremium(res)) return;
     const briefing = await getPortfolioBriefing();
     res.json(briefing);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting portfolio briefing:');
     res.status(500).json({
       error: 'Failed to generate briefing',
@@ -146,7 +146,7 @@ export async function getBehaviorHandler(req: Request, res: Response): Promise<v
     if (!requirePremium(res)) return;
     const behavior = await getBehaviorInsights();
     res.json(behavior);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting behavior insights:');
     res.status(500).json({
       error: 'Failed to generate behavior insights',
@@ -165,7 +165,7 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
     if (!requirePremium(res)) return;
     const report = await getDailyReport();
     res.json(report);
-  } catch (error) {
+  } catch (_error) {
     console.error('Daily report error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
@@ -183,7 +183,7 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
   try {
     const result = await getEarningsSummary();
     res.json(result);
-  } catch (error) {
+  } catch (_error) {
     console.error('Earnings summary error:');
     res.status(500).json({
       results: [],
@@ -197,7 +197,7 @@ export async function regenerateDailyReportHandler(req: Request, res: Response):
     if (!requirePremium(res)) return;
     const report = await regenerateDailyReport();
     res.json(report);
-  } catch (error) {
+  } catch (_error) {
     console.error('Daily report regenerate error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
@@ -221,7 +221,7 @@ export async function explainBriefingHandler(req: Request, res: Response): Promi
     }
     const result = await explainBriefingSection(title, body);
     res.json(result);
-  } catch (error: any) {
+  } catch (_error) {
     console.error('[Briefing Explain] Error');
     res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
   }

@@ -1,27 +1,21 @@
-﻿import prisma from '../utils/prisma';
-import { getPortfolio } from './portfolio.service';
+﻿import { getPortfolio } from './portfolio.service';
 import { getAllSnapshots } from './snapshot.service';
 import { insightsCache } from '../utils/finnhub';
 import {
   getMultipleCandlesGradual,
   HistoricalCandles,
   getCacheStats,
-  hasCachedCandles,
   getBenchmarkReturns,
 } from '../utils/candle-cache';
 import {
   HealthScore,
   HealthScoreDetails,
-  HealthCategoryDetail,
   Attribution,
   LeakDetectorResult,
   RiskForecast,
-  RiskForecastBasis,
-  RiskForecastMetrics,
   RiskForecastScenarios,
   HoldingWithQuote,
 } from '../types';
-import { config } from '../config';
 import { getSector } from '../utils/sectors';
 
 
@@ -31,9 +25,6 @@ const CORRELATION_TRADING_DAYS = 180;
 // Minimum days needed for analysis
 const MIN_CORRELATION_DAYS = 60;
 // Minimum days for Monte Carlo
-const MIN_MONTE_CARLO_DAYS = 100;
-// Fallback days if full data unavailable
-const FALLBACK_TRADING_DAYS = 120;
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -195,7 +186,7 @@ function estimateSectorDiversification(holdings: HoldingWithQuote[]): {
 /**
  * Calculate max drawdown returning both the percentage and the peak/trough dates.
  */
-function calculateMaxDrawdownWithDates(values: number[], timestamps?: Date[]): {
+function calculateMaxDrawdownWithDates(values: number[], _timestamps?: Date[]): {
   maxDD: number | null;
   peakIdx: number;
   troughIdx: number;

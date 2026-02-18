@@ -20,7 +20,7 @@ export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Pr
     const userId = req.user?.userId;
     const alerts = await getPriceAlerts(ticker, userId);
     res.json(alerts);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting price alerts:');
     res.status(500).json({ error: 'Failed to get price alerts' });
   }
@@ -36,7 +36,7 @@ export async function getPriceAlertHandler(req: AuthRequest, res: Response): Pro
       return;
     }
     res.json(alert);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting price alert:');
     res.status(500).json({ error: 'Failed to get price alert' });
   }
@@ -100,7 +100,7 @@ export async function updatePriceAlertHandler(req: AuthRequest, res: Response): 
       return;
     }
     res.json(alert);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error updating price alert:');
     res.status(500).json({ error: 'Failed to update price alert' });
   }
@@ -117,7 +117,7 @@ export async function deletePriceAlertHandler(req: AuthRequest, res: Response): 
       return;
     }
     res.json({ ok: true });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error deleting price alert:');
     res.status(500).json({ error: 'Failed to delete price alert' });
   }
@@ -130,7 +130,7 @@ export async function getPriceAlertEventsHandler(req: AuthRequest, res: Response
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
     const events = await getPriceAlertEvents(limit, userId);
     res.json(events);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting price alert events:');
     res.status(500).json({ error: 'Failed to get price alert events' });
   }
@@ -142,7 +142,7 @@ export async function markEventReadHandler(req: AuthRequest, res: Response): Pro
     const { id } = req.params;
     await markEventRead(id, req.user!.userId);
     res.json({ ok: true });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error marking event read:');
     res.status(500).json({ error: 'Failed to mark event read' });
   }
@@ -154,7 +154,7 @@ export async function getUnreadCountHandler(req: AuthRequest, res: Response): Pr
     const userId = req.user?.userId;
     const count = await getUnreadCount(userId);
     res.json({ count });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting unread count:');
     res.status(500).json({ error: 'Failed to get unread count' });
   }

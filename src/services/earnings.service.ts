@@ -60,7 +60,7 @@ function parseQuarterly(raw: AVQuarterlyEarning[]): ParsedQuarterlyEarning[] {
 export async function getEarningsData(ticker: string): Promise<EarningsResponse> {
   const upper = ticker.toUpperCase();
 
-  const empty: EarningsResponse = {
+  const _empty: EarningsResponse = {
     ticker: upper,
     quarterly: [],
     annual: [],

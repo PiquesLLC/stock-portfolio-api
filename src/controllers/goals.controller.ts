@@ -16,7 +16,7 @@ export async function listGoalsHandler(req: Request, res: Response): Promise<voi
   try {
     const goals = await getAllGoalsWithProgress();
     res.json(goals);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error listing goals:');
     res.status(500).json({ error: 'Failed to list goals' });
   }
@@ -39,7 +39,7 @@ export async function getGoalHandler(req: Request, res: Response): Promise<void>
     }
 
     res.json(goal);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting goal:');
     res.status(500).json({ error: 'Failed to get goal' });
   }
@@ -62,7 +62,7 @@ export async function createGoalHandler(req: Request, res: Response): Promise<vo
     });
 
     res.status(201).json(goal);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error creating goal:');
     res.status(500).json({ error: 'Failed to create goal' });
   }

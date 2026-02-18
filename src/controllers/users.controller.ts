@@ -1,7 +1,7 @@
 ﻿import { Response } from 'express';
 import prisma from '../utils/prisma';
 import { getUserPortfolio } from '../services/user-portfolio.service';
-import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructIntradayGap } from '../services/snapshot.service';
+import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { AuthRequest } from '../types/auth';
 
 
@@ -25,7 +25,7 @@ export async function getUsersHandler(req: AuthRequest, res: Response): Promise<
       },
     });
     res.json(users);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching users:');
     res.status(500).json({ error: 'Failed to fetch users' });
   }
@@ -100,7 +100,7 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
     }
 
     res.json(portfolio);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching user portfolio:');
     res.status(500).json({ error: 'Failed to fetch user portfolio' });
   }
@@ -126,7 +126,7 @@ export async function updateHoldingsVisibilityHandler(req: AuthRequest, res: Res
     }
     await prisma.user.update({ where: { id: userId }, data: { holdingsVisibility } });
     res.json({ holdingsVisibility });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error updating holdings visibility:');
     res.status(500).json({ error: 'Failed to update holdings visibility' });
   }
@@ -245,7 +245,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
 
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
     res.json({ points, periodStartValue, period });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching user chart:');
     res.status(500).json({ error: 'Failed to fetch user chart data' });
   }

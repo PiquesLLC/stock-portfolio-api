@@ -2,9 +2,8 @@
 import { PortfolioSnapshot } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
-import axios from 'axios';
 import NodeCache from 'node-cache';
-import { yahooGet, fetchFinnhubCandles, fetchPolygonAggs } from '../utils/yahoo-http';
+import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles

@@ -14,7 +14,7 @@ export async function getAnalystEventsHandler(req: Request, res: Response): Prom
     const ticker = req.query.ticker as string | undefined;
     const events = await getAnalystEvents(limit, ticker);
     res.json(events);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting analyst events:');
     res.status(500).json({ error: 'Failed to get analyst events' });
   }
@@ -25,7 +25,7 @@ export async function getUnreadAnalystCountHandler(req: Request, res: Response):
   try {
     const count = await getUnreadAnalystCount();
     res.json({ count });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting unread count:');
     res.status(500).json({ error: 'Failed to get unread count' });
   }
@@ -37,7 +37,7 @@ export async function markAnalystEventReadHandler(req: Request, res: Response): 
     const { id } = req.params;
     await markAnalystEventRead(id);
     res.json({ ok: true });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error marking event read:');
     res.status(500).json({ error: 'Failed to mark event read' });
   }
@@ -48,7 +48,7 @@ export async function markAllAnalystEventsReadHandler(req: Request, res: Respons
   try {
     await markAllAnalystEventsRead();
     res.json({ ok: true });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error marking all events read:');
     res.status(500).json({ error: 'Failed to mark all events read' });
   }
@@ -64,7 +64,7 @@ export async function getAnalystSnapshotHandler(req: Request, res: Response): Pr
       return;
     }
     res.json(snapshot);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting analyst snapshot:');
     res.status(500).json({ error: 'Failed to get analyst snapshot' });
   }

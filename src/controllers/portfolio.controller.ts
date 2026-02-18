@@ -92,7 +92,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       ...portfolio,
       paceProjection,
     });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching portfolio:');
     res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
@@ -116,7 +116,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     try {
       await recordCompositionChange('holding_update');
       await resetSnapshotsForCompositionChange();
-    } catch (err) {
+    } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding update:');
     }
 
@@ -189,7 +189,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     try {
       await recordCompositionChange('holding_remove');
       await resetSnapshotsForCompositionChange();
-    } catch (err) {
+    } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding removal:');
     }
 
@@ -241,7 +241,7 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
 
     const settings = await updateCashBalance(cashBalance);
     res.json({ cashBalance: settings.cashBalance });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error updating cash balance:');
     res.status(500).json({ error: 'Failed to update cash balance' });
   }
@@ -251,7 +251,7 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
   try {
     const snapshots = await getAllSnapshots();
     res.json(snapshots);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching history:');
     res.status(500).json({ error: 'Failed to fetch history' });
   }
@@ -286,7 +286,7 @@ export async function getProjectionsHandler(req: Request, res: Response): Promis
     }
 
     res.json(projections);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error calculating projections:');
     res.status(500).json({ error: 'Failed to calculate projections' });
   }
@@ -305,7 +305,7 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
 
     const metrics = await getMetrics(lookback);
     res.json(metrics);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error calculating metrics:');
     res.status(500).json({ error: 'Failed to calculate metrics' });
   }
@@ -469,7 +469,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
 
     res.json({ points, periodStartValue, period });
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching chart data:');
     res.status(500).json({ error: 'Failed to fetch chart data' });
   }
@@ -490,7 +490,7 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
 
     const result = await getCurrentPaceProjection(window);
     res.json(result);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error calculating current pace:');
     res.status(500).json({ error: 'Failed to calculate current pace' });
   }
@@ -536,7 +536,7 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
 
     const result = await getPerformanceComparison(window, benchmark, userId || null);
     res.json(result);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching performance:');
     res.status(500).json({ error: 'Failed to fetch performance data' });
   }
@@ -556,7 +556,7 @@ export async function getTickerActivity(req: AuthRequest, res: Response): Promis
     }
     const events = await getUserActivityByTicker(userId, ticker);
     res.json(events);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching ticker activity:');
     res.status(500).json({ error: 'Failed to fetch ticker activity' });
   }
@@ -674,7 +674,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       validRows: parsedRows.length,
       skippedRows,
     });
-  } catch (error) {
+  } catch (_error) {
     console.error('CSV import parse error:');
     res.status(500).json({ error: 'Failed to parse CSV' });
   }
@@ -709,7 +709,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       return;
     }
 
-    const incomingSet = new Set(normalized.map(h => h.ticker));
+    const _incomingSet = new Set(normalized.map(h => h.ticker));
 
     let added = 0;
     let updated = 0;
@@ -735,7 +735,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     try {
       await recordCompositionChange(mode === 'replace' ? 'import_replace' : 'import_merge');
       await resetSnapshotsForCompositionChange();
-    } catch (err) {
+    } catch (_err) {
       console.warn('[Snapshot] Reset failed after import confirm:');
     }
 
@@ -767,12 +767,12 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
     try {
       await recordCompositionChange('portfolio_clear');
       await resetSnapshotsForCompositionChange();
-    } catch (err) {
+    } catch (_err) {
       console.warn('[Snapshot] Reset failed after clear portfolio:');
     }
 
     res.json({ cleared: true, holdingsRemoved: deleted.count });
-  } catch (error) {
+  } catch (_error) {
     console.error('Clear portfolio error:');
     res.status(500).json({ error: 'Failed to clear portfolio' });
   }

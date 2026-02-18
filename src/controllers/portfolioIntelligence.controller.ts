@@ -14,7 +14,7 @@ export async function getIntelligenceHandler(req: Request, res: Response): Promi
 
     const intelligence = await getPortfolioIntelligence(window);
     res.json(intelligence);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting portfolio intelligence:');
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',
@@ -35,7 +35,7 @@ export async function getUserIntelligenceHandler(req: Request, res: Response): P
 
     const intelligence = await getPortfolioIntelligence(window, userId);
     res.json(intelligence);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error getting user intelligence:');
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',

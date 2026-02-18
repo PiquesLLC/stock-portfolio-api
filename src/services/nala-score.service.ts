@@ -105,7 +105,7 @@ function scoreValue(overview: ParsedOverview | null, currentPrice: number): Nala
   const target = overview?.analystTargetPrice;
 
   // P/E Position (lower is cheaper)
-  const peScore = pe != null && pe < 0
+  const _peScore = pe != null && pe < 0
     ? 5  // negative earnings
     : bracket(pe != null ? -pe : null, [
         [-10, 25], [-15, 22], [-20, 18], [-25, 14], [-35, 10], [-50, 6], [-Infinity, 3],

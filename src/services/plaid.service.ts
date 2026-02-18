@@ -229,7 +229,7 @@ export async function getInvestmentHoldings(plaidItemId: string, userId: string)
 
   const response = await plaidClient.investmentsHoldingsGet({ access_token: accessToken });
 
-  const { accounts, holdings, securities } = response.data;
+  const { holdings, securities } = response.data;
 
   // Build a lookup map for securities by security_id
   const secMap = new Map(securities.map((s) => [s.security_id, s]));

@@ -87,7 +87,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
           week52High = range.week52High;
           week52Low = range.week52Low;
         }
-      } catch (err) {
+      } catch (_err) {
         console.error(`[Milestone] Failed to get 52-week range for ${ticker}`);
       }
 
@@ -101,7 +101,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
           allTimeHigh = allTimeData.allTimeHigh;
           allTimeLow = allTimeData.allTimeLow;
         }
-      } catch (err) {
+      } catch (_err) {
         console.error(`[Milestone] Failed to get all-time range for ${ticker}`);
       }
 

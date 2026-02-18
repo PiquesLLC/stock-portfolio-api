@@ -22,7 +22,7 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
 
     const result = await getLeaderboard(window as LeaderboardWindow, region as LeaderboardRegion);
     res.json(result);
-  } catch (error) {
+  } catch (_error) {
     console.error('Error fetching leaderboard:');
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }

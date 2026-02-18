@@ -4,7 +4,7 @@ import { getHoldings } from './portfolio.service';
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { getSector } from '../utils/sectors';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity } from '../utils/perplexity';
 
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 

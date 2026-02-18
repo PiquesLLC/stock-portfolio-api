@@ -14,7 +14,7 @@ export async function createLinkTokenHandler(req: AuthRequest, res: Response) {
   try {
     const linkToken = await createLinkToken(req.user!.userId);
     res.json({ linkToken });
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Link token creation failed');
     res.status(500).json({ error: 'Failed to create link token' });
   }
@@ -33,7 +33,7 @@ export async function exchangeTokenHandler(req: AuthRequest, res: Response) {
 
     const result = await exchangePublicToken(req.user!.userId, parsed.data.publicToken);
     res.json(result);
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Token exchange failed');
     res.status(500).json({ error: 'Failed to link account' });
   }
@@ -47,7 +47,7 @@ export async function getItemsHandler(req: AuthRequest, res: Response) {
   try {
     const items = await getPlaidItems(req.user!.userId);
     res.json({ items });
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Failed to retrieve items');
     res.status(500).json({ error: 'Failed to retrieve linked accounts' });
   }
@@ -69,7 +69,7 @@ export async function disconnectItemHandler(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: 'Linked account not found' });
     }
     res.json({ success: true });
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Disconnect failed');
     res.status(500).json({ error: 'Failed to disconnect account' });
   }
@@ -88,7 +88,7 @@ export async function getHoldingsHandler(req: AuthRequest, res: Response) {
 
     const holdings = await getInvestmentHoldings(parsed.data.itemId, req.user!.userId);
     res.json({ holdings });
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Holdings fetch failed');
     res.status(500).json({ error: 'Failed to fetch holdings' });
   }
@@ -153,7 +153,7 @@ export async function webhookHandler(req: Request, res: Response) {
     const { webhook_type, webhook_code, item_id, error } = parsed.data;
     await handleItemWebhook(webhook_type, webhook_code, item_id, error);
     res.json({ received: true });
-  } catch (err) {
+  } catch (_err) {
     console.error('[Plaid] Webhook processing error');
     res.status(500).json({ error: 'Webhook processing failed' });
   }

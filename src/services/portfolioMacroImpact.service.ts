@@ -243,7 +243,7 @@ function buildRegimeClassification(
   intl: InternationalEconomicDashboard,
 ): MacroInsight {
   const fedRate = econ.indicators.fedFundsRate?.latestValue;
-  const yield10Y = econ.indicators.treasuryYield10Y?.latestValue;
+  const _yield10Y = econ.indicators.treasuryYield10Y?.latestValue;
   const gdpGrowth = intl.regions.us.indicators.gdpGrowth?.latestValue;
   const unemployment = econ.indicators.unemployment?.latestValue;
 

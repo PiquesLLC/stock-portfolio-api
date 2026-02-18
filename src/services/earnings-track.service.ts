@@ -4,7 +4,7 @@
  */
 
 import NodeCache from 'node-cache';
-import { getEarningsData, ParsedQuarterlyEarning } from './earnings.service';
+import { getEarningsData } from './earnings.service';
 
 const cache = new NodeCache({ stdTTL: 86400 }); // 24h cache
 

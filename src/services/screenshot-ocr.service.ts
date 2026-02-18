@@ -213,7 +213,7 @@ function parseWebullMobile(lines: string[]): OcrParseResult {
   for (let i = 0; i < lines.length - 1; i += 1) {
     const line = lines[i];
     const next = lines[i + 1];
-    const rowNumber = i + 1;
+    const _rowNumber = i + 1;
     const lower = line.toLowerCase();
 
     if (lower.includes('symbol') || lower.includes('mkt value') || lower.includes('open p&l')) {
