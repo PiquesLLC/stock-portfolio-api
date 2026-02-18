@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { getUserActivity } from './activity.service';
+import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache behavior insights for 1 hour
 const behaviorCache = new NodeCache({ stdTTL: 3600 });
@@ -44,7 +45,8 @@ Focus on: position sizing, concentration risk, sector diversification, cost-basi
 activity frequency (too much trading vs buy-and-hold), and unrealized gain/loss management.
 For "positive" severity, highlight good habits. For "warning", flag potential risks. For "info", offer educational tips.`;
 
-export async function getBehaviorInsights(): Promise<BehaviorInsightsResponse> {
+export async function getBehaviorInsights(userId: string): Promise<BehaviorInsightsResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const cacheKey = 'behavior-insights';
   const cached = behaviorCache.get<BehaviorInsightsResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };

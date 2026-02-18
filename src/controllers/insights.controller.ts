@@ -10,6 +10,8 @@ import { getPortfolioBriefing, explainBriefingSection } from '../services/perple
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
 import { getDailyReport, regenerateDailyReport } from '../services/perplexity-daily-report.service';
 import { getEarningsSummary } from '../services/earnings-summary.service';
+import { AuthRequest } from '../types/auth';
+import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -122,12 +124,20 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
   }
 }
 
-export async function getBriefingHandler(req: Request, res: Response): Promise<void> {
+export async function getBriefingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const briefing = await getPortfolioBriefing();
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const briefing = await getPortfolioBriefing(req.user.userId);
     res.json(briefing);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('Error getting portfolio briefing:');
     res.status(500).json({
       error: 'Failed to generate briefing',
@@ -141,12 +151,20 @@ export async function getBriefingHandler(req: Request, res: Response): Promise<v
   }
 }
 
-export async function getBehaviorHandler(req: Request, res: Response): Promise<void> {
+export async function getBehaviorHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const behavior = await getBehaviorInsights();
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const behavior = await getBehaviorInsights(req.user.userId);
     res.json(behavior);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('Error getting behavior insights:');
     res.status(500).json({
       error: 'Failed to generate behavior insights',
@@ -211,17 +229,25 @@ export async function regenerateDailyReportHandler(req: Request, res: Response):
   }
 }
 
-export async function explainBriefingHandler(req: Request, res: Response): Promise<void> {
+export async function explainBriefingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
     const { title, body } = req.body;
     if (!title || !body) {
       res.status(400).json({ error: 'title and body are required' });
       return;
     }
-    const result = await explainBriefingSection(title, body);
+    const result = await explainBriefingSection(title, body, req.user.userId);
     res.json(result);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('[Briefing Explain] Error');
     res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
   }

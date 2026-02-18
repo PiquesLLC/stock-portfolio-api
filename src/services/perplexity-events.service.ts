@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
 import { callPerplexity, extractJson } from '../utils/perplexity';
+import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache AI events for 10 minutes per ticker+days combo
 const aiEventsCache = new NodeCache({ stdTTL: 600 });
@@ -44,7 +45,8 @@ function normalizeSentiment(raw: unknown): number {
   return isNaN(parsed) ? 0 : Math.max(-1, Math.min(1, parsed));
 }
 
-export async function getAIEvents(ticker: string, days = 90): Promise<AIEventsResponse> {
+export async function getAIEvents(ticker: string, days = 90, userId: string): Promise<AIEventsResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const upper = ticker.toUpperCase();
   const cacheKey = `ai-events-${upper}-${days}`;
   const cached = aiEventsCache.get<AIEventsResponse>(cacheKey);

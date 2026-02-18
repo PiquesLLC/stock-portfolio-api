@@ -9,6 +9,8 @@ import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
 import { getEarningsTrack } from '../services/earnings-track.service';
 import { MarketIndex } from '../utils/sectors';
+import { AuthRequest } from '../types/auth';
+import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
 import {
   aiEventsQuerySchema,
   benchmarkParamSchema,
@@ -309,8 +311,12 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
   }
 }
 
-export async function getAIEventsHandler(req: Request, res: Response): Promise<void> {
+export async function getAIEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
     const parsedParams = tickerParamSchema.safeParse(req.params);
     const parsedQuery = aiEventsQuerySchema.safeParse(req.query);
     if (!parsedParams.success || !parsedQuery.success) {
@@ -319,9 +325,13 @@ export async function getAIEventsHandler(req: Request, res: Response): Promise<v
     }
     const { ticker } = parsedParams.data;
     const days = parsedQuery.data.days ?? 90;
-    const result = await getAIEvents(ticker, days);
+    const result = await getAIEvents(ticker, days, req.user.userId);
     res.json(result);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('Error fetching AI events:');
     res.status(500).json({ error: 'Failed to fetch AI events' });
   }
@@ -349,8 +359,12 @@ export async function getAssetAboutHandler(req: Request, res: Response): Promise
   }
 }
 
-export async function askStockQuestionHandler(req: Request, res: Response): Promise<void> {
+export async function askStockQuestionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    if (!req.user?.userId) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
     const parsedParams = tickerParamSchema.safeParse(req.params);
     const parsedBody = stockQuestionSchema.safeParse(req.body);
     if (!parsedParams.success || !parsedBody.success) {
@@ -360,9 +374,13 @@ export async function askStockQuestionHandler(req: Request, res: Response): Prom
     const { ticker } = parsedParams.data;
     const { question } = parsedBody.data;
 
-    const result = await askStockQuestion(ticker, question);
+    const result = await askStockQuestion(ticker, question, req.user.userId);
     res.json(result);
   } catch (error: any) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     if (error.response?.status === 429) {
       res.status(429).json({ error: 'Rate limited. Please wait a moment.' });
       return;

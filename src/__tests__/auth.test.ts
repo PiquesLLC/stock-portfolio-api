@@ -230,7 +230,7 @@ describe('Auth Service', () => {
       prismaMock.userSettings.create.mockResolvedValue({});
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'refresh-tok' });
 
-      const result = await signup('newuser', 'New User', 'StrongPass1');
+      const result = await signup('newuser', 'newuser@example.com', 'New User', 'StrongPass1');
 
       expect(result).not.toBeNull();
       expect(result!.user.username).toBe('newuser');
@@ -245,7 +245,7 @@ describe('Auth Service', () => {
 
     it('should return null if username already exists', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'existing-id' });
-      const result = await signup('taken', 'Taken User', 'StrongPass1');
+      const result = await signup('taken', 'taken@example.com', 'Taken User', 'StrongPass1');
       expect(result).toBeNull();
     });
   });
@@ -863,7 +863,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'newuser', displayName: 'New User', password: 'StrongPass1' });
+        .send({ username: 'newuser', email: 'newuser@example.com', displayName: 'New User', password: 'StrongPass1' });
 
       expect(res.status).toBe(201);
       expect(res.body.user.username).toBe('newuser');
@@ -872,7 +872,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for invalid username format', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'ab', displayName: 'Name', password: 'StrongPass1' });
+        .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1' });
 
       expect(res.status).toBe(400);
     });
@@ -880,7 +880,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for weak password (no uppercase)', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', displayName: 'Name', password: 'weakpass1' });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1' });
 
       expect(res.status).toBe(400);
     });
@@ -888,7 +888,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for short password', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', displayName: 'Name', password: 'Sh1' });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1' });
 
       expect(res.status).toBe(400);
     });
@@ -899,7 +899,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'taken_user', displayName: 'Name', password: 'StrongPass1' });
+        .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1' });
 
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already taken');
@@ -908,7 +908,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 when display name is missing', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', password: 'StrongPass1' });
+        .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1' });
 
       expect(res.status).toBe(400);
     });

@@ -1,6 +1,7 @@
 import NodeCache from 'node-cache';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
+import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache briefings for 30 minutes
 const briefingCache = new NodeCache({ stdTTL: 1800 });
@@ -44,7 +45,8 @@ Rules:
 - Do NOT recommend buying or selling
 - CRITICAL: Never invent or estimate portfolio dollar values. Use ONLY the exact total value provided in the user message. If you mention the portfolio value, use the exact number given.`;
 
-export async function getPortfolioBriefing(): Promise<PortfolioBriefingResponse> {
+export async function getPortfolioBriefing(userId: string): Promise<PortfolioBriefingResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const cacheKey = 'portfolio-briefing';
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
@@ -184,7 +186,8 @@ Writing rules (non-negotiable):
 - Do NOT recommend buying or selling
 - Do NOT give investment advice`;
 
-export async function explainBriefingSection(title: string, body: string): Promise<BriefingExplainResponse> {
+export async function explainBriefingSection(title: string, body: string, userId: string): Promise<BriefingExplainResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const cacheKey = `briefing-explain-${title.toLowerCase().replace(/\s+/g, '-').slice(0, 50)}`;
   const cached = explainCache.get<BriefingExplainResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };

@@ -1,4 +1,5 @@
 import { callPerplexity } from '../utils/perplexity';
+import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 export interface StockQAResponse {
   ticker: string;
@@ -17,8 +18,10 @@ Return plain text (markdown formatting allowed). Do NOT return JSON.`;
 
 export async function askStockQuestion(
   ticker: string,
-  question: string
+  question: string,
+  userId: string
 ): Promise<StockQAResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const upperTicker = ticker.toUpperCase();
 
   try {

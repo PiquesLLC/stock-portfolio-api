@@ -21,7 +21,14 @@ describe('Auth Validators', () => {
   });
 
   describe('signupSchema', () => {
-    const valid = { username: 'testuser', displayName: 'Test', password: 'TestPass1' };
+    const valid = {
+      username: 'testuser',
+      email: 'test@example.com',
+      displayName: 'Test',
+      password: 'TestPass1',
+      acceptedPrivacyPolicy: true,
+      acceptedTerms: true,
+    };
 
     it('accepts valid signup', () => {
       expect(signupSchema.safeParse(valid).success).toBe(true);

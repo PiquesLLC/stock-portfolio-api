@@ -1,5 +1,18 @@
 import { Router } from 'express';
-import { loginHandler, logoutHandler, meHandler, setPasswordHandler, hasPasswordHandler, signupHandler, checkUsernameHandler, changePasswordHandler, deleteAccountHandler, refreshHandler } from '../controllers/auth.controller';
+import {
+  loginHandler,
+  logoutHandler,
+  meHandler,
+  setPasswordHandler,
+  hasPasswordHandler,
+  signupHandler,
+  checkUsernameHandler,
+  changePasswordHandler,
+  deleteAccountHandler,
+  refreshHandler,
+  verifyEmailHandler,
+  resendVerificationHandler,
+} from '../controllers/auth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
@@ -29,6 +42,12 @@ router.get('/has-password/:username', enumerationLimiter, hasPasswordHandler);
 
 // POST /auth/signup - Create new user account (rate limited)
 router.post('/signup', signupLimiter, signupHandler);
+
+// POST /auth/verify-email - Verify signup email OTP
+router.post('/verify-email', apiLimiter, verifyEmailHandler);
+
+// POST /auth/resend-verification - Resend signup email OTP
+router.post('/resend-verification', mutationLimiter, resendVerificationHandler);
 
 // GET /auth/check-username/:username - Check if username is available (rate limited to prevent enumeration)
 router.get('/check-username/:username', enumerationLimiter, checkUsernameHandler);
