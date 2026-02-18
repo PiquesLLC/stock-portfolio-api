@@ -2,6 +2,15 @@
 /* eslint-disable no-console */
 const BASE_URL = process.env.SMOKE_BASE_URL || 'https://stock-portfolio-api-production.up.railway.app';
 const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
+const RUN_SIGNUP_FLOW = String(process.env.SMOKE_RUN_SIGNUP_FLOW ?? 'false').toLowerCase() === 'true';
+const SIGNUP_EMAIL = process.env.SMOKE_SIGNUP_EMAIL || '';
+const VERIFY_CODE = process.env.SMOKE_VERIFY_CODE || '';
+const SIGNUP_PASSWORD = process.env.SMOKE_SIGNUP_PASSWORD || 'StrongPass123';
+
+function parseSetCookies(setCookies) {
+  if (!Array.isArray(setCookies)) return '';
+  return setCookies.map((cookie) => cookie.split(';')[0]).join('; ');
+}
 
 async function runCheck(check) {
   const url = `${BASE_URL}${check.path}`;
@@ -37,10 +46,130 @@ async function runCheck(check) {
   }
 }
 
+async function requestJson(path, options = {}) {
+  const url = `${BASE_URL}${path}`;
+  const response = await fetch(url, options);
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  return { response, body };
+}
+
+async function runSignupVerificationFlow() {
+  const username = `smoke_${Date.now().toString(36)}`;
+  const email = SIGNUP_EMAIL;
+  const password = SIGNUP_PASSWORD;
+  let cookies = '';
+  let failures = 0;
+
+  if (!email) {
+    console.log('[SKIP] Signup verification flow skipped (set SMOKE_RUN_SIGNUP_FLOW=true and SMOKE_SIGNUP_EMAIL=...)');
+    return 0;
+  }
+
+  console.log('');
+  console.log('=== Signup Verification Flow ===');
+
+  const signup = await requestJson('/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username,
+      email,
+      displayName: 'Smoke User',
+      password,
+      acceptedPrivacyPolicy: true,
+      acceptedTerms: true,
+    }),
+  });
+
+  if (signup.response.status !== 201) {
+    console.log(`[FAIL] POST /auth/signup -> ${signup.response.status} (expected 201)`);
+    return 1;
+  }
+  cookies = parseSetCookies(signup.response.headers.getSetCookie?.() || []);
+  console.log(`[PASS] POST /auth/signup -> ${signup.response.status}`);
+
+  const preVerifyAi = await requestJson('/insights/briefing', {
+    method: 'GET',
+    headers: cookies ? { Cookie: cookies } : {},
+  });
+  const preVerifyStatusOk = [402, 403].includes(preVerifyAi.response.status);
+  const preVerifyBlockedByEmail =
+    preVerifyAi.response.status === 403 && preVerifyAi.body?.error === 'email_verification_required';
+  if (!preVerifyStatusOk) {
+    console.log(`[FAIL] GET /insights/briefing before verify -> ${preVerifyAi.response.status} (expected 402/403)`);
+    failures += 1;
+  } else {
+    console.log(
+      `[PASS] GET /insights/briefing before verify -> ${preVerifyAi.response.status}` +
+      (preVerifyBlockedByEmail ? ' (email gate active)' : ' (plan gate active)')
+    );
+  }
+
+  const resend = await requestJson('/auth/resend-verification', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (![200, 429].includes(resend.response.status)) {
+    console.log(`[FAIL] POST /auth/resend-verification -> ${resend.response.status} (expected 200/429)`);
+    failures += 1;
+  } else {
+    console.log(`[PASS] POST /auth/resend-verification -> ${resend.response.status}`);
+  }
+
+  if (!VERIFY_CODE) {
+    console.log('[SKIP] Verification step skipped (set SMOKE_VERIFY_CODE to run unlock assertion)');
+  } else {
+    const verify = await requestJson('/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code: VERIFY_CODE }),
+    });
+    if (verify.response.status !== 200) {
+      console.log(`[FAIL] POST /auth/verify-email -> ${verify.response.status} (expected 200)`);
+      failures += 1;
+    } else {
+      console.log('[PASS] POST /auth/verify-email -> 200');
+    }
+
+    const postVerifyAi = await requestJson('/insights/briefing', {
+      method: 'GET',
+      headers: cookies ? { Cookie: cookies } : {},
+    });
+    const stillEmailBlocked =
+      postVerifyAi.response.status === 403 && postVerifyAi.body?.error === 'email_verification_required';
+    if (stillEmailBlocked) {
+      console.log('[FAIL] GET /insights/briefing after verify -> still blocked by email verification');
+      failures += 1;
+    } else {
+      console.log(
+        `[PASS] GET /insights/briefing after verify -> ${postVerifyAi.response.status} ` +
+        '(no email verification block)'
+      );
+    }
+  }
+
+  if (cookies) {
+    await requestJson('/auth/delete-account', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Cookie: cookies },
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  return failures;
+}
+
 async function main() {
   console.log('=== Post-Deploy Smoke Test ===');
   console.log(`Base URL: ${BASE_URL}`);
   console.log(`Billing enabled expectation: ${BILLING_ENABLED}`);
+  console.log(`Signup verification flow: ${RUN_SIGNUP_FLOW}`);
   console.log('');
 
   const checks = [
@@ -90,6 +219,10 @@ async function main() {
     const tag = result.ok ? 'PASS' : 'FAIL';
     console.log(`[${tag}] ${result.method} ${result.path} (${check.name}) -> ${result.status} (expected ${result.expected})`);
     if (!result.ok) failures += 1;
+  }
+
+  if (RUN_SIGNUP_FLOW) {
+    failures += await runSignupVerificationFlow();
   }
 
   console.log('');
