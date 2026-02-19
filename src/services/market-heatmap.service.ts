@@ -4,7 +4,7 @@ import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
 import { yahooGet } from '../utils/yahoo-http';
 import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
-import { getPolygonSnapshotVolumes } from '../utils/polygon';
+import { getPolygonSnapshotVolumes, getPolygonMarketCaps } from '../utils/polygon';
 
 // 1D cache: 60s, longer periods: 5min (historical data doesn't change fast)
 const heatmapCache = new NodeCache({ stdTTL: 60 });
@@ -184,13 +184,14 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   const uniqueTickers = Array.from(new Set(allTickers));
 
   // Always fetch current prices + fundamentals
-  const [{ quotes }, fundamentals, polygonVolumes] = await Promise.all([
+  const [{ quotes }, fundamentals, polygonVolumes, polygonMarketCaps] = await Promise.all([
     fetchPrices(uniqueTickers),
     prisma.fundamentalsCache.findMany({
       where: { ticker: { in: uniqueTickers } },
       select: { ticker: true, overviewJson: true },
     }),
     getPolygonSnapshotVolumes(uniqueTickers),
+    getPolygonMarketCaps(uniqueTickers),
   ]);
 
   // Best-effort ADV refresh (non-blocking). Heatmap response uses currently cached values.
@@ -237,7 +238,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const upper = ticker.toUpperCase();
         const quote = quotes.get(upper);
         const overview = fundamentalsMap.get(upper);
-        const marketCapB = resolveMarketCapB(overview);
+        const marketCapFromOverview = resolveMarketCapB(overview);
+        const marketCapB = marketCapFromOverview ?? polygonMarketCaps.get(upper) ?? 1;
 
         // Use period change if available, otherwise fall back to daily
         const changePercent = periodChanges
@@ -253,7 +255,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           price: quote?.currentPrice ?? 0,
           changePercent,
           dayChange,
-          marketCapB: marketCapB ?? 1,
+          marketCapB,
           volume: polygonVolumes.get(upper) ?? 0,
           avgVolume: getCachedAdv(upper) ?? 0,
           subSector: subName,

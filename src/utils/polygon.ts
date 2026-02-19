@@ -11,6 +11,8 @@ const cache = new NodeCache({ stdTTL: config.quoteCacheTtlSeconds });
 
 // Backup cache with longer TTL (1 hour) - NEVER loses valid prices
 const backupCache = new NodeCache({ stdTTL: 3600 });
+// Reference market cap cache (changes slowly)
+const marketCapCache = new NodeCache({ stdTTL: 12 * 60 * 60 }); // 12h
 
 // Rate limit backoff tracking
 let rateLimitBackoffUntil: number = 0;
@@ -103,6 +105,17 @@ interface PolygonSnapshotResponse {
   tickers: PolygonTickerSnapshot[];
 }
 
+interface PolygonReferenceTickerResult {
+  ticker: string;
+  market_cap?: number;
+}
+
+interface PolygonReferenceTickersResponse {
+  status: string;
+  count?: number;
+  results?: PolygonReferenceTickerResult[];
+}
+
 /**
  * Fetches per-ticker volume from Polygon snapshot endpoint.
  * Returns day volume when available, otherwise prevDay volume, otherwise 0.
@@ -146,6 +159,65 @@ export async function getPolygonSnapshotVolumes(tickers: string[]): Promise<Map<
   }
 
   return volumes;
+}
+
+/**
+ * Fetches per-ticker market cap (billions) from Polygon v3 reference tickers endpoint.
+ * Uses a 12h cache and returns best-effort partial data.
+ */
+export async function getPolygonMarketCaps(tickers: string[]): Promise<Map<string, number>> {
+  const marketCapsB = new Map<string, number>();
+  if (tickers.length === 0 || !config.polygonApiKey) return marketCapsB;
+
+  const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
+  const uncached: string[] = [];
+
+  for (const ticker of uniqueTickers) {
+    const cached = marketCapCache.get<number>(`polygon:mcap:${ticker}`);
+    if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
+      marketCapsB.set(ticker, cached);
+    } else {
+      uncached.push(ticker);
+    }
+  }
+
+  const BATCH_SIZE = 200;
+  for (let i = 0; i < uncached.length; i += BATCH_SIZE) {
+    const batch = uncached.slice(i, i + BATCH_SIZE);
+    try {
+      const response = await axios.get<PolygonReferenceTickersResponse>(
+        `${POLYGON_BASE_URL}/v3/reference/tickers`,
+        {
+          params: {
+            'ticker.in': batch.join(','),
+            apiKey: config.polygonApiKey,
+            limit: Math.max(batch.length, 1),
+          },
+          timeout: 10000,
+        }
+      );
+
+      if (response.data.status !== 'OK' || !Array.isArray(response.data.results)) {
+        continue;
+      }
+
+      for (const row of response.data.results) {
+        const ticker = row.ticker?.toUpperCase();
+        const marketCapRaw = row.market_cap;
+        if (!ticker || typeof marketCapRaw !== 'number' || !Number.isFinite(marketCapRaw) || marketCapRaw <= 0) {
+          continue;
+        }
+        const marketCapB = marketCapRaw / 1_000_000_000;
+        marketCapsB.set(ticker, marketCapB);
+        marketCapCache.set(`polygon:mcap:${ticker}`, marketCapB);
+      }
+    } catch {
+      // Best effort only: missing caps fall through to other providers/callers.
+      continue;
+    }
+  }
+
+  return marketCapsB;
 }
 
 /**
