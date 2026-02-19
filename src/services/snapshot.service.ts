@@ -611,46 +611,204 @@ function parseIntervalMs(interval: string): number {
 // ---- User-specific snapshot functions ----
 
 const userSnapshotLocks = new Map<string, number>(); // userId -> lastSnapshotTime
+const userSnapshotMutex = new Set<string>(); // per-user creation mutex
 
-export async function createUserSnapshotIfNeeded(userId: string, totalAssets: number, cashBalance: number, dayChange: number, dayChangePercent: number, totalPL: number, totalPLPercent: number, netEquity: number): Promise<void> {
-  const now = Date.now();
-  const intervalMs = config.snapshotIntervalSeconds * 1000;
+export async function createUserSnapshotIfNeeded(
+  userId: string,
+  totalAssets: number,
+  cashBalance: number,
+  dayChange: number,
+  dayChangePercent: number,
+  totalPL: number,
+  totalPLPercent: number,
+  netEquity: number,
+  options?: { force?: boolean },
+): Promise<boolean> {
+  // Per-user mutex: prevent concurrent creation from refresh job + request handler
+  if (userSnapshotMutex.has(userId)) return false;
+  userSnapshotMutex.add(userId);
 
-  const lastTime = userSnapshotLocks.get(userId) ?? 0;
-  if (now - lastTime < intervalMs) return;
+  try {
+    const now = Date.now();
+    const intervalMs = config.snapshotIntervalSeconds * 1000;
+    const force = options?.force ?? false;
 
-  // Check DB
-  const latest = await prisma.portfolioSnapshot.findFirst({
-    where: { userId },
-    orderBy: { timestamp: 'desc' },
-  });
+    if (!force) {
+      const lastTime = userSnapshotLocks.get(userId) ?? 0;
+      if (now - lastTime < intervalMs) return false;
 
-  if (latest) {
-    const timeSince = now - new Date(latest.timestamp).getTime();
-    if (timeSince < intervalMs) {
-      userSnapshotLocks.set(userId, new Date(latest.timestamp).getTime());
-      return;
+      // Check DB
+      const latest = await prisma.portfolioSnapshot.findFirst({
+        where: { userId },
+        orderBy: { timestamp: 'desc' },
+      });
+
+      if (latest) {
+        const timeSince = now - new Date(latest.timestamp).getTime();
+        if (timeSince < intervalMs) {
+          userSnapshotLocks.set(userId, new Date(latest.timestamp).getTime());
+          return false;
+        }
+      }
     }
+
+    if (totalAssets < 100) return false;
+
+    const snapshotTime = new Date();
+    await prisma.portfolioSnapshot.create({
+      data: {
+        timestamp: snapshotTime,
+        totalValue: totalAssets,
+        cashBalance,
+        dailyPL: dayChange,
+        dailyPLPercent: dayChangePercent,
+        totalPL,
+        totalPLPercent,
+        netEquity,
+        userId,
+      },
+    });
+
+    userSnapshotLocks.set(userId, snapshotTime.getTime());
+    return true;
+  } finally {
+    userSnapshotMutex.delete(userId);
+  }
+}
+
+let isRefreshingLeaderboard = false;
+
+/**
+ * Refresh snapshots for all leaderboard-eligible users using live market data.
+ * Called every 3 hours to keep the leaderboard accurate and up-to-date.
+ *
+ * Optimizations (per Codex review):
+ * - Single shared quote fetch for all unique tickers (saves API quota)
+ * - Uses Polygon-preferred path for background job
+ * - Mutex to prevent concurrent runs
+ * - force: true bypasses interval gating
+ * - Returns accurate created counts
+ */
+export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number; skipped: number; errors: number }> {
+  if (isRefreshingLeaderboard) {
+    console.log('[Leaderboard Refresh] Already running, skipping');
+    return { refreshed: 0, skipped: 0, errors: 0 };
   }
 
-  if (totalAssets < 100) return;
+  isRefreshingLeaderboard = true;
 
-  const snapshotTime = new Date();
-  await prisma.portfolioSnapshot.create({
-    data: {
-      timestamp: snapshotTime,
-      totalValue: totalAssets,
-      cashBalance,
-      dailyPL: dayChange,
-      dailyPLPercent: dayChangePercent,
-      totalPL,
-      totalPLPercent,
-      netEquity,
-      userId,
-    },
-  });
+  try {
+    const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
-  userSnapshotLocks.set(userId, snapshotTime.getTime());
+    const users = await prisma.user.findMany({
+      where: {
+        leaderboardEligible: true,
+        id: { not: DEFAULT_USER_ID },
+      },
+      select: { id: true, displayName: true },
+    });
+
+    if (users.length === 0) return { refreshed: 0, skipped: 0, errors: 0 };
+
+    // Gather all holdings for all leaderboard users in one query
+    const allHoldings = await prisma.holding.findMany({
+      where: { userId: { in: users.map(u => u.id) } },
+      select: { userId: true, ticker: true, shares: true, averageCost: true },
+    });
+
+    // Collect unique tickers across all users (normalize to uppercase)
+    const uniqueTickers = Array.from(new Set(allHoldings.map(h => h.ticker.toUpperCase())));
+    if (uniqueTickers.length === 0) return { refreshed: 0, skipped: 0, errors: 0 };
+
+    // Single shared quote fetch — Polygon-preferred to save Finnhub quota
+    const { fetchPrices } = await import('./market.service');
+    const quotesResult = await fetchPrices(uniqueTickers, { preferPolygon: true });
+    const quotes = quotesResult.quotes;
+
+    // Fetch all user settings in one query
+    const allSettings = await prisma.userSettings.findMany({
+      where: { userId: { in: users.map(u => u.id) } },
+      select: { userId: true, cashBalance: true, marginDebt: true },
+    });
+    const settingsMap = new Map(allSettings.map(s => [s.userId, s]));
+
+    // Pre-group holdings by userId for O(1) lookup (avoids O(users*holdings) filter)
+    const holdingsByUser = new Map<string, typeof allHoldings>();
+    for (const h of allHoldings) {
+      if (!h.userId) continue;
+      const list = holdingsByUser.get(h.userId);
+      if (list) list.push(h);
+      else holdingsByUser.set(h.userId, [h]);
+    }
+
+    let refreshed = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const user of users) {
+      try {
+        const userHoldings = holdingsByUser.get(user.id) ?? [];
+        if (userHoldings.length === 0) { skipped++; continue; }
+
+        const settings = settingsMap.get(user.id);
+        const cashBalance = settings?.cashBalance ?? 0;
+        const marginDebt = settings?.marginDebt ?? 0;
+
+        // Compute portfolio values from shared quotes
+        // totalCost always includes all holdings (matches getUserPortfolio semantics)
+        let holdingsValue = 0;
+        let totalCost = 0;
+        let dayChange = 0;
+        let validCount = 0;
+
+        for (const h of userHoldings) {
+          const ticker = h.ticker.toUpperCase();
+          totalCost += h.shares * h.averageCost; // always counted
+
+          const quote = quotes.get(ticker);
+          const price = (quote?.extendedPrice && quote.extendedPrice > 0)
+            ? quote.extendedPrice
+            : (quote?.currentPrice ?? 0);
+          if (price <= 0) continue;
+
+          const previousClose = quote?.previousClose ?? price;
+          const value = h.shares * price;
+          const prevValue = h.shares * previousClose;
+
+          holdingsValue += value;
+          dayChange += value - prevValue;
+          validCount++;
+        }
+
+        if (validCount === 0) { skipped++; continue; }
+
+        const totalAssets = holdingsValue + cashBalance;
+        const netEquity = totalAssets - marginDebt;
+        const totalPL = holdingsValue - totalCost;
+        const totalPLPercent = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
+        const previousHoldingsValue = holdingsValue - dayChange;
+        const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
+
+        const created = await createUserSnapshotIfNeeded(
+          user.id, totalAssets, cashBalance,
+          dayChange, dayChangePercent,
+          totalPL, totalPLPercent, netEquity,
+          { force: true },
+        );
+
+        if (created) refreshed++;
+        else skipped++;
+      } catch (err) {
+        errors++;
+        console.error(`[Leaderboard Refresh] Error for ${user.displayName ?? user.id}:`, (err as Error).message);
+      }
+    }
+
+    console.log(`[Leaderboard Refresh] Done: ${refreshed} refreshed, ${skipped} skipped, ${errors} errors`);
+    return { refreshed, skipped, errors };
+  } finally {
+    isRefreshingLeaderboard = false;
+  }
 }
 
 // ----------------------------------------------------------------------------

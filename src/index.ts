@@ -1,7 +1,7 @@
 ﻿import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
-import { createSnapshotIfNeeded } from './services/snapshot.service';
+import { createSnapshotIfNeeded, refreshLeaderboardSnapshots } from './services/snapshot.service';
 import { backfillLeaderboardDemoData } from './services/demo-data.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
@@ -150,12 +150,30 @@ const server = app.listen(config.port, async () => {
     });
   }, SNAPSHOT_INTERVAL_MS);
 
-  // Demo leaderboard data backfill â€” holdings + snapshots + activity events
+  // Demo leaderboard data backfill â€" holdings + snapshots + activity events
   setTimeout(() => {
     backfillLeaderboardDemoData().catch(err =>
       console.error('[Demo Data] Backfill failed:', (err as Error).message)
     );
   }, 60000); // 60s delay after startup
+
+  // Leaderboard snapshot refresh — update all leaderboard users with live prices every 3 hours
+  // Skips when market is CLOSED (stale quotes); runs during PRE/REG/POST
+  console.log('[Leaderboard Refresh] Running every 3 hours (market hours only)');
+  setTimeout(() => {
+    const session = getMarketSession();
+    if (session === 'CLOSED') return;
+    refreshLeaderboardSnapshots().catch(err =>
+      console.error('[Leaderboard Refresh] Startup run failed:', (err as Error).message)
+    );
+  }, 120000); // 2 min delay after startup (backfill may still be running)
+  setInterval(() => {
+    const session = getMarketSession();
+    if (session === 'CLOSED') return;
+    refreshLeaderboardSnapshots().catch(err =>
+      console.error('[Leaderboard Refresh] Error:', (err as Error).message)
+    );
+  }, 3 * 60 * 60 * 1000); // Every 3 hours
 
   // Dividend sync â€" fetch dividend events from Yahoo Finance on startup + every 6 hours (skip weekends)
   if (!isWeekendET()) {

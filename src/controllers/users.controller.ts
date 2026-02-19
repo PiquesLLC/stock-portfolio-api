@@ -186,6 +186,19 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
         }
       }
 
+      // Fix incomplete chart data: candle prices (from Polygon/Yahoo) may differ
+      // from live quotes, and some tickers may lack candle data entirely.
+      // Normalize all chart points so the last candle aligns with liveValue,
+      // keeping the relative shape intact. This prevents the reference line
+      // from sitting far above chart data and squishing the line to the bottom.
+      if (points.length > 0 && liveValue > 0) {
+        const lastCandleValue = points[points.length - 1].value;
+        const offset = liveValue - lastCandleValue;
+        if (Math.abs(offset) > 1) {
+          for (const p of points) p.value += offset;
+        }
+      }
+
       // Append live value only if we're within the same session (gap < 4 hours).
       // On weekends/holidays, the Yahoo candles are the complete picture.
       const lastPtTime = points.length > 0 ? points[points.length - 1].time : 0;
@@ -239,8 +252,18 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
     }
 
+    // Normalize chart data so last candle aligns with live value (same as 1D fix)
+    const liveVal = portfolio.totalAssets - portfolio.marginDebt;
+    if (points.length > 0 && liveVal > 0) {
+      const lastCandleVal = points[points.length - 1].value;
+      const offset = liveVal - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
+      }
+    }
+
     if (points.length === 0 || now - points[points.length - 1].time > 5000) {
-      points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+      points.push({ time: now, value: liveVal });
     }
 
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;

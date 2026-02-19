@@ -366,6 +366,18 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         }
       }
 
+      // Normalize candle-based chart points to match live portfolio value.
+      // Candle prices (Polygon/Yahoo) can differ from live quotes (Finnhub),
+      // and some tickers may lack candle data entirely. Adding a constant offset
+      // keeps the chart shape intact while aligning with the actual portfolio value.
+      if (points.length > 0 && liveValue > 0) {
+        const lastCandleVal = points[points.length - 1].value;
+        const offset = liveValue - lastCandleVal;
+        if (Math.abs(offset) > 1) {
+          for (const p of points) p.value += offset;
+        }
+      }
+
       // Fill the gap between last Yahoo candle (~15min delayed) and now
       // using recent snapshots recorded every 60 seconds.
       // Cap at 4 hours to avoid bridging across overnight/weekend/holiday gaps —
@@ -451,9 +463,19 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
     }
 
+    // Normalize chart points to match live portfolio value (same as 1D fix)
+    const liveVal = portfolio.totalAssets - portfolio.marginDebt;
+    if (points.length > 0 && liveVal > 0) {
+      const lastCandleVal = points[points.length - 1].value;
+      const offset = liveVal - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
+      }
+    }
+
     // Append current live value
     if (points.length === 0 || now - points[points.length - 1].time > 5000) {
-      points.push({ time: now, value: portfolio.totalAssets - portfolio.marginDebt });
+      points.push({ time: now, value: liveVal });
     }
 
     // Rebaseline to latest composition change within the window to avoid false jumps.

@@ -2,6 +2,7 @@ import prisma from '../utils/prisma';
 import { subSectorGroups } from '../utils/sectors';
 import { backfillDemoUserSnapshots } from './snapshot.service';
 import { followUser } from './follow.service';
+import { fetchPrices } from './market.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -14,11 +15,17 @@ function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Tickers to exclude from demo data: delisted, renamed, or extreme prices
+const EXCLUDED_TICKERS = new Set(['HES', 'SQ', 'BRK.A']);
+
 function collectHeatmapTickers(): string[] {
   const tickers: string[] = [];
   for (const sector of Object.values(subSectorGroups)) {
     for (const list of Object.values(sector)) {
-      for (const t of list) tickers.push(t.toUpperCase());
+      for (const t of list) {
+        const upper = t.toUpperCase();
+        if (!EXCLUDED_TICKERS.has(upper)) tickers.push(upper);
+      }
     }
   }
   return Array.from(new Set(tickers));
@@ -49,21 +56,35 @@ export async function ensureLeaderboardUsersHaveHoldings(): Promise<{ filled: nu
     const holdingCount = randInt(6, 14);
     const selected = pickRandom(tickerPool, holdingCount);
 
+    // Fetch real prices so avgCost is realistic (±20% of current price)
+    const quotesResult = await fetchPrices(selected).catch(() => null);
+    const priceMap = new Map<string, number>();
+    if (quotesResult) {
+      for (const [ticker, q] of quotesResult.quotes) {
+        if (q.currentPrice > 0) priceMap.set(ticker, q.currentPrice);
+      }
+    }
+
     await prisma.holding.createMany({
-      data: selected.map((ticker) => {
-        const avgCost = randInt(10, 500) + Math.random();
-        const shares = randInt(2, 60);
-        return {
-          userId: user.id,
-          ticker,
-          shares,
-          averageCost: Math.round(avgCost * 100) / 100,
-        };
-      }),
+      data: selected
+        .filter(ticker => priceMap.has(ticker)) // only include tickers with valid prices
+        .map((ticker) => {
+          const currentPrice = priceMap.get(ticker)!;
+          // Random avgCost within ±20% of current price for realistic P/L
+          const variance = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+          const avgCost = currentPrice * variance;
+          const shares = randInt(2, 60);
+          return {
+            userId: user.id,
+            ticker,
+            shares,
+            averageCost: Math.round(avgCost * 100) / 100,
+          };
+        }),
     });
 
-    const cashBalance = randInt(5000, 50000);
-    const marginDebt = Math.random() > 0.7 ? randInt(1000, 10000) : 0;
+    const cashBalance = 0;
+    const marginDebt = 0;
     await prisma.userSettings.upsert({
       where: { userId: user.id },
       update: { cashBalance, marginDebt },
