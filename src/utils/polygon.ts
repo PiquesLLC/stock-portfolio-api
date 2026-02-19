@@ -105,15 +105,13 @@ interface PolygonSnapshotResponse {
   tickers: PolygonTickerSnapshot[];
 }
 
-interface PolygonReferenceTickerResult {
-  ticker: string;
-  market_cap?: number;
-}
-
-interface PolygonReferenceTickersResponse {
+interface PolygonTickerDetailsResponse {
   status: string;
-  count?: number;
-  results?: PolygonReferenceTickerResult[];
+  results?: {
+    ticker: string;
+    market_cap?: number;
+    weighted_shares_outstanding?: number;
+  };
 }
 
 /**
@@ -162,8 +160,9 @@ export async function getPolygonSnapshotVolumes(tickers: string[]): Promise<Map<
 }
 
 /**
- * Fetches per-ticker market cap (billions) from Polygon v3 reference tickers endpoint.
- * Uses a 12h cache and returns best-effort partial data.
+ * Fetches per-ticker market cap (billions) from Polygon v3 ticker details endpoint.
+ * Uses per-ticker calls with 12h cache (shares outstanding barely change).
+ * Processes in concurrent batches of 20 to stay within rate limits.
  */
 export async function getPolygonMarketCaps(tickers: string[]): Promise<Map<string, number>> {
   const marketCapsB = new Map<string, number>();
@@ -181,39 +180,33 @@ export async function getPolygonMarketCaps(tickers: string[]): Promise<Map<strin
     }
   }
 
-  const BATCH_SIZE = 200;
+  if (uncached.length === 0) return marketCapsB;
+
+  // Fetch in concurrent batches of 20
+  const BATCH_SIZE = 20;
   for (let i = 0; i < uncached.length; i += BATCH_SIZE) {
     const batch = uncached.slice(i, i + BATCH_SIZE);
-    try {
-      const response = await axios.get<PolygonReferenceTickersResponse>(
-        `${POLYGON_BASE_URL}/v3/reference/tickers`,
-        {
-          params: {
-            'ticker.in': batch.join(','),
-            apiKey: config.polygonApiKey,
-            limit: Math.max(batch.length, 1),
-          },
-          timeout: 10000,
+    const results = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        const response = await axios.get<PolygonTickerDetailsResponse>(
+          `${POLYGON_BASE_URL}/v3/reference/tickers/${encodeURIComponent(ticker)}`,
+          { params: { apiKey: config.polygonApiKey }, timeout: 8000 }
+        );
+        const res = response.data.results;
+        if (!res) return null;
+        const mcRaw = res.market_cap;
+        if (typeof mcRaw === 'number' && Number.isFinite(mcRaw) && mcRaw > 0) {
+          return { ticker: ticker.toUpperCase(), marketCapB: mcRaw / 1_000_000_000 };
         }
-      );
+        return null;
+      })
+    );
 
-      if (response.data.status !== 'OK' || !Array.isArray(response.data.results)) {
-        continue;
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) {
+        marketCapsB.set(r.value.ticker, r.value.marketCapB);
+        marketCapCache.set(`polygon:mcap:${r.value.ticker}`, r.value.marketCapB);
       }
-
-      for (const row of response.data.results) {
-        const ticker = row.ticker?.toUpperCase();
-        const marketCapRaw = row.market_cap;
-        if (!ticker || typeof marketCapRaw !== 'number' || !Number.isFinite(marketCapRaw) || marketCapRaw <= 0) {
-          continue;
-        }
-        const marketCapB = marketCapRaw / 1_000_000_000;
-        marketCapsB.set(ticker, marketCapB);
-        marketCapCache.set(`polygon:mcap:${ticker}`, marketCapB);
-      }
-    } catch {
-      // Best effort only: missing caps fall through to other providers/callers.
-      continue;
     }
   }
 
