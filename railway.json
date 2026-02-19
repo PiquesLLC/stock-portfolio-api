@@ -5,7 +5,7 @@
     "buildCommand": "bash scripts/build-with-client.sh"
   },
   "deploy": {
-    "startCommand": "npx prisma db push --skip-generate && exec node dist/index.js",
+    "startCommand": "npx prisma migrate resolve --applied 0_baseline || true; npx prisma migrate resolve --applied 20260218_add_refresh_token_family || true; npx prisma migrate resolve --applied 20260219_add_billing_fields || true; npx prisma migrate deploy && exec node dist/index.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

@@ -5,7 +5,7 @@
     "main": "dist/index.js",
     "scripts": {
         "build": "prisma generate && tsc",
-        "start": "prisma db push --skip-generate && node dist/index.js",
+        "start": "prisma migrate deploy && node dist/index.js",
         "dev": "node scripts/kill-port.js && nodemon --exec ts-node src/index.ts",
         "db:generate": "prisma generate",
         "db:push": "prisma db push",
