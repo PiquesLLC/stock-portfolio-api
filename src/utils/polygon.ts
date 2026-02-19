@@ -104,6 +104,51 @@ interface PolygonSnapshotResponse {
 }
 
 /**
+ * Fetches per-ticker volume from Polygon snapshot endpoint.
+ * Returns day volume when available, otherwise prevDay volume, otherwise 0.
+ * This function is best-effort and never throws.
+ */
+export async function getPolygonSnapshotVolumes(tickers: string[]): Promise<Map<string, number>> {
+  const volumes = new Map<string, number>();
+  if (tickers.length === 0) return volumes;
+
+  const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
+  const BATCH_SIZE = 200;
+
+  for (let i = 0; i < uniqueTickers.length; i += BATCH_SIZE) {
+    const batch = uniqueTickers.slice(i, i + BATCH_SIZE);
+    try {
+      const response = await axios.get<PolygonSnapshotResponse>(
+        `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
+        {
+          params: {
+            tickers: batch.join(','),
+            apiKey: config.polygonApiKey,
+          },
+          timeout: 10000,
+        }
+      );
+
+      if (response.data.status !== 'OK' && response.data.status !== 'DELAYED') {
+        continue;
+      }
+
+      for (const snapshot of response.data.tickers || []) {
+        const upperTicker = snapshot.ticker.toUpperCase();
+        const dayVolume = typeof snapshot.day?.v === 'number' ? snapshot.day.v : 0;
+        const prevDayVolume = typeof snapshot.prevDay?.v === 'number' ? snapshot.prevDay.v : 0;
+        volumes.set(upperTicker, dayVolume || prevDayVolume || 0);
+      }
+    } catch {
+      // Best effort: leave missing tickers at default 0 in caller
+      continue;
+    }
+  }
+
+  return volumes;
+}
+
+/**
  * Gets the best available "current" price from Polygon snapshot data.
  * Priority: lastTrade.p > min.c > day.c
  * This handles pre-market and after-hours where day.c might not be updated.

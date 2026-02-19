@@ -3,6 +3,8 @@ import prisma from '../utils/prisma';
 import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
 import { yahooGet } from '../utils/yahoo-http';
+import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
+import { getPolygonSnapshotVolumes } from '../utils/polygon';
 
 // 1D cache: 60s, longer periods: 5min (historical data doesn't change fast)
 const heatmapCache = new NodeCache({ stdTTL: 60 });
@@ -26,6 +28,8 @@ interface HeatmapStock {
   changePercent: number;
   dayChange: number;
   marketCapB: number;
+  volume: number;
+  avgVolume: number;
   subSector: string;
 }
 
@@ -180,13 +184,19 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   const uniqueTickers = Array.from(new Set(allTickers));
 
   // Always fetch current prices + fundamentals
-  const [{ quotes }, fundamentals] = await Promise.all([
+  const [{ quotes }, fundamentals, polygonVolumes] = await Promise.all([
     fetchPrices(uniqueTickers),
     prisma.fundamentalsCache.findMany({
       where: { ticker: { in: uniqueTickers } },
       select: { ticker: true, overviewJson: true },
     }),
+    getPolygonSnapshotVolumes(uniqueTickers),
   ]);
+
+  // Best-effort ADV refresh (non-blocking). Heatmap response uses currently cached values.
+  void queueAdvFetches(uniqueTickers).catch(() => {
+    // Ignore ADV queue failures; avgVolume defaults to 0.
+  });
 
   // For non-1D periods, fetch historical change %
   let periodChanges: Map<string, number> | null = null;
@@ -244,6 +254,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           changePercent,
           dayChange,
           marketCapB: marketCapB ?? 1,
+          volume: polygonVolumes.get(upper) ?? 0,
+          avgVolume: getCachedAdv(upper) ?? 0,
           subSector: subName,
         };
       });
