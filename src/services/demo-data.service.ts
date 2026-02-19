@@ -6,6 +6,51 @@ import { fetchPrices } from './market.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
+const DEMO_USERS = [
+  { username: 'alex_trades', displayName: 'Alex Chen', region: 'NA' },
+  { username: 'sarah_invest', displayName: 'Sarah Johnson', region: 'NA' },
+  { username: 'mike_portfolio', displayName: 'Mike Rivera', region: 'NA' },
+  { username: 'jess_capital', displayName: 'Jessica Park', region: 'APAC' },
+  { username: 'david_stocks', displayName: 'David Kim', region: 'APAC' },
+  { username: 'emma_wealth', displayName: 'Emma Thompson', region: 'EU' },
+  { username: 'ryan_markets', displayName: 'Ryan Garcia', region: 'NA' },
+  { username: 'lisa_gains', displayName: 'Lisa Nguyen', region: 'APAC' },
+  { username: 'chris_alpha', displayName: 'Chris Anderson', region: 'EU' },
+  { username: 'nina_bull', displayName: 'Nina Patel', region: 'APAC' },
+];
+
+/**
+ * Ensure all 10 demo leaderboard users exist. Idempotent — skips users
+ * that are already in the DB (matched by username).
+ */
+export async function ensureDemoLeaderboardUsers(): Promise<number> {
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  ninetyDaysAgo.setHours(0, 0, 0, 0);
+
+  let created = 0;
+  for (const u of DEMO_USERS) {
+    const existing = await prisma.user.findFirst({ where: { username: u.username } });
+    if (existing) continue;
+
+    await prisma.user.create({
+      data: {
+        username: u.username,
+        displayName: u.displayName,
+        region: u.region,
+        trackingActive: true,
+        trackingStartAt: ninetyDaysAgo,
+        leaderboardEligible: true,
+        leaderboardEligibleAt: ninetyDaysAgo,
+        profilePublic: true,
+      },
+    });
+    created++;
+  }
+  if (created > 0) console.log(`[Demo Users] Created ${created} demo leaderboard users`);
+  return created;
+}
+
 function pickRandom<T>(arr: T[], count: number): T[] {
   const shuffled = [...arr].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
@@ -238,7 +283,9 @@ export async function seedLeaderboardFollows(
 }
 
 export async function backfillLeaderboardDemoData(): Promise<void> {
+  await ensureDemoLeaderboardUsers();
   await ensureLeaderboardUsersHaveHoldings();
   await backfillDemoUserSnapshots();
   await seedLeaderboardActivityEvents();
+  await seedLeaderboardFollows();
 }
