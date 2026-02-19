@@ -208,7 +208,7 @@ export async function getQuotes(tickers: string[]): Promise<QuotesResult> {
       if (quote.isStale) staleCount++;
       if (quote.isRepricing) repricingCount++;
     } catch (error) {
-      console.error(`Failed to fetch quote for ${ticker}:`, error);
+      console.error(`Failed to fetch quote for ${ticker}:`, error instanceof Error ? error.message : String(error));
       failedTickers.push(ticker.toUpperCase());
     }
   }
@@ -346,7 +346,7 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
     if (error instanceof AxiosError && error.response?.status === 429) {
       rateLimitedUntil = now + 60000;
     }
-    console.error(`Failed to fetch candles for ${upperTicker}:`, error);
+    console.error(`Failed to fetch candles for ${upperTicker}:`, error instanceof Error ? error.message : String(error));
 
     return {
       ticker: upperTicker,
@@ -1164,7 +1164,7 @@ export async function searchSymbols(
           console.warn('Finnhub rate limited for symbol search, falling back to Polygon');
           usedFallback = true;
         } else {
-          console.error('Symbol search error:', error);
+          console.error('Symbol search error:', error instanceof Error ? error.message : String(error));
           usedFallback = true;
         }
       }
@@ -1199,7 +1199,7 @@ export async function searchSymbols(
           searchCache.set(cacheKey, rawResults);
         }
       } catch (error) {
-        console.error('Polygon search fallback error:', error);
+        console.error('Polygon search fallback error:', error instanceof Error ? error.message : String(error));
         return { results: [], partial: true, cached: false, advPending: [] };
       }
     }
