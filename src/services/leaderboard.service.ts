@@ -8,6 +8,7 @@ import {
   SnapshotPoint,
   CashflowEvent,
 } from '../utils/finance-math';
+import { fetchPrices } from './market.service';
 
 const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
   world: null,
@@ -61,6 +62,34 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   const windowStart = getWindowStartDate(window);
   const entries: LeaderboardEntry[] = [];
 
+  // ---- Live pricing: batch-fetch all holdings + quotes once ----
+  const userIds = users.map(u => u.id);
+  const [allHoldings, allSettings] = await Promise.all([
+    prisma.holding.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, ticker: true, shares: true, averageCost: true },
+    }),
+    prisma.userSettings.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, cashBalance: true, marginDebt: true },
+    }),
+  ]);
+
+  const uniqueTickers = Array.from(new Set(allHoldings.map(h => h.ticker.toUpperCase())));
+  const quotes = uniqueTickers.length > 0
+    ? (await fetchPrices(uniqueTickers, { preferPolygon: true })).quotes
+    : new Map<string, { currentPrice: number; previousClose?: number; extendedPrice?: number }>();
+
+  // Pre-group by userId
+  const holdingsByUser = new Map<string, typeof allHoldings>();
+  for (const h of allHoldings) {
+    if (!h.userId) continue;
+    const list = holdingsByUser.get(h.userId);
+    if (list) list.push(h);
+    else holdingsByUser.set(h.userId, [h]);
+  }
+  const settingsMap = new Map(allSettings.map(s => [s.userId, s]));
+
   for (const user of users) {
     if (!user.trackingStartAt) continue;
 
@@ -103,6 +132,30 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       where: { userId: user.id },
     });
 
+    // ---- Compute live portfolio value from current holdings + live quotes ----
+    const userHoldings = holdingsByUser.get(user.id) ?? [];
+    const userSettings = settingsMap.get(user.id);
+    const cashBalance = userSettings?.cashBalance ?? 0;
+    const marginDebt = userSettings?.marginDebt ?? 0;
+    let liveValue: number | null = null;
+
+    if (userHoldings.length > 0) {
+      let holdingsValue = 0;
+      let validCount = 0;
+      for (const h of userHoldings) {
+        const quote = quotes.get(h.ticker.toUpperCase());
+        const price = (quote?.extendedPrice && quote.extendedPrice > 0)
+          ? quote.extendedPrice
+          : (quote?.currentPrice ?? 0);
+        if (price <= 0) continue;
+        holdingsValue += h.shares * price;
+        validCount++;
+      }
+      if (validCount > 0) {
+        liveValue = holdingsValue + cashBalance - marginDebt;
+      }
+    }
+
     if (!baseline || !latest || allSnapshots.length < 2) {
       entries.push({
         userId: user.id,
@@ -123,7 +176,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         snapshotCount,
         startDateUsed: null,
         endDateUsed: null,
-        currentAssets: latest ? (latest.netEquity ?? latest.totalValue) : null,
+        currentAssets: liveValue ?? (latest ? (latest.netEquity ?? latest.totalValue) : null),
       });
       continue;
     }
@@ -149,13 +202,13 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     const twrRaw = calculateTWR(snapshotPoints, cashflows);
     const twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
 
-    // Simple return for backwards compatibility
+    // Use live value for return calculations (falls back to snapshot if quotes unavailable)
     const baselineValue = baseline.netEquity ?? baseline.totalValue;
-    const latestValue = latest.netEquity ?? latest.totalValue;
+    const currentValue = liveValue ?? (latest.netEquity ?? latest.totalValue);
     const returnPct = baselineValue > 0
-      ? ((latestValue - baselineValue) / baselineValue) * 100
+      ? ((currentValue - baselineValue) / baselineValue) * 100
       : null;
-    const returnDollar = latestValue - baselineValue;
+    const returnDollar = currentValue - baselineValue;
 
     // Anti-cheat checks
     let flagged = false;
@@ -200,7 +253,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       snapshotCount,
       startDateUsed: baseline.timestamp.toISOString(),
       endDateUsed: latest.timestamp.toISOString(),
-      currentAssets: latestValue,
+      currentAssets: currentValue,
     });
   }
 
