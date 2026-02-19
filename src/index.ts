@@ -150,12 +150,18 @@ const server = app.listen(config.port, async () => {
     });
   }, SNAPSHOT_INTERVAL_MS);
 
-  // Demo leaderboard data backfill â€" holdings + snapshots + activity events
-  setTimeout(() => {
-    backfillLeaderboardDemoData().catch(err =>
-      console.error('[Demo Data] Backfill failed:', (err as Error).message)
-    );
-  }, 60000); // 60s delay after startup
+  // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
+  // Disable this env var once real users join the leaderboard.
+  if (process.env.DEMO_LEADERBOARD === 'true') {
+    console.log('[Demo Data] DEMO_LEADERBOARD=true — backfilling demo users');
+    setTimeout(() => {
+      backfillLeaderboardDemoData().catch(err =>
+        console.error('[Demo Data] Backfill failed:', (err as Error).message)
+      );
+    }, 60000); // 60s delay after startup
+  } else {
+    console.log('[Demo Data] Skipped (DEMO_LEADERBOARD not set)');
+  }
 
   // Leaderboard snapshot refresh — update all leaderboard users with live prices every 3 hours
   // Skips when market is CLOSED (stale quotes); runs during PRE/REG/POST
