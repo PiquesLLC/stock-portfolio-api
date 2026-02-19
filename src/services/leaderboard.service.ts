@@ -138,21 +138,33 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     const cashBalance = userSettings?.cashBalance ?? 0;
     const marginDebt = userSettings?.marginDebt ?? 0;
     let liveValue: number | null = null;
+    let prevCloseValue: number | null = null; // portfolio value using previousClose prices
 
     if (userHoldings.length > 0) {
       let holdingsValue = 0;
+      let prevHoldingsValue = 0;
       let validCount = 0;
+      let prevValidCount = 0;
       for (const h of userHoldings) {
         const quote = quotes.get(h.ticker.toUpperCase());
         const price = (quote?.extendedPrice && quote.extendedPrice > 0)
           ? quote.extendedPrice
           : (quote?.currentPrice ?? 0);
-        if (price <= 0) continue;
-        holdingsValue += h.shares * price;
-        validCount++;
+        if (price > 0) {
+          holdingsValue += h.shares * price;
+          validCount++;
+        }
+        const prevClose = quote?.previousClose ?? 0;
+        if (prevClose > 0) {
+          prevHoldingsValue += h.shares * prevClose;
+          prevValidCount++;
+        }
       }
       if (validCount > 0) {
         liveValue = holdingsValue + cashBalance - marginDebt;
+      }
+      if (prevValidCount > 0) {
+        prevCloseValue = prevHoldingsValue + cashBalance - marginDebt;
       }
     }
 
@@ -198,17 +210,33 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       amount: t.type === 'deposit' ? t.amount : -t.amount,
     }));
 
-    // Calculate TWR
-    const twrRaw = calculateTWR(snapshotPoints, cashflows);
-    const twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
+    // Calculate TWR — for 1D, use live price-based return instead of snapshot TWR
+    // (snapshot baselines for demo users are synthetic and give wildly wrong 1D values)
+    let twrPct: number | null;
+    if (window === '1D' && prevCloseValue != null && liveValue != null && prevCloseValue > 0) {
+      twrPct = Math.round(((liveValue - prevCloseValue) / prevCloseValue) * 10000) / 100;
+    } else {
+      const twrRaw = calculateTWR(snapshotPoints, cashflows);
+      twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
+    }
 
-    // Use live value for return calculations (falls back to snapshot if quotes unavailable)
-    const baselineValue = baseline.netEquity ?? baseline.totalValue;
+    // Use live pricing for returns — for 1D use previousClose as baseline (real market data),
+    // for other windows fall back to snapshot baseline
     const currentValue = liveValue ?? (latest.netEquity ?? latest.totalValue);
-    const returnPct = baselineValue > 0
-      ? ((currentValue - baselineValue) / baselineValue) * 100
-      : null;
-    const returnDollar = currentValue - baselineValue;
+    let returnPct: number | null;
+    let returnDollar: number;
+
+    if (window === '1D' && prevCloseValue != null && liveValue != null) {
+      // 1D: compute from real previousClose → current price (no snapshot dependency)
+      returnDollar = liveValue - prevCloseValue;
+      returnPct = prevCloseValue > 0 ? (returnDollar / prevCloseValue) * 100 : null;
+    } else {
+      const baselineValue = baseline.netEquity ?? baseline.totalValue;
+      returnDollar = currentValue - baselineValue;
+      returnPct = baselineValue > 0
+        ? ((currentValue - baselineValue) / baselineValue) * 100
+        : null;
+    }
 
     // Anti-cheat checks
     let flagged = false;
