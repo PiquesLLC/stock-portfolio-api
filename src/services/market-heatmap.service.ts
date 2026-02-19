@@ -199,11 +199,13 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     // Ignore ADV queue failures; avgVolume defaults to 0.
   });
 
-  // For non-1D periods, fetch historical change %
+  // Fetch historical change % from candle data for all periods.
+  // For 1D: use 2-day lookback as fallback when live quotes show 0%
+  // (Finnhub resets dp to 0 after midnight; Polygon free tier hardcodes 0%).
   let periodChanges: Map<string, number> | null = null;
-  if (period !== '1D') {
-    const days = PERIOD_DAYS[period];
-    periodChanges = await fetchPeriodChanges(uniqueTickers, days);
+  const candleDays = period === '1D' ? 2 : PERIOD_DAYS[period];
+  if (candleDays > 0) {
+    periodChanges = await fetchPeriodChanges(uniqueTickers, candleDays);
   }
 
   const fundamentalsMap = new Map<string, any>();
@@ -241,10 +243,15 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const marketCapFromOverview = resolveMarketCapB(overview);
         const marketCapB = marketCapFromOverview ?? polygonMarketCaps.get(upper) ?? 1;
 
-        // Use period change if available, otherwise fall back to daily
-        const changePercent = periodChanges
-          ? (periodChanges.get(upper) ?? 0)
-          : (quote?.changePercent ?? 0);
+        // For 1D: prefer live quote changePercent when non-zero, fall back to candle data.
+        // After midnight or with Polygon free tier, live changePercent is 0 — candle data is reliable.
+        // For other periods: always use candle-based periodChanges.
+        let changePercent: number;
+        if (period === '1D' && quote?.changePercent) {
+          changePercent = quote.changePercent;
+        } else {
+          changePercent = periodChanges?.get(upper) ?? (quote?.changePercent ?? 0);
+        }
         const dayChange = period === '1D'
           ? (quote?.change ?? 0)
           : 0; // dayChange only meaningful for 1D
