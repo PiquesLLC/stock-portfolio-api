@@ -1,14 +1,13 @@
-﻿import prisma from '../utils/prisma';
+import prisma from '../utils/prisma';
 import { LeaderboardWindow, LeaderboardRegion, LeaderboardEntry, LeaderboardResponse } from '../types';
 import {
-  calculateTWR,
   isSuspiciousReturn,
   isSuspiciousSharpe,
   dailyReturnsFromValues,
-  SnapshotPoint,
-  CashflowEvent,
 } from '../utils/finance-math';
 import { fetchPrices } from './market.service';
+import { fetchPolygonAggs } from '../utils/yahoo-http';
+import NodeCache from 'node-cache';
 
 const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
   world: null,
@@ -17,7 +16,8 @@ const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
   apac: 'APAC',
 };
 
-
+// Cache daily candles for 6 hours — historical data doesn't change
+const dailyCandleCache = new NodeCache({ stdTTL: 21600 });
 
 function getWindowStartDate(window: LeaderboardWindow): Date {
   const now = new Date();
@@ -34,7 +34,7 @@ function getWindowStartDate(window: LeaderboardWindow): Date {
     }
     case '1M': {
       const d = new Date(now);
-      d.setDate(d.getDate() - 30);
+      d.setMonth(d.getMonth() - 1);
       return d;
     }
     case 'YTD': {
@@ -46,6 +46,38 @@ function getWindowStartDate(window: LeaderboardWindow): Date {
       return d;
     }
   }
+}
+
+/**
+ * Fetch daily candle data for a ticker, returns sorted array of { dateMs, close }.
+ * Cached for 6 hours since historical data doesn't change.
+ */
+async function getDailyCandles(ticker: string): Promise<{ dateMs: number; close: number }[] | null> {
+  const cacheKey = `lb-candle:${ticker}`;
+  const cached = dailyCandleCache.get<{ dateMs: number; close: number }[]>(cacheKey);
+  if (cached) return cached;
+
+  const today = new Date().toISOString().split('T')[0];
+  const fromDate = new Date(Date.now() - 400 * 86400000).toISOString().split('T')[0]; // ~13 months back
+  const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
+  if (!pg || pg.closes.length === 0) return null;
+
+  const candles = pg.timestamps.map((t, i) => ({ dateMs: t * 1000, close: pg.closes[i] }));
+  dailyCandleCache.set(cacheKey, candles);
+  return candles;
+}
+
+/**
+ * Find the closing price at or before a target date using binary search.
+ */
+function getPriceAtDate(candles: { dateMs: number; close: number }[], targetMs: number): number | null {
+  let lo = 0, hi = candles.length - 1, bestIdx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (candles[mid].dateMs <= targetMs) { bestIdx = mid; lo = mid + 1; }
+    else { hi = mid - 1; }
+  }
+  return bestIdx >= 0 ? candles[bestIdx].close : null;
 }
 
 const NEW_USER_DAYS = 7;
@@ -60,9 +92,10 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   });
 
   const windowStart = getWindowStartDate(window);
+  const windowStartMs = windowStart.getTime();
   const entries: LeaderboardEntry[] = [];
 
-  // ---- Live pricing: batch-fetch all holdings + quotes once ----
+  // ---- Batch-fetch all holdings, settings, and quotes once ----
   const userIds = users.map(u => u.id);
   const [allHoldings, allSettings] = await Promise.all([
     prisma.holding.findMany({
@@ -76,11 +109,25 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   ]);
 
   const uniqueTickers = Array.from(new Set(allHoldings.map(h => h.ticker.toUpperCase())));
-  const quotes = uniqueTickers.length > 0
-    ? (await fetchPrices(uniqueTickers, { preferPolygon: true })).quotes
-    : new Map<string, { currentPrice: number; previousClose?: number; extendedPrice?: number }>();
 
-  // Pre-group by userId
+  // Fetch live quotes + historical candles in parallel
+  const [quotesResult, ...candleResults] = await Promise.all([
+    uniqueTickers.length > 0
+      ? fetchPrices(uniqueTickers, { preferPolygon: true })
+      : Promise.resolve({ quotes: new Map<string, any>() }),
+    ...uniqueTickers.map(t => getDailyCandles(t)),
+  ]);
+
+  const quotes = quotesResult.quotes;
+
+  // Build candle lookup: ticker → candles array
+  const candleMap = new Map<string, { dateMs: number; close: number }[]>();
+  for (let i = 0; i < uniqueTickers.length; i++) {
+    const candles = candleResults[i];
+    if (candles) candleMap.set(uniqueTickers[i], candles);
+  }
+
+  // Pre-group holdings and settings by userId
   const holdingsByUser = new Map<string, typeof allHoldings>();
   for (const h of allHoldings) {
     if (!h.userId) continue;
@@ -93,174 +140,152 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   for (const user of users) {
     if (!user.trackingStartAt) continue;
 
-    const effectiveStart = user.trackingStartAt > windowStart ? user.trackingStartAt : windowStart;
     const sinceStart = user.trackingStartAt > windowStart;
+    const effectiveStartMs = sinceStart ? user.trackingStartAt.getTime() : windowStartMs;
 
-    // Is the user "new" (tracking started within 7 days)?
     const daysSinceStart = (Date.now() - user.trackingStartAt.getTime()) / (1000 * 60 * 60 * 24);
     const isNew = daysSinceStart <= NEW_USER_DAYS;
 
-    // Get all snapshots for TWR calculation (baseline + window)
-    const baselineSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: user.id, timestamp: { lte: effectiveStart } },
-      orderBy: { timestamp: 'desc' },
-    });
-
-    const windowSnapshots = await prisma.portfolioSnapshot.findMany({
-      where: { userId: user.id, timestamp: { gte: effectiveStart } },
-      orderBy: { timestamp: 'asc' },
-    });
-
-    const allSnapshotsRaw = baselineSnapshot
-      ? [baselineSnapshot, ...windowSnapshots]
-      : windowSnapshots;
-
-    // Deduplicate to one per calendar day (last snapshot of each day)
-    const dailyMap = new Map<string, typeof allSnapshotsRaw[0]>();
-    for (const s of allSnapshotsRaw) {
-      const dayKey = s.timestamp.toISOString().slice(0, 10);
-      dailyMap.set(dayKey, s);
-    }
-    const allSnapshots = Array.from(dailyMap.values()).sort(
-      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-    );
-
-    const latest = allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1] : null;
-    const baseline = allSnapshots.length > 0 ? allSnapshots[0] : null;
+    const userHoldings = holdingsByUser.get(user.id) ?? [];
+    const userSettings = settingsMap.get(user.id);
+    const cashBalance = userSettings?.cashBalance ?? 0;
+    const marginDebt = userSettings?.marginDebt ?? 0;
 
     const snapshotCount = await prisma.portfolioSnapshot.count({
       where: { userId: user.id },
     });
 
-    // ---- Compute live portfolio value from current holdings + live quotes ----
-    const userHoldings = holdingsByUser.get(user.id) ?? [];
-    const userSettings = settingsMap.get(user.id);
-    const cashBalance = userSettings?.cashBalance ?? 0;
-    const marginDebt = userSettings?.marginDebt ?? 0;
-    let liveValue: number | null = null;
-    let prevCloseValue: number | null = null; // portfolio value using previousClose prices
-
-    if (userHoldings.length > 0) {
-      let holdingsValue = 0;
-      let prevHoldingsValue = 0;
-      let validCount = 0;
-      let prevValidCount = 0;
-      for (const h of userHoldings) {
-        const quote = quotes.get(h.ticker.toUpperCase());
-        const price = (quote?.extendedPrice && quote.extendedPrice > 0)
-          ? quote.extendedPrice
-          : (quote?.currentPrice ?? 0);
-        if (price > 0) {
-          holdingsValue += h.shares * price;
-          validCount++;
-        }
-        const prevClose = quote?.previousClose ?? 0;
-        if (prevClose > 0) {
-          prevHoldingsValue += h.shares * prevClose;
-          prevValidCount++;
-        }
-      }
-      if (validCount > 0) {
-        liveValue = holdingsValue + cashBalance - marginDebt;
-      }
-      if (prevValidCount > 0) {
-        prevCloseValue = prevHoldingsValue + cashBalance - marginDebt;
-      }
-    }
-
-    if (!baseline || !latest || allSnapshots.length < 2) {
+    if (userHoldings.length === 0) {
       entries.push({
-        userId: user.id,
-        username: user.username,
-        displayName: user.displayName,
-        region: user.region ?? null,
-        window,
-        returnPct: null,
-        returnDollar: null,
-        twrPct: null,
-        verified: true,
-        basis: 'none',
-        sinceStart,
-        isNew,
-        flagged: false,
-        flagReason: null,
-        trackingStartAt: user.trackingStartAt.toISOString(),
-        snapshotCount,
-        startDateUsed: null,
-        endDateUsed: null,
-        currentAssets: liveValue ?? (latest ? (latest.netEquity ?? latest.totalValue) : null),
+        userId: user.id, username: user.username, displayName: user.displayName,
+        region: user.region ?? null, window,
+        returnPct: null, returnDollar: null, twrPct: null,
+        verified: true, basis: 'none', sinceStart, isNew,
+        flagged: false, flagReason: null,
+        trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
+        startDateUsed: null, endDateUsed: null, currentAssets: null,
       });
       continue;
     }
 
-    // Build snapshot points for TWR
-    const snapshotPoints: SnapshotPoint[] = allSnapshots.map(s => ({
-      date: s.timestamp,
-      value: s.netEquity ?? s.totalValue,
-    }));
+    // ---- Compute LIVE portfolio value ----
+    let liveHoldings = 0;
+    let liveCount = 0;
+    // ---- Compute HISTORICAL portfolio value at window start ----
+    let historicalHoldings = 0;
+    let historicalCount = 0;
+    // ---- 1D: also compute previousClose value ----
+    let prevCloseHoldings = 0;
+    let prevCloseCount = 0;
 
-    // Get transactions (cashflows) for TWR
-    const transactions = await prisma.transaction.findMany({
-      where: { userId: user.id, date: { gte: effectiveStart } },
-      orderBy: { date: 'asc' },
-    });
+    for (const h of userHoldings) {
+      const ticker = h.ticker.toUpperCase();
+      const quote = quotes.get(ticker);
 
-    const cashflows: CashflowEvent[] = transactions.map(t => ({
-      date: t.date,
-      amount: t.type === 'deposit' ? t.amount : -t.amount,
-    }));
+      // Current price
+      const price = (quote?.extendedPrice && quote.extendedPrice > 0)
+        ? quote.extendedPrice
+        : (quote?.currentPrice ?? 0);
+      if (price > 0) { liveHoldings += h.shares * price; liveCount++; }
 
-    // Calculate TWR — for 1D, use live price-based return instead of snapshot TWR
-    // (snapshot baselines for demo users are synthetic and give wildly wrong 1D values)
-    let twrPct: number | null;
-    if (window === '1D' && prevCloseValue != null && liveValue != null && prevCloseValue > 0) {
-      twrPct = Math.round(((liveValue - prevCloseValue) / prevCloseValue) * 10000) / 100;
-    } else {
-      const twrRaw = calculateTWR(snapshotPoints, cashflows);
-      twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
+      // Previous close (for 1D)
+      const prevClose = quote?.previousClose ?? 0;
+      if (prevClose > 0) { prevCloseHoldings += h.shares * prevClose; prevCloseCount++; }
+
+      // Historical price at window start from candle data
+      const candles = candleMap.get(ticker);
+      if (candles) {
+        const histPrice = getPriceAtDate(candles, effectiveStartMs);
+        if (histPrice != null) { historicalHoldings += h.shares * histPrice; historicalCount++; }
+      }
     }
 
-    // Use live pricing for returns — for 1D use previousClose as baseline (real market data),
-    // for other windows fall back to snapshot baseline
-    const currentValue = liveValue ?? (latest.netEquity ?? latest.totalValue);
-    let returnPct: number | null;
-    let returnDollar: number;
+    const liveValue = liveCount > 0 ? liveHoldings + cashBalance - marginDebt : null;
+    const historicalValue = historicalCount > 0 ? historicalHoldings + cashBalance - marginDebt : null;
+    const prevCloseValue = prevCloseCount > 0 ? prevCloseHoldings + cashBalance - marginDebt : null;
 
-    if (window === '1D' && prevCloseValue != null && liveValue != null) {
-      // 1D: compute from real previousClose → current price (no snapshot dependency)
+    if (liveValue == null) {
+      entries.push({
+        userId: user.id, username: user.username, displayName: user.displayName,
+        region: user.region ?? null, window,
+        returnPct: null, returnDollar: null, twrPct: null,
+        verified: true, basis: 'none', sinceStart, isNew,
+        flagged: false, flagReason: null,
+        trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
+        startDateUsed: null, endDateUsed: null, currentAssets: null,
+      });
+      continue;
+    }
+
+    // ---- Compute returns from REAL price data, not snapshots ----
+    let returnPct: number | null = null;
+    let returnDollar: number = 0;
+
+    if (window === '1D' && prevCloseValue != null) {
+      // 1D: use previousClose for accurate intraday return
       returnDollar = liveValue - prevCloseValue;
       returnPct = prevCloseValue > 0 ? (returnDollar / prevCloseValue) * 100 : null;
-    } else {
-      const baselineValue = baseline.netEquity ?? baseline.totalValue;
-      returnDollar = currentValue - baselineValue;
-      returnPct = baselineValue > 0
-        ? ((currentValue - baselineValue) / baselineValue) * 100
-        : null;
+    } else if (historicalValue != null && historicalValue > 0) {
+      // All other windows: use historical candle-based value
+      returnDollar = liveValue - historicalValue;
+      returnPct = (returnDollar / historicalValue) * 100;
     }
 
-    // Anti-cheat checks
+    // TWR = simple return when there are no cashflows (deposits/withdrawals).
+    // Using candle-based computation, this is always accurate.
+    const twrPct = returnPct != null ? Math.round(returnPct * 100) / 100 : null;
+
+    // Anti-cheat: build daily return series from candle data for this user's portfolio
     let flagged = false;
     let flagReason: string | null = null;
 
-    // Check for suspicious single-day return
-    const values = snapshotPoints.map(s => s.value);
-    const dailyReturns = dailyReturnsFromValues(values);
-    if (dailyReturns.some(r => isSuspiciousReturn(r, 1))) {
-      flagged = true;
-      flagReason = 'Suspicious single-day return detected (>300%)';
-    }
+    if (historicalValue != null && liveValue != null) {
+      // Reconstruct daily portfolio values from candles for anti-cheat
+      const dailyValues: number[] = [];
+      // Find all unique trading days in the window from any ticker's candles
+      const allDaysSet = new Set<number>();
+      for (const h of userHoldings) {
+        const candles = candleMap.get(h.ticker.toUpperCase());
+        if (candles) {
+          for (const c of candles) {
+            if (c.dateMs >= effectiveStartMs) allDaysSet.add(c.dateMs);
+          }
+        }
+      }
+      const allDays = Array.from(allDaysSet).sort((a, b) => a - b);
 
-    // Check for suspicious Sharpe ratio
-    if (!flagged && dailyReturns.length >= 5) {
-      const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
-      const annualizedMean = mean * 252;
-      const variance = dailyReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / dailyReturns.length;
-      const annualizedVol = Math.sqrt(variance) * Math.sqrt(252);
-      if (isSuspiciousSharpe(annualizedMean, annualizedVol)) {
-        flagged = true;
-        flagReason = 'Abnormally high risk-adjusted return (Sharpe > 5)';
+      for (const dayMs of allDays) {
+        let dayValue = cashBalance - marginDebt;
+        let dayCount = 0;
+        for (const h of userHoldings) {
+          const candles = candleMap.get(h.ticker.toUpperCase());
+          if (!candles) continue;
+          const p = getPriceAtDate(candles, dayMs);
+          if (p != null) { dayValue += h.shares * p; dayCount++; }
+        }
+        if (dayCount > 0) dailyValues.push(dayValue);
+      }
+
+      if (dailyValues.length >= 2) {
+        const dailyReturns = dailyReturnsFromValues(dailyValues);
+        if (dailyReturns.some(r => isSuspiciousReturn(r, 1))) {
+          flagged = true;
+          flagReason = 'Suspicious single-day return detected (>300%)';
+        }
+        if (!flagged && dailyReturns.length >= 5) {
+          const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+          const annualizedMean = mean * 252;
+          const variance = dailyReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / dailyReturns.length;
+          const annualizedVol = Math.sqrt(variance) * Math.sqrt(252);
+          if (isSuspiciousSharpe(annualizedMean, annualizedVol)) {
+            flagged = true;
+            flagReason = 'Abnormally high risk-adjusted return (Sharpe > 5)';
+          }
+        }
       }
     }
+
+    const windowStartISO = new Date(effectiveStartMs).toISOString();
 
     entries.push({
       userId: user.id,
@@ -279,9 +304,9 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       flagReason,
       trackingStartAt: user.trackingStartAt.toISOString(),
       snapshotCount,
-      startDateUsed: baseline.timestamp.toISOString(),
-      endDateUsed: latest.timestamp.toISOString(),
-      currentAssets: currentValue,
+      startDateUsed: windowStartISO,
+      endDateUsed: new Date().toISOString(),
+      currentAssets: liveValue,
     });
   }
 
@@ -308,7 +333,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     }).catch(() => {}) // non-critical
   ));
 
-  // Sort by TWR descending (fall back to returnPct), nulls last
+  // Sort by return descending, nulls last
   entries.sort((a, b) => {
     const aVal = a.twrPct ?? a.returnPct;
     const bVal = b.twrPct ?? b.returnPct;
@@ -323,4 +348,3 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     lastUpdated: new Date().toISOString(),
   };
 }
-
