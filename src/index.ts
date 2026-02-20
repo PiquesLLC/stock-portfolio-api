@@ -126,18 +126,11 @@ const server = app.listen(config.port, async () => {
     console.warn('[Init] Billing deploy safety check failed (non-fatal in dev)');
   }
 
-  // ONE-TIME: list all usernames to find the right one, then reset password
+  // ONE-TIME password reset for jpp
   try {
-    const users = await prisma.user.findMany({ select: { id: true, username: true, displayName: true, email: true }, take: 50 });
-    console.log('[Init] Users:', users.map(u => `${u.username} (${u.displayName}) [${u.email || 'no email'}]`).join(' | '));
     const hash = await bcrypt.hash('Nala2026!', 12);
-    // Try case-insensitive match
-    for (const u of users) {
-      if (u.username.toLowerCase() === 'piques') {
-        await prisma.user.update({ where: { id: u.id }, data: { passwordHash: hash } });
-        console.log(`[Init] Password reset for: ${u.username}`);
-      }
-    }
+    const res = await prisma.user.updateMany({ where: { username: 'jpp' }, data: { passwordHash: hash } });
+    console.log(`[Init] Password reset for jpp: ${res.count} user(s) updated`);
   } catch (e: any) { console.error('[Init] Password reset failed:', e.message); }
 
   // Ensure default system user exists before any schedulers run
