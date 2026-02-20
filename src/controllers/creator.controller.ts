@@ -302,6 +302,10 @@ export async function creatorStripeWebhookHandler(req: Request, res: Response): 
     res.json({ received: true });
   } catch (error) {
     console.error('[Creator] creatorStripeWebhookHandler failed:', error);
+    if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
+      res.status(400).json({ error: 'Invalid webhook signature' });
+      return;
+    }
     res.status(400).json({ error: 'Webhook processing failed' });
   }
 }

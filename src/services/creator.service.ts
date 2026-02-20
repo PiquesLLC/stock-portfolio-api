@@ -68,9 +68,11 @@ export async function resolveAccessLevel(creatorUserId: string, viewerId?: strin
       where: {
         creatorUserId,
         subscriberUserId: viewerId,
-        status: { in: ['active', 'canceled', 'past_due'] },
+        status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
         OR: [
           { trialEnd: { gt: now } },
+          // Null period end can occur briefly for a just-created Stripe subscription;
+          // allow access until Stripe writes the first billing-cycle boundary.
           { currentPeriodEnd: null },
           { currentPeriodEnd: { gt: now } },
         ],

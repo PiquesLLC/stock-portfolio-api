@@ -132,6 +132,49 @@ async function markWebhookProcessed(eventId: string, eventType: string): Promise
   }
 }
 
+async function resolveStripeSubscriptionIdFromCharge(charge: Stripe.Charge, stripe: Stripe): Promise<string | null> {
+  const invoiceRef = (charge as Stripe.Charge & { invoice?: unknown }).invoice;
+  let invoice: Stripe.Invoice | null = null;
+
+  if (typeof invoiceRef === 'string') {
+    const fetched = await stripe.invoices.retrieve(invoiceRef);
+    if (!('deleted' in fetched)) {
+      invoice = fetched as Stripe.Invoice;
+    }
+  } else if (invoiceRef && typeof invoiceRef === 'object') {
+    invoice = invoiceRef as Stripe.Invoice;
+  }
+
+  const sub = (invoice as (Stripe.Invoice & { subscription?: unknown }) | null)?.subscription;
+  return typeof sub === 'string' ? sub : null;
+}
+
+async function resolveSubscriptionFromDispute(dispute: Stripe.Dispute, stripe: Stripe): Promise<{
+  id: string;
+  creatorUserId: string;
+  stripeSubscriptionId: string;
+} | null> {
+  const chargeId = typeof dispute.charge === 'string' ? dispute.charge : null;
+  if (!chargeId) return null;
+
+  const charge = await stripe.charges.retrieve(chargeId);
+  if (!charge || (charge as { object?: string }).object !== 'charge') return null;
+
+  const stripeSubscriptionId = await resolveStripeSubscriptionIdFromCharge(charge as Stripe.Charge, stripe);
+  if (!stripeSubscriptionId) return null;
+
+  const sub = await prisma.creatorSubscription.findFirst({
+    where: { stripeSubscriptionId: { equals: stripeSubscriptionId } },
+    select: { id: true, creatorUserId: true, stripeSubscriptionId: true },
+  });
+  if (!sub?.stripeSubscriptionId) return null;
+  return {
+    id: sub.id,
+    creatorUserId: sub.creatorUserId,
+    stripeSubscriptionId: sub.stripeSubscriptionId,
+  };
+}
+
 export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<void> {
   const shouldProcess = await markWebhookProcessed(event.id, event.type);
   if (!shouldProcess) return;
@@ -284,6 +327,148 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             status: 'past_due',
             // Ensure access resolution no longer treats this as paid access.
             currentPeriodEnd: new Date(Date.now() - 1000),
+          },
+        });
+        return;
+      }
+
+      case 'charge.refunded': {
+        const stripe = getStripeClient();
+        const charge = event.data.object as Stripe.Charge;
+        const stripeSubscriptionId = await resolveStripeSubscriptionIdFromCharge(charge, stripe);
+        if (!stripeSubscriptionId) return;
+
+        const sub = await prisma.creatorSubscription.findFirst({
+          where: { stripeSubscriptionId },
+          select: { id: true, creatorUserId: true },
+        });
+        if (!sub) return;
+
+        const amount = typeof charge.amount === 'number' ? charge.amount : 0;
+        const amountRefunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
+        if (amountRefunded <= 0) return;
+
+        const creatorRefund = -Math.round(amountRefunded * 0.8);
+        const platformRefund = -(amountRefunded - Math.round(amountRefunded * 0.8));
+        const creatorRefundKey = `stripe_event:${event.id}:refund_creator`;
+        const platformRefundKey = `stripe_event:${event.id}:refund_platform`;
+
+        await prisma.$transaction([
+          prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: sub.creatorUserId,
+              type: 'refund',
+              amountCents: creatorRefund,
+              subscriptionId: sub.id,
+              description: creatorRefundKey,
+            },
+          }),
+          prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: sub.creatorUserId,
+              type: 'platform_fee',
+              amountCents: platformRefund,
+              subscriptionId: sub.id,
+              description: platformRefundKey,
+            },
+          }),
+        ]);
+
+        if (amount > 0 && amountRefunded >= amount) {
+          await prisma.creatorSubscription.update({
+            where: { id: sub.id },
+            data: {
+              status: 'canceled',
+              canceledAt: new Date(),
+              currentPeriodEnd: new Date(Date.now() - 1000),
+            },
+          });
+          await prisma.creatorSubscriptionEvent.create({
+            data: {
+              subscriptionId: sub.id,
+              eventType: 'canceled',
+            },
+          });
+        }
+        return;
+      }
+
+      case 'charge.dispute.created': {
+        const stripe = getStripeClient();
+        const dispute = event.data.object as Stripe.Dispute;
+        const sub = await resolveSubscriptionFromDispute(dispute, stripe);
+        if (!sub) return;
+
+        const reason = dispute.reason ?? 'unknown';
+        console.error(`[CreatorWebhook] Dispute created for subscription ${sub.id}: reason=${reason}`);
+
+        await prisma.$transaction([
+          prisma.creatorSubscription.update({
+            where: { id: sub.id },
+            data: {
+              status: 'past_due',
+              disputedAt: new Date(),
+              currentPeriodEnd: new Date(Date.now() - 1000),
+            },
+          }),
+          prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: sub.creatorUserId,
+              type: 'platform_fee',
+              amountCents: 1500,
+              subscriptionId: sub.id,
+              description: `stripe_event:${event.id}:dispute_fee:${reason}`,
+            },
+          }),
+        ]);
+        return;
+      }
+
+      case 'charge.dispute.closed': {
+        const stripe = getStripeClient();
+        const dispute = event.data.object as Stripe.Dispute;
+        const sub = await resolveSubscriptionFromDispute(dispute, stripe);
+        if (!sub) return;
+
+        const outcome = dispute.status ?? 'unknown';
+        if (outcome === 'won') {
+          await prisma.creatorSubscription.update({
+            where: { id: sub.id },
+            data: {
+              status: 'active',
+              disputedAt: null,
+            },
+          });
+        } else {
+          await prisma.creatorSubscription.update({
+            where: { id: sub.id },
+            data: {
+              status: 'canceled',
+              canceledAt: new Date(),
+            },
+          });
+        }
+        return;
+      }
+
+      case 'payout.paid': {
+        const payout = event.data.object as Stripe.Payout;
+        await prisma.creatorPayout.updateMany({
+          where: { stripePayoutId: payout.id },
+          data: {
+            status: 'completed',
+            paidAt: new Date(),
+          },
+        });
+        return;
+      }
+
+      case 'payout.failed': {
+        const payout = event.data.object as Stripe.Payout;
+        await prisma.creatorPayout.updateMany({
+          where: { stripePayoutId: payout.id },
+          data: {
+            status: 'failed',
           },
         });
         return;

@@ -712,6 +712,7 @@ model CreatorSubscription {
   stripeSubscriptionId String?
   currentPeriodEnd     DateTime?
   trialEnd             DateTime?
+  disputedAt           DateTime?
   canceledAt           DateTime?
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
@@ -747,6 +748,7 @@ model CreatorWalletLedger {
 
   @@index([creatorUserId])
   @@index([creatorUserId, type])
+  @@index([subscriptionId])
   @@index([createdAt])
 }
 
@@ -756,6 +758,7 @@ model CreatorPayout {
   amountCents      Int
   status           String   @default("pending") // pending | processing | completed | failed
   stripeTransferId String?
+  stripePayoutId   String?
   paidAt           DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
