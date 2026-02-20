@@ -401,4 +401,91 @@ describe('creator billing webhooks', () => {
       data: { status: 'failed' },
     });
   });
+
+  it('handles out-of-order invoice events (payment_failed before paid) and still credits exactly once', async () => {
+    const fx = fixtureFactory('ooo_invoice');
+    await handleCreatorWebhookEvent(fx.event.invoicePaymentFailed('evt_ooo_failed_first'));
+    await handleCreatorWebhookEvent(fx.event.invoicePaid('evt_ooo_paid_after', 10000));
+
+    const updateCalls = (prismaMock as any).creatorSubscription.updateMany.mock.calls;
+    const paidCall = (prismaMock as any).creatorWalletLedger.create.mock.calls.find(
+      (c: any[]) => c?.[0]?.data?.description === 'stripe_event:evt_ooo_paid_after:creator_share'
+    );
+
+    expect(updateCalls.some((c: any[]) => c?.[0]?.data?.status === 'past_due')).toBe(true);
+    expect(paidCall).toBeTruthy();
+    expect((prismaMock as any).creatorWalletLedger.create.mock.calls.filter(
+      (c: any[]) => String(c?.[0]?.data?.description || '').includes('evt_ooo_paid_after')
+    ).length).toBe(2);
+  });
+
+  it('handles out-of-order dispute events (closed before created) without throwing and preserves deterministic updates', async () => {
+    const fx = fixtureFactory('ooo_dispute');
+    await handleCreatorWebhookEvent(fx.event.disputeClosed('evt_ooo_dispute_closed_first', 'won'));
+    await handleCreatorWebhookEvent(fx.event.disputeCreated('evt_ooo_dispute_created_after', 'fraudulent'));
+
+    const updateCalls = (prismaMock as any).creatorSubscription.update.mock.calls.map((c: any[]) => c?.[0]?.data);
+    expect(updateCalls).toContainEqual(expect.objectContaining({ status: 'active', disputedAt: null }));
+    expect(updateCalls).toContainEqual(expect.objectContaining({ status: 'past_due', disputedAt: expect.any(Date) }));
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: expect.stringContaining('evt_ooo_dispute_created_after'),
+        }),
+      })
+    );
+  });
+
+  it('dedupes mixed duplicate event stream (failed, paid, refunded, payout_failed)', async () => {
+    const fx = fixtureFactory('ooo_mix');
+    const seenEventIds = new Set<string>();
+    (prismaMock as any).creatorWebhookEvent.create.mockImplementation(({ data }: any) => {
+      const eventId = String(data?.eventId ?? '');
+      if (seenEventIds.has(eventId)) {
+        return Promise.reject({ code: 'P2002' });
+      }
+      seenEventIds.add(eventId);
+      return Promise.resolve({ id: `cw_${eventId}` });
+    });
+
+    await handleCreatorWebhookEvent(fx.event.invoicePaymentFailed('evt_mix_failed'));
+    await handleCreatorWebhookEvent(fx.event.invoicePaymentFailed('evt_mix_failed'));
+
+    await handleCreatorWebhookEvent(fx.event.invoicePaid('evt_mix_paid', 10000));
+    await handleCreatorWebhookEvent(fx.event.invoicePaid('evt_mix_paid', 10000));
+
+    chargesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeChargeId,
+      object: 'charge',
+      amount: 10000,
+      amount_refunded: 3000,
+      invoice: fx.ids.stripeInvoiceId,
+    });
+    invoicesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeInvoiceId,
+      subscription: fx.ids.stripeSubscriptionId,
+    });
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_mix_refund', 10000, 3000));
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_mix_refund', 10000, 3000));
+
+    await handleCreatorWebhookEvent(fx.event.payoutFailed('evt_mix_payout_failed'));
+    await handleCreatorWebhookEvent(fx.event.payoutFailed('evt_mix_payout_failed'));
+
+    const failedUpdates = (prismaMock as any).creatorSubscription.updateMany.mock.calls.filter(
+      (c: any[]) => c?.[0]?.data?.status === 'past_due'
+    );
+    const paidLedgerByEvent = (prismaMock as any).creatorWalletLedger.create.mock.calls.filter(
+      (c: any[]) => String(c?.[0]?.data?.description || '').includes('evt_mix_paid')
+    );
+    const refundLedgerByEvent = (prismaMock as any).creatorWalletLedger.create.mock.calls.filter(
+      (c: any[]) => String(c?.[0]?.data?.description || '').includes('evt_mix_refund')
+    );
+
+    expect(failedUpdates.length).toBe(1);
+    expect(paidLedgerByEvent.length).toBe(2); // creator share + platform fee once
+    expect(refundLedgerByEvent.length).toBe(2); // refund + platform refund once
+    expect((prismaMock as any).creatorPayout.updateMany.mock.calls.filter(
+      (c: any[]) => c?.[0]?.where?.stripePayoutId === fx.ids.stripePayoutId
+    ).length).toBe(1);
+  });
 });
