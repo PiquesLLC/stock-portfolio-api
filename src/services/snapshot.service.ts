@@ -180,6 +180,7 @@ export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
     orderBy: { timestamp: 'asc' },
+    take: 2000,
   });
 }
 
@@ -192,6 +193,7 @@ export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnaps
       },
     },
     orderBy: { timestamp: 'asc' },
+    take: 2000,
   });
 }
 
@@ -249,33 +251,23 @@ export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
   dayPLPercent: number;
   timestamp: Date;
 }[]> {
-  // Get distinct snapshot days (by date, not time)
-  const allSnapshots = await prisma.holdingSnapshot.findMany({
-    orderBy: { timestamp: 'desc' },
-    select: { timestamp: true },
-    distinct: ['snapshotId'],
-  });
+  // Get the N most recent distinct calendar dates efficiently via raw SQL
+  const recentDates = await prisma.$queryRaw<{ d: string }[]>`
+    SELECT DISTINCT date(timestamp / 1000, 'unixepoch') AS d
+    FROM HoldingSnapshot
+    ORDER BY d DESC
+    LIMIT ${days}
+  `;
 
-  // Extract unique calendar dates
-  const seenDates = new Set<string>();
-  const cutoffDates: string[] = [];
-  for (const s of allSnapshots) {
-    const dateStr = s.timestamp.toISOString().slice(0, 10);
-    if (!seenDates.has(dateStr)) {
-      seenDates.add(dateStr);
-      cutoffDates.push(dateStr);
-      if (cutoffDates.length >= days) break;
-    }
-  }
+  if (recentDates.length === 0) return [];
 
-  if (cutoffDates.length === 0) return [];
-
-  const oldestDate = new Date(cutoffDates[cutoffDates.length - 1]);
+  const oldestDate = new Date(recentDates[recentDates.length - 1].d);
 
   return prisma.holdingSnapshot.findMany({
     where: { timestamp: { gte: oldestDate } },
     select: { ticker: true, dayPL: true, dayPLPercent: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
+    take: 5000,
   });
 }
 
@@ -1159,27 +1151,45 @@ export async function getChartSnapshots(period: string): Promise<{
 
 // Utility to clean up duplicate snapshots (for fixing existing data)
 export async function cleanupDuplicateSnapshots(): Promise<number> {
-  // Get all snapshots
-  const snapshots = await prisma.portfolioSnapshot.findMany({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
-    orderBy: { timestamp: 'asc' },
-  });
-
-  if (snapshots.length === 0) return 0;
-
   const toDelete: string[] = [];
+  const fetchBatchSize = 1000;
   let lastKeptTimestamp = 0;
   const intervalMs = config.snapshotIntervalSeconds * 1000;
+  let cursor: { timestamp: Date; id: string } | null = null;
 
-  for (const snapshot of snapshots) {
-    const snapshotTime = new Date(snapshot.timestamp).getTime();
-    if (snapshotTime - lastKeptTimestamp < intervalMs) {
-      // This snapshot is too close to the last kept one - mark for deletion
-      toDelete.push(snapshot.id);
-    } else {
-      // Keep this snapshot
-      lastKeptTimestamp = snapshotTime;
+  for (;;) {
+    const where: any = {
+      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      ...(cursor
+        ? {
+            OR: [
+              { timestamp: { gt: cursor.timestamp } },
+              { timestamp: cursor.timestamp, id: { gt: cursor.id } },
+            ],
+          }
+        : {}),
+    };
+    const snapshots = await prisma.portfolioSnapshot.findMany({
+      where,
+      orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
+      take: fetchBatchSize,
+    });
+
+    if (snapshots.length === 0) break;
+
+    for (const snapshot of snapshots) {
+      const snapshotTime = new Date(snapshot.timestamp).getTime();
+      if (snapshotTime - lastKeptTimestamp < intervalMs) {
+        // This snapshot is too close to the last kept one - mark for deletion
+        toDelete.push(snapshot.id);
+      } else {
+        // Keep this snapshot
+        lastKeptTimestamp = snapshotTime;
+      }
     }
+
+    const last = snapshots[snapshots.length - 1];
+    cursor = { timestamp: new Date(last.timestamp), id: last.id };
   }
 
   if (toDelete.length > 0) {
