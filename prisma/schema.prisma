@@ -705,9 +705,9 @@ model CreatorVisibility {
 model CreatorSubscription {
   id                   String                    @id @default(uuid())
   subscriberUserId     String
-  subscriber           User                      @relation("subscriber", fields: [subscriberUserId], references: [id], onDelete: Cascade)
+  subscriber           User                      @relation("subscriber", fields: [subscriberUserId], references: [id], onDelete: Restrict)
   creatorUserId        String
-  creator              User                      @relation("creator_sub", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  creator              User                      @relation("creator_sub", fields: [creatorUserId], references: [id], onDelete: Restrict)
   status               String                    @default("active") // active | canceled | expired | past_due
   stripeSubscriptionId String?
   currentPeriodEnd     DateTime?

@@ -262,6 +262,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[CreatorWebhook] Failed processing event ${event.type} (${event.id}): ${msg}`);
     await prisma.creatorWebhookEvent.deleteMany({ where: { eventId: event.id } });
     throw error;
   }
@@ -314,17 +316,22 @@ function computeReservedBalanceCents(entries: Array<{ type: string; amountCents:
 }
 
 export async function getPayoutBalance(userId: string): Promise<{ availableCents: number; reservedCents: number }> {
-  const [entries, balance] = await Promise.all([
+  const [entries, balance, pendingPayoutAgg] = await Promise.all([
     prisma.creatorWalletLedger.findMany({
       where: { creatorUserId: userId },
       select: { type: true, amountCents: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
     getPayoutBalanceFromLedger(userId),
+    prisma.creatorPayout.aggregate({
+      where: { creatorUserId: userId, status: 'pending' },
+      _sum: { amountCents: true },
+    }),
   ]);
   const reservedCents = computeReservedBalanceCents(entries);
+  const pendingCents = pendingPayoutAgg._sum.amountCents ?? 0;
   return {
-    availableCents: Math.max(0, balance - reservedCents),
+    availableCents: Math.max(0, balance - reservedCents - pendingCents),
     reservedCents,
   };
 }
@@ -336,6 +343,13 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   });
   if (!creator || creator.status !== 'active') throw new Error('Creator not active');
   if (!creator.stripeConnectId) throw new Error('Stripe Connect onboarding required');
+
+  const pendingCount = await prisma.creatorPayout.count({
+    where: { creatorUserId: userId, status: 'pending' },
+  });
+  if (pendingCount > 0) {
+    throw new Error('Existing payout request is still pending');
+  }
 
   const { availableCents } = await getPayoutBalance(userId);
   if (availableCents < 5000) {
