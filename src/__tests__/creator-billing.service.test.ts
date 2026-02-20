@@ -223,6 +223,8 @@ describe('creator billing webhooks', () => {
         }),
       })
     );
+    const callArg = checkoutCreateMock.mock.calls[0]?.[0];
+    expect(callArg?.subscription_data?.trial_period_days).toBeUndefined();
   });
 
   it('ignores duplicate webhook event ids', async () => {

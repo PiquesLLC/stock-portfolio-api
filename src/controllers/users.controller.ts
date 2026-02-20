@@ -108,7 +108,7 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
             if (visibility.tradeDelayHours > 0) {
               const cutoff = Date.now() - visibility.tradeDelayHours * 60 * 60 * 1000;
               portfolio.holdings = portfolio.holdings.filter(h => {
-                const ts = new Date(h.createdAt as Date).getTime();
+                const ts = new Date(h.createdAt).getTime();
                 return Number.isFinite(ts) && ts <= cutoff;
               });
             }
@@ -274,10 +274,10 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
     } else if (period === 'YTD') {
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
       if (ytdDays <= 90) {
-        const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+        const yahooRange: '1mo' | '3mo' = ytdDays <= 30 ? '1mo' : '3mo';
         points = await reconstructPortfolioHistoryHiRes(
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-          portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
+          portfolio.cashBalance, portfolio.marginDebt, yahooRange, '1h',
         );
         const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
         points = points.filter(p => p.time >= ytdStart);

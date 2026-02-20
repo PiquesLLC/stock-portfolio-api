@@ -118,7 +118,6 @@ export async function createCreatorCheckoutSession(
         creatorUserId,
         subscriberUserId,
       },
-      trial_period_days: creator.trialDays > 0 ? creator.trialDays : undefined,
     },
     allow_promotion_codes: false,
   });

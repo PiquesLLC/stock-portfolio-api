@@ -8,9 +8,21 @@ export type CreatorSection =
   | 'sectors'
   | 'riskMetrics'
   | 'watchlists';
+export type CreatorCtaState = {
+  requiresAuth: boolean;
+  canSubscribe: boolean;
+  priceCents: number | null;
+  subscriberCount: number;
+  unlocks: CreatorSection[];
+  disclaimer: string;
+};
+export type CreatorEntitlement = {
+  level: CreatorAccessLevel;
+  accessibleSections: CreatorSection[];
+  cta: CreatorCtaState;
+};
 
 const VALID_PRICING = new Set([500, 1500, 4900]);
-const VALID_TRIAL_DAYS = new Set([0, 7]);
 const VALID_TRADE_DELAY_HOURS = new Set([0, 24, 48, 72]);
 const DISCLAIMER = 'Educational content only. Not investment advice.';
 
@@ -93,20 +105,28 @@ export async function resolveAccessLevel(creatorUserId: string, viewerId?: strin
 export async function getEntitlement(creatorUserId: string, viewerId?: string): Promise<{
   level: CreatorAccessLevel;
   accessibleSections: CreatorSection[];
+  cta: CreatorCtaState;
 }> {
   const creator = await prisma.creator.findUnique({
     where: { userId: creatorUserId },
     include: { visibility: true },
   });
   if (!creator || creator.status !== 'active' || !creator.visibility) {
-    return { level: 'public', accessibleSections: [] };
+    return {
+      level: 'public',
+      accessibleSections: [],
+      cta: {
+        requiresAuth: !viewerId,
+        canSubscribe: false,
+        priceCents: null,
+        subscriberCount: 0,
+        unlocks: [],
+        disclaimer: DISCLAIMER,
+      },
+    };
   }
 
   const level = await resolveAccessLevel(creatorUserId, viewerId);
-  if (level !== 'paid') {
-    return { level, accessibleSections: [] };
-  }
-
   const sections: CreatorSection[] = [];
   if (creator.visibility.showHoldings) sections.push('holdings');
   if (creator.visibility.showTradeHistory) sections.push('tradeHistory');
@@ -114,7 +134,21 @@ export async function getEntitlement(creatorUserId: string, viewerId?: string): 
   if (creator.visibility.showSectors) sections.push('sectors');
   if (creator.visibility.showRiskMetrics) sections.push('riskMetrics');
   if (creator.visibility.showWatchlists) sections.push('watchlists');
-  return { level, accessibleSections: sections };
+  const subscriberCount = await prisma.creatorSubscription.count({
+    where: { creatorUserId, status: 'active' },
+  });
+  return {
+    level,
+    accessibleSections: level === 'paid' ? sections : [],
+    cta: {
+      requiresAuth: !viewerId,
+      canSubscribe: level !== 'paid',
+      priceCents: creator.pricingCents,
+      subscriberCount,
+      unlocks: sections,
+      disclaimer: DISCLAIMER,
+    },
+  };
 }
 
 export async function getCreatorProfile(creatorUserId: string, viewerId?: string): Promise<{
@@ -124,7 +158,7 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
   displayName: string;
   status: string;
   pricingCents: number;
-  trialDays: number;
+  trialDays: 0;
   pitch: string | null;
   stripeConnectOnboarded: boolean;
   complianceAcceptedAt: string | null;
@@ -141,6 +175,7 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
   } | null;
   accessLevel: CreatorAccessLevel;
   entitlement: CreatorSection[];
+  cta: CreatorCtaState;
   subscriberCount: number;
   disclaimer: string;
 } | null> {
@@ -170,7 +205,7 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
     displayName: user?.displayName ?? '',
     status: creator.status,
     pricingCents: creator.pricingCents,
-    trialDays: creator.trialDays,
+    trialDays: 0,
     pitch: creator.pitch,
     stripeConnectOnboarded: creator.stripeConnectOnboarded,
     complianceAcceptedAt: creator.complianceAcceptedAt?.toISOString() ?? null,
@@ -187,14 +222,14 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
     } : null,
     accessLevel: entitlement.level,
     entitlement: entitlement.accessibleSections,
-    subscriberCount,
+    cta: entitlement.cta,
+    subscriberCount: entitlement.cta.subscriberCount || subscriberCount,
     disclaimer: DISCLAIMER,
   };
 }
 
 type CreatorSettingsInput = {
   pricingCents?: number;
-  trialDays?: number;
   pitch?: string | null;
   showHoldings?: boolean;
   showTradeHistory?: boolean;
@@ -209,9 +244,6 @@ type CreatorSettingsInput = {
 export async function updateCreatorSettings(userId: string, settings: CreatorSettingsInput): Promise<void> {
   if (settings.pricingCents !== undefined && !VALID_PRICING.has(settings.pricingCents)) {
     throw new Error('Invalid pricing');
-  }
-  if (settings.trialDays !== undefined && !VALID_TRIAL_DAYS.has(settings.trialDays)) {
-    throw new Error('Invalid trial days');
   }
   if (settings.tradeDelayHours !== undefined && !VALID_TRADE_DELAY_HOURS.has(settings.tradeDelayHours)) {
     throw new Error('Invalid trade delay');
@@ -230,7 +262,7 @@ export async function updateCreatorSettings(userId: string, settings: CreatorSet
       where: { userId },
       data: {
         pricingCents: settings.pricingCents,
-        trialDays: settings.trialDays,
+        trialDays: 0,
         pitch: settings.pitch === undefined ? undefined : (settings.pitch?.trim() || null),
       },
     }),
