@@ -48,7 +48,8 @@ export async function applyCreatorHandler(req: AuthRequest, res: Response): Prom
     }
     const result = await applyAsCreator(userId, parsed.data.pitch);
     res.json({ ...result, disclaimer: DISCLAIMER });
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] applyCreatorHandler failed:', error);
     res.status(500).json({ error: 'Failed to apply as creator' });
   }
 }
@@ -67,7 +68,8 @@ export async function activateCreatorHandler(req: AuthRequest, res: Response): P
     const { userId } = req.params;
     await activateCreator(userId);
     res.json({ ok: true });
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] activateCreatorHandler failed:', error);
     res.status(500).json({ error: 'Failed to activate creator' });
   }
 }
@@ -81,7 +83,8 @@ export async function getCreatorProfileHandler(req: AuthRequest, res: Response):
       return;
     }
     res.json(profile);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] getCreatorProfileHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch creator profile' });
   }
 }
@@ -91,7 +94,8 @@ export async function getCreatorEntitlementHandler(req: AuthRequest, res: Respon
     const { userId } = req.params;
     const entitlement = await getEntitlement(userId, req.user?.userId);
     res.json(entitlement);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] getCreatorEntitlementHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch entitlement' });
   }
 }
@@ -125,6 +129,7 @@ export async function getCreatorLockedContentHandler(req: AuthRequest, res: Resp
       res.status(403).json({ error: 'Locked content requires paid subscription' });
       return;
     }
+    console.error('[Creator] getCreatorLockedContentHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch locked content' });
   }
 }
@@ -158,7 +163,8 @@ export async function creatorDashboardHandler(req: AuthRequest, res: Response): 
     }
     const data = await getCreatorDashboard(userId);
     res.json(data);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] creatorDashboardHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch creator dashboard' });
   }
 }
@@ -172,7 +178,8 @@ export async function getMyCreatorSubscriptionsHandler(req: AuthRequest, res: Re
     }
     const data = await getMyCreatorSubscriptions(userId);
     res.json(data);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] getMyCreatorSubscriptionsHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch subscriptions' });
   }
 }
@@ -248,7 +255,8 @@ export async function getCreatorPayoutBalanceHandler(req: AuthRequest, res: Resp
     }
     const balance = await getPayoutBalance(userId);
     res.json(balance);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] getCreatorPayoutBalanceHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch payout balance' });
   }
 }
@@ -292,7 +300,8 @@ export async function creatorStripeWebhookHandler(req: Request, res: Response): 
     const event = stripe.webhooks.constructEvent(req.body, signature, config.stripeConnectWebhookSecret);
     await handleCreatorWebhookEvent(event);
     res.json({ received: true });
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Creator] creatorStripeWebhookHandler failed:', error);
     res.status(400).json({ error: 'Webhook processing failed' });
   }
 }

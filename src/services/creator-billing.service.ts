@@ -218,13 +218,27 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const stripeSubscriptionId = typeof maybeSubscription === 'string' ? maybeSubscription : null;
         if (!stripeSubscriptionId) return;
         const amountPaid = invoice.amount_paid;
-        if (!amountPaid || amountPaid <= 0) return;
+        if (typeof amountPaid !== 'number' || !Number.isFinite(amountPaid) || amountPaid <= 0) return;
 
         const sub = await prisma.creatorSubscription.findFirst({
           where: { stripeSubscriptionId },
           select: { id: true, creatorUserId: true },
         });
         if (!sub) return;
+
+        const creatorEventKey = `stripe_event:${event.id}:creator_share`;
+        const platformEventKey = `stripe_event:${event.id}:platform_fee`;
+        const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
+          where: {
+            creatorUserId: sub.creatorUserId,
+            OR: [
+              { description: creatorEventKey },
+              { description: platformEventKey },
+            ],
+          },
+          select: { id: true },
+        });
+        if (alreadyCredited) return;
 
         const creatorShare = Math.round(amountPaid * 0.8);
         const platformShare = amountPaid - creatorShare;
@@ -236,7 +250,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               type: 'earning',
               amountCents: creatorShare,
               subscriptionId: sub.id,
-              description: 'Subscription payment (creator share)',
+              description: creatorEventKey,
             },
           }),
           prisma.creatorWalletLedger.create({
@@ -245,7 +259,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               type: 'platform_fee',
               amountCents: platformShare,
               subscriptionId: sub.id,
-              description: 'Platform fee (20%)',
+              description: platformEventKey,
             },
           }),
           prisma.creatorSubscriptionEvent.create({
@@ -255,6 +269,23 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
+        return;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        const maybeSubscription = (invoice as Stripe.Invoice & { subscription?: unknown }).subscription;
+        const stripeSubscriptionId = typeof maybeSubscription === 'string' ? maybeSubscription : null;
+        if (!stripeSubscriptionId) return;
+
+        await prisma.creatorSubscription.updateMany({
+          where: { stripeSubscriptionId },
+          data: {
+            status: 'past_due',
+            // Ensure access resolution no longer treats this as paid access.
+            currentPeriodEnd: new Date(Date.now() - 1000),
+          },
+        });
         return;
       }
 
