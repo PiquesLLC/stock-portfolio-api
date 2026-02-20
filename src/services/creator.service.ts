@@ -118,11 +118,27 @@ export async function getEntitlement(creatorUserId: string, viewerId?: string): 
 }
 
 export async function getCreatorProfile(creatorUserId: string, viewerId?: string): Promise<{
+  userId: string;
   creatorUserId: string;
+  username: string;
+  displayName: string;
   status: string;
   pricingCents: number;
   trialDays: number;
   pitch: string | null;
+  stripeConnectOnboarded: boolean;
+  complianceAcceptedAt: string | null;
+  createdAt: string;
+  visibility: {
+    showHoldings: boolean;
+    showTradeHistory: boolean;
+    showRationale: boolean;
+    showSectors: boolean;
+    showRiskMetrics: boolean;
+    showWatchlists: boolean;
+    tradeDelayHours: number;
+    hideShareCount: boolean;
+  } | null;
   accessLevel: CreatorAccessLevel;
   entitlement: CreatorSection[];
   subscriberCount: number;
@@ -141,12 +157,34 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
     }),
   ]);
 
+  // Fetch display info for the creator user
+  const user = await prisma.user.findUnique({
+    where: { id: creatorUserId },
+    select: { username: true, displayName: true },
+  });
+
   return {
+    userId: creatorUserId,
     creatorUserId,
+    username: user?.username ?? '',
+    displayName: user?.displayName ?? '',
     status: creator.status,
     pricingCents: creator.pricingCents,
     trialDays: creator.trialDays,
     pitch: creator.pitch,
+    stripeConnectOnboarded: creator.stripeConnectOnboarded,
+    complianceAcceptedAt: creator.complianceAcceptedAt?.toISOString() ?? null,
+    createdAt: creator.createdAt.toISOString(),
+    visibility: creator.visibility ? {
+      showHoldings: creator.visibility.showHoldings,
+      showTradeHistory: creator.visibility.showTradeHistory,
+      showRationale: creator.visibility.showRationale,
+      showSectors: creator.visibility.showSectors,
+      showRiskMetrics: creator.visibility.showRiskMetrics,
+      showWatchlists: creator.visibility.showWatchlists,
+      tradeDelayHours: creator.visibility.tradeDelayHours,
+      hideShareCount: creator.visibility.hideShareCount,
+    } : null,
     accessLevel: entitlement.level,
     entitlement: entitlement.accessibleSections,
     subscriberCount,
