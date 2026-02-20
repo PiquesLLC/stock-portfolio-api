@@ -3,6 +3,35 @@ import prisma from '../utils/prisma';
 import { config } from '../config';
 import { getPayoutBalanceFromLedger } from './creator.service';
 
+type CreatorBillingCounterKey =
+  | 'processed'
+  | 'deduped'
+  | 'failed'
+  | 'refunded'
+  | 'disputed'
+  | 'payoutFailed';
+
+const creatorBillingCounters: Record<CreatorBillingCounterKey, number> = {
+  processed: 0,
+  deduped: 0,
+  failed: 0,
+  refunded: 0,
+  disputed: 0,
+  payoutFailed: 0,
+};
+
+function bumpCounter(key: CreatorBillingCounterKey): void {
+  creatorBillingCounters[key] = (creatorBillingCounters[key] ?? 0) + 1;
+}
+
+function logCreatorBilling(data: Record<string, unknown>): void {
+  console.info('[CreatorBilling]', JSON.stringify({ ...data, counters: creatorBillingCounters }));
+}
+
+export function getCreatorBillingCounters(): Record<CreatorBillingCounterKey, number> {
+  return { ...creatorBillingCounters };
+}
+
 function getStripeClient(): Stripe {
   if (!config.stripeSecretKey) {
     throw new Error('Stripe is not configured');
@@ -177,7 +206,15 @@ async function resolveSubscriptionFromDispute(dispute: Stripe.Dispute, stripe: S
 
 export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<void> {
   const shouldProcess = await markWebhookProcessed(event.id, event.type);
-  if (!shouldProcess) return;
+  if (!shouldProcess) {
+    bumpCounter('deduped');
+    logCreatorBilling({
+      outcome: 'deduped',
+      eventId: event.id,
+      eventType: event.type,
+    });
+    return;
+  }
 
   try {
     switch (event.type) {
@@ -225,6 +262,14 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
         }
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          creatorUserId,
+          subscriptionId: sub?.id ?? null,
+        });
         return;
       }
 
@@ -240,6 +285,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             canceledAt: subscription.cancel_at_period_end ? new Date() : null,
           },
         });
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          subscriptionId: stripeSubscriptionId,
+        });
         return;
       }
 
@@ -251,6 +303,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             status: 'expired',
             canceledAt: new Date(),
           },
+        });
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          subscriptionId: subscription.id,
         });
         return;
       }
@@ -312,6 +371,15 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          creatorUserId: sub.creatorUserId,
+          subscriptionId: sub.id,
+          amountPaid,
+        });
         return;
       }
 
@@ -328,6 +396,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             // Ensure access resolution no longer treats this as paid access.
             currentPeriodEnd: new Date(Date.now() - 1000),
           },
+        });
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          subscriptionId: stripeSubscriptionId,
         });
         return;
       }
@@ -390,6 +465,17 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
         }
+        bumpCounter('refunded');
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          creatorUserId: sub.creatorUserId,
+          subscriptionId: sub.id,
+          amountRefunded,
+          fullRefund: amount > 0 && amountRefunded >= amount,
+        });
         return;
       }
 
@@ -421,6 +507,16 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
+        bumpCounter('disputed');
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          creatorUserId: sub.creatorUserId,
+          subscriptionId: sub.id,
+          reason,
+        });
         return;
       }
 
@@ -448,6 +544,15 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
         }
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          creatorUserId: sub.creatorUserId,
+          subscriptionId: sub.id,
+          disputeOutcome: outcome,
+        });
         return;
       }
 
@@ -460,6 +565,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             paidAt: new Date(),
           },
         });
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          stripePayoutId: payout.id,
+        });
         return;
       }
 
@@ -471,15 +583,36 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             status: 'failed',
           },
         });
+        bumpCounter('payoutFailed');
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          stripePayoutId: payout.id,
+        });
         return;
       }
 
       default:
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed_unhandled',
+          eventId: event.id,
+          eventType: event.type,
+        });
         return;
     }
   } catch (error) {
+    bumpCounter('failed');
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[CreatorWebhook] Failed processing event ${event.type} (${event.id}): ${msg}`);
+    logCreatorBilling({
+      outcome: 'failed',
+      eventId: event.id,
+      eventType: event.type,
+      error: msg,
+    });
     await prisma.creatorWebhookEvent.deleteMany({ where: { eventId: event.id } });
     throw error;
   }
@@ -593,5 +726,97 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   return {
     payoutId: payout.id,
     amountCents: payout.amountCents,
+  };
+}
+
+type LedgerType = 'earning' | 'platform_fee' | 'refund' | 'payout';
+
+type CreatorLedgerQuery = {
+  limit?: number;
+  cursor?: string;
+  type?: LedgerType;
+  from?: Date;
+  to?: Date;
+};
+
+export async function getCreatorLedger(
+  userId: string,
+  query: CreatorLedgerQuery
+): Promise<{
+  items: Array<{
+    id: string;
+    createdAt: Date;
+    type: string;
+    amountCents: number;
+    description: string | null;
+    subscriptionId: string | null;
+  }>;
+  page: {
+    cursor?: string;
+    nextCursor?: string;
+    limit: number;
+    hasMore: boolean;
+  };
+  summary: {
+    availableCents: number;
+    reservedCents: number;
+    pendingPayoutCents: number;
+  };
+}> {
+  const limit = Math.max(1, Math.min(query.limit ?? 25, 100));
+  const where: {
+    creatorUserId: string;
+    type?: LedgerType;
+    createdAt?: { gte?: Date; lte?: Date };
+  } = { creatorUserId: userId };
+
+  if (query.type) {
+    where.type = query.type;
+  }
+  if (query.from || query.to) {
+    where.createdAt = {};
+    if (query.from) where.createdAt.gte = query.from;
+    if (query.to) where.createdAt.lte = query.to;
+  }
+
+  const [rows, balance, pendingPayoutAgg] = await Promise.all([
+    prisma.creatorWalletLedger.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      take: limit + 1,
+      select: {
+        id: true,
+        createdAt: true,
+        type: true,
+        amountCents: true,
+        description: true,
+        subscriptionId: true,
+      },
+    }),
+    getPayoutBalance(userId),
+    prisma.creatorPayout.aggregate({
+      where: { creatorUserId: userId, status: 'pending' },
+      _sum: { amountCents: true },
+    }),
+  ]);
+
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? items[items.length - 1]?.id : undefined;
+
+  return {
+    items,
+    page: {
+      cursor: query.cursor,
+      nextCursor,
+      limit,
+      hasMore,
+    },
+    summary: {
+      availableCents: balance.availableCents,
+      reservedCents: balance.reservedCents,
+      pendingPayoutCents: pendingPayoutAgg._sum.amountCents ?? 0,
+    },
   };
 }

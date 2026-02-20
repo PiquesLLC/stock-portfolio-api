@@ -18,6 +18,7 @@ import {
 import {
   cancelCreatorSubscription,
   createCreatorCheckoutSession,
+  getCreatorLedger,
   createStripeConnectOnboardingLink,
   getPayoutBalance,
   handleCreatorWebhookEvent,
@@ -258,6 +259,46 @@ export async function getCreatorPayoutBalanceHandler(req: AuthRequest, res: Resp
   } catch (error) {
     console.error('[Creator] getCreatorPayoutBalanceHandler failed:', error);
     res.status(500).json({ error: 'Failed to fetch payout balance' });
+  }
+}
+
+export async function getCreatorLedgerHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : 25;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const typeRaw = typeof req.query.type === 'string' ? req.query.type : undefined;
+    const allowedTypes = new Set(['earning', 'platform_fee', 'refund', 'payout']);
+    if (typeRaw && !allowedTypes.has(typeRaw)) {
+      res.status(400).json({ error: 'Invalid type filter' });
+      return;
+    }
+    const fromRaw = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const toRaw = typeof req.query.to === 'string' ? req.query.to : undefined;
+    const from = fromRaw ? new Date(fromRaw) : undefined;
+    const to = toRaw ? new Date(toRaw) : undefined;
+    if ((fromRaw && Number.isNaN(from?.getTime())) || (toRaw && Number.isNaN(to?.getTime()))) {
+      res.status(400).json({ error: 'Invalid date range' });
+      return;
+    }
+
+    const data = await getCreatorLedger(userId, {
+      limit,
+      cursor,
+      type: typeRaw as 'earning' | 'platform_fee' | 'refund' | 'payout' | undefined,
+      from,
+      to,
+    });
+    res.json(data);
+  } catch (error) {
+    console.error('[Creator] getCreatorLedgerHandler failed:', error);
+    res.status(500).json({ error: 'Failed to fetch creator ledger' });
   }
 }
 

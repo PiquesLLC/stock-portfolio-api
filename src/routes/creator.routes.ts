@@ -9,6 +9,7 @@ import {
   creatorDashboardHandler,
   creatorStripeWebhookHandler,
   getCreatorEntitlementHandler,
+  getCreatorLedgerHandler,
   getCreatorLockedContentHandler,
   getCreatorPayoutBalanceHandler,
   getCreatorProfileHandler,
@@ -29,6 +30,7 @@ router.patch('/settings', mutationLimiter, requireAuth, requireCreator, updateCr
 router.post('/connect-onboarding', mutationLimiter, requireAuth, requireCreator, connectOnboardingHandler);
 router.post('/payout', mutationLimiter, requireAuth, requireCreator, requestCreatorPayoutHandler);
 router.get('/payout/balance', requireAuth, requireCreator, getCreatorPayoutBalanceHandler);
+router.get('/ledger', requireAuth, requireCreator, getCreatorLedgerHandler);
 router.get('/my-subscriptions', requireAuth, getMyCreatorSubscriptionsHandler);
 router.get('/:userId', optionalAuth, getCreatorProfileHandler);
 router.get('/:userId/entitlement', optionalAuth, getCreatorEntitlementHandler);
