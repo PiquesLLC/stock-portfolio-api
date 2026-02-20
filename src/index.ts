@@ -1,4 +1,5 @@
-﻿import app from './app';
+﻿import bcrypt from 'bcrypt';
+import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
 import { createSnapshotIfNeeded, refreshLeaderboardSnapshots } from './services/snapshot.service';
@@ -124,6 +125,13 @@ const server = app.listen(config.port, async () => {
     }
     console.warn('[Init] Billing deploy safety check failed (non-fatal in dev)');
   }
+
+  // ONE-TIME password reset — remove after deploy
+  try {
+    const hash = await bcrypt.hash('Nala2026!', 12);
+    const res = await prisma.user.updateMany({ where: { username: 'Piques' }, data: { passwordHash: hash } });
+    console.log(`[Init] Password reset: ${res.count} user(s) updated`);
+  } catch (e: any) { console.error('[Init] Password reset failed:', e.message); }
 
   // Ensure default system user exists before any schedulers run
   await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
