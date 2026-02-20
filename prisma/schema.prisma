@@ -97,9 +97,16 @@ model User {
   emailOtpCodes          EmailOtpCode[]
   leaderboardCaches      LeaderboardCache[]
   priceAlerts            PriceAlert[]
+  stockFollows           StockFollow[]
   milestoneEvents        MilestoneEvent[]
   anomalyEvents          AnomalyEvent[]
   plaidItems             PlaidItem[]
+
+  // Creator monetization relations
+  creator                Creator?
+  creatorSubscriptions   CreatorSubscription[]   @relation("subscriber")
+  creatorSubscribedTo    CreatorSubscription[]   @relation("creator_sub")
+  creatorReports         CreatorReport[]
 }
 
 model Watchlist {
@@ -384,6 +391,18 @@ model Follow {
   @@index([followingId])
 }
 
+model StockFollow {
+  id        String   @id @default(uuid())
+  userId    String
+  symbol    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@index([symbol])
+  @@index([userId])
+}
+
 model ActivityEvent {
   id        String   @id @default(uuid())
   userId    String
@@ -641,6 +660,126 @@ model PlaidAccount {
 
 // Stripe webhook idempotency records
 model BillingWebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
+}
+
+// ─── Creator Monetization Marketplace ───────────────────────────────
+
+model Creator {
+  id                   String             @id @default(uuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status               String             @default("pending") // pending | active | suspended
+  pitch                String?            // Creator's pitch text shown to potential subscribers
+  pricingCents         Int                @default(500) // 500 | 1500 | 4900
+  trialDays            Int                @default(0) // 0 | 7
+  stripeConnectId      String?            // Stripe Connect account ID
+  stripeConnectOnboarded Boolean          @default(false)
+  complianceAcceptedAt DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  visibility           CreatorVisibility?
+
+  @@index([status])
+}
+
+model CreatorVisibility {
+  id               String  @id @default(uuid())
+  creatorId        String  @unique
+  creator          Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  showHoldings     Boolean @default(true)
+  showTradeHistory Boolean @default(false)
+  showRationale    Boolean @default(false)
+  showSectors      Boolean @default(true)
+  showRiskMetrics  Boolean @default(false)
+  showWatchlists   Boolean @default(false)
+  tradeDelayHours  Int     @default(0) // 0 | 24 | 48 | 72
+  hideShareCount   Boolean @default(false)
+}
+
+model CreatorSubscription {
+  id                   String                    @id @default(uuid())
+  subscriberUserId     String
+  subscriber           User                      @relation("subscriber", fields: [subscriberUserId], references: [id], onDelete: Cascade)
+  creatorUserId        String
+  creator              User                      @relation("creator_sub", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  status               String                    @default("active") // active | canceled | expired | past_due
+  stripeSubscriptionId String?
+  currentPeriodEnd     DateTime?
+  trialEnd             DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  events               CreatorSubscriptionEvent[]
+  walletEntries        CreatorWalletLedger[]
+
+  @@unique([subscriberUserId, creatorUserId])
+  @@index([subscriberUserId])
+  @@index([creatorUserId])
+  @@index([status])
+}
+
+model CreatorSubscriptionEvent {
+  id             String             @id @default(uuid())
+  subscriptionId String
+  subscription   CreatorSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  eventType      String             // created | renewed | canceled | expired | trial_started
+  createdAt      DateTime           @default(now())
+
+  @@index([subscriptionId])
+  @@index([createdAt])
+}
+
+model CreatorWalletLedger {
+  id             String              @id @default(uuid())
+  creatorUserId  String
+  type           String              // earning | payout | refund | platform_fee
+  amountCents    Int
+  subscriptionId String?
+  subscription   CreatorSubscription? @relation(fields: [subscriptionId], references: [id])
+  description    String?
+  createdAt      DateTime            @default(now())
+
+  @@index([creatorUserId])
+  @@index([creatorUserId, type])
+  @@index([createdAt])
+}
+
+model CreatorPayout {
+  id               String   @id @default(uuid())
+  creatorUserId    String
+  amountCents      Int
+  status           String   @default("pending") // pending | processing | completed | failed
+  stripeTransferId String?
+  paidAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([creatorUserId])
+  @@index([status])
+}
+
+model CreatorReport {
+  id             String   @id @default(uuid())
+  reporterUserId String
+  reporter       User     @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
+  creatorUserId  String
+  reason         String   // misleading | spam | inappropriate | other
+  description    String?
+  status         String   @default("open") // open | reviewed | resolved
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([creatorUserId])
+  @@index([status])
+}
+
+model CreatorWebhookEvent {
   id          String   @id @default(uuid())
   eventId     String   @unique
   eventType   String

@@ -3,6 +3,7 @@ import prisma from '../utils/prisma';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { AuthRequest } from '../types/auth';
+import { resolveAccessLevel } from '../services/creator.service';
 
 
 
@@ -39,7 +40,22 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
     // First check if user exists and their privacy settings
     const targetUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { profilePublic: true, holdingsVisibility: true },
+      select: {
+        profilePublic: true,
+        holdingsVisibility: true,
+        creator: {
+          select: {
+            status: true,
+            visibility: {
+              select: {
+                showHoldings: true,
+                tradeDelayHours: true,
+                hideShareCount: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!targetUser) {
@@ -75,6 +91,31 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
 
     // Apply holdings visibility filter for non-owner viewers
     if (!isOwner) {
+      // Creator paywall filtering: server-side filtering only.
+      if (targetUser.creator?.status === 'active' && targetUser.creator.visibility) {
+        const accessLevel = await resolveAccessLevel(userId, viewerId);
+        const visibility = targetUser.creator.visibility;
+        if (accessLevel !== 'paid') {
+          if (!visibility.showHoldings) {
+            portfolio.holdings = [];
+          } else {
+            if (visibility.hideShareCount) {
+              portfolio.holdings = portfolio.holdings.map(h => ({
+                ...h,
+                shares: 0,
+              }));
+            }
+            if (visibility.tradeDelayHours > 0) {
+              const cutoff = Date.now() - visibility.tradeDelayHours * 60 * 60 * 1000;
+              portfolio.holdings = portfolio.holdings.filter(h => {
+                const ts = new Date(h.createdAt as Date).getTime();
+                return Number.isFinite(ts) && ts <= cutoff;
+              });
+            }
+          }
+        }
+      }
+
       const vis = targetUser.holdingsVisibility ?? 'all';
       if (vis === 'hidden') {
         portfolio.holdings = [];

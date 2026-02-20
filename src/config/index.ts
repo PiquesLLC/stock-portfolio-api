@@ -13,6 +13,7 @@ if (!jwtSecret) {
 // In production, also require API keys
 if (process.env.NODE_ENV === 'production') {
   const billingEnabled = process.env.BILLING_ENABLED !== 'false';
+  const creatorMonetizationEnabled = process.env.CREATOR_MONETIZATION_ENABLED === 'true';
   const plaidEnabled = process.env.PLAID_ENABLED !== 'false';
   const requiredKeys = [
     'FINNHUB_API_KEY',
@@ -28,6 +29,12 @@ if (process.env.NODE_ENV === 'production') {
       'STRIPE_WEBHOOK_SECRET',
       'STRIPE_PRO_MONTHLY_PRICE_ID',
       'STRIPE_PREMIUM_MONTHLY_PRICE_ID'
+    );
+  }
+  if (creatorMonetizationEnabled) {
+    requiredKeys.push(
+      'STRIPE_SECRET_KEY',
+      'STRIPE_CONNECT_WEBHOOK_SECRET'
     );
   }
   for (const key of requiredKeys) {
@@ -91,7 +98,13 @@ export const config = {
   stripePremiumMonthlyPriceId: process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_PREMIUM || '',
   stripePremiumYearlyPriceId: process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID || '',
   stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173/settings/billing',
+  stripeConnectWebhookSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
   billingEnabled: process.env.BILLING_ENABLED !== 'false',
+  creatorMonetizationEnabled: process.env.CREATOR_MONETIZATION_ENABLED === 'true',
+  creatorAdminUserIds: (process.env.CREATOR_ADMIN_USER_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
 
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),

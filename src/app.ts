@@ -69,7 +69,7 @@ const jsonParser = express.json({
 });
 app.use((req, res, next) => {
   // Stripe webhook uses route-level express.raw() for signature verification.
-  if (req.path === '/billing/webhook') {
+  if (req.path === '/billing/webhook' || req.path === '/creator/webhooks/stripe') {
     next();
     return;
   }

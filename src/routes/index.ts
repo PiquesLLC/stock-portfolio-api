@@ -22,6 +22,8 @@ import watchlistRoutes from './watchlist.routes';
 import notificationsRoutes from './notifications.routes';
 import plaidRoutes from './plaid.routes';
 import billingRoutes from './billing.routes';
+import stockFollowRoutes from './stock-follow.routes';
+import creatorRoutes from './creator.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -46,6 +48,8 @@ router.use('/milestones', milestoneRoutes);
 router.use('/fundamentals', fundamentalsRoutes);
 router.use('/nala', nalaRoutes);
 router.use('/watchlists', watchlistRoutes);
+router.use('/stock-follows', stockFollowRoutes);
+router.use('/creator', creatorRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/plaid', plaidRoutes);
 if (config.billingEnabled) {

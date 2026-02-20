@@ -11,6 +11,7 @@ import {
 import { getFeed, getUserActivity } from '../services/activity.service';
 import { getPerformanceComparison } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
+import { getCreatorProfile } from '../services/creator.service';
 
 
 
@@ -153,6 +154,8 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       }
     }
 
+    const creatorProfile = await getCreatorProfile(userId, viewerId).catch(() => null);
+
     res.json({
       ...user,
       createdAt: user.createdAt.toISOString(),
@@ -161,6 +164,8 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       viewerIsFollowing: viewerFollowing,
       recentActivity: activity,
       performance,
+      creator: creatorProfile,
+      viewerAccessLevel: creatorProfile?.accessLevel ?? 'public',
     });
   } catch (_error) {
     console.error('Error getting profile:');
