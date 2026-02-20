@@ -102,6 +102,13 @@ model User {
   anomalyEvents          AnomalyEvent[]
   plaidItems             PlaidItem[]
 
+  // Referral tracking
+  referredBy             String?
+  referrer               User?                  @relation("referrals", fields: [referredBy], references: [id])
+  referrals              User[]                 @relation("referrals")
+  referralsGiven         Referral[]             @relation("referrer")
+  referralsReceived      Referral[]             @relation("referred")
+
   // Creator monetization relations
   creator                Creator?
   creatorSubscriptions   CreatorSubscription[]   @relation("subscriber")
@@ -789,4 +796,24 @@ model CreatorWebhookEvent {
   processedAt DateTime @default(now())
 
   @@index([processedAt])
+}
+
+// ─── Referral Tracking ──────────────────────────────────────────────
+
+model Referral {
+  id             String   @id @default(uuid())
+  referrerUserId String
+  referrer       User     @relation("referrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referredUserId String   @unique // Each user can only be referred once
+  referred       User     @relation("referred", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referralCode   String   // The code/username used at signup
+  status         String   @default("signed_up") // signed_up | verified | active
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([referrerUserId, referredUserId])
+  @@index([referrerUserId])
+  @@index([referredUserId])
+  @@index([status])
+  @@index([createdAt])
 }

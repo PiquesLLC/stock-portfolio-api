@@ -24,6 +24,7 @@ import plaidRoutes from './plaid.routes';
 import billingRoutes from './billing.routes';
 import stockFollowRoutes from './stock-follow.routes';
 import creatorRoutes from './creator.routes';
+import referralRoutes from './referral.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -50,6 +51,7 @@ router.use('/nala', nalaRoutes);
 router.use('/watchlists', watchlistRoutes);
 router.use('/stock-follows', stockFollowRoutes);
 router.use('/creator', creatorRoutes);
+router.use('/referral', referralRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/plaid', plaidRoutes);
 if (config.billingEnabled) {

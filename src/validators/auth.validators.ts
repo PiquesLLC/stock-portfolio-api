@@ -34,6 +34,7 @@ export const signupSchema = z.object({
   acceptedTerms: z.literal(true, {
     error: 'You must accept the Terms of Service',
   }),
+  referralCode: z.string().max(20).optional(),
 });
 
 export const setPasswordSchema = z.object({

@@ -427,7 +427,8 @@ export async function signup(
   email: string,
   displayName: string,
   password: string,
-  consentMeta?: { ipAddress?: string; userAgent?: string }
+  consentMeta?: { ipAddress?: string; userAgent?: string },
+  referralCode?: string
 ): Promise<LoginResponse | null> {
   const normalizedEmail = normalizeEmail(email);
 
@@ -494,6 +495,16 @@ export async function signup(
 
     return newUser;
   });
+
+  // Process referral (non-blocking — don't fail signup if referral fails)
+  if (referralCode) {
+    try {
+      const { processReferral } = await import('./referral.service');
+      await processReferral(user.id, referralCode);
+    } catch {
+      // Referral processing failed — don't block signup
+    }
+  }
 
   const token = generateAccessToken({
     userId: user.id,
@@ -584,6 +595,14 @@ export async function verifyEmailCode(
       data: { emailVerified: true },
     }),
   ]);
+
+  // Update referral status to 'verified'
+  try {
+    const { markReferralVerified } = await import('./referral.service');
+    await markReferralVerified(user.id);
+  } catch {
+    // Non-critical
+  }
 
   return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS };
 }

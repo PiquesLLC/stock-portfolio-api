@@ -227,7 +227,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const { username, email, displayName, password } = parsed.data;
+    const { username, email, displayName, password, referralCode } = parsed.data;
 
     const exists = await usernameExists(username);
     if (exists) {
@@ -244,7 +244,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const result = await signup(username, email, displayName, password, {
       ipAddress: req.ip || req.headers['x-forwarded-for']?.toString(),
       userAgent: req.headers['user-agent'],
-    });
+    }, referralCode);
 
     if (!result) {
       res.status(500).json({ error: 'Failed to create account' });
