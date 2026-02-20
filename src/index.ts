@@ -16,6 +16,7 @@ import { rotateTickerFundamentals } from './services/fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
+import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -350,6 +351,25 @@ const server = app.listen(config.port, async () => {
       console.error('[Dividend Change Detection] Error:', err.message)
     );
   }, 6 * 60 * 60 * 1000);
+
+  // Creator reconciliation — daily ledger vs subscription consistency audit.
+  // This is a safety-net process and does not mutate data.
+  if (config.creatorMonetizationEnabled) {
+    console.log('[Creator Reconciliation] Running daily');
+    setTimeout(() => {
+      runCreatorLedgerReconciliation().catch(err =>
+        console.error('[Creator Reconciliation] Startup run failed:', (err as Error).message)
+      );
+    }, 180000); // 3 min delay after startup
+
+    setInterval(() => {
+      runCreatorLedgerReconciliation().catch(err =>
+        console.error('[Creator Reconciliation] Daily run failed:', (err as Error).message)
+      );
+    }, 24 * 60 * 60 * 1000);
+  } else {
+    console.log('[Creator Reconciliation] Skipped (creator monetization disabled)');
+  }
 });
 
 process.on('SIGTERM', () => {
@@ -359,7 +379,6 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
-
 
 
 
