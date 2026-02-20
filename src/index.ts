@@ -1,4 +1,4 @@
-﻿import bcrypt from 'bcrypt';
+﻿import bcrypt from 'bcryptjs';
 import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached } from './utils/candle-cache';
