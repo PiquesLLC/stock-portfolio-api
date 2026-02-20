@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import * as Sentry from '@sentry/node';
 import Stripe from 'stripe';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
@@ -347,6 +348,7 @@ export async function creatorStripeWebhookHandler(req: Request, res: Response): 
       res.status(400).json({ error: 'Invalid webhook signature' });
       return;
     }
+    Sentry.captureException(error, { tags: { component: 'creator_webhook' } });
     res.status(400).json({ error: 'Webhook processing failed' });
   }
 }

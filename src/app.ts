@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -7,6 +8,23 @@ import fs from 'fs';
 import routes from './routes';
 import { config } from './config';
 import { apiLimiter } from './middleware/rateLimiter';
+
+// Initialize Sentry before Express app (must be first)
+if (config.sentryDsn) {
+  Sentry.init({
+    dsn: config.sentryDsn,
+    environment: config.nodeEnv,
+    tracesSampleRate: config.nodeEnv === 'production' ? 0.1 : 1.0,
+    beforeSend(event) {
+      // Strip sensitive headers
+      if (event.request?.headers) {
+        delete event.request.headers['authorization'];
+        delete event.request.headers['cookie'];
+      }
+      return event;
+    },
+  });
+}
 
 const app = express();
 
@@ -164,6 +182,11 @@ if (fs.existsSync(clientDir)) {
   app.use((req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
+}
+
+// Sentry error handler (must be before generic error handler)
+if (config.sentryDsn) {
+  Sentry.setupExpressErrorHandler(app);
 }
 
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

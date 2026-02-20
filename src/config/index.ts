@@ -141,6 +141,9 @@ export const config = {
     },
   },
 
+  // Sentry error monitoring
+  sentryDsn: process.env.SENTRY_DSN || '',
+
   // Cookie options for auth token clearing
   clearCookieOptions: {
     httpOnly: true,
