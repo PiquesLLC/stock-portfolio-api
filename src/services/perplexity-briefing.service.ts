@@ -47,11 +47,11 @@ Rules:
 
 export async function getPortfolioBriefing(userId: string): Promise<PortfolioBriefingResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = 'portfolio-briefing';
+  const cacheKey = `portfolio-briefing:${userId}`;
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
 
   if (portfolio.holdings.length === 0) {
     return {

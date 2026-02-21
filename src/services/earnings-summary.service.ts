@@ -2,7 +2,6 @@ import { insightsCache } from '../utils/finnhub';
 import { getPortfolio } from './portfolio.service';
 import { getEarningsData } from './earnings.service';
 
-const CACHE_KEY = 'earnings-summary';
 const CACHE_TTL_SECONDS = 30 * 60;
 const UPCOMING_WINDOW_DAYS = 90;
 
@@ -25,15 +24,16 @@ function daysUntil(target: Date, now: Date): number {
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
-export async function getEarningsSummary(): Promise<{ results: EarningsSummaryItem[]; partial: boolean }> {
-  const cached = insightsCache.get<{ results: EarningsSummaryItem[]; partial: boolean }>(CACHE_KEY);
+export async function getEarningsSummary(userId: string): Promise<{ results: EarningsSummaryItem[]; partial: boolean }> {
+  const cacheKey = `earnings-summary:${userId}`;
+  const cached = insightsCache.get<{ results: EarningsSummaryItem[]; partial: boolean }>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const tickers = portfolio.holdings.map(h => h.ticker.toUpperCase());
   if (tickers.length === 0) {
     const empty = { results: [], partial: false };
-    insightsCache.set(CACHE_KEY, empty, CACHE_TTL_SECONDS);
+    insightsCache.set(cacheKey, empty, CACHE_TTL_SECONDS);
     return empty;
   }
 
@@ -79,6 +79,6 @@ export async function getEarningsSummary(): Promise<{ results: EarningsSummaryIt
   });
 
   const payload = { results: flattened, partial };
-  insightsCache.set(CACHE_KEY, payload, CACHE_TTL_SECONDS);
+  insightsCache.set(cacheKey, payload, CACHE_TTL_SECONDS);
   return payload;
 }

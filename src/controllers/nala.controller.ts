@@ -28,8 +28,7 @@ export async function askNalaHandler(req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const userId = req.user?.userId;
-    const result = await askNala(question.trim(), userId);
+    const result = await askNala(question.trim(), req.user!.userId);
     res.json(result);
   } catch (_error) {
     console.error('[Nala Controller] Error:');

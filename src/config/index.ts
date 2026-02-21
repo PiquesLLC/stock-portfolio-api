@@ -106,6 +106,13 @@ export const config = {
     .map((id) => id.trim())
     .filter(Boolean),
 
+  // OAuth
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  appleClientId: process.env.APPLE_CLIENT_ID || '',
+  appleTeamId: process.env.APPLE_TEAM_ID || '',
+  appleKeyId: process.env.APPLE_KEY_ID || '',
+  applePrivateKey: (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+
   // CORS - allowed origins for API requests
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),
 

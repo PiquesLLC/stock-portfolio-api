@@ -142,13 +142,25 @@ const server = app.listen(config.port, async () => {
   // no browser is connected, so the 1D chart never has gaps.
   const SNAPSHOT_INTERVAL_MS = config.snapshotIntervalSeconds * 1000;
   console.log(`[Snapshot Scheduler] Running every ${config.snapshotIntervalSeconds}s`);
-  setInterval(() => {
-    createSnapshotIfNeeded().catch(err => {
-      // Only log non-routine errors (quotes unavailable is expected outside market hours)
-      if (err?.message && !err.message.includes('quotes')) {
-        console.error('[Snapshot Scheduler] Error:', err.message);
+  setInterval(async () => {
+    try {
+      const userIds = await prisma.holding.findMany({
+        select: { userId: true },
+        distinct: ['userId'],
+        where: { shares: { gt: 0 }, userId: { not: null } },
+      });
+      for (const { userId } of userIds) {
+        if (userId) {
+          await createSnapshotIfNeeded(userId).catch(err => {
+            if (err?.message && !err.message.includes('quotes')) {
+              console.error(`[Snapshot Scheduler] Error for user ${userId.slice(0, 8)}:`, err.message);
+            }
+          });
+        }
       }
-    });
+    } catch (err: unknown) {
+      console.error('[Snapshot Scheduler] Error fetching users:', (err as Error).message);
+    }
   }, SNAPSHOT_INTERVAL_MS);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
@@ -318,37 +330,60 @@ const server = app.listen(config.port, async () => {
     );
   }, 30 * 60 * 1000);
 
-  // AI Anomaly Detection — check every 15 minutes during market hours
+  // AI Anomaly Detection — check every 15 minutes during market hours (all users)
   console.log('[Anomaly Detection] Running every 15 minutes (market hours only)');
+  async function runAnomalyDetectionForAllUsers() {
+    const session = getMarketSession();
+    if (session !== 'PRE' && session !== 'REG' && session !== 'POST') return;
+    const users = await prisma.holding.findMany({
+      select: { userId: true },
+      distinct: ['userId'],
+      where: { shares: { gt: 0 }, userId: { not: null } },
+    });
+    for (const { userId } of users) {
+      if (userId) {
+        await detectAnomalies(userId).catch(err =>
+          console.error(`[Anomaly Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
+        );
+      }
+    }
+  }
   setTimeout(() => {
-    const session = getMarketSession();
-    if (session === 'PRE' || session === 'REG' || session === 'POST') {
-      detectAnomalies().catch(err =>
-        console.error('[Anomaly Detection] Startup check failed:', err.message)
-      );
-    }
+    runAnomalyDetectionForAllUsers().catch(err =>
+      console.error('[Anomaly Detection] Startup check failed:', (err as Error).message)
+    );
   }, 120000); // 2 min delay
-  setInterval(async () => {
-    const session = getMarketSession();
-    if (session === 'PRE' || session === 'REG' || session === 'POST') {
-      await detectAnomalies().catch(err =>
-        console.error('[Anomaly Detection] Error:', err.message)
-      );
-    }
+  setInterval(() => {
+    runAnomalyDetectionForAllUsers().catch(err =>
+      console.error('[Anomaly Detection] Error:', (err as Error).message)
+    );
   }, 15 * 60 * 1000);
 
-  // Dividend change detection — every 6 hours (skip weekends — no new dividend data)
+  // Dividend change detection — every 6 hours (skip weekends — no new dividend data, all users)
   console.log('[Dividend Change Detection] Running every 6 hours');
-  setTimeout(() => {
+  async function runDividendChangeDetectionForAllUsers() {
     if (isWeekendET()) return;
-    detectDividendChanges().catch(err =>
-      console.error('[Dividend Change Detection] Init failed:', err.message)
+    const users = await prisma.holding.findMany({
+      select: { userId: true },
+      distinct: ['userId'],
+      where: { shares: { gt: 0 }, userId: { not: null } },
+    });
+    for (const { userId } of users) {
+      if (userId) {
+        await detectDividendChanges(userId).catch(err =>
+          console.error(`[Dividend Change Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
+        );
+      }
+    }
+  }
+  setTimeout(() => {
+    runDividendChangeDetectionForAllUsers().catch(err =>
+      console.error('[Dividend Change Detection] Init failed:', (err as Error).message)
     );
   }, 60000);
   setInterval(() => {
-    if (isWeekendET()) return;
-    detectDividendChanges().catch(err =>
-      console.error('[Dividend Change Detection] Error:', err.message)
+    runDividendChangeDetectionForAllUsers().catch(err =>
+      console.error('[Dividend Change Detection] Error:', (err as Error).message)
     );
   }, 6 * 60 * 60 * 1000);
 

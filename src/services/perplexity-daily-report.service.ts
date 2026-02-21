@@ -7,7 +7,6 @@ import { getEarningsSummary } from './earnings-summary.service';
 
 // Cache daily reports for 4 hours
 const reportCache = new NodeCache({ stdTTL: 14400 });
-const DAILY_REPORT_CACHE_KEY = 'daily-report';
 
 // Non-ticker acronyms that Perplexity sometimes returns as "relatedTickers"
 const TICKER_BLACKLIST = new Set([
@@ -50,18 +49,19 @@ function isWeekendET(): boolean {
   return etDay === 'Sat' || etDay === 'Sun';
 }
 
-export async function getDailyReport(): Promise<DailyReportResponse> {
-  const cached = reportCache.get<DailyReportResponse>(DAILY_REPORT_CACHE_KEY);
+export async function getDailyReport(userId: string): Promise<DailyReportResponse> {
+  const cacheKey = `daily-report:${userId}`;
+  const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
   const weekend = isWeekendET();
 
   // Gather data in parallel
   const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
-    getPortfolio(),
+    getPortfolio(userId),
     fetchMarketNews(10),
     getEconomicDashboard(),
-    getEarningsSummary(),
+    getEarningsSummary(userId),
   ]);
 
   const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
@@ -206,7 +206,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
     };
 
     if (result.topStories.length > 0) {
-      reportCache.set(DAILY_REPORT_CACHE_KEY, result);
+      reportCache.set(cacheKey, result);
     }
 
     const elapsed = Date.now() - startTime;
@@ -218,7 +218,7 @@ export async function getDailyReport(): Promise<DailyReportResponse> {
   }
 }
 
-export async function regenerateDailyReport(): Promise<DailyReportResponse> {
-  reportCache.del(DAILY_REPORT_CACHE_KEY);
-  return getDailyReport();
+export async function regenerateDailyReport(userId: string): Promise<DailyReportResponse> {
+  reportCache.del(`daily-report:${userId}`);
+  return getDailyReport(userId);
 }

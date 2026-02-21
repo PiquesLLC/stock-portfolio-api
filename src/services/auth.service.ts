@@ -352,7 +352,7 @@ export async function setPassword(username: string, password: string): Promise<b
 export async function getUserById(userId: string) {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, displayName: true, email: true, emailVerified: true, plan: true, planExpiresAt: true },
+    select: { id: true, username: true, displayName: true, email: true, emailVerified: true, plan: true, planExpiresAt: true, createdAt: true },
   });
 }
 

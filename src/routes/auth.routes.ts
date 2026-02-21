@@ -19,11 +19,15 @@ import {
 import { requireAuth } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
+import oauthRoutes from './oauth.routes';
 
 const router = Router();
 
 // Mount MFA sub-routes at /auth/mfa/*
 router.use('/mfa', mfaRoutes);
+
+// Mount OAuth sub-routes at /auth/oauth/*
+router.use('/oauth', oauthRoutes);
 
 // POST /auth/login - Login with username and password (rate limited)
 router.post('/login', loginLimiter, loginHandler);
