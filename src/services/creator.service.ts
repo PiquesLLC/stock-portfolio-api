@@ -376,12 +376,13 @@ export async function getPayoutBalanceFromLedger(userId: string): Promise<number
 }
 
 export async function getCreatorDashboard(userId: string): Promise<{
-  mrrCents: number;
+  mrr: number;
   activeSubscribers: number;
   churnRatePct: number;
+  totalEarningsCents: number;
   payoutBalanceCents: number;
-  earningsChart: Array<{ month: string; amountCents: number }>;
-  recentEvents: Array<{ eventType: string; createdAt: Date; subscriberUserId: string }>;
+  monthlyEarnings: Array<{ month: string; amountCents: number }>;
+  recentEvents: Array<{ type: string; description: string; createdAt: Date }>;
 }> {
   const creator = await prisma.creator.findUnique({
     where: { userId },
@@ -417,29 +418,41 @@ export async function getCreatorDashboard(userId: string): Promise<{
     getPayoutBalanceFromLedger(userId),
   ]);
 
-  const mrrCents = activeSubscribers * creator.pricingCents;
+  const mrr = activeSubscribers * creator.pricingCents;
   const churnDenominator = activeSubscribers + churnedLast30;
   const churnRatePct = churnDenominator > 0 ? Number(((churnedLast30 / churnDenominator) * 100).toFixed(2)) : 0;
+
+  const totalEarningsCents = ledger.reduce((sum, row) => sum + row.amountCents, 0);
 
   const earningsByMonth = new Map<string, number>();
   for (const row of ledger) {
     const month = `${row.createdAt.getUTCFullYear()}-${String(row.createdAt.getUTCMonth() + 1).padStart(2, '0')}`;
     earningsByMonth.set(month, (earningsByMonth.get(month) || 0) + row.amountCents);
   }
-  const earningsChart = Array.from(earningsByMonth.entries())
+  const monthlyEarnings = Array.from(earningsByMonth.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, amountCents]) => ({ month, amountCents }));
 
+  const eventDescriptions: Record<string, string> = {
+    created: 'New subscription',
+    renewed: 'Subscription renewed',
+    canceled: 'Subscription canceled',
+    expired: 'Subscription expired',
+    payment_failed: 'Payment failed',
+    trial_started: 'Trial started',
+  };
+
   return {
-    mrrCents,
+    mrr,
     activeSubscribers,
     churnRatePct,
+    totalEarningsCents,
     payoutBalanceCents,
-    earningsChart,
+    monthlyEarnings,
     recentEvents: recentEvents.map((e) => ({
-      eventType: e.eventType,
+      type: e.eventType,
+      description: eventDescriptions[e.eventType] || e.eventType,
       createdAt: e.createdAt,
-      subscriberUserId: e.subscription.subscriberUserId,
     })),
   };
 }
