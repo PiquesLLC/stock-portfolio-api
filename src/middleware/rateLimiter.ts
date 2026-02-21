@@ -14,6 +14,18 @@ export const loginLimiter = rateLimit({
 });
 
 /**
+ * OAuth callback rate limiter - stricter than generic mutations
+ * 10 attempts per 15 minutes in production, 50 in dev
+ */
+export const oauthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 50,
+  message: { error: 'Too many authentication attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Password setting rate limiter
  * 3 attempts per 15 minutes
  */
