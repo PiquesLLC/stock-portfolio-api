@@ -8,12 +8,6 @@ import { Prisma } from '@prisma/client';
 import prisma from '../utils/prisma';
 import { isDripEnabled, reinvestDividend } from './drip.service';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
-function resolveUserId(userId?: string | null): string {
-  return userId ?? SYSTEM_USER_ID;
-}
-
 
 /**
  * Post dividends for all events with payDate on the given date.
@@ -48,6 +42,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
     for (const holding of holdings) {
       const sharesEligible = holding.shares;
       if (sharesEligible <= 0) continue;
+      if (!holding.userId) continue; // Skip orphaned holdings with no user
 
       const amountGross = Math.round(sharesEligible * event.amountPerShare * 100) / 100;
 
@@ -67,29 +62,18 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
             },
           });
 
-          // Increment cash balance
-          if (holding.userId) {
-            // Multi-user: update UserSettings
-            await tx.userSettings.upsert({
-              where: { userId: holding.userId },
-              create: {
-                userId: holding.userId,
-                cashBalance: amountGross,
-                marginDebt: 0,
-              },
-              update: {
-                cashBalance: { increment: amountGross },
-              },
-            });
-          } else {
-            // Default user: update Settings
-            await tx.settings.update({
-              where: { id: 'default' },
-              data: {
-                cashBalance: { increment: amountGross },
-              },
-            });
-          }
+          // Increment cash balance in UserSettings
+          await tx.userSettings.upsert({
+            where: { userId: holding.userId! },
+            create: {
+              userId: holding.userId!,
+              cashBalance: amountGross,
+              marginDebt: 0,
+            },
+            update: {
+              cashBalance: { increment: amountGross },
+            },
+          });
         });
 
         posted++;
@@ -107,18 +91,18 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
             ? true
             : dividendType === 'cash'
               ? false
-              : await isDripEnabled(holding.userId ?? null);
+              : await isDripEnabled(holding.userId);
 
           if (shouldReinvest) {
             // Get the credit we just created to get its ID
             const newCredit = await prisma.dividendCredit.findFirst({
               where: {
-                userId: holding.userId ?? null,
+                userId: holding.userId,
                 dividendEventId: event.id,
               },
             });
             if (newCredit) {
-              await reinvestDividend(newCredit.id, holding.userId ?? null);
+              await reinvestDividend(newCredit.id, holding.userId);
               console.log(`[DRIP] Auto-reinvested dividend for ${event.ticker}`);
             }
           }
@@ -179,17 +163,16 @@ export async function backfillMissedDividends(): Promise<{ totalPosted: number; 
 /**
  * Get dividend summary for a user.
  */
-export async function getDividendSummary(userId?: string | null): Promise<{
+export async function getDividendSummary(userId: string): Promise<{
   totalYTD: number;
   totalAllTime: number;
   byTicker: { ticker: string; total: number; count: number }[];
 }> {
   const ytdStart = new Date(new Date().getFullYear(), 0, 1);
-  const targetUserId = resolveUserId(userId);
 
   const credits = await prisma.dividendCredit.findMany({
     where: {
-      userId: targetUserId,
+      userId,
       status: 'posted',
     },
     orderBy: { creditedAt: 'desc' },
@@ -223,11 +206,10 @@ export async function getDividendSummary(userId?: string | null): Promise<{
 /**
  * Get dividend credits (history) for a user.
  */
-export async function getDividendCredits(userId?: string | null, ticker?: string): Promise<any[]> {
-  const targetUserId = resolveUserId(userId);
+export async function getDividendCredits(userId: string, ticker?: string): Promise<any[]> {
   return prisma.dividendCredit.findMany({
     where: {
-      userId: targetUserId,
+      userId,
       ...(ticker ? { ticker: ticker.toUpperCase() } : {}),
       status: 'posted',
     },

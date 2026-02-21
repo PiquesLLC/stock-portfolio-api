@@ -6,7 +6,7 @@
 import prisma from '../utils/prisma';
 import { getUpcomingDividendEvents } from './dividend.service';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+
 
 function formatDateICS(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -23,13 +23,13 @@ function escapeICS(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
 
-export async function generateDividendCalendar(options?: {
+export async function generateDividendCalendar(userId: string, options?: {
   months?: number;
   ticker?: string;
 }): Promise<string> {
   const months = Math.min(options?.months ?? 6, 24);
 
-  const events = await getUpcomingDividendEvents();
+  const events = await getUpcomingDividendEvents(userId);
 
   // Filter by months range
   const cutoff = new Date();
@@ -44,7 +44,7 @@ export async function generateDividendCalendar(options?: {
 
   // Get user's holdings for payout calculation
   const holdings = await prisma.holding.findMany({
-    where: { userId: SYSTEM_USER_ID, shares: { gt: 0 } },
+    where: { userId, shares: { gt: 0 } },
     select: { ticker: true, shares: true },
   });
   const sharesMap = new Map(holdings.map(h => [h.ticker, h.shares]));

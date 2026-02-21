@@ -1,12 +1,14 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { generateDividendCalendar } from '../services/calendar.service';
+import { AuthRequest } from '../types/auth';
 
-export async function getCalendarICS(req: Request, res: Response): Promise<void> {
+export async function getCalendarICS(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const months = req.query.months ? Math.min(parseInt(String(req.query.months), 10) || 6, 24) : 6;
     const ticker = req.query.ticker ? String(req.query.ticker).toUpperCase() : undefined;
 
-    const ical = await generateDividendCalendar({ months, ticker });
+    const ical = await generateDividendCalendar(userId, { months, ticker });
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="nala-dividends.ics"');

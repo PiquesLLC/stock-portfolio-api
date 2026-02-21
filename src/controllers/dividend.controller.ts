@@ -16,10 +16,6 @@ import {
   updateDripSettings,
 } from '../services/drip.service';
 
-// Single-portfolio app: all data lives under the system user.
-// Auth is for access control only — never use client-supplied userId for lookups.
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
 // --- Events ---
 
 export async function addDividendEvent(req: AuthRequest, res: Response): Promise<void> {
@@ -70,7 +66,7 @@ export async function getEventsHandler(req: AuthRequest, res: Response): Promise
       ticker: ticker as string | undefined,
       fromDate: from ? new Date(from as string) : undefined,
       toDate: to ? new Date(to as string) : undefined,
-      userId: SYSTEM_USER_ID,
+      userId: req.user!.userId,
     });
     res.json(events);
   } catch (_error) {
@@ -81,7 +77,7 @@ export async function getEventsHandler(req: AuthRequest, res: Response): Promise
 
 export async function getUpcomingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const events = await getUpcomingDividendEvents(SYSTEM_USER_ID);
+    const events = await getUpcomingDividendEvents(req.user!.userId);
     res.json(events);
   } catch (_error) {
     console.error('Error fetching upcoming dividends:');
@@ -109,7 +105,7 @@ export async function getCreditsHandler(req: AuthRequest, res: Response): Promis
   try {
     const { ticker } = req.query;
     const credits = await getDividendCredits(
-      SYSTEM_USER_ID,
+      req.user!.userId,
       ticker as string | undefined,
     );
     res.json(credits);
@@ -121,7 +117,7 @@ export async function getCreditsHandler(req: AuthRequest, res: Response): Promis
 
 export async function getSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const summary = await getDividendSummary(SYSTEM_USER_ID);
+    const summary = await getDividendSummary(req.user!.userId);
     res.json(summary);
   } catch (_error) {
     console.error('Error fetching dividend summary:');
@@ -167,7 +163,7 @@ export async function getReinvestmentsHandler(req: AuthRequest, res: Response): 
   try {
     const { ticker } = req.query;
     const reinvestments = await getReinvestments(
-      SYSTEM_USER_ID,
+      req.user!.userId,
       ticker as string | undefined
     );
     res.json(reinvestments);
@@ -196,7 +192,7 @@ export async function reinvestHandler(req: AuthRequest, res: Response): Promise<
   try {
     const { id } = req.params;
     // Always use system user — never accept userId from body
-    const result = await reinvestDividend(id, SYSTEM_USER_ID);
+    const result = await reinvestDividend(id, req.user!.userId);
     res.json(result);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -220,7 +216,7 @@ export async function reinvestHandler(req: AuthRequest, res: Response): Promise<
 
 export async function getDripSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const settings = await getDripSettings(SYSTEM_USER_ID);
+    const settings = await getDripSettings(req.user!.userId);
     res.json(settings);
   } catch (_error) {
     console.error('Error fetching DRIP settings:');
@@ -236,7 +232,7 @@ export async function updateDripSettingsHandler(req: AuthRequest, res: Response)
       return;
     }
     // Always use system user — never accept userId from body
-    await updateDripSettings(SYSTEM_USER_ID, enabled);
+    await updateDripSettings(req.user!.userId, enabled);
     res.json({ enabled });
   } catch (_error) {
     console.error('Error updating DRIP settings:');
