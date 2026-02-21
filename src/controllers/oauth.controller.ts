@@ -4,6 +4,7 @@ import { config } from '../config';
 import { getCookieOptions } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
 import { googleCallbackSchema, appleCallbackSchema } from '../validators/oauth.validators';
+import { trackOAuthSuccess, trackOAuthFail, trackOAuthMfa } from '../utils/auth-metrics';
 
 /**
  * POST /auth/oauth/google/callback
@@ -43,6 +44,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
         const challengeToken = await createMfaChallenge(user.id);
         const methods = await getEnabledMethods(user.id);
         const maskedEmail = await getMaskedEmail(user.id);
+        trackOAuthMfa('google');
         res.json({
           mfaRequired: true,
           challengeToken,
@@ -57,9 +59,11 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', loginResponse.token, accessOptions);
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
+    trackOAuthSuccess('google');
     console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     res.json({ user: loginResponse.user, isNewUser });
   } catch (error: unknown) {
+    trackOAuthFail('google');
     console.error('Google OAuth error:', error instanceof Error ? error.message : error);
     res.status(401).json({ error: 'Authentication failed' });
   }
@@ -100,6 +104,7 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
         const challengeToken = await createMfaChallenge(user.id);
         const methods = await getEnabledMethods(user.id);
         const maskedEmail = await getMaskedEmail(user.id);
+        trackOAuthMfa('apple');
         res.json({
           mfaRequired: true,
           challengeToken,
@@ -114,9 +119,11 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', loginResponse.token, accessOptions);
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
+    trackOAuthSuccess('apple');
     console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     res.json({ user: loginResponse.user, isNewUser });
   } catch (error: unknown) {
+    trackOAuthFail('apple');
     console.error('Apple OAuth error:', error instanceof Error ? error.message : error);
     res.status(401).json({ error: 'Authentication failed' });
   }

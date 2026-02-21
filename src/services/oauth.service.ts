@@ -3,6 +3,7 @@ import appleSignin from 'apple-signin-auth';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { generateAccessToken, generateRefreshToken, CURRENT_POLICY_VERSION } from './auth.service';
+import { trackP2002 } from '../utils/auth-metrics';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -233,6 +234,7 @@ export async function findOrCreateOAuthUser(
         },
       });
       if (byProvider) {
+        trackP2002('byProvider');
         return { user: byProvider, isNewUser: false };
       }
 
@@ -251,11 +253,13 @@ export async function findOrCreateOAuthUser(
             where: { id: byEmail.id },
             data: { [providerIdField]: profile.providerId },
           });
+          trackP2002('byEmail');
           return { user: byEmail, isNewUser: false };
         }
       }
 
       // 3) Any other race/conflict: fail closed
+      trackP2002('failed');
       throw new Error('OAuth account conflict');
     }
 
