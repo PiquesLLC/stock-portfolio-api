@@ -5,8 +5,7 @@ import { addTransactionSchema, transactionIdParamSchema } from '../validators/tr
 
 export async function getTransactionsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.user?.userId || null;
-    const transactions = await getTransactions(userId);
+    const transactions = await getTransactions(req.user!.userId);
     res.json(transactions);
   } catch (_error) {
     console.error('Error fetching transactions:');

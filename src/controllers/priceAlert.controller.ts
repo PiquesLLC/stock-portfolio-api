@@ -17,8 +17,7 @@ import { PlanLimitError } from '../utils/plan-limit.error';
 export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const ticker = req.query.ticker as string | undefined;
-    const userId = req.user?.userId;
-    const alerts = await getPriceAlerts(ticker, userId);
+    const alerts = await getPriceAlerts(req.user!.userId, ticker);
     res.json(alerts);
   } catch (_error) {
     console.error('Error getting price alerts:');
@@ -30,7 +29,7 @@ export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Pr
 export async function getPriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const alert = await getPriceAlertById(id, req.user?.userId);
+    const alert = await getPriceAlertById(id, req.user!.userId);
     if (!alert) {
       res.status(404).json({ error: 'Price alert not found' });
       return;
@@ -126,9 +125,8 @@ export async function deletePriceAlertHandler(req: AuthRequest, res: Response): 
 // GET /price-alerts/events
 export async function getPriceAlertEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.user?.userId;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const events = await getPriceAlertEvents(limit, userId);
+    const events = await getPriceAlertEvents(req.user!.userId, limit);
     res.json(events);
   } catch (_error) {
     console.error('Error getting price alert events:');
@@ -151,8 +149,7 @@ export async function markEventReadHandler(req: AuthRequest, res: Response): Pro
 // GET /price-alerts/events/unread-count
 export async function getUnreadCountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const userId = req.user?.userId;
-    const count = await getUnreadCount(userId);
+    const count = await getUnreadCount(req.user!.userId);
     res.json({ count });
   } catch (_error) {
     console.error('Error getting unread count:');

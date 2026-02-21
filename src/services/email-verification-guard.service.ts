@@ -1,7 +1,5 @@
 import prisma from '../utils/prisma';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
 export class EmailVerificationRequiredError extends Error {
   constructor() {
     super('Email verification required');
@@ -10,14 +8,15 @@ export class EmailVerificationRequiredError extends Error {
 }
 
 export async function ensureEmailVerifiedForAi(userId: string): Promise<void> {
-  if (userId === SYSTEM_USER_ID) {
-    return;
-  }
-
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { emailVerified: true },
+    select: { emailVerified: true, username: true },
   });
+
+  // System user (no email) is always allowed
+  if (user?.username === '_system') {
+    return;
+  }
 
   if (!user?.emailVerified) {
     throw new EmailVerificationRequiredError();

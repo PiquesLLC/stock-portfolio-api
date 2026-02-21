@@ -21,8 +21,8 @@ export async function getSettings(): Promise<Settings> {
   return settings as Settings;
 }
 
-export async function setBaseline(input: BaselineInput): Promise<Settings> {
-  const portfolio = await getPortfolio();
+export async function setBaseline(userId: string, input: BaselineInput): Promise<Settings> {
+  const portfolio = await getPortfolio(userId);
   const now = new Date();
 
   // Set baseline based on current portfolio ASSETS (not net equity)
@@ -150,10 +150,10 @@ export async function restartTracking(): Promise<Settings> {
   return settings as Settings;
 }
 
-export async function getPerformanceSummary(): Promise<PerformanceSummary> {
+export async function getPerformanceSummary(userId: string): Promise<PerformanceSummary> {
   const [settings, portfolio] = await Promise.all([
     getSettings(),
-    getPortfolio(),
+    getPortfolio(userId),
   ]);
 
   // Calculate holdings P/L (unrealized)
@@ -169,7 +169,7 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
 
   if (settings.trackingStartDate && settings.baselineTotalValue !== null) {
     // Get snapshots since tracking start
-    const snapshots = await getSnapshotsAfter(settings.trackingStartDate);
+    const snapshots = await getSnapshotsAfter(userId, settings.trackingStartDate);
 
     const startingValue = settings.baselineTotalValue;
     // Use totalAssets (not netEquity) so margin debt changes don't affect performance
@@ -178,7 +178,7 @@ export async function getPerformanceSummary(): Promise<PerformanceSummary> {
     const percentReturn = startingValue > 0 ? (absoluteReturn / startingValue) * 100 : 0;
 
     // Fetch transactions and calculate TWR
-    const transactions = await getTransactions(null, settings.trackingStartDate);
+    const transactions = await getTransactions(userId, settings.trackingStartDate);
 
     // Convert snapshots to SnapshotPoint format for TWR calculation
     const snapshotPoints: SnapshotPoint[] = [

@@ -6,21 +6,22 @@ import { config } from '../config';
 
 
 /**
- * Get all goals
+ * Get all goals for a user
  */
-export async function getAllGoals(): Promise<Goal[]> {
+export async function getAllGoals(userId: string): Promise<Goal[]> {
   const goals = await prisma.goal.findMany({
+    where: { userId },
     orderBy: { createdAt: 'asc' },
   });
   return goals as Goal[];
 }
 
 /**
- * Get a single goal by ID
+ * Get a single goal by ID (scoped to user)
  */
-export async function getGoalById(id: string): Promise<Goal | null> {
-  const goal = await prisma.goal.findUnique({
-    where: { id },
+export async function getGoalById(id: string, userId: string): Promise<Goal | null> {
+  const goal = await prisma.goal.findFirst({
+    where: { id, userId },
   });
   return goal as Goal | null;
 }
@@ -28,9 +29,10 @@ export async function getGoalById(id: string): Promise<Goal | null> {
 /**
  * Create a new goal
  */
-export async function createGoal(input: GoalInput): Promise<Goal> {
+export async function createGoal(input: GoalInput, userId: string): Promise<Goal> {
   const goal = await prisma.goal.create({
     data: {
+      userId,
       name: input.name,
       targetValue: input.targetValue,
       monthlyContribution: input.monthlyContribution ?? 0,
@@ -41,9 +43,17 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
 }
 
 /**
- * Update an existing goal
+ * Update an existing goal (scoped to user)
  */
-export async function updateGoal(id: string, input: Partial<GoalInput>): Promise<Goal> {
+export async function updateGoal(id: string, input: Partial<GoalInput>, userId: string): Promise<Goal> {
+  // Verify ownership before updating
+  const existing = await prisma.goal.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const err = new Error('Goal not found') as Error & { code: string };
+    err.code = 'P2025';
+    throw err;
+  }
+
   const updateData: Record<string, unknown> = {};
 
   if (input.name !== undefined) {
@@ -67,9 +77,17 @@ export async function updateGoal(id: string, input: Partial<GoalInput>): Promise
 }
 
 /**
- * Delete a goal
+ * Delete a goal (scoped to user)
  */
-export async function deleteGoal(id: string): Promise<void> {
+export async function deleteGoal(id: string, userId: string): Promise<void> {
+  // Verify ownership before deleting
+  const existing = await prisma.goal.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const err = new Error('Goal not found') as Error & { code: string };
+    err.code = 'P2025';
+    throw err;
+  }
+
   await prisma.goal.delete({
     where: { id },
   });
@@ -192,9 +210,9 @@ function calculateTimeToGoalRange(
 /**
  * Get all goals with progress calculations
  */
-export async function getAllGoalsWithProgress(): Promise<GoalWithProgress[]> {
-  const goals = await getAllGoals();
-  const portfolio = await getPortfolio();
+export async function getAllGoalsWithProgress(userId: string): Promise<GoalWithProgress[]> {
+  const goals = await getAllGoals(userId);
+  const portfolio = await getPortfolio(userId);
   const currentValue = portfolio.netEquity;
 
   return goals.map((goal) => {
@@ -222,11 +240,11 @@ export async function getAllGoalsWithProgress(): Promise<GoalWithProgress[]> {
 /**
  * Get a single goal with progress
  */
-export async function getGoalWithProgress(id: string): Promise<GoalWithProgress | null> {
-  const goal = await getGoalById(id);
+export async function getGoalWithProgress(id: string, userId: string): Promise<GoalWithProgress | null> {
+  const goal = await getGoalById(id, userId);
   if (!goal) return null;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const currentValue = portfolio.netEquity;
 
   const progress = Math.min(100, (currentValue / goal.targetValue) * 100);

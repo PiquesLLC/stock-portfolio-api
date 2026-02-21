@@ -7,7 +7,6 @@ import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 // Cache behavior insights for 1 hour
 const behaviorCache = new NodeCache({ stdTTL: 3600 });
 
-const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 export interface BehaviorInsight {
   category: 'concentration' | 'timing' | 'sizing' | 'diversification' | 'general';
@@ -47,13 +46,13 @@ For "positive" severity, highlight good habits. For "warning", flag potential ri
 
 export async function getBehaviorInsights(userId: string): Promise<BehaviorInsightsResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = 'behavior-insights';
+  const cacheKey = `behavior-insights:${userId}`;
   const cached = behaviorCache.get<BehaviorInsightsResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
   const [portfolio, activity] = await Promise.all([
-    getPortfolio(),
-    getUserActivity(DEFAULT_USER_ID, 50),
+    getPortfolio(userId),
+    getUserActivity(userId, 50),
   ]);
 
   if (portfolio.holdings.length === 0) {

@@ -198,9 +198,9 @@ function parseStockResults(raw: any): NalaStockResult[] {
 async function buildFallbackNala(
   question: string,
   strategyInfo: NalaStrategyInfo | null,
-  userId?: string
+  userId: string
 ): Promise<NalaResearchResponse> {
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
 
   if (portfolio.holdings.length === 0) {
     return {
@@ -274,7 +274,7 @@ async function buildFallbackNala(
   };
 }
 
-async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): Promise<NalaStockResult[]> {
+async function enrichWithLocalData(stocks: NalaStockResult[], userId: string): Promise<NalaStockResult[]> {
   // Fast Prisma-only lookup â€” never triggers live Alpha Vantage fetches
   const tickers = stocks.map(s => s.ticker);
   const cachedRows = await prisma.fundamentalsCache.findMany({
@@ -348,9 +348,9 @@ async function enrichWithLocalData(stocks: NalaStockResult[], userId?: string): 
 
 // â”€â”€ Main Function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export async function askNala(question: string, userId?: string): Promise<NalaResearchResponse> {
+export async function askNala(question: string, userId: string): Promise<NalaResearchResponse> {
   const normalized = normalizeQuestion(question);
-  const cacheKey = `nala-${normalized}`;
+  const cacheKey = `nala-${userId}-${normalized}`;
 
   // Check cache
   const cached = nalaCache.get<NalaResearchResponse>(cacheKey);

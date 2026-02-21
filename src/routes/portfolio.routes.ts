@@ -15,6 +15,7 @@ import {
   confirmPortfolioImportHandler,
   clearPortfolioHandler,
   importPortfolioScreenshotHandler,
+  seedSamplePortfolio,
 } from '../controllers/portfolio.controller';
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
@@ -29,18 +30,19 @@ router.get('/', optionalAuth, getPortfolioHandler);
 router.post('/holdings', mutationLimiter, requireAuth, addHolding);
 router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
 router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
-router.get('/history', heavyReadLimiter, getHistory);
+router.get('/history', heavyReadLimiter, requireAuth, getHistory);
 router.get('/history/chart', heavyReadLimiter, optionalAuth, getChartHandler);
-router.get('/projections', getProjectionsHandler);
-router.get('/projections/current-pace', getCurrentPaceHandler);
-router.get('/metrics', getMetricsHandler);
-router.get('/summary', getSummaryHandler);
+router.get('/projections', requireAuth, getProjectionsHandler);
+router.get('/projections/current-pace', requireAuth, getCurrentPaceHandler);
+router.get('/metrics', requireAuth, getMetricsHandler);
+router.get('/summary', requireAuth, getSummaryHandler);
 router.get('/etf-overlap', requireAuth, getEtfOverlapHandler);
-router.get('/performance', heavyReadLimiter, getPerformanceHandler);
+router.get('/performance', heavyReadLimiter, requireAuth, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);
 router.post('/import/screenshot', mutationLimiter, requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
 router.post('/import/confirm', mutationLimiter, requireAuth, confirmPortfolioImportHandler);
 router.post('/clear', mutationLimiter, requireAuth, clearPortfolioHandler);
+router.post('/seed-sample', mutationLimiter, requireAuth, seedSamplePortfolio);
 
 export default router;

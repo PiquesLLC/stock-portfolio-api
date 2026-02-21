@@ -11,6 +11,7 @@ import { createActivityEvent, getUserActivityByTicker } from '../services/activi
 import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
+import { setBaseline } from '../services/settings.service';
 
 import {
   getSP500Projections,
@@ -31,8 +32,6 @@ import {
   setCashBalanceSchema,
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
-
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -81,12 +80,12 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       ).catch(() => console.error('User snapshot error'));
     } else {
       // Default portfolio â€” the main portfolio data (all users see this)
-      await createSnapshotIfNeeded();
-      portfolio = await getPortfolio();
+      await createSnapshotIfNeeded(req.user!.userId);
+      portfolio = await getPortfolio(req.user!.userId);
     }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
-    const paceProjection = await getPaceProjection(portfolio.netEquity);
+    const paceProjection = await getPaceProjection(req.user!.userId, portfolio.netEquity);
 
     res.json({
       ...portfolio,
@@ -109,13 +108,13 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
 
     // Check if this is an update vs new add
     // Always use system/default portfolio â€” auth is for access control only
-    const existingHoldings = await getHoldings();
+    const existingHoldings = await getHoldings(req.user!.userId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
-    const holding = await upsertHolding({ ticker, shares, averageCost });
+    const holding = await upsertHolding({ ticker, shares, averageCost }, req.user!.userId);
     try {
-      await recordCompositionChange('holding_update');
-      await resetSnapshotsForCompositionChange();
+      await recordCompositionChange(req.user!.userId, 'holding_update');
+      await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding update:');
     }
@@ -133,7 +132,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
           type: transactionType,
           amount: Math.abs(costBasisDiff),
           date: new Date().toISOString(),
-          userId: req.user?.userId,
+          userId: req.user!.userId,
         });
       }
     }
@@ -181,14 +180,14 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
 
     // Get the holding before deletion to know the cost basis
     // Always use system/default portfolio â€” auth is for access control only
-    const existingHoldings = await getHoldings();
+    const existingHoldings = await getHoldings(req.user!.userId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
-    await deleteHolding(ticker);
+    await deleteHolding(ticker, req.user!.userId);
     try {
-      await recordCompositionChange('holding_remove');
-      await resetSnapshotsForCompositionChange();
+      await recordCompositionChange(req.user!.userId, 'holding_remove');
+      await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding removal:');
     }
@@ -199,6 +198,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
         type: 'withdrawal',
         amount: costBasis,
         date: new Date().toISOString(),
+        userId: req.user!.userId,
       });
       console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
     }
@@ -239,7 +239,7 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
       });
     }
 
-    const settings = await updateCashBalance(cashBalance);
+    const settings = await updateCashBalance(req.user!.userId, cashBalance);
     res.json({ cashBalance: settings.cashBalance });
   } catch (_error) {
     console.error('Error updating cash balance:');
@@ -247,9 +247,9 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
   }
 }
 
-export async function getHistory(req: Request, res: Response): Promise<void> {
+export async function getHistory(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const snapshots = await getAllSnapshots();
+    const snapshots = await getAllSnapshots(req.user!.userId);
     res.json(snapshots);
   } catch (_error) {
     console.error('Error fetching history:');
@@ -257,8 +257,9 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function getProjectionsHandler(req: Request, res: Response): Promise<void> {
+export async function getProjectionsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const mode = (req.query.mode as ProjectionMode) || 'sp500';
     const lookback = (req.query.lookback as LookbackPeriod) || '1y';
 
@@ -280,9 +281,9 @@ export async function getProjectionsHandler(req: Request, res: Response): Promis
 
     let projections;
     if (mode === 'sp500') {
-      projections = await getSP500Projections();
+      projections = await getSP500Projections(userId);
     } else {
-      projections = await getRealizedProjections(lookback);
+      projections = await getRealizedProjections(userId, lookback);
     }
 
     res.json(projections);
@@ -292,8 +293,9 @@ export async function getProjectionsHandler(req: Request, res: Response): Promis
   }
 }
 
-export async function getMetricsHandler(req: Request, res: Response): Promise<void> {
+export async function getMetricsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const lookback = (req.query.lookback as LookbackPeriod) || '1y';
 
     if (!VALID_LOOKBACKS.includes(lookback)) {
@@ -303,7 +305,7 @@ export async function getMetricsHandler(req: Request, res: Response): Promise<vo
       return;
     }
 
-    const metrics = await getMetrics(lookback);
+    const metrics = await getMetrics(userId, lookback);
     res.json(metrics);
   } catch (_error) {
     console.error('Error calculating metrics:');
@@ -338,13 +340,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return getUserChartHandler(req, res);
     }
 
-    const portfolio = await getPortfolio();
+    const portfolio = await getPortfolio(req.user!.userId);
 
     if (period === '1D') {
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const previousCloseValue = liveValue - portfolio.dayChange;
-      const holdings = await getHoldings();
+      const holdings = await getHoldings(req.user!.userId);
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
       // After hours, Yahoo range=1d still returns the last trading session's data.
@@ -356,7 +358,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       // If Yahoo returned insufficient data, fall back to last 24h of snapshots
       if (points.length < 5) {
         const cutoff = new Date(now - 24 * 60 * 60 * 1000);
-        const snapshots = await getAllSnapshots();
+        const snapshots = await getAllSnapshots(req.user!.userId);
         const recentSnapshots = snapshots.filter(s => s.timestamp.getTime() >= cutoff.getTime());
         if (recentSnapshots.length >= 2) {
           points = recentSnapshots.map(s => ({
@@ -386,7 +388,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         const lastCandleTime = points[points.length - 1].time;
         const gapMs = now - lastCandleTime;
         if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
-          const snapshots = await getSnapshotsAfter(new Date(lastCandleTime));
+          const snapshots = await getSnapshotsAfter(req.user!.userId, new Date(lastCandleTime));
           for (const s of snapshots) {
             const t = s.timestamp.getTime();
             if (t > lastCandleTime && t < now - 5000) {
@@ -405,7 +407,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
       // If composition changed within the last day, rebaseline to avoid false jumps.
       const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
-      const latestChange = await getLatestCompositionChangeAfter(rangeStart);
+      const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, rangeStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
         points = points.filter(p => p.time >= cutoff);
@@ -419,7 +421,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const holdings = await getHoldings();
+    const holdings = await getHoldings(req.user!.userId);
     const now = Date.now();
     let points: { time: number; value: number }[];
 
@@ -481,7 +483,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // Rebaseline to latest composition change within the window to avoid false jumps.
     if (points.length > 0) {
       const windowStart = new Date(points[0].time);
-      const latestChange = await getLatestCompositionChangeAfter(windowStart);
+      const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, windowStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
         points = points.filter(p => p.time >= cutoff);
@@ -499,8 +501,9 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
 const VALID_PACE_WINDOWS: PaceWindow[] = ['1D', '1M', '6M', '1Y', 'YTD'];
 
-export async function getCurrentPaceHandler(req: Request, res: Response): Promise<void> {
+export async function getCurrentPaceHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const window = ((req.query.window as string) || '1M').toUpperCase() as PaceWindow;
 
     if (!VALID_PACE_WINDOWS.includes(window)) {
@@ -510,7 +513,7 @@ export async function getCurrentPaceHandler(req: Request, res: Response): Promis
       return;
     }
 
-    const result = await getCurrentPaceProjection(window);
+    const result = await getCurrentPaceProjection(userId, window);
     res.json(result);
   } catch (_error) {
     console.error('Error calculating current pace:');
@@ -556,7 +559,7 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
       }
     }
 
-    const result = await getPerformanceComparison(window, benchmark, userId || null);
+    const result = await getPerformanceComparison(window, benchmark, userId || req.user!.userId);
     res.json(result);
   } catch (_error) {
     console.error('Error fetching performance:');
@@ -715,7 +718,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     }
 
     const existingHoldings = await prisma.holding.findMany({
-      where: { userId: SYSTEM_USER_ID },
+      where: { userId: req.user!.userId },
       select: { ticker: true },
     });
     const existingSet = new Set(existingHoldings.map(h => h.ticker.toUpperCase()));
@@ -742,7 +745,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       added = normalized.length;
       updated = 0;
 
-      await prisma.holding.deleteMany({ where: { userId: SYSTEM_USER_ID } });
+      await prisma.holding.deleteMany({ where: { userId: req.user!.userId } });
     } else {
       added = normalized.filter(h => !existingSet.has(h.ticker)).length;
       updated = normalized.filter(h => existingSet.has(h.ticker)).length;
@@ -751,12 +754,12 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     for (const h of normalized) {
       await upsertHolding(
         { ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
-        SYSTEM_USER_ID
+        req.user!.userId
       );
     }
     try {
-      await recordCompositionChange(mode === 'replace' ? 'import_replace' : 'import_merge');
-      await resetSnapshotsForCompositionChange();
+      await recordCompositionChange(req.user!.userId, mode === 'replace' ? 'import_replace' : 'import_merge');
+      await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after import confirm:');
     }
@@ -780,15 +783,15 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const deleted = await prisma.holding.deleteMany({ where: { userId: SYSTEM_USER_ID } });
+    const deleted = await prisma.holding.deleteMany({ where: { userId: req.user!.userId } });
     await prisma.userSettings.upsert({
-      where: { userId: SYSTEM_USER_ID },
+      where: { userId: req.user!.userId },
       update: { cashBalance: 0, marginDebt: 0 },
-      create: { userId: SYSTEM_USER_ID, cashBalance: 0, marginDebt: 0 },
+      create: { userId: req.user!.userId, cashBalance: 0, marginDebt: 0 },
     });
     try {
-      await recordCompositionChange('portfolio_clear');
-      await resetSnapshotsForCompositionChange();
+      await recordCompositionChange(req.user!.userId, 'portfolio_clear');
+      await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after clear portfolio:');
     }
@@ -851,6 +854,42 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       return;
     }
     res.status(500).json({ error: 'Failed to process screenshot' });
+  }
+}
+
+const SAMPLE_HOLDINGS = [
+  { ticker: 'AAPL', shares: 10, averageCost: 185.00 },
+  { ticker: 'MSFT', shares: 5, averageCost: 410.00 },
+  { ticker: 'GOOGL', shares: 8, averageCost: 175.00 },
+  { ticker: 'AMZN', shares: 6, averageCost: 195.00 },
+  { ticker: 'NVDA', shares: 4, averageCost: 880.00 },
+];
+
+export async function seedSamplePortfolio(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const existing = await getHoldings(req.user!.userId);
+    if (existing.length > 0) {
+      res.status(409).json({ error: 'Portfolio already has holdings. Clear first to re-seed.' });
+      return;
+    }
+
+    for (const h of SAMPLE_HOLDINGS) {
+      await upsertHolding(h, req.user!.userId);
+    }
+
+    await setBaseline(req.user!.userId, { type: 'existing_portfolio' });
+
+    try {
+      await recordCompositionChange(req.user!.userId, 'sample_seed');
+      await resetSnapshotsForCompositionChange(req.user!.userId);
+    } catch (_err) {
+      console.warn('[Snapshot] Reset failed after sample seed:');
+    }
+
+    res.json({ seeded: true, holdings: SAMPLE_HOLDINGS.length });
+  } catch (_error) {
+    console.error('Error seeding sample portfolio:');
+    res.status(500).json({ error: 'Failed to seed sample portfolio' });
   }
 }
 

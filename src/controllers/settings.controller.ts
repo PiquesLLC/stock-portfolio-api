@@ -18,26 +18,17 @@ import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapsho
 
 export async function getSettingsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    // Use authenticated user's ID if available, otherwise fall back to global settings
     const userId = req.user?.userId;
-
-    if (userId) {
-      // User-specific settings from UserSettings
-      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
-      res.json({
-        cashBalance: Math.round((userSettings?.cashBalance ?? 0) * 100) / 100,
-        marginDebt: Math.round((userSettings?.marginDebt ?? 0) * 100) / 100,
-        cashInterestRate: Math.round((userSettings?.cashInterestRate ?? 0) * 100) / 100,
-      });
-    } else {
-      // Legacy: global settings (unauthenticated fallback)
-      const settings = await getSettings();
-      res.json({
-        cashBalance: Math.round(settings.cashBalance * 100) / 100,
-        marginDebt: Math.round((settings.marginDebt ?? 0) * 100) / 100,
-        cashInterestRate: Math.round((settings.cashInterestRate ?? 0) * 100) / 100,
-      });
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
     }
+    const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+    res.json({
+      cashBalance: Math.round((userSettings?.cashBalance ?? 0) * 100) / 100,
+      marginDebt: Math.round((userSettings?.marginDebt ?? 0) * 100) / 100,
+      cashInterestRate: Math.round((userSettings?.cashInterestRate ?? 0) * 100) / 100,
+    });
   } catch (_error) {
     console.error('Error fetching settings:');
     res.status(500).json({ error: 'Failed to fetch settings' });
@@ -104,8 +95,9 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
   }
 }
 
-export async function setBaselineHandler(req: Request, res: Response): Promise<void> {
+export async function setBaselineHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const { type } = req.body;
 
     if (!type || !['fresh_start', 'existing_portfolio'].includes(type)) {
@@ -115,7 +107,7 @@ export async function setBaselineHandler(req: Request, res: Response): Promise<v
       return;
     }
 
-    const settings = await setBaseline({ type });
+    const settings = await setBaseline(userId, { type });
     res.json({
       message: 'Baseline set successfully',
       trackingStartDate: settings.trackingStartDate,
@@ -225,9 +217,10 @@ export async function clearYtdHandler(req: Request, res: Response): Promise<void
   }
 }
 
-export async function getSummaryHandler(req: Request, res: Response): Promise<void> {
+export async function getSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const summary = await getPerformanceSummary();
+    const userId = req.user!.userId;
+    const summary = await getPerformanceSummary(userId);
     res.json(summary);
   } catch (_error) {
     console.error('Error fetching summary:');
@@ -261,11 +254,12 @@ export async function restartTrackingHandler(req: Request, res: Response): Promi
   }
 }
 
-export async function cleanupSnapshotsHandler(req: Request, res: Response): Promise<void> {
+export async function cleanupSnapshotsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const countBefore = await getSnapshotCount();
+    const userId = req.user!.userId;
+    const countBefore = await getSnapshotCount(userId);
     const deletedCount = await cleanupDuplicateSnapshots();
-    const countAfter = await getSnapshotCount();
+    const countAfter = await getSnapshotCount(userId);
 
     res.json({
       message: 'Snapshot cleanup completed',
@@ -282,19 +276,13 @@ export async function cleanupSnapshotsHandler(req: Request, res: Response): Prom
 export async function getCashInterestAccrualHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.user?.userId;
-
-    let cashBalance = 0;
-    let cashInterestRate = 0;
-
-    if (userId) {
-      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
-      cashBalance = userSettings?.cashBalance ?? 0;
-      cashInterestRate = userSettings?.cashInterestRate ?? 0;
-    } else {
-      const settings = await getSettings();
-      cashBalance = settings.cashBalance ?? 0;
-      cashInterestRate = settings.cashInterestRate ?? 0;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
     }
+    const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+    const cashBalance = userSettings?.cashBalance ?? 0;
+    const cashInterestRate = userSettings?.cashInterestRate ?? 0;
 
     const dailyAccrual = cashBalance * (cashInterestRate / 100) / 365;
     const annualAccrual = cashBalance * (cashInterestRate / 100);

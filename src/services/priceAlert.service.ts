@@ -16,7 +16,7 @@ export interface CreatePriceAlertInput {
   referencePriceType?: ReferencePriceType;
   repeatAlert?: boolean;
   expiresAt?: string; // ISO date string
-  userId?: string;
+  userId: string;
 }
 
 export interface UpdatePriceAlertInput {
@@ -67,10 +67,9 @@ export async function createPriceAlert(input: CreatePriceAlertInput) {
   });
 }
 
-export async function getPriceAlerts(ticker?: string, userId?: string) {
-  const where: { ticker?: string; userId?: string } = {};
+export async function getPriceAlerts(userId: string, ticker?: string) {
+  const where: { ticker?: string; userId: string } = { userId };
   if (ticker) where.ticker = ticker.toUpperCase();
-  if (userId) where.userId = userId;
 
   return prisma.priceAlert.findMany({
     where,
@@ -84,9 +83,9 @@ export async function getPriceAlerts(ticker?: string, userId?: string) {
   });
 }
 
-export async function getPriceAlertById(id: string, userId?: string) {
+export async function getPriceAlertById(id: string, userId: string) {
   return prisma.priceAlert.findFirst({
-    where: { id, ...(userId ? { userId } : {}) },
+    where: { id, userId },
     include: {
       events: {
         orderBy: { createdAt: 'desc' },
@@ -111,14 +110,9 @@ export async function deletePriceAlert(id: string, userId: string): Promise<bool
   return true;
 }
 
-export async function getPriceAlertEvents(limit = 50, userId?: string) {
-  // Include events for the user OR global alerts (userId is null)
-  const where = userId
-    ? { priceAlert: { OR: [{ userId }, { userId: null }] } }
-    : {};
-
+export async function getPriceAlertEvents(userId: string, limit = 50) {
   return prisma.priceAlertEvent.findMany({
-    where,
+    where: { priceAlert: { userId } },
     orderBy: { createdAt: 'desc' },
     take: limit,
     include: {
@@ -146,13 +140,10 @@ export async function markEventRead(eventId: string, userId: string) {
   });
 }
 
-export async function getUnreadCount(userId?: string): Promise<number> {
-  // Include unread events for the user OR global alerts (userId is null)
-  const where = userId
-    ? { priceAlert: { OR: [{ userId }, { userId: null }] }, read: false }
-    : { read: false };
-
-  return prisma.priceAlertEvent.count({ where });
+export async function getUnreadCount(userId: string): Promise<number> {
+  return prisma.priceAlertEvent.count({
+    where: { priceAlert: { userId }, read: false },
+  });
 }
 
 /**

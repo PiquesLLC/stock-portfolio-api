@@ -6,7 +6,7 @@ export interface TransactionInput {
   type: 'deposit' | 'withdrawal';
   amount: number;
   date: string; // ISO date
-  userId?: string;
+  userId: string;
 }
 
 export async function addTransaction(input: TransactionInput) {
@@ -15,15 +15,15 @@ export async function addTransaction(input: TransactionInput) {
       type: input.type,
       amount: input.amount,
       date: new Date(input.date),
-      userId: input.userId ?? null,
+      userId: input.userId,
     },
   });
 }
 
-export async function getTransactions(userId?: string | null, since?: Date) {
+export async function getTransactions(userId: string, since?: Date) {
   return prisma.transaction.findMany({
     where: {
-      userId: userId ?? null,
+      userId,
       ...(since ? { date: { gte: since } } : {}),
     },
     orderBy: { date: 'desc' },

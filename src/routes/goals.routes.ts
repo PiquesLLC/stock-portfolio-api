@@ -11,9 +11,8 @@ import { mutationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-// GET endpoints public (for leaderboard display)
-router.get('/', listGoalsHandler);
-router.get('/:id', getGoalHandler);
+router.get('/', requireAuth, listGoalsHandler);
+router.get('/:id', requireAuth, getGoalHandler);
 
 // Mutations require authentication + rate limiting
 router.post('/', mutationLimiter, requireAuth, createGoalHandler);

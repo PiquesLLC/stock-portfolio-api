@@ -1,4 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import {
   getAllGoalsWithProgress,
   getGoalWithProgress,
@@ -12,9 +13,9 @@ import {
   updateGoalSchema,
 } from '../validators/goals.validators';
 
-export async function listGoalsHandler(req: Request, res: Response): Promise<void> {
+export async function listGoalsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const goals = await getAllGoalsWithProgress();
+    const goals = await getAllGoalsWithProgress(req.user!.userId);
     res.json(goals);
   } catch (_error) {
     console.error('Error listing goals:');
@@ -22,7 +23,7 @@ export async function listGoalsHandler(req: Request, res: Response): Promise<voi
   }
 }
 
-export async function getGoalHandler(req: Request, res: Response): Promise<void> {
+export async function getGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const parsedParams = goalIdParamSchema.safeParse(req.params);
     if (!parsedParams.success) {
@@ -31,7 +32,7 @@ export async function getGoalHandler(req: Request, res: Response): Promise<void>
     }
 
     const { id } = parsedParams.data;
-    const goal = await getGoalWithProgress(id);
+    const goal = await getGoalWithProgress(id, req.user!.userId);
 
     if (!goal) {
       res.status(404).json({ error: 'Goal not found' });
@@ -45,7 +46,7 @@ export async function getGoalHandler(req: Request, res: Response): Promise<void>
   }
 }
 
-export async function createGoalHandler(req: Request, res: Response): Promise<void> {
+export async function createGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const parsed = createGoalSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -59,7 +60,7 @@ export async function createGoalHandler(req: Request, res: Response): Promise<vo
       targetValue,
       monthlyContribution,
       deadline,
-    });
+    }, req.user!.userId);
 
     res.status(201).json(goal);
   } catch (_error) {
@@ -68,7 +69,7 @@ export async function createGoalHandler(req: Request, res: Response): Promise<vo
   }
 }
 
-export async function updateGoalHandler(req: Request, res: Response): Promise<void> {
+export async function updateGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const parsedParams = goalIdParamSchema.safeParse(req.params);
     const parsedBody = updateGoalSchema.safeParse(req.body);
@@ -84,7 +85,7 @@ export async function updateGoalHandler(req: Request, res: Response): Promise<vo
       targetValue,
       monthlyContribution,
       deadline,
-    });
+    }, req.user!.userId);
 
     res.json(goal);
   } catch (error: unknown) {
@@ -97,7 +98,7 @@ export async function updateGoalHandler(req: Request, res: Response): Promise<vo
   }
 }
 
-export async function deleteGoalHandler(req: Request, res: Response): Promise<void> {
+export async function deleteGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const parsedParams = goalIdParamSchema.safeParse(req.params);
     if (!parsedParams.success) {
@@ -106,7 +107,7 @@ export async function deleteGoalHandler(req: Request, res: Response): Promise<vo
     }
 
     const { id } = parsedParams.data;
-    await deleteGoal(id);
+    await deleteGoal(id, req.user!.userId);
     res.status(204).send();
   } catch (error: unknown) {
     if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2025') {

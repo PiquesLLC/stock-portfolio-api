@@ -26,24 +26,24 @@ import { requireEmailVerifiedForAi } from '../middleware/email-verification.midd
 
 const router = Router();
 
-router.get('/health', getHealthHandler);
-router.get('/attribution', heavyReadLimiter, getAttributionHandler);
-router.get('/leak-detector', heavyReadLimiter, getLeakDetectorHandler);
-router.get('/risk-forecast', heavyReadLimiter, getRiskForecastHandler);
-router.get('/income', heavyReadLimiter, getIncomeInsightsHandler);
+router.get('/health', requireAuth, getHealthHandler);
+router.get('/attribution', heavyReadLimiter, requireAuth, getAttributionHandler);
+router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandler);
+router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
+router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
 router.get('/briefing', heavyReadLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), getBriefingHandler);
 router.post('/briefing/explain', mutationLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('pro'), explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), getBehaviorHandler);
-router.get('/daily-report', heavyReadLimiter, getDailyReportHandler);
+router.get('/daily-report', heavyReadLimiter, requireAuth, getDailyReportHandler);
 router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('pro'), regenerateDailyReportHandler);
-router.get('/earnings-summary', heavyReadLimiter, getEarningsSummaryHandler);
+router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
 
 // Tax-Loss Harvesting
-router.get('/tax-harvest', heavyReadLimiter, getTaxHarvestHandler);
+router.get('/tax-harvest', heavyReadLimiter, requireAuth, getTaxHarvestHandler);
 
 // Anomaly Detection
-router.get('/anomalies', getAnomaliesHandler);
-router.get('/anomalies/unread-count', getUnreadAnomalyCountHandler);
+router.get('/anomalies', requireAuth, getAnomaliesHandler);
+router.get('/anomalies/unread-count', requireAuth, getUnreadAnomalyCountHandler);
 router.patch('/anomalies/:id/read', mutationLimiter, requireAuth, markAnomalyReadHandler);
 router.post('/anomalies/mark-all-read', mutationLimiter, requireAuth, markAllAnomaliesReadHandler);
 

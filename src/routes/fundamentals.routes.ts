@@ -16,7 +16,7 @@ const router = Router();
 
 router.get('/economic', getEconomicDashboardHandler);
 router.get('/economic/international', getInternationalEconomicHandler);
-router.get('/economic/portfolio-impact', getPortfolioMacroImpactHandler);
+router.get('/economic/portfolio-impact', requireAuth, getPortfolioMacroImpactHandler);
 router.get('/status', getAVStatusHandler);
 router.post('/earnings/batch', mutationLimiter, requireAuth, getEarningsBatchHandler);
 router.get('/:ticker', getFundamentalsHandler);

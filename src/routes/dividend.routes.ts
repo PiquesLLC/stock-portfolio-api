@@ -51,8 +51,8 @@ router.post('/sync', mutationLimiter, requireAuth, syncHandler);
 // Backfill missed dividend postings — requires auth
 router.post('/backfill', mutationLimiter, requireAuth, backfillHandler);
 
-// Calendar export (iCal) — public (user adds to calendar app)
-router.get('/calendar.ics', getCalendarICS);
+// Calendar export (iCal)
+router.get('/calendar.ics', requireAuth, getCalendarICS);
 
 // Backward compat: GET / returns events, POST / adds event
 router.get('/', requireAuth, getEventsHandler);
