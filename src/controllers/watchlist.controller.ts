@@ -28,11 +28,9 @@ import {
 } from '../validators/watchlist.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
 export async function listWatchlistsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const data = await getWatchlists(SYSTEM_USER_ID);
+    const data = await getWatchlists(req.user!.userId);
     res.json(data);
   } catch (_error) {
     console.error('Watchlist list error:');
@@ -48,7 +46,7 @@ export async function getWatchlistHandler(req: AuthRequest, res: Response): Prom
       return;
     }
     const { id } = parsedParams.data;
-    const watchlist = await getWatchlistDetail(id, SYSTEM_USER_ID);
+    const watchlist = await getWatchlistDetail(id, req.user!.userId);
     if (!watchlist) {
       res.status(404).json({ error: 'Watchlist not found' });
       return;
@@ -68,7 +66,7 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
       return;
     }
     const { name, description, color } = parsedBody.data;
-    const watchlist = await createWatchlist(SYSTEM_USER_ID, { name, description, color });
+    const watchlist = await createWatchlist(req.user!.userId, { name, description, color });
     res.status(201).json({
       id: watchlist.id,
       name: watchlist.name,
@@ -101,7 +99,7 @@ export async function updateWatchlistHandler(req: AuthRequest, res: Response): P
     }
     const { id } = parsedParams.data;
     const { name, description, color } = parsedBody.data;
-    const updated = await updateWatchlist(id, SYSTEM_USER_ID, { name, description, color });
+    const updated = await updateWatchlist(id, req.user!.userId, { name, description, color });
     if (!updated) {
       res.status(404).json({ error: 'Watchlist not found' });
       return;
@@ -133,7 +131,7 @@ export async function deleteWatchlistHandler(req: AuthRequest, res: Response): P
       return;
     }
     const { id } = parsedParams.data;
-    const removed = await deleteWatchlist(id, SYSTEM_USER_ID);
+    const removed = await deleteWatchlist(id, req.user!.userId);
     if (!removed) {
       res.status(404).json({ error: 'Watchlist not found' });
       return;
@@ -159,7 +157,7 @@ export async function addWatchlistHoldingHandler(req: AuthRequest, res: Response
     const { id } = parsedParams.data;
     const { ticker, shares, averageCost } = parsedBody.data;
 
-    const holding = await addWatchlistHolding(id, SYSTEM_USER_ID, { ticker, shares, averageCost });
+    const holding = await addWatchlistHolding(id, req.user!.userId, { ticker, shares, averageCost });
     if (!holding) {
       res.status(404).json({ error: 'Watchlist not found' });
       return;
@@ -185,7 +183,7 @@ export async function updateWatchlistHoldingHandler(req: AuthRequest, res: Respo
     const { id, ticker } = parsedParams.data;
     const { shares, averageCost } = parsedBody.data;
 
-    const updated = await updateWatchlistHolding(id, SYSTEM_USER_ID, ticker, { shares, averageCost });
+    const updated = await updateWatchlistHolding(id, req.user!.userId, ticker, { shares, averageCost });
     if (!updated) {
       res.status(404).json({ error: 'Watchlist holding not found' });
       return;
@@ -208,7 +206,7 @@ export async function removeWatchlistHoldingHandler(req: AuthRequest, res: Respo
       return;
     }
     const { id, ticker } = parsedParams.data;
-    const removed = await removeWatchlistHolding(id, SYSTEM_USER_ID, ticker);
+    const removed = await removeWatchlistHolding(id, req.user!.userId, ticker);
     if (!removed) {
       res.status(404).json({ error: 'Watchlist holding not found' });
       return;
@@ -237,7 +235,7 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
     const period = parsedQuery.data.period || '1D';
 
     const watchlist = await prisma.watchlist.findFirst({
-      where: { id, userId: SYSTEM_USER_ID },
+      where: { id, userId: req.user!.userId },
       select: { id: true, holdings: { select: { ticker: true, shares: true } } },
     });
 

@@ -2,11 +2,7 @@ import prisma from '../utils/prisma';
 import { getETFHoldings } from '../utils/yahoo-finance';
 import { fetchPrices } from './market.service';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
-function resolveUserId(userId?: string | null): string {
-  return userId ?? SYSTEM_USER_ID;
-}
 
 function round(value: number, decimals = 2): number {
   const factor = Math.pow(10, decimals);
@@ -20,11 +16,9 @@ type OverlapHolding = {
   exposureValue: number;
 };
 
-export async function getEtfOverlap(userId?: string | null) {
-  const targetUserId = resolveUserId(userId);
-
+export async function getEtfOverlap(userId: string) {
   const holdings = await prisma.holding.findMany({
-    where: { userId: targetUserId, shares: { gt: 0 } },
+    where: { userId, shares: { gt: 0 } },
     select: { ticker: true, shares: true },
   });
 

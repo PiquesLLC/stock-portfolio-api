@@ -4,7 +4,6 @@ import { fetchPolygonAggs } from '../utils/yahoo-http';
 import NodeCache from 'node-cache';
 import { PlanLimitError } from '../utils/plan-limit.error';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 // Cache performance data for 5 minutes
 const perfCache = new NodeCache({ stdTTL: 300 });
@@ -117,7 +116,7 @@ async function fetchPERatios(tickers: string[]): Promise<Map<string, number | nu
   return result;
 }
 
-export async function getWatchlists(userId: string = SYSTEM_USER_ID) {
+export async function getWatchlists(userId: string) {
   const watchlists = await prisma.watchlist.findMany({
     where: { userId },
     include: {
@@ -136,7 +135,7 @@ export async function getWatchlists(userId: string = SYSTEM_USER_ID) {
   }));
 }
 
-export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USER_ID) {
+export async function getWatchlistDetail(id: string, userId: string) {
   const watchlist = await prisma.watchlist.findFirst({
     where: { id, userId },
     include: { holdings: true },
@@ -243,7 +242,7 @@ export async function getWatchlistDetail(id: string, userId: string = SYSTEM_USE
 }
 
 export async function createWatchlist(
-  userId: string = SYSTEM_USER_ID,
+  userId: string,
   input: { name: string; description?: string; color?: string }
 ) {
   const user = await prisma.user.findUnique({
@@ -270,7 +269,7 @@ export async function createWatchlist(
 
 export async function updateWatchlist(
   id: string,
-  userId: string = SYSTEM_USER_ID,
+  userId: string,
   input: { name?: string; description?: string | null; color?: string }
 ) {
   const existing = await prisma.watchlist.findFirst({ where: { id, userId } });
@@ -286,7 +285,7 @@ export async function updateWatchlist(
   });
 }
 
-export async function deleteWatchlist(id: string, userId: string = SYSTEM_USER_ID) {
+export async function deleteWatchlist(id: string, userId: string) {
   const existing = await prisma.watchlist.findFirst({ where: { id, userId } });
   if (!existing) return null;
   await prisma.watchlist.delete({ where: { id } });
@@ -300,7 +299,7 @@ async function ensureWatchlistOwned(watchlistId: string, userId: string) {
 
 export async function addWatchlistHolding(
   watchlistId: string,
-  userId: string = SYSTEM_USER_ID,
+  userId: string,
   input: { ticker: string; shares: number; averageCost: number }
 ) {
   const watchlist = await ensureWatchlistOwned(watchlistId, userId);
@@ -331,7 +330,7 @@ export async function addWatchlistHolding(
 
 export async function updateWatchlistHolding(
   watchlistId: string,
-  userId: string = SYSTEM_USER_ID,
+  userId: string,
   ticker: string,
   input: { shares?: number; averageCost?: number }
 ) {
@@ -354,7 +353,7 @@ export async function updateWatchlistHolding(
 
 export async function removeWatchlistHolding(
   watchlistId: string,
-  userId: string = SYSTEM_USER_ID,
+  userId: string,
   ticker: string
 ) {
   const watchlist = await ensureWatchlistOwned(watchlistId, userId);
