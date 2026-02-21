@@ -77,12 +77,12 @@ export async function createWatchlistHandler(req: AuthRequest, res: Response): P
       holdingsCount: 0,
       createdAt: watchlist.createdAt,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof PlanLimitError) {
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
       return;
     }
-    if (error?.code === 'P2002') {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2002') {
       res.status(409).json({ error: 'Watchlist name already exists' });
       return;
     }
@@ -115,8 +115,8 @@ export async function updateWatchlistHandler(req: AuthRequest, res: Response): P
       holdingsCount,
       createdAt: updated.createdAt,
     });
-  } catch (error: any) {
-    if (error?.code === 'P2002') {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2002') {
       res.status(409).json({ error: 'Watchlist name already exists' });
       return;
     }

@@ -1,4 +1,5 @@
 import NodeCache from 'node-cache';
+import { AxiosError } from 'axios';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
@@ -122,10 +123,10 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     }
     console.log(`[Perplexity] ${upper}: ${validEvents.length}/${rawEvents.length} events (${isMax ? 'MAX' : `${startDate} to ${endDate}`}), ${resp.citations.length} citations`);
     return result;
-  } catch (error: any) {
-    if (error.response?.status === 429) {
+  } catch (error: unknown) {
+    if (error instanceof AxiosError && error.response?.status === 429) {
       console.warn(`[Perplexity] Rate limited for ${upper}`);
-    } else if (error.response?.status === 401) {
+    } else if (error instanceof AxiosError && error.response?.status === 401) {
       console.error(`[Perplexity] Invalid API key`);
     } else {
       console.error(`[Perplexity] Error for ${upper}`);

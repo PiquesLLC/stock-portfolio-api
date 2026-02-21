@@ -210,8 +210,8 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
 
     res.status(204).send();
-  } catch (error: any) {
-    if (error?.code === 'P2025') {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2025') {
       res.status(404).json({ error: 'Holding not found' });
       return;
     }

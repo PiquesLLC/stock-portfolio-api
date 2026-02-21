@@ -211,8 +211,8 @@ export async function updateEmailHandler(req: AuthRequest, res: Response): Promi
     }
     await updateEmail(req.user.userId, parsed.data.email);
     res.json({ email: parsed.data.email, verified: false });
-  } catch (error: any) {
-    if ((error as Error)?.message === 'Email already in use') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Email already in use') {
       res.status(409).json({ error: 'Email already in use' });
       return;
     }
@@ -248,8 +248,8 @@ export async function emailOtpSetupHandler(req: AuthRequest, res: Response): Pro
     if (!req.user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     await beginEmailOtpSetup(req.user.userId);
     res.json({ codeSent: true });
-  } catch (error: any) {
-    if ((error as Error)?.message?.includes('Email must be verified')) {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes('Email must be verified')) {
       res.status(400).json({ error: 'Email must be verified before enabling email OTP' });
       return;
     }

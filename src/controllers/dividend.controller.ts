@@ -93,8 +93,8 @@ export async function removeEvent(req: AuthRequest, res: Response): Promise<void
   try {
     await deleteDividendEvent(req.params.id);
     res.status(204).send();
-  } catch (error: any) {
-    if (error?.code === 'P2025') {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2025') {
       res.status(404).json({ error: 'Dividend event not found' });
       return;
     }
@@ -182,8 +182,8 @@ export async function getTimelineHandler(req: AuthRequest, res: Response): Promi
     const { id } = req.params;
     const timeline = await getDividendTimeline(id);
     res.json(timeline);
-  } catch (error: any) {
-    if (error?.message === 'Dividend credit not found') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Dividend credit not found') {
       res.status(404).json({ error: 'Dividend credit not found' });
       return;
     }
@@ -198,18 +198,20 @@ export async function reinvestHandler(req: AuthRequest, res: Response): Promise<
     // Always use system user — never accept userId from body
     const result = await reinvestDividend(id, SYSTEM_USER_ID);
     res.json(result);
-  } catch (error: any) {
-    if (error?.message === 'Dividend credit not found') {
-      res.status(404).json({ error: 'Dividend credit not found' });
-      return;
-    }
-    if (error?.message === 'Dividend already reinvested') {
-      res.status(400).json({ error: 'Dividend already reinvested' });
-      return;
-    }
-    if (error?.message?.includes('No holding found')) {
-      res.status(400).json({ error: 'No holding found for this ticker' });
-      return;
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      if (error.message === 'Dividend credit not found') {
+        res.status(404).json({ error: 'Dividend credit not found' });
+        return;
+      }
+      if (error.message === 'Dividend already reinvested') {
+        res.status(400).json({ error: 'Dividend already reinvested' });
+        return;
+      }
+      if (error.message.includes('No holding found')) {
+        res.status(400).json({ error: 'No holding found for this ticker' });
+        return;
+      }
     }
     console.error('Error reinvesting dividend:');
     res.status(500).json({ error: 'Failed to reinvest dividend' });

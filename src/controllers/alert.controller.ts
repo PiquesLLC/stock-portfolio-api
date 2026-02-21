@@ -8,6 +8,7 @@ import {
   markEventRead,
   markAllRead,
 } from '../services/alert.service';
+import { alertIdParamSchema, updateAlertBodySchema } from '../validators/alert.validators';
 
 // GET /alerts — uses authenticated user
 export async function getAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -27,12 +28,19 @@ export async function getAlertsHandler(req: AuthRequest, res: Response): Promise
 // PUT /alerts/:id — ownership-scoped
 export async function updateAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
-    const { threshold, enabled } = req.body;
+    const parsedParams = alertIdParamSchema.safeParse(req.params);
+    const parsedBody = updateAlertBodySchema.safeParse(req.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+
+    const { id } = parsedParams.data;
+    const { threshold, enabled } = parsedBody.data;
 
     const data: { threshold?: number | null; enabled?: boolean } = {};
     if (threshold !== undefined) data.threshold = threshold;
-    if (typeof enabled === 'boolean') data.enabled = enabled;
+    if (enabled !== undefined) data.enabled = enabled;
 
     const alert = await updateAlert(id, data, req.user!.userId);
     if (!alert) {
@@ -79,7 +87,12 @@ export async function getUnreadCountHandler(req: AuthRequest, res: Response): Pr
 // POST /alerts/events/:id/read — ownership-scoped
 export async function markReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    await markEventRead(req.params.id, req.user!.userId);
+    const parsedParams = alertIdParamSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    await markEventRead(parsedParams.data.id, req.user!.userId);
     res.json({ ok: true });
   } catch (_error) {
     console.error('Error marking event read:');

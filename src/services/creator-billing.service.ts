@@ -700,8 +700,8 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   }
 
   const { availableCents } = await getPayoutBalance(userId);
-  if (availableCents < 5000) {
-    throw new Error('Minimum payout is $50');
+  if (availableCents < 500) {
+    throw new Error('Minimum payout is $5');
   }
 
   const payout = await prisma.creatorPayout.create({

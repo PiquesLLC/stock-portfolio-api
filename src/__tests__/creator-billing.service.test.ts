@@ -119,6 +119,32 @@ function fixtureFactory(seed = '1') {
         type: 'payout.failed',
         data: { object: { id: stripePayoutId } },
       }),
+      checkoutCompleted: (eventId = `evt_checkout_${seed}`) => ({
+        id: eventId,
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            metadata: { creatorUserId, subscriberUserId },
+            subscription: stripeSubscriptionId,
+          },
+        },
+      }),
+      subscriptionUpdated: (eventId = `evt_sub_updated_${seed}`, cancelAtPeriodEnd = false, currentPeriodEnd?: number) => ({
+        id: eventId,
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: stripeSubscriptionId,
+            cancel_at_period_end: cancelAtPeriodEnd,
+            items: { data: [{ current_period_end: currentPeriodEnd ?? Math.floor(Date.now() / 1000) + 30 * 86400 }] },
+          },
+        },
+      }),
+      subscriptionDeleted: (eventId = `evt_sub_deleted_${seed}`) => ({
+        id: eventId,
+        type: 'customer.subscription.deleted',
+        data: { object: { id: stripeSubscriptionId } },
+      }),
     },
   };
 }
@@ -489,5 +515,163 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorPayout.updateMany.mock.calls.filter(
       (c: any[]) => c?.[0]?.where?.stripePayoutId === fx.ids.stripePayoutId
     ).length).toBe(1);
+  });
+
+  // ── Out-of-order / lifecycle tests ──────────────────────────────
+
+  it('processes subscription lifecycle: checkout → updated → deleted', async () => {
+    const fx = fixtureFactory('lifecycle');
+    (prismaMock as any).creatorSubscription.upsert.mockResolvedValue({ id: fx.ids.subscriptionId });
+    (prismaMock as any).creatorSubscription.findUnique.mockResolvedValue({ id: fx.ids.subscriptionId });
+
+    await handleCreatorWebhookEvent(fx.event.checkoutCompleted());
+    expect((prismaMock as any).creatorSubscription.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ status: 'active' }),
+        create: expect.objectContaining({ status: 'active' }),
+      })
+    );
+    expect((prismaMock as any).creatorSubscriptionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventType: 'created' }),
+      })
+    );
+
+    await handleCreatorWebhookEvent(fx.event.subscriptionUpdated('evt_sub_updated_lifecycle'));
+    expect((prismaMock as any).creatorSubscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeSubscriptionId: fx.ids.stripeSubscriptionId },
+        data: expect.objectContaining({ status: 'active' }),
+      })
+    );
+
+    await handleCreatorWebhookEvent(fx.event.subscriptionDeleted());
+    expect((prismaMock as any).creatorSubscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeSubscriptionId: fx.ids.stripeSubscriptionId },
+        data: expect.objectContaining({ status: 'expired' }),
+      })
+    );
+  });
+
+  it('handles subscription.deleted before checkout.session.completed without throwing', async () => {
+    const fx = fixtureFactory('deleted_first');
+    (prismaMock as any).creatorSubscription.upsert.mockResolvedValue({ id: fx.ids.subscriptionId });
+    (prismaMock as any).creatorSubscription.findUnique.mockResolvedValue({ id: fx.ids.subscriptionId });
+    (prismaMock as any).creatorSubscription.updateMany.mockResolvedValue({ count: 0 });
+
+    // deleted fires first — updateMany on non-existent subscription (count=0 is fine)
+    await handleCreatorWebhookEvent(fx.event.subscriptionDeleted('evt_deleted_first'));
+    expect((prismaMock as any).creatorSubscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'expired' }),
+      })
+    );
+
+    // checkout arrives late — upsert still creates the subscription as active
+    await handleCreatorWebhookEvent(fx.event.checkoutCompleted('evt_checkout_late'));
+    expect((prismaMock as any).creatorSubscription.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ status: 'active' }),
+        create: expect.objectContaining({ status: 'active' }),
+      })
+    );
+  });
+
+  it('processes charge.refunded after dispute.closed without double-canceling', async () => {
+    const fx = fixtureFactory('double_rev');
+
+    // dispute won restores active
+    await handleCreatorWebhookEvent(fx.event.disputeClosed('evt_dispute_closed_double', 'won'));
+    expect((prismaMock as any).creatorSubscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'active', disputedAt: null }),
+      })
+    );
+
+    // full refund arrives after dispute was already closed as won
+    chargesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeChargeId,
+      object: 'charge',
+      amount: 10000,
+      amount_refunded: 10000,
+      invoice: fx.ids.stripeInvoiceId,
+    });
+    invoicesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeInvoiceId,
+      subscription: fx.ids.stripeSubscriptionId,
+    });
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_refund_after_dispute', 10000, 10000));
+
+    // Refund handler writes ledger entries and cancels
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalled();
+    expect((prismaMock as any).creatorSubscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'canceled' }),
+      })
+    );
+  });
+
+  it('handles orphaned payout.paid without throwing when no DB record exists', async () => {
+    const fx = fixtureFactory('orphan_payout');
+    (prismaMock as any).creatorPayout.updateMany.mockResolvedValue({ count: 0 });
+
+    await handleCreatorWebhookEvent(fx.event.payoutPaid('evt_orphan_payout'));
+
+    // Should not throw — updateMany with count 0 is a no-op
+    expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
+      where: { stripePayoutId: fx.ids.stripePayoutId },
+      data: { status: 'completed', paidAt: expect.any(Date) },
+    });
+  });
+
+  it('processes invoice.paid after charge.refunded and credits independently', async () => {
+    const fx = fixtureFactory('paid_after_refund');
+
+    // First: refund processes
+    chargesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeChargeId,
+      object: 'charge',
+      amount: 10000,
+      amount_refunded: 10000,
+      invoice: fx.ids.stripeInvoiceId,
+    });
+    invoicesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeInvoiceId,
+      subscription: fx.ids.stripeSubscriptionId,
+    });
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_refund_first', 10000, 10000));
+
+    // Second: late invoice.paid arrives (different event ID, so not deduped)
+    await handleCreatorWebhookEvent(fx.event.invoicePaid('evt_paid_late', 10000));
+
+    // Both should have been processed (different event IDs)
+    const refundLedger = (prismaMock as any).creatorWalletLedger.create.mock.calls.filter(
+      (c: any[]) => String(c?.[0]?.data?.description || '').includes('evt_refund_first')
+    );
+    const paidLedger = (prismaMock as any).creatorWalletLedger.create.mock.calls.filter(
+      (c: any[]) => String(c?.[0]?.data?.description || '').includes('evt_paid_late')
+    );
+    expect(refundLedger.length).toBeGreaterThan(0);
+    expect(paidLedger.length).toBeGreaterThan(0);
+  });
+
+  it('handles subscription.updated before checkout.session.completed gracefully', async () => {
+    const fx = fixtureFactory('updated_first');
+    (prismaMock as any).creatorSubscription.upsert.mockResolvedValue({ id: fx.ids.subscriptionId });
+    (prismaMock as any).creatorSubscription.findUnique.mockResolvedValue({ id: fx.ids.subscriptionId });
+    (prismaMock as any).creatorSubscription.updateMany.mockResolvedValue({ count: 0 });
+
+    // updated arrives first — updateMany on non-existent (count 0)
+    await handleCreatorWebhookEvent(fx.event.subscriptionUpdated('evt_updated_early'));
+    expect((prismaMock as any).creatorSubscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeSubscriptionId: fx.ids.stripeSubscriptionId },
+      })
+    );
+
+    // checkout arrives late — creates subscription
+    await handleCreatorWebhookEvent(fx.event.checkoutCompleted('evt_checkout_after'));
+    expect((prismaMock as any).creatorSubscription.upsert).toHaveBeenCalled();
   });
 });

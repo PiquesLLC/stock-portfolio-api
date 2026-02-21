@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
 import { getPerformanceComparison } from './benchmark.service';
 import { getLeaderboard } from './leaderboard.service';
+import { getUserChartSnapshots } from './snapshot.service';
 
 // Load and cache logo as base64 at startup
 let LOGO_B64 = '';
@@ -27,6 +28,7 @@ interface ShareCardData {
   nalaScore: number | null;
   followerCount: number;
   isCreator: boolean;
+  sparklineValues: number[];
 }
 
 async function getShareCardData(userId: string): Promise<ShareCardData | null> {
@@ -43,10 +45,11 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
 
   if (!user || !user.profilePublic) return null;
 
-  const [performance, leaderboard, followerCount] = await Promise.all([
+  const [performance, leaderboard, followerCount, chart] = await Promise.all([
     getPerformanceComparison('1M', 'SPY', userId).catch(() => null),
     getLeaderboard('1M', 'world').catch(() => null),
     prisma.follow.count({ where: { followingId: userId } }),
+    getUserChartSnapshots(userId, '1M').catch(() => null),
   ]);
 
   let leaderboardRank: number | null = null;
@@ -66,6 +69,23 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
     nalaScore = Math.round(raw);
   }
 
+  const rawValues = (chart?.points ?? [])
+    .map((p: { value: number }) => p.value)
+    .filter((v: number) => Number.isFinite(v) && v > 0);
+  const targetSparkCount = 36;
+  let sparklineValues: number[] = [];
+  if (rawValues.length > 0) {
+    if (rawValues.length <= targetSparkCount) {
+      sparklineValues = rawValues;
+    } else {
+      const step = (rawValues.length - 1) / (targetSparkCount - 1);
+      sparklineValues = Array.from({ length: targetSparkCount }, (_, i) => {
+        const idx = Math.round(i * step);
+        return rawValues[idx];
+      });
+    }
+  }
+
   return {
     username: user.username,
     displayName: user.displayName || user.username,
@@ -76,6 +96,7 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
     nalaScore,
     followerCount,
     isCreator: user.creator?.status === 'active',
+    sparklineValues,
   };
 }
 
@@ -138,6 +159,7 @@ async function buildSvg(data: ShareCardData): Promise<string> {
 
   const grade = getGrade(data.nalaScore);
   const rankText = data.leaderboardRank != null ? `#${data.leaderboardRank}` : '--';
+  const heroHighlight = isPositive ? '#7CFF80' : '#FF9E96';
 
   const initials = data.displayName
     .split(' ')
@@ -146,9 +168,9 @@ async function buildSvg(data: ShareCardData): Promise<string> {
     .substring(0, 2)
     .toUpperCase();
 
-  const logoEl = LOGO_B64
-    ? `<image href="data:image/png;base64,${LOGO_B64}" x="60" y="${H - 58}" width="34" height="34"/>`
-    : `<text x="77" y="${H - 33}" fill="${GREEN}" font-size="22" font-weight="800" text-anchor="middle" font-family="${F}">N</text>`;
+  const logoEl = `<text x="60" y="${H - 34}" font-size="30" font-weight="800" font-family="${F}">
+    <tspan fill="${GREEN}">N</tspan><tspan fill="#f3f4f6">ala</tspan>
+  </text>`;
 
   const scoreR = 34;
   const scoreCirc = 2 * Math.PI * scoreR;
@@ -156,6 +178,22 @@ async function buildSvg(data: ShareCardData): Promise<string> {
   const scoreText = data.nalaScore != null ? `${data.nalaScore}` : '--';
 
   const glowR = isPositive ? '0,200,5' : '232,84,78';
+
+  const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
+  const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
+  const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
+  const sparkStartX = 95;
+  const sparkEndX = 686;
+  const sparkTopY = 422;
+  const sparkBottomY = 516;
+  const sparklinePoints = data.sparklineValues.length > 1
+    ? data.sparklineValues.map((value, i) => {
+      const t = i / (data.sparklineValues.length - 1);
+      const x = sparkStartX + t * (sparkEndX - sparkStartX);
+      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ')
+    : '95,500 686,440';
 
   // Generate QR code for referral link
   const referralUrl = `https://nalaai.com/join?ref=${encodeURIComponent(data.username)}`;
@@ -187,6 +225,10 @@ async function buildSvg(data: ShareCardData): Promise<string> {
       <stop offset="0%" stop-color="${grade.color}"/>
       <stop offset="100%" stop-color="${grade.color}" stop-opacity="0.55"/>
     </linearGradient>
+    <linearGradient id="retFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${heroHighlight}"/>
+      <stop offset="100%" stop-color="${accentColor}"/>
+    </linearGradient>
     <filter id="numGlow">
       <feGaussianBlur stdDeviation="2.2" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
@@ -211,42 +253,41 @@ async function buildSvg(data: ShareCardData): Promise<string> {
   <rect x="56" y="136" width="${W - 112}" height="1" fill="rgba(255,255,255,0.08)"/>
 
   <text x="96" y="195" fill="#7f8894" font-size="14" font-weight="600" letter-spacing="2" font-family="${F}">1-MONTH RETURN</text>
-  <text x="96" y="330" fill="${accentColor}" font-size="112" font-weight="800" font-family="${F}" filter="url(#numGlow)">${retText}</text>
+  <text x="96" y="330" fill="url(#retFill)" font-size="108" font-weight="800" font-family="${F}" filter="url(#numGlow)">${retText}</text>
   <text x="96" y="372" fill="#7f8894" font-size="13" letter-spacing="1.5" font-family="${F}">BETA</text>
   <text x="96" y="404" fill="#e5e7eb" font-size="31" font-weight="700" font-family="${F}">${data.beta != null ? data.beta.toFixed(2) : '--'}</text>
 
   <rect x="84" y="414" width="612" height="112" rx="8" fill="rgba(8,12,15,0.7)" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
   <g clip-path="url(#sparkClip)">
-    <polyline points="95,508 168,500 242,503 316,484 390,474 464,468 538,448 612,457 686,420"
+    <polyline points="${sparklinePoints}"
       fill="none" stroke="${accentColor}" stroke-width="1.6" opacity="0.55" stroke-linecap="round"/>
-    <polyline points="95,508 168,500 242,503 316,484 390,474 464,468 538,448 612,457 686,420"
+    <polyline points="${sparklinePoints}"
       fill="none" stroke="${accentColor}" stroke-width="4" opacity="0.08" stroke-linecap="round"/>
   </g>
 
-  <rect x="748" y="168" width="174" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="772" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">VS SPY (ALPHA)</text>
-  <text x="772" y="250" fill="${alphaColor}" font-size="50" font-weight="800" font-family="${F}">${alphaText}</text>
+  <rect x="744" y="168" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <text x="766" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">VS SPY (ALPHA)</text>
+  <text x="766" y="250" fill="${alphaColor}" font-size="44" font-weight="800" font-family="${F}">${alphaText}</text>
 
-  <rect x="938" y="168" width="174" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="962" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">FOLLOWERS</text>
-  <text x="962" y="250" fill="#f3f4f6" font-size="50" font-weight="700" font-family="${F}">${data.followerCount}</text>
+  <rect x="952" y="168" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <text x="974" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">FOLLOWERS</text>
+  <text x="974" y="250" fill="#f3f4f6" font-size="48" font-weight="700" font-family="${F}">${data.followerCount}</text>
 
-  <rect x="748" y="308" width="174" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="772" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">NALA SCORE</text>
-  <circle cx="784" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3" opacity="0.15"/>
-  <circle cx="784" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3"
-    stroke-dasharray="${scoreDash} ${scoreCirc}" stroke-linecap="round" transform="rotate(-90 784 381)"/>
-  <text x="784" y="389" fill="${grade.color}" font-size="25" font-weight="800" text-anchor="middle" font-family="${F}">${scoreText}</text>
-  <text x="834" y="389" fill="#88909b" font-size="14" font-family="${F}">/ 100</text>
+  <rect x="744" y="308" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <text x="766" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">NALA SCORE</text>
+  <circle cx="802" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3" opacity="0.15"/>
+  <circle cx="802" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3"
+    stroke-dasharray="${scoreDash} ${scoreCirc}" stroke-linecap="round" transform="rotate(-90 802 381)"/>
+  <text x="802" y="389" fill="${grade.color}" font-size="25" font-weight="800" text-anchor="middle" font-family="${F}">${scoreText}</text>
+  <text x="852" y="389" fill="#88909b" font-size="14" font-family="${F}">/ 100</text>
 
-  <rect x="938" y="308" width="174" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="962" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">RANK</text>
-  <text x="962" y="394" fill="${GREEN}" font-size="56" font-weight="800" font-family="${F}">${rankText}</text>
+  <rect x="952" y="308" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <text x="974" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">RANK</text>
+  <text x="974" y="394" fill="${GREEN}" font-size="56" font-weight="800" font-family="${F}">${rankText}</text>
 
   <rect x="56" y="${H - 92}" width="${W - 112}" height="1" fill="rgba(255,255,255,0.08)"/>
   ${logoEl}
-  <text x="102" y="${H - 37}" fill="#f3f4f6" font-size="17" font-weight="700" font-family="${F}">Nala</text>
-  <text x="102" y="${H - 19}" fill="#7f8894" font-size="10" font-family="${F}">Portfolio Intelligence Platform</text>
+  <text x="60" y="${H - 19}" fill="#7f8894" font-size="10" font-family="${F}">Portfolio Intelligence Platform</text>
   <!-- QR code + label -->
   ${qrSvg}
   <text x="${qrX + qrSize / 2}" y="${qrY - 8}" fill="#7f8894" font-size="9" font-weight="600" text-anchor="middle" letter-spacing="1" font-family="${F}">SCAN TO JOIN</text>

@@ -9,6 +9,7 @@ import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
 import { getEarningsTrack } from '../services/earnings-track.service';
 import { MarketIndex } from '../utils/sectors';
+import { AxiosError } from 'axios';
 import { AuthRequest } from '../types/auth';
 import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
 import {
@@ -376,12 +377,12 @@ export async function askStockQuestionHandler(req: AuthRequest, res: Response): 
 
     const result = await askStockQuestion(ticker, question, req.user.userId);
     res.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof EmailVerificationRequiredError) {
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    if (error.response?.status === 429) {
+    if (error instanceof AxiosError && error.response?.status === 429) {
       res.status(429).json({ error: 'Rate limited. Please wait a moment.' });
       return;
     }

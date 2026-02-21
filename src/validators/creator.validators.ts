@@ -4,7 +4,7 @@ export const applySchema = z.object({
   pitch: z.string().trim().max(500, 'Pitch must be at most 500 characters').optional(),
 });
 
-const pricingCentsSchema = z.union([z.literal(500), z.literal(1500), z.literal(4900)]);
+const pricingCentsSchema = z.number().int().min(100, 'Minimum price is $1.00').max(99999, 'Maximum price is $999.99');
 const tradeDelaySchema = z.union([z.literal(0), z.literal(24), z.literal(48), z.literal(72)]);
 
 export const updateSettingsSchema = z.object({

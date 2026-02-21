@@ -22,7 +22,8 @@ export type CreatorEntitlement = {
   cta: CreatorCtaState;
 };
 
-const VALID_PRICING = new Set([500, 1500, 4900]);
+const MIN_PRICING_CENTS = 100; // $1.00 minimum
+const MAX_PRICING_CENTS = 99999; // $999.99 maximum
 const VALID_TRADE_DELAY_HOURS = new Set([0, 24, 48, 72]);
 const DISCLAIMER = 'Educational content only. Not investment advice.';
 
@@ -242,8 +243,8 @@ type CreatorSettingsInput = {
 };
 
 export async function updateCreatorSettings(userId: string, settings: CreatorSettingsInput): Promise<void> {
-  if (settings.pricingCents !== undefined && !VALID_PRICING.has(settings.pricingCents)) {
-    throw new Error('Invalid pricing');
+  if (settings.pricingCents !== undefined && (settings.pricingCents < MIN_PRICING_CENTS || settings.pricingCents > MAX_PRICING_CENTS)) {
+    throw new Error('Price must be between $1.00 and $999.99');
   }
   if (settings.tradeDelayHours !== undefined && !VALID_TRADE_DELAY_HOURS.has(settings.tradeDelayHours)) {
     throw new Error('Invalid trade delay');
@@ -393,7 +394,7 @@ export async function getCreatorDashboard(userId: string): Promise<{
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const [activeSubscribers, churnedLast30, ledger, recentEvents, payoutBalanceCents] = await Promise.all([
+  const [activeSubscribers, churnedLast30, ledger, recentEvents, rawPayoutBalance, pendingPayoutAgg] = await Promise.all([
     prisma.creatorSubscription.count({
       where: { creatorUserId: userId, status: 'active' },
     }),
@@ -416,7 +417,19 @@ export async function getCreatorDashboard(userId: string): Promise<{
       take: 25,
     }),
     getPayoutBalanceFromLedger(userId),
+    prisma.creatorPayout.aggregate({
+      where: { creatorUserId: userId, status: 'pending' },
+      _sum: { amountCents: true },
+    }),
   ]);
+
+  // Subtract reserved (last 14 days of earnings) and pending payouts — matches requestPayout's check
+  const reserveCutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const reservedCents = ledger
+    .filter(e => e.createdAt > reserveCutoff)
+    .reduce((sum, e) => sum + Math.abs(e.amountCents), 0);
+  const pendingCents = pendingPayoutAgg._sum.amountCents ?? 0;
+  const payoutBalanceCents = Math.max(0, rawPayoutBalance - reservedCents - pendingCents);
 
   const mrr = activeSubscribers * creator.pricingCents;
   const churnDenominator = activeSubscribers + churnedLast30;

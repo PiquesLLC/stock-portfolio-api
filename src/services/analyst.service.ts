@@ -1,5 +1,5 @@
 ﻿import prisma from '../utils/prisma';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { config } from '../config';
 
 
@@ -52,8 +52,8 @@ async function fetchPriceTarget(ticker: string): Promise<FinnhubPriceTarget | nu
       return null;
     }
     return response.data;
-  } catch (error: any) {
-    if (error?.response?.status === 403) {
+  } catch (error: unknown) {
+    if (error instanceof AxiosError && error.response?.status === 403) {
       console.warn(`[Analyst] Price target endpoint requires premium plan â€” disabling for this session`);
       priceTargetDisabled = true;
     }
@@ -75,8 +75,8 @@ async function fetchRecommendations(ticker: string): Promise<FinnhubRecommendati
       return response.data[0];
     }
     return null;
-  } catch (error: any) {
-    if (error?.response?.status === 403) {
+  } catch (error: unknown) {
+    if (error instanceof AxiosError && error.response?.status === 403) {
       console.warn(`[Analyst] Recommendations endpoint requires premium plan â€” disabling for this session`);
       recommendationsDisabled = true;
     }
