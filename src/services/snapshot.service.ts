@@ -14,19 +14,19 @@ const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/h
 let lastSnapshotTime: number = 0;
 let isCreatingSnapshot = false;
 
-export async function recordCompositionChange(reason?: string): Promise<void> {
+export async function recordCompositionChange(userId: string, reason?: string): Promise<void> {
   await prisma.portfolioCompositionChange.create({
     data: {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId,
       reason: reason || null,
     },
   });
 }
 
-export async function getLatestCompositionChangeAfter(startDate: Date): Promise<Date | null> {
+export async function getLatestCompositionChangeAfter(userId: string, startDate: Date): Promise<Date | null> {
   const latest = await prisma.portfolioCompositionChange.findFirst({
     where: {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId,
       timestamp: { gte: startDate },
     },
     orderBy: { timestamp: 'desc' },
@@ -34,21 +34,21 @@ export async function getLatestCompositionChangeAfter(startDate: Date): Promise<
   return latest?.timestamp ?? null;
 }
 
-export async function resetSnapshotsForCompositionChange(): Promise<void> {
+export async function resetSnapshotsForCompositionChange(userId: string): Promise<void> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   await prisma.holdingSnapshot.deleteMany({
     where: { timestamp: { gte: cutoff } },
   });
   await prisma.portfolioSnapshot.deleteMany({
     where: {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId,
       timestamp: { gte: cutoff },
     },
   });
   lastSnapshotTime = 0;
 }
 
-export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null> {
+export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioSnapshot | null> {
   const now = Date.now();
   const intervalMs = config.snapshotIntervalSeconds * 1000;
 
@@ -67,7 +67,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   try {
     // Double-check with database (in case server restarted)
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+      where: { userId },
       orderBy: { timestamp: 'desc' },
     });
 
@@ -80,7 +80,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
       }
     }
 
-    const portfolio = await getPortfolio({ preferPolygon: true });
+    const portfolio = await getPortfolio(userId, { preferPolygon: true });
 
     // Skip snapshot only if majority of quotes are unavailable
     // (allows snapshots during premarket/after-hours when some tickers lack data)
@@ -131,7 +131,7 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
     const snapshotTime = new Date();
     const snapshot = await prisma.portfolioSnapshot.create({
       data: {
-        userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+        userId,
         timestamp: snapshotTime,
         totalValue: portfolio.totalAssets, // Assets only - no marginDebt
         cashBalance: portfolio.cashBalance,
@@ -176,18 +176,18 @@ export async function createSnapshotIfNeeded(): Promise<PortfolioSnapshot | null
   }
 }
 
-export async function getAllSnapshots(): Promise<PortfolioSnapshot[]> {
+export async function getAllSnapshots(userId: string): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { userId },
     orderBy: { timestamp: 'asc' },
     take: 2000,
   });
 }
 
-export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnapshot[]> {
+export async function getSnapshotsAfter(userId: string, startDate: Date): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     where: {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId,
       timestamp: {
         gte: startDate,
       },
@@ -197,34 +197,34 @@ export async function getSnapshotsAfter(startDate: Date): Promise<PortfolioSnaps
   });
 }
 
-export async function getRecentSnapshots(limit: number): Promise<PortfolioSnapshot[]> {
+export async function getRecentSnapshots(userId: string, limit: number): Promise<PortfolioSnapshot[]> {
   const snapshots = await prisma.portfolioSnapshot.findMany({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { userId },
     orderBy: { timestamp: 'desc' },
     take: limit,
   });
   return snapshots.reverse();
 }
 
-export async function getLatestSnapshot(): Promise<PortfolioSnapshot | null> {
+export async function getLatestSnapshot(userId: string): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { userId },
     orderBy: { timestamp: 'desc' },
   });
 }
 
-export async function getSnapshotCount(): Promise<number> {
-  return prisma.portfolioSnapshot.count({ where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' } });
+export async function getSnapshotCount(userId: string): Promise<number> {
+  return prisma.portfolioSnapshot.count({ where: { userId } });
 }
 
 /**
  * Get the snapshot closest to AND at-or-before the target time.
  * Returns null if no snapshot exists before targetTime.
  */
-export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSnapshot | null> {
+export async function getBaselineSnapshot(userId: string, targetTime: Date): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
     where: {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId,
       timestamp: { lte: targetTime },
     },
     orderBy: { timestamp: 'desc' },
@@ -232,11 +232,11 @@ export async function getBaselineSnapshot(targetTime: Date): Promise<PortfolioSn
 }
 
 /**
- * Get the oldest snapshot (earliest timestamp) for the default user.
+ * Get the oldest snapshot (earliest timestamp) for a user.
  */
-export async function getOldestSnapshot(): Promise<PortfolioSnapshot | null> {
+export async function getOldestSnapshot(userId: string): Promise<PortfolioSnapshot | null> {
   return prisma.portfolioSnapshot.findFirst({
-    where: { userId: '237198da-612e-411c-9ef8-f267c887a9f1' },
+    where: { userId },
     orderBy: { timestamp: 'asc' },
   });
 }
@@ -1074,7 +1074,7 @@ export async function reconstructIntradayGap(
  * Get snapshots for chart display, filtered by period.
  * Returns points + periodStartValue for reference line.
  */
-export async function getChartSnapshots(period: string): Promise<{
+export async function getChartSnapshots(userId: string, period: string): Promise<{
   points: { time: number; value: number }[];
   periodStartValue: number;
   period: string;
@@ -1109,18 +1109,18 @@ export async function getChartSnapshots(period: string): Promise<{
       break;
     case 'ALL':
     default: {
-      const oldest = await getOldestSnapshot();
+      const oldest = await getOldestSnapshot(userId);
       startDate = oldest ? new Date(oldest.timestamp) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       break;
     }
   }
 
   // Get baseline (snapshot at or before start)
-  const baseline = await getBaselineSnapshot(startDate);
+  const baseline = await getBaselineSnapshot(userId, startDate);
   const periodStartValue = baseline ? (baseline.netEquity ?? baseline.totalValue) : 0;
 
   // Get all snapshots in period
-  const snapshots = await getSnapshotsAfter(startDate);
+  const snapshots = await getSnapshotsAfter(userId, startDate);
 
   let points = snapshots.map(s => ({
     time: new Date(s.timestamp).getTime(),
@@ -1159,7 +1159,7 @@ export async function cleanupDuplicateSnapshots(): Promise<number> {
 
   for (;;) {
     const where: any = {
-      userId: '237198da-612e-411c-9ef8-f267c887a9f1',
+      userId: { not: undefined }, // All users
       ...(cursor
         ? {
             OR: [

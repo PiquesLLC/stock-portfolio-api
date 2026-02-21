@@ -8,18 +8,16 @@ import { PlanLimitError } from '../utils/plan-limit.error';
 
 
 
-const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
-export async function getHoldings(userId?: string): Promise<Holding[]> {
+export async function getHoldings(userId: string): Promise<Holding[]> {
   return prisma.holding.findMany({
-    where: { userId: userId || DEFAULT_USER_ID },
+    where: { userId },
     orderBy: { ticker: 'asc' },
   });
 }
 
-export async function upsertHolding(input: HoldingInput, userId?: string): Promise<Holding> {
+export async function upsertHolding(input: HoldingInput, userId: string): Promise<Holding> {
   const ticker = input.ticker.toUpperCase();
-  const uid = userId || DEFAULT_USER_ID;
+  const uid = userId;
 
   const existing = await prisma.holding.findFirst({
     where: { ticker, userId: uid },
@@ -57,59 +55,55 @@ export async function upsertHolding(input: HoldingInput, userId?: string): Promi
   });
 }
 
-export async function deleteHolding(ticker: string, userId?: string): Promise<void> {
+export async function deleteHolding(ticker: string, userId: string): Promise<void> {
   const existing = await prisma.holding.findFirst({
-    where: { ticker: ticker.toUpperCase(), userId: userId || DEFAULT_USER_ID },
+    where: { ticker: ticker.toUpperCase(), userId },
   });
   if (existing) {
     await prisma.holding.delete({ where: { id: existing.id } });
   }
 }
 
-export async function getSettings(): Promise<Settings> {
-  let settings = await prisma.settings.findUnique({
-    where: { id: 'default' },
-  });
-
-  if (!settings) {
-    settings = await prisma.settings.create({
-      data: { id: 'default', cashBalance: 0, marginDebt: 0 },
-    });
-  }
-
-  // Ensure UserSettings is in sync with global Settings
-  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
+export async function getSettings(userId: string): Promise<Settings> {
+  // Read from per-user UserSettings table
   const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
-  if (!userSettings || userSettings.cashBalance !== settings.cashBalance || userSettings.marginDebt !== settings.marginDebt) {
-    await prisma.userSettings.upsert({
-      where: { userId },
-      update: { cashBalance: settings.cashBalance, marginDebt: settings.marginDebt ?? 0 },
-      create: { userId, cashBalance: settings.cashBalance, marginDebt: settings.marginDebt ?? 0 },
-    });
+  if (userSettings) {
+    return {
+      id: 'default',
+      cashBalance: userSettings.cashBalance,
+      marginDebt: userSettings.marginDebt ?? 0,
+      cashInterestRate: userSettings.cashInterestRate ?? 0,
+    } as Settings;
   }
 
-  return settings as Settings;
+  // If no UserSettings yet, create one with defaults
+  const created = await prisma.userSettings.create({
+    data: { userId, cashBalance: 0, marginDebt: 0 },
+  });
+  return {
+    id: 'default',
+    cashBalance: created.cashBalance,
+    marginDebt: created.marginDebt ?? 0,
+    cashInterestRate: created.cashInterestRate ?? 0,
+  } as Settings;
 }
 
-export async function updateCashBalance(cashBalance: number): Promise<Settings> {
-  const result = await prisma.settings.upsert({
-    where: { id: 'default' },
-    update: { cashBalance },
-    create: { id: 'default', cashBalance, marginDebt: 0 },
-  });
-
-  // Sync to the user's UserSettings so user profile matches main portfolio
-  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
-  await prisma.userSettings.upsert({
+export async function updateCashBalance(userId: string, cashBalance: number): Promise<Settings> {
+  const result = await prisma.userSettings.upsert({
     where: { userId },
     update: { cashBalance },
     create: { userId, cashBalance, marginDebt: 0 },
   });
 
-  return result as Settings;
+  return {
+    id: 'default',
+    cashBalance: result.cashBalance,
+    marginDebt: result.marginDebt ?? 0,
+    cashInterestRate: result.cashInterestRate ?? 0,
+  } as Settings;
 }
 
-export async function updateSettings(input: SettingsUpdateInput): Promise<Settings> {
+export async function updateSettings(userId: string, input: SettingsUpdateInput): Promise<Settings> {
   const updateData: Record<string, number> = {};
 
   if (input.cashBalance !== undefined) {
@@ -122,20 +116,7 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
     updateData.cashInterestRate = input.cashInterestRate;
   }
 
-  const result = await prisma.settings.upsert({
-    where: { id: 'default' },
-    update: updateData,
-    create: {
-      id: 'default',
-      cashBalance: input.cashBalance ?? 0,
-      marginDebt: input.marginDebt ?? 0,
-      cashInterestRate: input.cashInterestRate ?? 0,
-    },
-  });
-
-  // Sync to the user's UserSettings so user profile matches main portfolio
-  const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
-  await prisma.userSettings.upsert({
+  const result = await prisma.userSettings.upsert({
     where: { userId },
     update: updateData,
     create: {
@@ -146,11 +127,16 @@ export async function updateSettings(input: SettingsUpdateInput): Promise<Settin
     },
   });
 
-  return result as Settings;
+  return {
+    id: 'default',
+    cashBalance: result.cashBalance,
+    marginDebt: result.marginDebt ?? 0,
+    cashInterestRate: result.cashInterestRate ?? 0,
+  } as Settings;
 }
 
-export async function getPortfolio(options?: { preferPolygon?: boolean }): Promise<Portfolio> {
-  const [holdings, settings] = await Promise.all([getHoldings(), getSettings()]);
+export async function getPortfolio(userId: string, options?: { preferPolygon?: boolean }): Promise<Portfolio> {
+  const [holdings, settings] = await Promise.all([getHoldings(userId), getSettings(userId)]);
 
   const marginDebt = settings.marginDebt ?? 0;
   const session = getMarketSession();

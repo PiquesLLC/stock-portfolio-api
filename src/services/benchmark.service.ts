@@ -21,8 +21,6 @@ import { reconstructPortfolioHistory } from './snapshot.service';
 import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';
 
-
-
 export type PerformanceWindow = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
 
 export interface PerformanceData {
@@ -76,7 +74,7 @@ function getWindowStartDate(window: PerformanceWindow): Date {
 export async function getPerformanceComparison(
   window: PerformanceWindow = '1M',
   benchmarkTicker: string = 'SPY',
-  userId?: string | null
+  userId: string
 ): Promise<PerformanceData> {
   const windowStart = getWindowStartDate(window);
   const tradingDays = getWindowTradingDays(window);
@@ -85,7 +83,10 @@ export async function getPerformanceComparison(
   // This ensures accuracy by using the same dayChange calculation as the chart
   if (window === '1D') {
     try {
-      const portfolio = await getPortfolio();
+      const portfolio = await getPortfolio(userId);
+      if (portfolio.holdings.length === 0) {
+        return emptyPerformanceData(window, benchmarkTicker);
+      }
       const portfolioReturnPct = Math.round(portfolio.dayChangePercent * 100) / 100;
 
       // Get benchmark return from live quote
@@ -117,7 +118,7 @@ export async function getPerformanceComparison(
         maxDrawdownPct: portfolioReturnPct < 0 ? Math.abs(portfolioReturnPct) : 0,
         bestDay: { date: new Date().toISOString().slice(0, 10), returnPct: portfolioReturnPct },
         worstDay: { date: new Date().toISOString().slice(0, 10), returnPct: portfolioReturnPct },
-        snapshotCount: 2, // Set to 2 so UI doesn't show "not enough data"
+        snapshotCount: portfolio.holdings.length > 0 ? 2 : 0,
         dataStartDate: new Date().toISOString(),
         dataEndDate: new Date().toISOString(),
       };
@@ -130,7 +131,7 @@ export async function getPerformanceComparison(
   // Get portfolio snapshots for this window
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: {
-      userId: userId ?? undefined,
+      userId,
       timestamp: { gte: windowStart },
     },
     orderBy: { timestamp: 'asc' },
@@ -139,7 +140,7 @@ export async function getPerformanceComparison(
   // Also get the last snapshot before the window for baseline
   const baselineSnapshot = await prisma.portfolioSnapshot.findFirst({
     where: {
-      userId: userId ?? undefined,
+      userId,
       timestamp: { lt: windowStart },
     },
     orderBy: { timestamp: 'desc' },
@@ -185,24 +186,18 @@ export async function getPerformanceComparison(
 
   // Fetch current holdings to reconstruct history from candles
   const holdings = await prisma.holding.findMany({
-    where: { userId: userId ?? undefined },
+    where: { userId },
   });
 
   if (holdings.length > 0 && windowDays > 1) {
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: { userId: userId ?? undefined },
+      where: { userId },
       orderBy: { timestamp: 'desc' },
     });
     const cashBalance = latestSnapshot?.cashBalance ?? 0;
-    // Get marginDebt from settings (not on snapshot model)
-    let marginDebt = 0;
-    if (userId) {
-      const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
-      marginDebt = userSettings?.marginDebt ?? 0;
-    } else {
-      const settings = await prisma.settings.findFirst();
-      marginDebt = settings?.marginDebt ?? 0;
-    }
+    // Get marginDebt from user settings (not on snapshot model)
+    const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+    const marginDebt = userSettings?.marginDebt ?? 0;
 
     // Request extra buffer days to ensure enough trading days for statistical measures.
     // 30 calendar days â‰ˆ 21 trading days â†’ 20 returns, but we need margin for holidays/gaps.
@@ -226,7 +221,7 @@ export async function getPerformanceComparison(
   // Get transactions for TWR calculation
   const transactions = await prisma.transaction.findMany({
     where: {
-      userId: userId ?? null,
+      userId,
       date: { gte: windowStart },
     },
     orderBy: { date: 'asc' },
@@ -374,6 +369,27 @@ export async function getPerformanceComparison(
     snapshotCount: snapshots.length,
     dataStartDate: allSnapshots.length > 0 ? allSnapshots[0].timestamp.toISOString() : null,
     dataEndDate: allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1].timestamp.toISOString() : null,
+  };
+}
+
+function emptyPerformanceData(window: PerformanceWindow, benchmarkTicker: string): PerformanceData {
+  return {
+    window,
+    benchmarkTicker,
+    simpleReturnPct: null,
+    twrPct: null,
+    mwrPct: null,
+    benchmarkReturnPct: null,
+    alphaPct: null,
+    beta: null,
+    correlation: null,
+    volatilityPct: null,
+    maxDrawdownPct: null,
+    bestDay: null,
+    worstDay: null,
+    snapshotCount: 0,
+    dataStartDate: null,
+    dataEndDate: null,
   };
 }
 
