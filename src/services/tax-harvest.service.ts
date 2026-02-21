@@ -10,7 +10,6 @@ import { fetchPrices } from './market.service';
 import { getSector } from '../utils/sectors';
 import { callPerplexity } from '../utils/perplexity';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 const cache = new NodeCache({ stdTTL: 3600 }); // 1-hour cache
 
 const SHORT_TERM_TAX_RATE = 0.25;
@@ -43,11 +42,12 @@ export interface TaxHarvestResponse {
   cached: boolean;
 }
 
-export async function getTaxHarvestSuggestions(): Promise<TaxHarvestResponse> {
-  const cached_result = cache.get<TaxHarvestResponse>('tax-harvest');
+export async function getTaxHarvestSuggestions(userId: string): Promise<TaxHarvestResponse> {
+  const cacheKey = `tax-harvest:${userId}`;
+  const cached_result = cache.get<TaxHarvestResponse>(cacheKey);
   if (cached_result) return { ...cached_result, cached: true };
 
-  const holdings = await getHoldings();
+  const holdings = await getHoldings(userId);
   if (holdings.length === 0) {
     return emptyResponse();
   }
@@ -58,7 +58,7 @@ export async function getTaxHarvestSuggestions(): Promise<TaxHarvestResponse> {
 
   // Get lots for holding period determination
   const lots = await prisma.lot.findMany({
-    where: { userId: SYSTEM_USER_ID, ticker: { in: tickers } },
+    where: { userId, ticker: { in: tickers } },
     orderBy: { acquiredAt: 'asc' },
   });
   const lotsByTicker = new Map<string, typeof lots>();
@@ -134,7 +134,7 @@ export async function getTaxHarvestSuggestions(): Promise<TaxHarvestResponse> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const recentActivity = await prisma.activityEvent.findMany({
     where: {
-      userId: SYSTEM_USER_ID,
+      userId,
       type: 'holding_removed',
       createdAt: { gte: thirtyDaysAgo },
     },
@@ -190,7 +190,7 @@ export async function getTaxHarvestSuggestions(): Promise<TaxHarvestResponse> {
     cached: false,
   };
 
-  cache.set('tax-harvest', response);
+  cache.set(cacheKey, response);
   return response;
 }
 

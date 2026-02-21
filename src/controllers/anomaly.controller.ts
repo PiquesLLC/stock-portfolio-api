@@ -1,13 +1,12 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
-
-export async function getAnomaliesHandler(req: Request, res: Response): Promise<void> {
+export async function getAnomaliesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
     const anomalies = await prisma.anomalyEvent.findMany({
-      where: { userId: SYSTEM_USER_ID },
+      where: { userId: req.user!.userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
@@ -18,10 +17,10 @@ export async function getAnomaliesHandler(req: Request, res: Response): Promise<
   }
 }
 
-export async function getUnreadAnomalyCountHandler(req: Request, res: Response): Promise<void> {
+export async function getUnreadAnomalyCountHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const count = await prisma.anomalyEvent.count({
-      where: { userId: SYSTEM_USER_ID, read: false },
+      where: { userId: req.user!.userId, read: false },
     });
     res.json({ count });
   } catch (_error) {
@@ -30,7 +29,7 @@ export async function getUnreadAnomalyCountHandler(req: Request, res: Response):
   }
 }
 
-export async function markAnomalyReadHandler(req: Request, res: Response): Promise<void> {
+export async function markAnomalyReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     await prisma.anomalyEvent.update({
       where: { id: req.params.id },
@@ -43,10 +42,10 @@ export async function markAnomalyReadHandler(req: Request, res: Response): Promi
   }
 }
 
-export async function markAllAnomaliesReadHandler(req: Request, res: Response): Promise<void> {
+export async function markAllAnomaliesReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     await prisma.anomalyEvent.updateMany({
-      where: { userId: SYSTEM_USER_ID, read: false },
+      where: { userId: req.user!.userId, read: false },
       data: { read: true },
     });
     res.json({ success: true });

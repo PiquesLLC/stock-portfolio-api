@@ -6,7 +6,6 @@ import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { getSector } from '../utils/sectors';
 import { callPerplexity } from '../utils/perplexity';
 
-const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
 // Cooldown: 1 anomaly per ticker+type per 4 hours
 const COOLDOWN_MS = 4 * 60 * 60 * 1000;
@@ -113,10 +112,10 @@ async function getPerplexityAnalysis(ticker: string, context: string): Promise<{
   }
 }
 
-export async function detectAnomalies(): Promise<void> {
+export async function detectAnomalies(userId: string): Promise<void> {
   console.log('[Anomaly Detection] Running scan...');
 
-  const holdings = await getHoldings();
+  const holdings = await getHoldings(userId);
   if (holdings.length === 0) {
     console.log('[Anomaly Detection] No holdings, skipping');
     return;
@@ -276,7 +275,7 @@ export async function detectAnomalies(): Promise<void> {
 
     await prisma.anomalyEvent.create({
       data: {
-        userId: SYSTEM_USER_ID,
+        userId,
         ticker: c.ticker,
         type: c.type,
         severity: c.severity,
@@ -298,10 +297,10 @@ export async function detectAnomalies(): Promise<void> {
  * Detect dividend increases/decreases for held tickers.
  * Creates AnomalyEvent with type 'dividend_change'.
  */
-export async function detectDividendChanges(): Promise<void> {
+export async function detectDividendChanges(userId: string): Promise<void> {
   console.log('[Dividend Change Detection] Running scan...');
 
-  const holdings = await getHoldings();
+  const holdings = await getHoldings(userId);
   if (holdings.length === 0) return;
 
   let created = 0;
@@ -342,7 +341,7 @@ export async function detectDividendChanges(): Promise<void> {
 
     await prisma.anomalyEvent.create({
       data: {
-        userId: SYSTEM_USER_ID,
+        userId,
         ticker,
         type: 'dividend_change',
         severity,

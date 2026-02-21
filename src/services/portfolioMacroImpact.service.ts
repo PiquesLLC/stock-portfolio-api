@@ -36,7 +36,6 @@ export interface PortfolioMacroImpactResponse {
   dataAge: 'fresh' | 'cached' | 'stale';
 }
 
-const CACHE_KEY = 'macro-impact';
 const CACHE_TTL = 14400; // 4 hours
 
 // ─── Sector Rate Sensitivity Map ─────────────────────────────────────────────
@@ -440,13 +439,14 @@ function getProjectedQuarter(): string {
 
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
-export async function getPortfolioMacroImpact(): Promise<PortfolioMacroImpactResponse> {
-  const cached = insightsCache.get<PortfolioMacroImpactResponse>(CACHE_KEY);
+export async function getPortfolioMacroImpact(userId: string): Promise<PortfolioMacroImpactResponse> {
+  const cacheKey = `macro-impact:${userId}`;
+  const cached = insightsCache.get<PortfolioMacroImpactResponse>(cacheKey);
   if (cached) return cached;
 
   try {
     const [portfolio, econ, intl] = await Promise.all([
-      getPortfolio(),
+      getPortfolio(userId),
       getEconomicDashboard(),
       getInternationalEconomicDashboard(),
     ]);
@@ -483,7 +483,7 @@ export async function getPortfolioMacroImpact(): Promise<PortfolioMacroImpactRes
       dataAge: econ.dataAge,
     };
 
-    insightsCache.set(CACHE_KEY, result, CACHE_TTL);
+    insightsCache.set(cacheKey, result, CACHE_TTL);
     return result;
   } catch (err) {
     console.error('[MacroImpact] Error computing portfolio macro impact:', (err as Error).message);

@@ -712,31 +712,14 @@ async function computeHeroStats(
 // ============================================================================
 
 export async function getPortfolioIntelligence(
-  window: IntelligenceWindow = '1d',
-  userId?: string
+  userId: string,
+  window: IntelligenceWindow = '1d'
 ): Promise<PortfolioIntelligenceResponse> {
-  const cacheKey = userId ? `intelligence:${userId}:${window}` : `intelligence:${window}`;
+  const cacheKey = `intelligence:${userId}:${window}`;
   const cached = insightsCache.get<PortfolioIntelligenceResponse>(cacheKey);
   if (cached) return cached;
 
-  let portfolio;
-  if (userId) {
-    const { getUserPortfolio } = await import('./user-portfolio.service');
-    portfolio = await getUserPortfolio(userId);
-    if (!portfolio) {
-      return {
-        window, contributors: [], detractors: [], sectorExposure: [],
-        beta: null, explanation: 'User not found.', partial: true, heroStats: null,
-        winnersCount: 0, losersCount: 0,
-        totalGains: 0,
-        totalLosses: 0,
-        totalAbsMovement: 0,
-        netPnL: 0,
-      };
-    }
-  } else {
-    portfolio = await getPortfolio();
-  }
+  const portfolio = await getPortfolio(userId);
   const holdings = portfolio.holdings;
 
   if (holdings.length === 0) {

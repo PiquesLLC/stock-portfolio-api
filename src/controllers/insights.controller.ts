@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import {
   getHealthScore,
   getAttribution,
@@ -26,9 +26,9 @@ function requirePremium(res: Response): boolean {
   return false;
 }
 
-export async function getHealthHandler(req: Request, res: Response): Promise<void> {
+export async function getHealthHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const healthScore = await getHealthScore();
+    const healthScore = await getHealthScore(req.user!.userId);
     res.json(healthScore);
   } catch (_error) {
     console.error('Error getting health score:');
@@ -39,7 +39,7 @@ export async function getHealthHandler(req: Request, res: Response): Promise<voi
   }
 }
 
-export async function getAttributionHandler(req: Request, res: Response): Promise<void> {
+export async function getAttributionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const windowParam = req.query.window as string | undefined;
     let window: AttributionWindow = '1d';
@@ -48,7 +48,7 @@ export async function getAttributionHandler(req: Request, res: Response): Promis
       window = windowParam as AttributionWindow;
     }
 
-    const attribution = await getAttribution(window);
+    const attribution = await getAttribution(req.user!.userId, window);
     res.json(attribution);
   } catch (_error) {
     console.error('Error getting attribution:');
@@ -59,9 +59,9 @@ export async function getAttributionHandler(req: Request, res: Response): Promis
   }
 }
 
-export async function getLeakDetectorHandler(req: Request, res: Response): Promise<void> {
+export async function getLeakDetectorHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const leaks = await getLeakDetector();
+    const leaks = await getLeakDetector(req.user!.userId);
     res.json(leaks);
   } catch (_error) {
     console.error('Error getting leak detector:');
@@ -75,9 +75,9 @@ export async function getLeakDetectorHandler(req: Request, res: Response): Promi
   }
 }
 
-export async function getRiskForecastHandler(req: Request, res: Response): Promise<void> {
+export async function getRiskForecastHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const riskForecast = await getRiskForecast();
+    const riskForecast = await getRiskForecast(req.user!.userId);
     res.json(riskForecast);
   } catch (_error) {
     console.error('Error getting risk forecast:');
@@ -93,7 +93,7 @@ export async function getRiskForecastHandler(req: Request, res: Response): Promi
 
 const VALID_INCOME_WINDOWS = ['today', '5d', '1m'] as const;
 
-export async function getIncomeInsightsHandler(req: Request, res: Response): Promise<void> {
+export async function getIncomeInsightsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
     const windowParam = req.query.window as string | undefined;
@@ -103,7 +103,7 @@ export async function getIncomeInsightsHandler(req: Request, res: Response): Pro
       window = windowParam as IncomeWindow;
     }
 
-    const incomeInsights = await getIncomeInsights(window);
+    const incomeInsights = await getIncomeInsights(req.user!.userId, window);
     res.json(incomeInsights);
   } catch (_error) {
     console.error('Error getting income insights:');
@@ -178,10 +178,10 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
   }
 }
 
-export async function getDailyReportHandler(req: Request, res: Response): Promise<void> {
+export async function getDailyReportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const report = await getDailyReport();
+    const report = await getDailyReport(req.user!.userId);
     res.json(report);
   } catch (_error) {
     console.error('Daily report error:');
@@ -197,9 +197,9 @@ export async function getDailyReportHandler(req: Request, res: Response): Promis
   }
 }
 
-export async function getEarningsSummaryHandler(req: Request, res: Response): Promise<void> {
+export async function getEarningsSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const result = await getEarningsSummary();
+    const result = await getEarningsSummary(req.user!.userId);
     res.json(result);
   } catch (_error) {
     console.error('Earnings summary error:');
@@ -210,10 +210,10 @@ export async function getEarningsSummaryHandler(req: Request, res: Response): Pr
   }
 }
 
-export async function regenerateDailyReportHandler(req: Request, res: Response): Promise<void> {
+export async function regenerateDailyReportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const report = await regenerateDailyReport();
+    const report = await regenerateDailyReport(req.user!.userId);
     res.json(report);
   } catch (_error) {
     console.error('Daily report regenerate error:');

@@ -215,13 +215,13 @@ function calculateMaxDrawdownWithDates(values: number[], _timestamps?: Date[]): 
   return { maxDD, peakIdx: ddPeakIdx, troughIdx: ddTroughIdx };
 }
 
-export async function getHealthScore(): Promise<HealthScore> {
-  const cacheKey = 'health-score';
+export async function getHealthScore(userId: string): Promise<HealthScore> {
+  const cacheKey = `health-score:${userId}`;
   const cached = insightsCache.get<HealthScore>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio();
-  const snapshots = await getAllSnapshots();
+  const portfolio = await getPortfolio(userId);
+  const snapshots = await getAllSnapshots(userId);
   const holdings = portfolio.holdings;
 
   const reasons: string[] = [];
@@ -586,12 +586,12 @@ export async function getHealthScore(): Promise<HealthScore> {
 
 type AttributionWindow = '1d' | '5d' | '1m';
 
-export async function getAttribution(window: AttributionWindow = '1d'): Promise<Attribution> {
-  const cacheKey = `attribution:${window}`;
+export async function getAttribution(userId: string, window: AttributionWindow = '1d'): Promise<Attribution> {
+  const cacheKey = `attribution:${userId}:${window}`;
   const cached = insightsCache.get<Attribution>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const holdings = portfolio.holdings;
 
   if (holdings.length === 0) {
@@ -690,12 +690,12 @@ export async function getAttribution(window: AttributionWindow = '1d'): Promise<
 // LEAK DETECTOR (CORRELATION CLUSTERS) - WITH GRACEFUL DEGRADATION
 // ============================================================================
 
-export async function getLeakDetector(): Promise<LeakDetectorResult> {
-  const cacheKey = 'leak-detector';
+export async function getLeakDetector(userId: string): Promise<LeakDetectorResult> {
+  const cacheKey = `leak-detector:${userId}`;
   const cached = insightsCache.get<LeakDetectorResult>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const holdings = portfolio.holdings;
 
   if (holdings.length < 2) {
@@ -1122,12 +1122,12 @@ function runMonteCarloGBM(
   };
 }
 
-export async function getRiskForecast(): Promise<RiskForecast> {
-  const cacheKey = 'risk-forecast';
+export async function getRiskForecast(userId: string): Promise<RiskForecast> {
+  const cacheKey = `risk-forecast:${userId}`;
   const cached = insightsCache.get<RiskForecast>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio();
+  const portfolio = await getPortfolio(userId);
   const holdings = portfolio.holdings;
   const currentValue = portfolio.totalAssets;
 

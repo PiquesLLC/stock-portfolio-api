@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../types/auth';
 import { getEconomicDashboard, getInternationalEconomicDashboard } from '../services/economic.service';
 import { getPortfolioMacroImpact } from '../services/portfolioMacroImpact.service';
 import { getCompanyFundamentals } from '../services/fundamentals.service';
@@ -39,9 +40,9 @@ export async function getAVStatusHandler(req: Request, res: Response): Promise<v
 }
 
 // GET /fundamentals/economic/portfolio-impact
-export async function getPortfolioMacroImpactHandler(req: Request, res: Response): Promise<void> {
+export async function getPortfolioMacroImpactHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const impact = await getPortfolioMacroImpact();
+    const impact = await getPortfolioMacroImpact(req.user!.userId);
     res.json(impact);
   } catch (_error) {
     console.error('Error computing portfolio macro impact:');

@@ -1,9 +1,10 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { getTaxHarvestSuggestions } from '../services/tax-harvest.service';
+import { AuthRequest } from '../types/auth';
 
-export async function getTaxHarvestHandler(_req: Request, res: Response): Promise<void> {
+export async function getTaxHarvestHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const result = await getTaxHarvestSuggestions();
+    const result = await getTaxHarvestSuggestions(req.user!.userId);
     res.json(result);
   } catch (_error) {
     console.error('[Tax Harvest] Error:');
