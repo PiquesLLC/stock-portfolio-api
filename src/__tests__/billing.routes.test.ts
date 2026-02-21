@@ -27,6 +27,7 @@ vi.mock('../middleware/rateLimiter', () => {
     enumerationLimiter: passthrough,
     mfaVerifyLimiter: passthrough,
     mfaSendLimiter: passthrough,
+    oauthLimiter: passthrough,
     webhookLimiter: passthrough,
     billingMutationLimiter: passthrough,
     billingWebhookLimiter: passthrough,

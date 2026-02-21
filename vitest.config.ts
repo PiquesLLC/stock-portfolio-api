@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     root: './src',
     include: ['**/__tests__/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**'],
     setupFiles: ['./__tests__/setup.ts'],
     coverage: {
       provider: 'v8',

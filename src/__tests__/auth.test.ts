@@ -20,6 +20,7 @@ vi.mock('../middleware/rateLimiter', async () => {
     mutationLimiter: passthrough,
     heavyReadLimiter: passthrough,
     apiLimiter: passthrough,
+    oauthLimiter: passthrough,
   };
 });
 

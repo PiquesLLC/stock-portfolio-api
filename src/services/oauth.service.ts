@@ -3,7 +3,6 @@ import appleSignin from 'apple-signin-auth';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { generateAccessToken, generateRefreshToken, CURRENT_POLICY_VERSION } from './auth.service';
-import { LoginResponse } from '../types/auth';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -17,8 +16,18 @@ interface OAuthProfile {
   picture?: string;
 }
 
-interface OAuthLoginResult {
-  loginResponse: LoginResponse;
+export interface OAuthUser {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string | null;
+  emailVerified?: boolean;
+  plan: string;
+  planExpiresAt: Date | null;
+}
+
+interface OAuthResult {
+  user: OAuthUser;
   isNewUser: boolean;
 }
 
@@ -112,7 +121,7 @@ export async function findOrCreateOAuthUser(
   profile: OAuthProfile,
   appleName?: { firstName?: string; lastName?: string },
   consentMeta?: { ipAddress?: string; userAgent?: string },
-): Promise<OAuthLoginResult> {
+): Promise<OAuthResult> {
   const providerIdField = provider === 'google' ? 'googleId' : 'appleId';
 
   // 1. Look up by provider ID
@@ -132,10 +141,7 @@ export async function findOrCreateOAuthUser(
         data: { avatarUrl: profile.picture },
       }).catch(() => {});
     }
-    return {
-      loginResponse: await issueTokens(existingByProvider),
-      isNewUser: false,
-    };
+    return { user: existingByProvider, isNewUser: false };
   }
 
   // 2. Look up by email (if verified) — link provider to existing account
@@ -159,10 +165,7 @@ export async function findOrCreateOAuthUser(
           ...(provider === 'google' && profile.picture ? { avatarUrl: profile.picture } : {}),
         },
       });
-      return {
-        loginResponse: await issueTokens(existingByEmail),
-        isNewUser: false,
-      };
+      return { user: existingByEmail, isNewUser: false };
     }
   }
 
@@ -217,10 +220,7 @@ export async function findOrCreateOAuthUser(
       return user;
     });
 
-    return {
-      loginResponse: await issueTokens(newUser),
-      isNewUser: true,
-    };
+    return { user: newUser, isNewUser: true };
   } catch (err: any) {
     // P2002 = unique constraint violation (concurrent first-login race)
     if (err?.code === 'P2002') {
@@ -233,7 +233,7 @@ export async function findOrCreateOAuthUser(
         },
       });
       if (byProvider) {
-        return { loginResponse: await issueTokens(byProvider), isNewUser: false };
+        return { user: byProvider, isNewUser: false };
       }
 
       // 2) Email match is only safe when BOTH sides are verified
@@ -251,7 +251,7 @@ export async function findOrCreateOAuthUser(
             where: { id: byEmail.id },
             data: { [providerIdField]: profile.providerId },
           });
-          return { loginResponse: await issueTokens(byEmail), isNewUser: false };
+          return { user: byEmail, isNewUser: false };
         }
       }
 
@@ -265,15 +265,11 @@ export async function findOrCreateOAuthUser(
 
 // ─── Token Issuance (shared helper) ─────────────────────────────────────────
 
-async function issueTokens(user: {
-  id: string;
-  username: string;
-  displayName: string;
-  email?: string | null;
-  emailVerified?: boolean;
-  plan: string;
-  planExpiresAt: Date | null;
-}): Promise<LoginResponse> {
+export async function issueTokens(user: OAuthUser): Promise<{
+  token: string;
+  refreshToken: string;
+  user: { id: string; username: string; displayName: string; email?: string | null; emailVerified?: boolean; plan: string; planExpiresAt: Date | null };
+}> {
   const token = generateAccessToken({
     userId: user.id,
     username: user.username,

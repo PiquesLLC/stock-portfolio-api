@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser } from '../services/oauth.service';
+import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens } from '../services/oauth.service';
 import { config } from '../config';
 import { getCookieOptions } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
@@ -29,20 +29,20 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
 
     const profile = await verifyGoogleToken(accessToken);
 
-    const { loginResponse, isNewUser } = await findOrCreateOAuthUser(
+    const { user, isNewUser } = await findOrCreateOAuthUser(
       'google',
       profile,
       undefined,
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
 
-    // Check if existing user has MFA enabled
+    // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {
-      const mfaEnabled = await hasMfaEnabled(loginResponse.user.id);
+      const mfaEnabled = await hasMfaEnabled(user.id);
       if (mfaEnabled) {
-        const challengeToken = await createMfaChallenge(loginResponse.user.id);
-        const methods = await getEnabledMethods(loginResponse.user.id);
-        const maskedEmail = await getMaskedEmail(loginResponse.user.id);
+        const challengeToken = await createMfaChallenge(user.id);
+        const methods = await getEnabledMethods(user.id);
+        const maskedEmail = await getMaskedEmail(user.id);
         res.json({
           mfaRequired: true,
           challengeToken,
@@ -53,10 +53,11 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       }
     }
 
+    const loginResponse = await issueTokens(user);
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', loginResponse.token, accessOptions);
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
-    console.log(`[OAuth] google login: userId=${loginResponse.user.id}, isNew=${isNewUser}, ip=${req.ip}`);
+    console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     res.json({ user: loginResponse.user, isNewUser });
   } catch (error: unknown) {
     console.error('Google OAuth error:', error instanceof Error ? error.message : error);
@@ -85,20 +86,20 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
 
     const profile = await verifyAppleToken(id_token, nonce);
 
-    const { loginResponse, isNewUser } = await findOrCreateOAuthUser(
+    const { user, isNewUser } = await findOrCreateOAuthUser(
       'apple',
       profile,
       appleUser, // { firstName, lastName } — only on first auth
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
 
-    // Check if existing user has MFA enabled
+    // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {
-      const mfaEnabled = await hasMfaEnabled(loginResponse.user.id);
+      const mfaEnabled = await hasMfaEnabled(user.id);
       if (mfaEnabled) {
-        const challengeToken = await createMfaChallenge(loginResponse.user.id);
-        const methods = await getEnabledMethods(loginResponse.user.id);
-        const maskedEmail = await getMaskedEmail(loginResponse.user.id);
+        const challengeToken = await createMfaChallenge(user.id);
+        const methods = await getEnabledMethods(user.id);
+        const maskedEmail = await getMaskedEmail(user.id);
         res.json({
           mfaRequired: true,
           challengeToken,
@@ -109,10 +110,11 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       }
     }
 
+    const loginResponse = await issueTokens(user);
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', loginResponse.token, accessOptions);
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
-    console.log(`[OAuth] apple login: userId=${loginResponse.user.id}, isNew=${isNewUser}, ip=${req.ip}`);
+    console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     res.json({ user: loginResponse.user, isNewUser });
   } catch (error: unknown) {
     console.error('Apple OAuth error:', error instanceof Error ? error.message : error);
