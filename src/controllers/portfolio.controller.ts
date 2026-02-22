@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -435,8 +435,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // If so, use trade-aware reconstruction for accurate historical charts.
     const tradeCount = await prisma.portfolioTrade.count({ where: { userId: req.user!.userId } });
     const hasTrades = tradeCount > 0;
+    const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user!.userId } });
+    const hasLedgerEvents = ledgerEventCount > 0;
     let tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[] = [];
-    if (hasTrades) {
+    if (hasTrades && !hasLedgerEvents) {
       tradeHistory = await prisma.portfolioTrade.findMany({
         where: { userId: req.user!.userId },
         orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
@@ -444,6 +446,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       });
       console.log(`[Chart] ${period} for user ${req.user!.userId} — using ${tradeHistory.length} trades for accurate reconstruction`);
     }
+
+    let usedModelReconstruction = false;
 
     // For 1W: always use current-holdings reconstruction (hi-res intraday candles).
     // Trade-aware hi-res has data coverage issues. 1W composition change is minimal.
@@ -453,9 +457,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
       );
     } else if (period === '1M') {
-      // 1M: trade-aware with full cash reconstruction (deposits minimal over 1 month)
-      if (hasTrades) {
+      if (hasLedgerEvents) {
+        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
+        usedModelReconstruction = true;
+      } else if (hasTrades) {
+        // 1M: trade-aware with full cash reconstruction (deposits minimal over 1 month)
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 1.0);
+        usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistoryHiRes(
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
@@ -463,12 +471,14 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         );
       }
     } else if (period === 'YTD') {
-      // YTD/3M+: trade-aware with partial cash reconstruction (0.7 weight).
-      // 0.7 accounts for ~30% of net purchases coming from external deposits
-      // that aren't in the trade history, avoiding inflated starting values.
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      if (hasTrades) {
+      if (hasLedgerEvents) {
+        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
+        usedModelReconstruction = true;
+      } else if (hasTrades) {
+        // YTD trade-aware with partial cash reconstruction.
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0.7);
+        usedModelReconstruction = true;
       } else {
         if (ytdDays <= 90) {
           const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
@@ -483,14 +493,18 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         }
       }
     } else {
-      // 3M/1Y/ALL: trade-aware with partial cash reconstruction
+      // 3M/1Y/ALL
       const periodDaysMap: Record<string, number> = {
         '3M': 90,
         '1Y': 365, 'ALL': 365 * 5,
       };
       const periodDays = periodDaysMap[period] ?? 30;
-      if (hasTrades) {
+      if (hasLedgerEvents) {
+        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
+        usedModelReconstruction = true;
+      } else if (hasTrades) {
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0.7);
+        usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
       }
@@ -522,10 +536,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     // Rebaseline to latest composition change within the window to avoid false jumps.
-    // Skip for trade-aware periods (1M/YTD/3M/1Y/ALL) — trades already account for composition changes.
-    // 1W always uses current-holdings, so it still needs this filter.
-    const usedTradeReconstruction = hasTrades && period !== '1W';
-    if (!usedTradeReconstruction && points.length > 0) {
+    // Skip when using ledger/trade replay (already models composition changes).
+    if (!usedModelReconstruction && points.length > 0) {
       const windowStart = new Date(points[0].time);
       const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, windowStart);
       if (latestChange) {

@@ -4,6 +4,7 @@ import { getPortfolio } from './portfolio.service';
 import { config } from '../config';
 import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
+import { replayDailyLedger } from './ledger/replay.service';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
@@ -1527,6 +1528,127 @@ export async function reconstructPortfolioHistoryFromTrades(
       points.shift();
     } else {
       break;
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Reconstruct historical portfolio value from ledger replay snapshots.
+ * Uses replayed daily positions/cash/margin and overlays daily market prices
+ * to produce market-value equity points.
+ */
+export async function reconstructPortfolioHistoryFromLedger(
+  userId: string,
+  periodDays: number,
+): Promise<{ time: number; value: number }[]> {
+  const endDate = new Date();
+  const startDate = new Date(Date.now() - periodDays * 86400000);
+  const snapshots = await replayDailyLedger(userId, startDate, endDate);
+  if (snapshots.length === 0) return [];
+
+  const allTickers = new Set<string>();
+  for (const snap of snapshots) {
+    for (const [ticker, pos] of snap.positions) {
+      if (pos.shares > 0.000001) allTickers.add(ticker);
+    }
+  }
+
+  if (allTickers.size === 0) {
+    return snapshots.map(s => ({ time: s.date.getTime(), value: s.cash - s.margin }));
+  }
+
+  const fetchDailyForChart = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
+    const cacheKey = `chart-candle:${ticker}`;
+    const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
+    if (cached) return cached;
+
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = new Date(startDate.getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
+    if (pg && pg.closes.length > 0) {
+      const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
+      chartCandleCache.set(cacheKey, data);
+      return data;
+    }
+
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const from = Math.floor((startDate.getTime() - 30 * 86400000) / 1000);
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
+      const resp = await yahooGet(url);
+      const result = resp.data?.chart?.result?.[0];
+      if (result?.timestamp && result?.indicators?.quote?.[0]) {
+        const timestamps: number[] = result.timestamp;
+        const q = result.indicators.quote[0];
+        const dates: number[] = [];
+        const closes: number[] = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          if (q.close[i] != null) {
+            dates.push(timestamps[i] * 1000);
+            closes.push(q.close[i]);
+          }
+        }
+        if (closes.length > 0) {
+          const data = { dates, closes };
+          chartCandleCache.set(cacheKey, data);
+          return data;
+        }
+      }
+    } catch {
+      // fallback failed
+    }
+
+    return null;
+  };
+
+  const tickerArr = Array.from(allTickers);
+  const candleResults = await limitConcurrency(
+    tickerArr.map(t => () => fetchDailyForChart(t)),
+    10,
+  );
+  const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
+  for (let i = 0; i < tickerArr.length; i++) {
+    if (candleResults[i]) tickerCandles.set(tickerArr[i], candleResults[i]!);
+  }
+  if (tickerCandles.size === 0) return [];
+
+  function getPriceAt(ticker: string, dateMs: number): number | null {
+    const candles = tickerCandles.get(ticker);
+    if (!candles) return null;
+    let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles.dates[mid] <= dateMs) { bestIdx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return bestIdx >= 0 ? candles.closes[bestIdx] : null;
+  }
+
+  const points: { time: number; value: number }[] = [];
+  for (const snap of snapshots) {
+    const time = snap.date.getTime();
+    let totalValue = snap.cash - snap.margin;
+    let coveredValue = 0;
+    let estimatedMissing = 0;
+
+    for (const [ticker, pos] of snap.positions) {
+      if (pos.shares <= 0.000001) continue;
+      const price = getPriceAt(ticker, time);
+      if (price != null) {
+        const v = pos.shares * price;
+        totalValue += v;
+        coveredValue += v;
+      } else {
+        const fallback = pos.shares > 0 ? (pos.costBasis / pos.shares) : 0;
+        estimatedMissing += pos.shares * fallback;
+      }
+    }
+
+    const estimatedTotal = coveredValue + estimatedMissing;
+    if (estimatedTotal <= 0 || coveredValue / estimatedTotal >= 0.8) {
+      points.push({ time, value: totalValue });
     }
   }
 
