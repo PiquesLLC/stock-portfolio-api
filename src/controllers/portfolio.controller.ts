@@ -591,6 +591,126 @@ function normalizeHeader(value: string): string {
   return value.toLowerCase().replace(/[\s_-]/g, '');
 }
 
+/**
+ * Detect and parse Robinhood transaction history CSV.
+ * Replays Buy/Sell transactions to compute current positions with weighted avg cost.
+ */
+function parseRobinhoodTransactionCsv(
+  data: Record<string, unknown>[]
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[] } | null {
+  const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
+  const isRobinhood = headers.includes('activity date') && headers.includes('trans code') && headers.includes('instrument');
+  if (!isRobinhood) return null;
+
+  const positions = new Map<string, { shares: number; totalCost: number }>();
+  const warnings: { rowNumber: number; message: string }[] = [];
+
+  // Codes that don't affect share counts — skip silently
+  const ignoreCodes = new Set(['CDIV', 'GOLD', 'ACH', 'GDBP', 'INT', 'MINT', 'MDIV', 'DTAX', 'DFEE', 'AFEE', 'SLIP', 'MISC', 'FUTSWP']);
+  // Options codes — contracts, not stock shares
+  const optionsCodes = new Set(['BTO', 'STC', 'STO', 'OEXP']);
+
+  // Robinhood exports newest-first — reverse to process chronologically
+  const chronological = [...data].reverse();
+
+  chronological.forEach((row, index) => {
+    const originalRowNum = data.length - index;
+    const ticker = String(row['Instrument'] || '').trim().toUpperCase();
+    if (!ticker || !isValidTicker(ticker)) return;
+
+    const transCode = String(row['Trans Code'] || '').trim();
+    if (ignoreCodes.has(transCode) || optionsCodes.has(transCode)) return;
+
+    const qtyRaw = String(row['Quantity'] || '').replace(/[$,]/g, '').trim();
+    const qtyClean = qtyRaw.replace(/S$/i, '');
+    const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
+    const qty = parseFloat(qtyClean);
+    const price = parseFloat(priceRaw);
+
+    const pos = positions.get(ticker) || { shares: 0, totalCost: 0 };
+
+    if (transCode === 'Buy') {
+      if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Buy — invalid qty/price` });
+        return;
+      }
+      pos.totalCost += qty * price;
+      pos.shares += qty;
+    } else if (transCode === 'Sell') {
+      if (!Number.isFinite(qty) || qty <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Sell — invalid qty` });
+        return;
+      }
+      if (pos.shares <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position` });
+      } else {
+        const avgBefore = pos.totalCost / pos.shares;
+        pos.shares -= qty;
+        if (pos.shares <= 0.001) {
+          pos.shares = 0;
+          pos.totalCost = 0;
+        } else {
+          pos.totalCost = pos.shares * avgBefore;
+        }
+      }
+    } else if (transCode === 'SPL') {
+      // Stock split: adds shares, total cost unchanged (avg cost decreases)
+      if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
+        pos.shares += qty;
+      }
+    } else if (transCode === 'ACATI' || transCode === 'REC' || transCode === 'T/A') {
+      // Transfer in / Receive / Transfer-adjustment: add shares
+      if (Number.isFinite(qty) && qty > 0) {
+        const p = Number.isFinite(price) && price > 0 ? price : 0;
+        pos.totalCost += qty * p;
+        pos.shares += qty;
+      }
+    } else if (transCode === 'SXCH' || transCode === 'MRGS') {
+      // Symbol exchange or Merger: 'S' suffix = shares removed (old symbol), plain = shares added (new symbol)
+      if (qtyRaw.endsWith('S')) {
+        pos.shares = 0;
+        pos.totalCost = 0;
+      } else if (Number.isFinite(qty) && qty > 0) {
+        const p = Number.isFinite(price) && price > 0 ? price : 0;
+        pos.totalCost += qty * p;
+        pos.shares += qty;
+      }
+    } else if (transCode === 'BCXL') {
+      // Buy cancel: reverse a buy
+      if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
+        const avgBefore = pos.totalCost / pos.shares;
+        pos.shares -= qty;
+        if (pos.shares <= 0.001) {
+          pos.shares = 0;
+          pos.totalCost = 0;
+        } else {
+          pos.totalCost = pos.shares * avgBefore;
+        }
+      }
+    }
+
+    positions.set(ticker, pos);
+  });
+
+  const parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[] = [];
+  let rowNum = 1;
+  for (const [ticker, pos] of positions) {
+    // Filter out closed/tiny positions
+    if (pos.shares >= 0.01) {
+      const avgCost = pos.totalCost / pos.shares;
+      parsed.push({
+        rowNumber: rowNum++,
+        ticker,
+        shares: Math.round(pos.shares * 1000000) / 1000000,
+        averageCost: Math.round(avgCost * 100) / 100,
+        confidence: 'high',
+      });
+    }
+  }
+
+  return { parsed, warnings };
+}
+
 function parseNumber(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -604,7 +724,7 @@ function parseNumber(value: unknown): number | null {
 }
 
 function isValidTicker(ticker: string): boolean {
-  return /^[A-Z]{1,5}$/.test(ticker);
+  return /^[A-Z]{1,5}(\.[A-Z])?$/.test(ticker);
 }
 
 export async function importPortfolioCsvHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -620,7 +740,26 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      relax_column_count: true,
     }) as Record<string, unknown>[];
+
+    // Try Robinhood transaction history format first
+    const robinhoodResult = parseRobinhoodTransactionCsv(data);
+    if (robinhoodResult) {
+      res.json({
+        reviewRequired: true,
+        editableFields: ['ticker', 'shares', 'averageCost'],
+        parsed: robinhoodResult.parsed,
+        warnings: robinhoodResult.warnings,
+        totalRows: data.length,
+        validRows: robinhoodResult.parsed.length,
+        skippedRows: data.length - robinhoodResult.parsed.length,
+        warning: `Detected Robinhood transaction history — aggregated ${data.length} transactions into ${robinhoodResult.parsed.length} current positions`,
+      });
+      return;
+    }
+
+    // Standard holdings CSV format
     const headers = Object.keys(data[0] || {});
 
     const headerMap: Record<string, string> = {};

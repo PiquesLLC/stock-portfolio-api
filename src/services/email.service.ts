@@ -4,9 +4,12 @@ import { config } from '../config';
 let resend: Resend | null = null;
 const capturedEmailVerificationCodes = new Map<string, { code: string; expiresAt: number }>();
 
-function getResend(): Resend {
+function getResend(): Resend | null {
   if (!resend) {
-    if (!config.resendApiKey) {
+    if (!config.resendApiKey || config.resendApiKey === 'PASTE_YOUR_RESEND_API_KEY_HERE') {
+      if (process.env.NODE_ENV !== 'production') {
+        return null;
+      }
       throw new Error('RESEND_API_KEY is not configured');
     }
     resend = new Resend(config.resendApiKey);
@@ -15,7 +18,19 @@ function getResend(): Resend {
 }
 
 export async function sendOtpEmail(to: string, code: string): Promise<void> {
+  // Capture for local dev
+  if (process.env.NODE_ENV !== 'production') {
+    capturedEmailVerificationCodes.set(to.trim().toLowerCase(), {
+      code,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+  }
+
   const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — OTP code for ${to}: ${code}`);
+    return;
+  }
   await r.emails.send({
     from: 'Nala <noreply@piques.io>',
     to,
@@ -43,6 +58,10 @@ export async function sendEmailVerification(to: string, code: string): Promise<v
   }
 
   const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — verification code for ${to}: ${code}`);
+    return;
+  }
   await r.emails.send({
     from: 'Nala <noreply@piques.io>',
     to,
@@ -70,6 +89,10 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   }
 
   const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — password reset code for ${to}: ${code}`);
+    return;
+  }
   await r.emails.send({
     from: 'Nala <noreply@piques.io>',
     to,
