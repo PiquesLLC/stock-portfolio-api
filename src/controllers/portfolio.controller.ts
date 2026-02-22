@@ -513,30 +513,20 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     // Normalize chart points to match live portfolio value.
     // Use median of last 5 points as scaling anchor (more robust than single last point).
-    // Clamp scale to [0.97, 1.03] to prevent extreme adjustments from bad data.
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
     if (points.length > 0 && liveVal > 0) {
       const anchorWindow = points.slice(-Math.min(5, points.length));
       const sortedAnchor = anchorWindow.map(p => p.value).sort((a, b) => a - b);
       const anchorVal = sortedAnchor[Math.floor(sortedAnchor.length / 2)]; // median
       if (anchorVal > 0 && Math.abs(liveVal - anchorVal) > 1) {
-        const rawScale = liveVal / anchorVal;
-        const scale = Math.max(0.97, Math.min(1.03, rawScale));
-        if (Math.abs(rawScale - scale) > 0.001) {
-          console.warn(`[Chart] ${period} scale clamped: raw=${rawScale.toFixed(4)} → ${scale.toFixed(4)} (liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)})`);
-        } else {
-          console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
-        }
+        const scale = liveVal / anchorVal;
+        console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
         for (const p of points) p.value *= scale;
       }
     }
 
-    // Append current live value.
-    // When trade/ledger replay produced data, skip the live point — it can
-    // create a visible drop at the chart edge due to normalization clamping.
-    // Always append as fallback when reconstruction returned nothing.
-    const skipLivePoint = usedModelReconstruction && points.length > 0;
-    if (!skipLivePoint && (points.length === 0 || now - points[points.length - 1].time > 5000)) {
+    // Always append the live point so chart ends at the exact current value.
+    if (points.length === 0 || now - points[points.length - 1].time > 5000) {
       points.push({ time: now, value: liveVal });
     }
 
