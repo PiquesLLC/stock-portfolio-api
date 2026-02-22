@@ -9,7 +9,7 @@ const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
 
 /** Bounded concurrency executor — limits parallel async operations (like p-limit) */
-async function limitConcurrency<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+export async function limitConcurrency<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
   const results: T[] = new Array(tasks.length);
   let nextIdx = 0;
   const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
