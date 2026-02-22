@@ -437,7 +437,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     if (hasTrades) {
       tradeHistory = await prisma.portfolioTrade.findMany({
         where: { userId: req.user!.userId },
-        orderBy: { date: 'asc' },
+        orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }],
         select: { date: true, ticker: true, type: true, shares: true, price: true },
       });
       console.log(`[Chart] ${period} for user ${req.user!.userId} — using ${tradeHistory.length} trades for accurate reconstruction`);
@@ -495,13 +495,21 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     // Normalize chart points to match live portfolio value.
-    // Use proportional scaling (not constant offset) to preserve relative changes.
+    // Use median of last 5 points as scaling anchor (more robust than single last point).
+    // Clamp scale to [0.97, 1.03] to prevent extreme adjustments from bad data.
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
     if (points.length > 0 && liveVal > 0) {
-      const lastCandleVal = points[points.length - 1].value;
-      if (lastCandleVal > 0 && Math.abs(liveVal - lastCandleVal) > 1) {
-        const scale = liveVal / lastCandleVal;
-        console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, lastCandle=${lastCandleVal.toFixed(0)}, scale=${scale.toFixed(4)}, first=${points[0].value.toFixed(0)}, last=${points[points.length - 1].value.toFixed(0)}`);
+      const anchorWindow = points.slice(-Math.min(5, points.length));
+      const sortedAnchor = anchorWindow.map(p => p.value).sort((a, b) => a - b);
+      const anchorVal = sortedAnchor[Math.floor(sortedAnchor.length / 2)]; // median
+      if (anchorVal > 0 && Math.abs(liveVal - anchorVal) > 1) {
+        const rawScale = liveVal / anchorVal;
+        const scale = Math.max(0.97, Math.min(1.03, rawScale));
+        if (Math.abs(rawScale - scale) > 0.001) {
+          console.warn(`[Chart] ${period} scale clamped: raw=${rawScale.toFixed(4)} → ${scale.toFixed(4)} (liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)})`);
+        } else {
+          console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
+        }
         for (const p of points) p.value *= scale;
       }
     }
@@ -634,14 +642,15 @@ function normalizeHeader(value: string): string {
  */
 function parseRobinhoodTransactionCsv(
   data: Record<string, unknown>[]
-): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number }[] } | null {
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number }[] } | null {
   const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
   const isRobinhood = headers.includes('activity date') && headers.includes('trans code') && headers.includes('instrument');
   if (!isRobinhood) return null;
 
   const positions = new Map<string, { shares: number; totalCost: number }>();
   const warnings: { rowNumber: number; message: string }[] = [];
-  const trades: { date: string; ticker: string; type: string; shares: number; price: number }[] = [];
+  const trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number }[] = [];
+  let tradeRowIndex = 0;
 
   // Codes that don't affect share counts — skip silently
   const ignoreCodes = new Set(['CDIV', 'GOLD', 'ACH', 'GDBP', 'INT', 'MINT', 'MDIV', 'DTAX', 'DFEE', 'AFEE', 'SLIP', 'MISC', 'FUTSWP']);
@@ -675,7 +684,7 @@ function parseRobinhoodTransactionCsv(
       }
       pos.totalCost += qty * price;
       pos.shares += qty;
-      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price });
+      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++ });
     } else if (transCode === 'Sell') {
       if (!Number.isFinite(qty) || qty <= 0) {
         warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Sell — invalid qty` });
@@ -692,13 +701,13 @@ function parseRobinhoodTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
-        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0 });
+        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++ });
       }
     } else if (transCode === 'SPL') {
       // Stock split: adds shares, total cost unchanged (avg cost decreases)
       if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
         pos.shares += qty;
-        trades.push({ date: dateStr, ticker, type: 'split', shares: qty, price: 0 });
+        trades.push({ date: dateStr, ticker, type: 'split', shares: qty, price: 0, rowIndex: tradeRowIndex++ });
       }
     } else if (transCode === 'ACATI' || transCode === 'REC' || transCode === 'T/A') {
       // Transfer in / Receive / Transfer-adjustment: add shares
@@ -706,19 +715,19 @@ function parseRobinhoodTransactionCsv(
         const p = Number.isFinite(price) && price > 0 ? price : 0;
         pos.totalCost += qty * p;
         pos.shares += qty;
-        trades.push({ date: dateStr, ticker, type: 'transfer', shares: qty, price: p });
+        trades.push({ date: dateStr, ticker, type: 'transfer', shares: qty, price: p, rowIndex: tradeRowIndex++ });
       }
     } else if (transCode === 'SXCH' || transCode === 'MRGS') {
       // Symbol exchange or Merger: 'S' suffix = shares removed (old symbol), plain = shares added (new symbol)
       if (qtyRaw.endsWith('S')) {
         pos.shares = 0;
         pos.totalCost = 0;
-        trades.push({ date: dateStr, ticker, type: 'sell', shares: Number.isFinite(qty) ? qty : 0, price: 0 });
+        trades.push({ date: dateStr, ticker, type: 'sell', shares: Number.isFinite(qty) ? qty : 0, price: 0, rowIndex: tradeRowIndex++ });
       } else if (Number.isFinite(qty) && qty > 0) {
         const p = Number.isFinite(price) && price > 0 ? price : 0;
         pos.totalCost += qty * p;
         pos.shares += qty;
-        trades.push({ date: dateStr, ticker, type: 'merger', shares: qty, price: p });
+        trades.push({ date: dateStr, ticker, type: 'merger', shares: qty, price: p, rowIndex: tradeRowIndex++ });
       }
     } else if (transCode === 'BCXL') {
       // Buy cancel: reverse a buy
@@ -731,7 +740,7 @@ function parseRobinhoodTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
-        trades.push({ date: dateStr, ticker, type: 'cancel', shares: qty, price: Number.isFinite(price) ? price : 0 });
+        trades.push({ date: dateStr, ticker, type: 'cancel', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++ });
       }
     }
 
@@ -950,21 +959,26 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       if (mode === 'replace') {
         await prisma.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } });
       }
-      // Batch insert trades
+      // Generate a unique sourceFileId for this import batch
+      const { randomUUID } = await import('crypto');
+      const sourceFileId = randomUUID();
+      // Batch insert trades with rowIndex for deterministic ordering
       const tradeRecords = trades
         .filter((t: any) => t.date && t.ticker && t.type)
-        .map((t: any) => ({
+        .map((t: any, idx: number) => ({
           userId: req.user!.userId,
           date: new Date(t.date),
           ticker: String(t.ticker).trim().toUpperCase(),
           type: String(t.type),
           shares: Number(t.shares) || 0,
           price: Number(t.price) || 0,
+          rowIndex: Number(t.rowIndex) || idx,
+          sourceFileId,
         }))
         .filter(t => !isNaN(t.date.getTime()));
       if (tradeRecords.length > 0) {
         await prisma.portfolioTrade.createMany({ data: tradeRecords });
-        console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId}`);
+        console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId} (batch ${sourceFileId})`);
       }
     }
 

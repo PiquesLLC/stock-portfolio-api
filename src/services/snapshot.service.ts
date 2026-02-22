@@ -8,7 +8,19 @@ import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
 
-
+/** Bounded concurrency executor — limits parallel async operations (like p-limit) */
+async function limitConcurrency<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let nextIdx = 0;
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
+    while (nextIdx < tasks.length) {
+      const i = nextIdx++;
+      results[i] = await tasks[i]();
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 // In-memory lock to prevent race conditions in snapshot creation
 let lastSnapshotTime: number = 0;
@@ -331,7 +343,9 @@ export async function reconstructPortfolioHistory(
     return null;
   };
 
-  const candleResults = await Promise.all(holdings.map(h => fetchDailyForChart(h.ticker)));
+  const candleResults = await limitConcurrency(
+    holdings.map(h => () => fetchDailyForChart(h.ticker)), 10
+  );
 
   // Build a map: ticker -> { dates[], closes[] }
   const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
@@ -463,7 +477,9 @@ export async function reconstructPortfolioHistoryHiRes(
     return null;
   };
 
-  const candleResults = await Promise.all(holdings.map(h => fetchHiResForChart(h.ticker)));
+  const candleResults = await limitConcurrency(
+    holdings.map(h => () => fetchHiResForChart(h.ticker)), 10
+  );
 
   const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
   for (let i = 0; i < holdings.length; i++) {
@@ -1306,7 +1322,9 @@ export async function reconstructPortfolioHistoryFromTrades(
   };
 
   const tickerArr = Array.from(allTickers);
-  const candleResults = await Promise.all(tickerArr.map(t => fetchDailyForChart(t)));
+  const candleResults = await limitConcurrency(
+    tickerArr.map(t => () => fetchDailyForChart(t)), 10
+  );
 
   const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
   for (let i = 0; i < tickerArr.length; i++) {
@@ -1394,6 +1412,22 @@ export async function reconstructPortfolioHistoryFromTrades(
     }
   }
 
+  // Pre-compute average trade price per ticker for value-weighted coverage fallback.
+  // Used to estimate the value of tickers missing candle data entirely.
+  const tickerAvgPrices = new Map<string, number>();
+  const tickerPriceSums = new Map<string, { totalCost: number; totalShares: number }>();
+  for (const t of trades) {
+    if (t.price > 0 && (t.type === 'buy' || t.type === 'sell')) {
+      const acc = tickerPriceSums.get(t.ticker) || { totalCost: 0, totalShares: 0 };
+      acc.totalCost += t.shares * t.price;
+      acc.totalShares += t.shares;
+      tickerPriceSums.set(t.ticker, acc);
+    }
+  }
+  for (const [ticker, acc] of tickerPriceSums) {
+    if (acc.totalShares > 0) tickerAvgPrices.set(ticker, acc.totalCost / acc.totalShares);
+  }
+
   // ── Weighted cash reconstruction ──
   // Without deposit/withdrawal data, we estimate historical cash from buy/sell trades.
   // Full reconstruction overestimates starting cash (counts bank deposits as existing cash).
@@ -1448,25 +1482,35 @@ export async function reconstructPortfolioHistoryFromTrades(
     if (portfolio.size === 0) continue; // No holdings yet at this date
 
     let totalValue = getCashAt(dateMs) - marginDebt;
-    let tickersWithPrice = 0;
+    let coveredValue = 0;
+    let missingValue = 0;
 
     for (const [ticker, shares] of portfolio) {
       const price = getPriceAt(ticker, dateMs);
       if (price != null) {
-        totalValue += shares * price;
-        tickersWithPrice++;
+        const val = shares * price;
+        totalValue += val;
+        coveredValue += val;
       } else {
         // Forward-fill: use first available price if candle data hasn't started yet
         const firstPrice = firstPrices.get(ticker);
         if (firstPrice !== undefined) {
-          totalValue += shares * firstPrice;
-          tickersWithPrice++;
+          const val = shares * firstPrice;
+          totalValue += val;
+          coveredValue += val;
+        } else {
+          // No candle data at all — estimate value from avg trade price
+          const avgPrice = tickerAvgPrices.get(ticker) || 0;
+          missingValue += shares * avgPrice;
         }
       }
     }
 
-    // Require at least 80% of held tickers to have price data (stricter than 60%)
-    if (tickersWithPrice >= Math.max(1, Math.ceil(portfolio.size * 0.8))) {
+    // Value-weighted coverage: require 80% of portfolio VALUE to have price data.
+    // This prevents small-cap gaps from blocking the chart while ensuring large
+    // holdings with missing data cause appropriate point exclusion.
+    const estimatedTotal = coveredValue + missingValue;
+    if (estimatedTotal > 0 && coveredValue / estimatedTotal >= 0.8) {
       points.push({ time: dateMs, value: totalValue });
     }
   }
@@ -1581,7 +1625,9 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
   };
 
   const tickerArr = Array.from(allTickers);
-  const candleResults = await Promise.all(tickerArr.map(t => fetchHiResForChart(t)));
+  const candleResults = await limitConcurrency(
+    tickerArr.map(t => () => fetchHiResForChart(t)), 10
+  );
 
   const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
   for (let i = 0; i < tickerArr.length; i++) {

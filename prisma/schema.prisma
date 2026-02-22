@@ -837,15 +837,17 @@ model UserReport {
 // ─── Portfolio Trade History (from CSV import) ──────────────────────
 
 model PortfolioTrade {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date      DateTime
-  ticker    String
-  type      String   // 'buy' | 'sell' | 'split' | 'transfer' | 'merger' | 'cancel'
-  shares    Float
-  price     Float    @default(0)
-  createdAt DateTime @default(now())
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime
+  ticker       String
+  type         String   // 'buy' | 'sell' | 'split' | 'transfer' | 'merger' | 'cancel'
+  shares       Float
+  price        Float    @default(0)
+  rowIndex     Int      @default(0)   // Position in source CSV for deterministic ordering
+  sourceFileId String?                // Which import batch this trade came from
+  createdAt    DateTime @default(now())
 
   @@index([userId, date])
 }
