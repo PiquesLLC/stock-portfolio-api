@@ -46,6 +46,11 @@ CREATE TABLE "User" (
     "username" TEXT NOT NULL,
     "displayName" TEXT NOT NULL,
     "passwordHash" TEXT,
+    "plan" TEXT NOT NULL DEFAULT 'free',
+    "stripeCustomerId" TEXT,
+    "stripeSubscriptionId" TEXT,
+    "planExpiresAt" DATETIME,
+    "planStartedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "trackingActive" BOOLEAN NOT NULL DEFAULT false,
     "trackingStartAt" DATETIME,
@@ -57,7 +62,12 @@ CREATE TABLE "User" (
     "holdingsVisibility" TEXT NOT NULL DEFAULT 'all',
     "bio" TEXT,
     "email" TEXT,
-    "emailVerified" BOOLEAN NOT NULL DEFAULT false
+    "emailVerified" BOOLEAN NOT NULL DEFAULT false,
+    "googleId" TEXT,
+    "appleId" TEXT,
+    "avatarUrl" TEXT,
+    "referredBy" TEXT,
+    CONSTRAINT "User_referredBy_fkey" FOREIGN KEY ("referredBy") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -89,6 +99,7 @@ CREATE TABLE "RefreshToken" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "token" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "family" TEXT,
     "expiresAt" DATETIME NOT NULL,
     "revokedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -281,12 +292,14 @@ CREATE TABLE "Lot" (
 -- CreateTable
 CREATE TABLE "Goal" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "targetValue" REAL NOT NULL,
     "monthlyContribution" REAL NOT NULL DEFAULT 0,
     "deadline" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Goal_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -297,6 +310,15 @@ CREATE TABLE "Follow" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Follow_followerId_fkey" FOREIGN KEY ("followerId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Follow_followingId_fkey" FOREIGN KEY ("followingId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "StockFollow" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "symbol" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "StockFollow_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -519,6 +541,162 @@ CREATE TABLE "PlaidAccount" (
     CONSTRAINT "PlaidAccount_plaidItemId_fkey" FOREIGN KEY ("plaidItemId") REFERENCES "PlaidItem" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "BillingWebhookEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "eventType" TEXT NOT NULL,
+    "processedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "Creator" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "pitch" TEXT,
+    "pricingCents" INTEGER NOT NULL DEFAULT 500,
+    "trialDays" INTEGER NOT NULL DEFAULT 0,
+    "stripeConnectId" TEXT,
+    "stripeConnectOnboarded" BOOLEAN NOT NULL DEFAULT false,
+    "complianceAcceptedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Creator_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorVisibility" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "creatorId" TEXT NOT NULL,
+    "showHoldings" BOOLEAN NOT NULL DEFAULT true,
+    "showTradeHistory" BOOLEAN NOT NULL DEFAULT false,
+    "showRationale" BOOLEAN NOT NULL DEFAULT false,
+    "showSectors" BOOLEAN NOT NULL DEFAULT true,
+    "showRiskMetrics" BOOLEAN NOT NULL DEFAULT false,
+    "showWatchlists" BOOLEAN NOT NULL DEFAULT false,
+    "tradeDelayHours" INTEGER NOT NULL DEFAULT 0,
+    "hideShareCount" BOOLEAN NOT NULL DEFAULT false,
+    CONSTRAINT "CreatorVisibility_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorSubscription" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "subscriberUserId" TEXT NOT NULL,
+    "creatorUserId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "stripeSubscriptionId" TEXT,
+    "currentPeriodEnd" DATETIME,
+    "trialEnd" DATETIME,
+    "disputedAt" DATETIME,
+    "canceledAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CreatorSubscription_subscriberUserId_fkey" FOREIGN KEY ("subscriberUserId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "CreatorSubscription_creatorUserId_fkey" FOREIGN KEY ("creatorUserId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorSubscriptionEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "subscriptionId" TEXT NOT NULL,
+    "eventType" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CreatorSubscriptionEvent_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "CreatorSubscription" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorWalletLedger" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "creatorUserId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "amountCents" INTEGER NOT NULL,
+    "subscriptionId" TEXT,
+    "description" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CreatorWalletLedger_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "CreatorSubscription" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorPayout" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "creatorUserId" TEXT NOT NULL,
+    "amountCents" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "stripeTransferId" TEXT,
+    "stripePayoutId" TEXT,
+    "paidAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "CreatorReport" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reporterUserId" TEXT NOT NULL,
+    "creatorUserId" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "description" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'open',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CreatorReport_reporterUserId_fkey" FOREIGN KEY ("reporterUserId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "CreatorWebhookEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "eventType" TEXT NOT NULL,
+    "processedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "UserReport" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reporterUserId" TEXT NOT NULL,
+    "reportedUserId" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "description" TEXT,
+    "context" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "UserReport_reporterUserId_fkey" FOREIGN KEY ("reporterUserId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "UserReport_reportedUserId_fkey" FOREIGN KEY ("reportedUserId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "PortfolioTrade" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "date" DATETIME NOT NULL,
+    "ticker" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "shares" REAL NOT NULL,
+    "price" REAL NOT NULL DEFAULT 0,
+    "rowIndex" INTEGER NOT NULL DEFAULT 0,
+    "sourceFileId" TEXT,
+    "sourceBroker" TEXT,
+    "rawAction" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "PortfolioTrade_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "Referral" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "referrerUserId" TEXT NOT NULL,
+    "referredUserId" TEXT NOT NULL,
+    "referralCode" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'signed_up',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Referral_referrerUserId_fkey" FOREIGN KEY ("referrerUserId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Referral_referredUserId_fkey" FOREIGN KEY ("referredUserId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Holding_userId_ticker_key" ON "Holding"("userId", "ticker");
 
@@ -538,6 +716,12 @@ CREATE UNIQUE INDEX "User_username_key" ON "User"("username");
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "User_googleId_key" ON "User"("googleId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_appleId_key" ON "User"("appleId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Watchlist_userId_name_key" ON "Watchlist"("userId", "name");
 
 -- CreateIndex
@@ -545,6 +729,9 @@ CREATE UNIQUE INDEX "WatchlistHolding_watchlistId_ticker_key" ON "WatchlistHoldi
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RefreshToken_token_key" ON "RefreshToken"("token");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_family_idx" ON "RefreshToken"("family");
 
 -- CreateIndex
 CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
@@ -640,6 +827,9 @@ CREATE INDEX "Lot_userId_ticker_idx" ON "Lot"("userId", "ticker");
 CREATE INDEX "Lot_ticker_idx" ON "Lot"("ticker");
 
 -- CreateIndex
+CREATE INDEX "Goal_userId_idx" ON "Goal"("userId");
+
+-- CreateIndex
 CREATE INDEX "Follow_followerId_idx" ON "Follow"("followerId");
 
 -- CreateIndex
@@ -647,6 +837,15 @@ CREATE INDEX "Follow_followingId_idx" ON "Follow"("followingId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Follow_followerId_followingId_key" ON "Follow"("followerId", "followingId");
+
+-- CreateIndex
+CREATE INDEX "StockFollow_symbol_idx" ON "StockFollow"("symbol");
+
+-- CreateIndex
+CREATE INDEX "StockFollow_userId_idx" ON "StockFollow"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "StockFollow_userId_symbol_key" ON "StockFollow"("userId", "symbol");
 
 -- CreateIndex
 CREATE INDEX "ActivityEvent_userId_createdAt_idx" ON "ActivityEvent"("userId", "createdAt");
@@ -743,4 +942,97 @@ CREATE UNIQUE INDEX "PlaidAccount_plaidAccountId_key" ON "PlaidAccount"("plaidAc
 
 -- CreateIndex
 CREATE INDEX "PlaidAccount_plaidItemId_idx" ON "PlaidAccount"("plaidItemId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BillingWebhookEvent_eventId_key" ON "BillingWebhookEvent"("eventId");
+
+-- CreateIndex
+CREATE INDEX "BillingWebhookEvent_processedAt_idx" ON "BillingWebhookEvent"("processedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Creator_userId_key" ON "Creator"("userId");
+
+-- CreateIndex
+CREATE INDEX "Creator_status_idx" ON "Creator"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CreatorVisibility_creatorId_key" ON "CreatorVisibility"("creatorId");
+
+-- CreateIndex
+CREATE INDEX "CreatorSubscription_subscriberUserId_idx" ON "CreatorSubscription"("subscriberUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorSubscription_creatorUserId_idx" ON "CreatorSubscription"("creatorUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorSubscription_status_idx" ON "CreatorSubscription"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CreatorSubscription_subscriberUserId_creatorUserId_key" ON "CreatorSubscription"("subscriberUserId", "creatorUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorSubscriptionEvent_subscriptionId_idx" ON "CreatorSubscriptionEvent"("subscriptionId");
+
+-- CreateIndex
+CREATE INDEX "CreatorSubscriptionEvent_createdAt_idx" ON "CreatorSubscriptionEvent"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "CreatorWalletLedger_creatorUserId_idx" ON "CreatorWalletLedger"("creatorUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorWalletLedger_creatorUserId_type_idx" ON "CreatorWalletLedger"("creatorUserId", "type");
+
+-- CreateIndex
+CREATE INDEX "CreatorWalletLedger_subscriptionId_idx" ON "CreatorWalletLedger"("subscriptionId");
+
+-- CreateIndex
+CREATE INDEX "CreatorWalletLedger_createdAt_idx" ON "CreatorWalletLedger"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "CreatorPayout_creatorUserId_idx" ON "CreatorPayout"("creatorUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorPayout_status_idx" ON "CreatorPayout"("status");
+
+-- CreateIndex
+CREATE INDEX "CreatorReport_creatorUserId_idx" ON "CreatorReport"("creatorUserId");
+
+-- CreateIndex
+CREATE INDEX "CreatorReport_status_idx" ON "CreatorReport"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CreatorWebhookEvent_eventId_key" ON "CreatorWebhookEvent"("eventId");
+
+-- CreateIndex
+CREATE INDEX "CreatorWebhookEvent_processedAt_idx" ON "CreatorWebhookEvent"("processedAt");
+
+-- CreateIndex
+CREATE INDEX "UserReport_reporterUserId_idx" ON "UserReport"("reporterUserId");
+
+-- CreateIndex
+CREATE INDEX "UserReport_reportedUserId_idx" ON "UserReport"("reportedUserId");
+
+-- CreateIndex
+CREATE INDEX "UserReport_status_idx" ON "UserReport"("status");
+
+-- CreateIndex
+CREATE INDEX "PortfolioTrade_userId_date_idx" ON "PortfolioTrade"("userId", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Referral_referredUserId_key" ON "Referral"("referredUserId");
+
+-- CreateIndex
+CREATE INDEX "Referral_referrerUserId_idx" ON "Referral"("referrerUserId");
+
+-- CreateIndex
+CREATE INDEX "Referral_referredUserId_idx" ON "Referral"("referredUserId");
+
+-- CreateIndex
+CREATE INDEX "Referral_status_idx" ON "Referral"("status");
+
+-- CreateIndex
+CREATE INDEX "Referral_createdAt_idx" ON "Referral"("createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Referral_referrerUserId_referredUserId_key" ON "Referral"("referrerUserId", "referredUserId");
 
