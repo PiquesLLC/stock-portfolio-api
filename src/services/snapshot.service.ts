@@ -385,8 +385,9 @@ export async function reconstructPortfolioHistory(
       }
     }
 
-    // Include point if all available tickers have price data at this date
-    if (tickersWithPrice >= tickerCandles.size) {
+    // Include point if enough tickers have price data at this date
+    const minTickers = Math.max(1, Math.ceil(tickerCandles.size * 0.6));
+    if (tickersWithPrice >= minTickers) {
       points.push({ time: dateMs, value: totalValue });
     }
   }
@@ -526,11 +527,11 @@ export async function reconstructPortfolioHistoryHiRes(
       }
     }
 
-    // Include point if all tickers are accounted for (actual or forward-filled)
-    // AND enough tickers have real data (avoids phantom early points).
-    const ratio = Math.max(0.5, Math.min(1, minActualRatio));
-    if (tickersWithPrice >= tickerCandles.size &&
-        tickersWithActualPrice >= Math.ceil(tickerCandles.size * ratio)) {
+    // Include point if enough tickers have price data.
+    // For large portfolios, some tickers may lack data at certain timestamps
+    // (different trading hours, international stocks, etc.)
+    const minTickers = Math.max(1, Math.ceil(tickerCandles.size * 0.6));
+    if (tickersWithActualPrice >= minTickers && tickersWithPrice >= minTickers) {
       points.push({ time: dateMs, value: totalValue });
     }
   }
@@ -1212,5 +1213,484 @@ export async function cleanupDuplicateSnapshots(): Promise<number> {
   }
 
   return toDelete.length;
+}
+
+/**
+ * Reconstruct historical portfolio value using trade history.
+ * Instead of projecting current holdings backward, this replays actual trades
+ * to compute what was held at each point in time, producing accurate historical charts.
+ * Uses daily candles (Polygon primary, Yahoo fallback).
+ */
+export async function reconstructPortfolioHistoryFromTrades(
+  tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[],
+  cashBalance: number,
+  periodDays: number,
+  marginDebt: number = 0,
+  cashWeight: number = 0.7,
+): Promise<{ time: number; value: number }[]> {
+  if (tradeHistory.length === 0) return [];
+
+  // Sort trades chronologically
+  const trades = [...tradeHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Only fetch candles for tickers that were held during the chart period.
+  // Two groups: (1) tickers held going INTO the period, (2) tickers traded DURING the period.
+  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const allTickers = new Set<string>();
+
+  // Group 1: tickers held at the start of the chart window
+  const sharesAtCutoff = new Map<string, number>();
+  for (const t of trades) {
+    if (t.date.getTime() > cutoffMs) break;
+    const cur = sharesAtCutoff.get(t.ticker) || 0;
+    if (t.type === 'buy' || t.type === 'transfer' || t.type === 'merger') {
+      sharesAtCutoff.set(t.ticker, cur + t.shares);
+    } else if (t.type === 'sell' || t.type === 'cancel') {
+      sharesAtCutoff.set(t.ticker, Math.max(0, cur - t.shares));
+    } else if (t.type === 'split' && cur > 0) {
+      sharesAtCutoff.set(t.ticker, cur + t.shares);
+    }
+  }
+  for (const [ticker, shares] of sharesAtCutoff) {
+    if (shares > 0.001) allTickers.add(ticker);
+  }
+
+  // Group 2: any ticker involved in a trade during the chart window
+  for (const t of trades) {
+    if (t.date.getTime() >= cutoffMs) allTickers.add(t.ticker);
+  }
+
+  console.log(`[Chart-Trades] Need candles for ${allTickers.size} tickers (of ${new Set(trades.map(t => t.ticker)).size} total)`);
+
+  // Fetch daily candles for relevant tickers
+  const fetchDailyForChart = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
+    const cacheKey = `chart-candle:${ticker}`;
+    const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
+    if (cached) return cached;
+
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = new Date(Date.now() - Math.max(365, periodDays + 30) * 86400000).toISOString().split('T')[0];
+    const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
+    if (pg && pg.closes.length > 0) {
+      const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
+      chartCandleCache.set(cacheKey, data);
+      return data;
+    }
+
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const from = now - Math.max(365, periodDays + 30) * 24 * 60 * 60;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${from}&period2=${now}&interval=1d`;
+      const resp = await yahooGet(url);
+      const result = resp.data?.chart?.result?.[0];
+      if (result?.timestamp && result?.indicators?.quote?.[0]) {
+        const timestamps: number[] = result.timestamp;
+        const q = result.indicators.quote[0];
+        const dates: number[] = [];
+        const closes: number[] = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          if (q.close[i] != null) {
+            dates.push(timestamps[i] * 1000);
+            closes.push(q.close[i]);
+          }
+        }
+        if (closes.length > 0) {
+          const data = { dates, closes };
+          chartCandleCache.set(cacheKey, data);
+          return data;
+        }
+      }
+    } catch { /* Yahoo also failed */ }
+
+    return null;
+  };
+
+  const tickerArr = Array.from(allTickers);
+  const candleResults = await Promise.all(tickerArr.map(t => fetchDailyForChart(t)));
+
+  const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
+  for (let i = 0; i < tickerArr.length; i++) {
+    if (candleResults[i]) tickerCandles.set(tickerArr[i], candleResults[i]!);
+  }
+
+  if (tickerCandles.size === 0) return [];
+
+  // Collect all unique chart dates within the period (reuse cutoffMs from above)
+  const allDatesSet = new Set<number>();
+  for (const { dates } of tickerCandles.values()) {
+    for (const d of dates) {
+      if (d >= cutoffMs) allDatesSet.add(d);
+    }
+  }
+  const allDates = Array.from(allDatesSet).sort((a, b) => a - b);
+  if (allDates.length === 0) return [];
+
+  // Pre-compute portfolio snapshots at each trade boundary.
+  // Walk through trades chronologically building a running portfolio state.
+  // Store as sorted array of { dateMs, portfolio: Map<ticker, shares> }
+  const portfolioTimeline: { dateMs: number; portfolio: Map<string, number> }[] = [];
+  const runningPortfolio = new Map<string, number>();
+
+  // Initial state: empty portfolio before first trade
+  portfolioTimeline.push({ dateMs: 0, portfolio: new Map() });
+
+  for (const trade of trades) {
+    const dateMs = trade.date.getTime();
+    const current = runningPortfolio.get(trade.ticker) || 0;
+
+    if (trade.type === 'buy' || trade.type === 'transfer' || trade.type === 'merger') {
+      runningPortfolio.set(trade.ticker, current + trade.shares);
+    } else if (trade.type === 'sell' || trade.type === 'cancel') {
+      const remaining = current - trade.shares;
+      if (remaining <= 0.001) {
+        runningPortfolio.delete(trade.ticker);
+      } else {
+        runningPortfolio.set(trade.ticker, remaining);
+      }
+    } else if (trade.type === 'split') {
+      if (current > 0) {
+        runningPortfolio.set(trade.ticker, current + trade.shares);
+      }
+    }
+
+    portfolioTimeline.push({ dateMs, portfolio: new Map(runningPortfolio) });
+  }
+
+  // Helper: find the portfolio state at a given timestamp (binary search)
+  function getPortfolioAt(dateMs: number): Map<string, number> {
+    let lo = 0, hi = portfolioTimeline.length - 1, bestIdx = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (portfolioTimeline[mid].dateMs <= dateMs) {
+        bestIdx = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return portfolioTimeline[bestIdx].portfolio;
+  }
+
+  // Helper: get price at a date for a ticker via binary search
+  function getPriceAt(ticker: string, dateMs: number): number | null {
+    const candles = tickerCandles.get(ticker);
+    if (!candles) return null;
+    let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles.dates[mid] <= dateMs) { bestIdx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return bestIdx >= 0 ? candles.closes[bestIdx] : null;
+  }
+
+  // Pre-compute first available price per ticker for forward-fill.
+  // When a timestamp is before a ticker's first candle, use its earliest
+  // known price so the holding isn't silently dropped from the total.
+  const firstPrices = new Map<string, number>();
+  for (const [ticker, candles] of tickerCandles) {
+    if (candles.closes.length > 0) {
+      firstPrices.set(ticker, candles.closes[0]);
+    }
+  }
+
+  // ── Weighted cash reconstruction ──
+  // Without deposit/withdrawal data, we estimate historical cash from buy/sell trades.
+  // Full reconstruction overestimates starting cash (counts bank deposits as existing cash).
+  // Constant cash underestimates (ignores that user had more cash before buying).
+  // cashWeight blends: 1.0 = full reconstruction, 0.0 = constant, 0.7 = recommended default.
+  // 0.7 accounts for ~30% of net purchases typically coming from external deposits.
+  const periodTrades = trades.filter(t => t.date.getTime() >= cutoffMs);
+  let periodBuyCost = 0;
+  let periodSellProceeds = 0;
+  for (const t of periodTrades) {
+    if (t.type === 'buy') {
+      periodBuyCost += t.shares * t.price;
+    } else if (t.type === 'sell' || t.type === 'cancel') {
+      periodSellProceeds += t.shares * t.price;
+    }
+  }
+
+  // Build full cash timeline (100% reconstruction), then blend at lookup time
+  const fullCashAtStart = cashBalance + periodBuyCost - periodSellProceeds;
+  const cashTimeline: { dateMs: number; cash: number }[] = [];
+  let runningCash = fullCashAtStart;
+  cashTimeline.push({ dateMs: 0, cash: fullCashAtStart });
+  for (const t of periodTrades) {
+    if (t.type === 'buy') {
+      runningCash -= t.shares * t.price;
+    } else if (t.type === 'sell' || t.type === 'cancel') {
+      runningCash += t.shares * t.price;
+    }
+    cashTimeline.push({ dateMs: t.date.getTime(), cash: runningCash });
+  }
+
+  function getCashAt(dateMs: number): number {
+    // Get fully reconstructed cash at this date
+    let lo = 0, hi = cashTimeline.length - 1, bestIdx = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (cashTimeline[mid].dateMs <= dateMs) { bestIdx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    const fullCash = cashTimeline[bestIdx].cash;
+    // Blend between constant (cashBalance) and fully reconstructed
+    return cashBalance + cashWeight * (fullCash - cashBalance);
+  }
+
+  const adjustedCashAtStart = cashBalance + cashWeight * (fullCashAtStart - cashBalance);
+  console.log(`[Chart-Trades] Cash: current=${cashBalance.toFixed(0)}, fullStart=${fullCashAtStart.toFixed(0)}, adjustedStart=${adjustedCashAtStart.toFixed(0)} (weight=${cashWeight}), buys=${periodBuyCost.toFixed(0)}, sells=${periodSellProceeds.toFixed(0)}`);
+
+  // Compute portfolio value at each chart date
+  const points: { time: number; value: number }[] = [];
+  for (const dateMs of allDates) {
+    const portfolio = getPortfolioAt(dateMs);
+    if (portfolio.size === 0) continue; // No holdings yet at this date
+
+    let totalValue = getCashAt(dateMs) - marginDebt;
+    let tickersWithPrice = 0;
+
+    for (const [ticker, shares] of portfolio) {
+      const price = getPriceAt(ticker, dateMs);
+      if (price != null) {
+        totalValue += shares * price;
+        tickersWithPrice++;
+      } else {
+        // Forward-fill: use first available price if candle data hasn't started yet
+        const firstPrice = firstPrices.get(ticker);
+        if (firstPrice !== undefined) {
+          totalValue += shares * firstPrice;
+          tickersWithPrice++;
+        }
+      }
+    }
+
+    // Require at least 80% of held tickers to have price data (stricter than 60%)
+    if (tickersWithPrice >= Math.max(1, Math.ceil(portfolio.size * 0.8))) {
+      points.push({ time: dateMs, value: totalValue });
+    }
+  }
+
+  // Trim leading outlier points that have artificially low values due to data gaps.
+  // After holidays or period boundaries, the first 1-2 candle dates may lack coverage
+  // for some tickers (missing data passes the 80% threshold but causes a visible dip).
+  // If the first point is >2% lower than the median of the next 3-5 points, drop it.
+  while (points.length > 5) {
+    const windowEnd = Math.min(5, points.length - 1);
+    const windowValues = points.slice(1, windowEnd + 1).map(p => p.value).sort((a, b) => a - b);
+    const median = windowValues[Math.floor(windowValues.length / 2)];
+    if (points[0].value < median * 0.98) {
+      points.shift();
+    } else {
+      break;
+    }
+  }
+
+  return points;
+}
+
+/**
+ * High-resolution trade-aware reconstruction using intraday candles.
+ * Same concept as reconstructPortfolioHistoryFromTrades but uses 15-min or 1-hour candles.
+ */
+export async function reconstructPortfolioHistoryFromTradesHiRes(
+  tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[],
+  cashBalance: number,
+  marginDebt: number,
+  yahooRange: string,
+  yahooInterval: string,
+): Promise<{ time: number; value: number }[]> {
+  if (tradeHistory.length === 0) return [];
+
+  const trades = [...tradeHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Only fetch candles for tickers held during the hi-res window
+  const rangeDaysMapFilter: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
+  const windowDays = rangeDaysMapFilter[yahooRange] || 35;
+  const windowCutoff = Date.now() - windowDays * 86400000;
+  const allTickers = new Set<string>();
+
+  // Group 1: tickers held at the start of the window
+  const preWindowShares = new Map<string, number>();
+  for (const t of trades) {
+    if (t.date.getTime() > windowCutoff) break;
+    const cur = preWindowShares.get(t.ticker) || 0;
+    if (t.type === 'buy' || t.type === 'transfer' || t.type === 'merger') {
+      preWindowShares.set(t.ticker, cur + t.shares);
+    } else if (t.type === 'sell' || t.type === 'cancel') {
+      preWindowShares.set(t.ticker, Math.max(0, cur - t.shares));
+    } else if (t.type === 'split' && cur > 0) {
+      preWindowShares.set(t.ticker, cur + t.shares);
+    }
+  }
+  for (const [ticker, shares] of preWindowShares) {
+    if (shares > 0.001) allTickers.add(ticker);
+  }
+
+  // Group 2: any ticker traded during the window
+  for (const t of trades) {
+    if (t.date.getTime() >= windowCutoff) allTickers.add(t.ticker);
+  }
+
+  // Fetch hi-res candles for relevant tickers
+  const fetchHiResForChart = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
+    const cacheKey = `hires:${ticker}:${yahooRange}:${yahooInterval}`;
+    const cached = hiresCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
+    if (cached) return cached;
+
+    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
+    const rangeDays = rangeDaysMap[yahooRange] || 35;
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
+
+    let multiplier = 1;
+    let timespan = 'hour';
+    if (yahooInterval === '5m' || yahooInterval === '2m') { multiplier = 5; timespan = 'minute'; }
+    else if (yahooInterval === '15m') { multiplier = 15; timespan = 'minute'; }
+    else if (yahooInterval === '1h' || yahooInterval === '60m') { multiplier = 1; timespan = 'hour'; }
+    else if (yahooInterval === '1d') { multiplier = 1; timespan = 'day'; }
+
+    const pg = await fetchPolygonAggs(ticker, multiplier, timespan, fromDate, today, 300);
+    if (pg && pg.closes.length > 0) {
+      const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
+      hiresCache.set(cacheKey, data);
+      return data;
+    }
+
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${yahooRange}&interval=${yahooInterval}&includePrePost=true`;
+      const resp = await yahooGet(url);
+      const result = resp.data?.chart?.result?.[0];
+      if (result?.timestamp && result?.indicators?.quote?.[0]) {
+        const timestamps: number[] = result.timestamp;
+        const q = result.indicators.quote[0];
+        const dates: number[] = [];
+        const closes: number[] = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          if (q.close[i] != null) { dates.push(timestamps[i] * 1000); closes.push(q.close[i]); }
+        }
+        if (closes.length > 0) {
+          const data = { dates, closes };
+          hiresCache.set(cacheKey, data);
+          return data;
+        }
+      }
+    } catch { /* fallback failed */ }
+
+    return null;
+  };
+
+  const tickerArr = Array.from(allTickers);
+  const candleResults = await Promise.all(tickerArr.map(t => fetchHiResForChart(t)));
+
+  const tickerCandles = new Map<string, { dates: number[]; closes: number[] }>();
+  for (let i = 0; i < tickerArr.length; i++) {
+    if (candleResults[i]) tickerCandles.set(tickerArr[i], candleResults[i]!);
+  }
+
+  if (tickerCandles.size === 0) return [];
+
+  // Collect all unique timestamps
+  const allDatesSet = new Set<number>();
+  for (const { dates } of tickerCandles.values()) {
+    for (const d of dates) allDatesSet.add(d);
+  }
+  const allDates = Array.from(allDatesSet).sort((a, b) => a - b);
+  if (allDates.length === 0) return [];
+
+  // Build portfolio timeline from trades
+  const portfolioTimeline: { dateMs: number; portfolio: Map<string, number> }[] = [];
+  const runningPortfolio = new Map<string, number>();
+  portfolioTimeline.push({ dateMs: 0, portfolio: new Map() });
+
+  for (const trade of trades) {
+    const dateMs = trade.date.getTime();
+    const current = runningPortfolio.get(trade.ticker) || 0;
+    if (trade.type === 'buy' || trade.type === 'transfer' || trade.type === 'merger') {
+      runningPortfolio.set(trade.ticker, current + trade.shares);
+    } else if (trade.type === 'sell' || trade.type === 'cancel') {
+      const remaining = current - trade.shares;
+      if (remaining <= 0.001) runningPortfolio.delete(trade.ticker);
+      else runningPortfolio.set(trade.ticker, remaining);
+    } else if (trade.type === 'split') {
+      if (current > 0) runningPortfolio.set(trade.ticker, current + trade.shares);
+    }
+    portfolioTimeline.push({ dateMs, portfolio: new Map(runningPortfolio) });
+  }
+
+  function getPortfolioAt(dateMs: number): Map<string, number> {
+    let lo = 0, hi = portfolioTimeline.length - 1, bestIdx = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (portfolioTimeline[mid].dateMs <= dateMs) { bestIdx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return portfolioTimeline[bestIdx].portfolio;
+  }
+
+  function getPriceAt(ticker: string, dateMs: number): number | null {
+    const candles = tickerCandles.get(ticker);
+    if (!candles) return null;
+    let lo = 0, hi = candles.dates.length - 1, bestIdx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles.dates[mid] <= dateMs) { bestIdx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return bestIdx >= 0 ? candles.closes[bestIdx] : null;
+  }
+
+  const points: { time: number; value: number }[] = [];
+  for (const dateMs of allDates) {
+    const portfolio = getPortfolioAt(dateMs);
+    if (portfolio.size === 0) continue;
+
+    let totalValue = cashBalance - marginDebt;
+    let tickersWithPrice = 0;
+
+    for (const [ticker, shares] of portfolio) {
+      const price = getPriceAt(ticker, dateMs);
+      if (price != null) { totalValue += shares * price; tickersWithPrice++; }
+    }
+
+    if (tickersWithPrice >= Math.max(1, Math.ceil(portfolio.size * 0.6))) {
+      points.push({ time: dateMs, value: totalValue });
+    }
+  }
+
+  // Outlier smoothing (same as main hi-res function)
+  if (points.length >= 3) {
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1].value;
+      const curr = points[i].value;
+      const next = points[i + 1].value;
+      const neighborAvg = (prev + next) / 2;
+      if (neighborAvg > 0) {
+        const deviation = Math.abs(curr - neighborAvg) / neighborAvg;
+        if (deviation > 0.05) points[i].value = neighborAvg;
+      }
+    }
+  }
+
+  // Gap fill
+  const expectedMs = parseIntervalMs(yahooInterval);
+  if (expectedMs > 0 && points.length >= 2) {
+    const filled: { time: number; value: number }[] = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const gap = points[i].time - points[i - 1].time;
+      if (gap > expectedMs * 1.5 && gap < expectedMs * 10) {
+        const steps = Math.round(gap / expectedMs);
+        for (let s = 1; s < steps; s++) {
+          const t = points[i - 1].time + (gap * s) / steps;
+          const v = points[i - 1].value + ((points[i].value - points[i - 1].value) * s) / steps;
+          filled.push({ time: Math.round(t), value: v });
+        }
+      }
+      filled.push(points[i]);
+    }
+    return filled;
+  }
+
+  return points;
 }
 

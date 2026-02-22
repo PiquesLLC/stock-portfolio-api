@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -406,11 +406,15 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
 
       // If composition changed within the last day, rebaseline to avoid false jumps.
+      // But don't filter if it would leave the chart empty (e.g. fresh import on weekend).
       const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
       const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, rangeStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
-        points = points.filter(p => p.time >= cutoff);
+        const filtered = points.filter(p => p.time >= cutoff);
+        if (filtered.length >= 2) {
+          points = filtered;
+        }
       }
 
       const periodStartValue = latestChange
@@ -425,53 +429,80 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const now = Date.now();
     let points: { time: number; value: number }[];
 
-    // Use high-resolution data for short periods (like Robinhood)
+    // Check if user has trade history (from Robinhood CSV import).
+    // If so, use trade-aware reconstruction for accurate historical charts.
+    const tradeCount = await prisma.portfolioTrade.count({ where: { userId: req.user!.userId } });
+    const hasTrades = tradeCount > 0;
+    let tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[] = [];
+    if (hasTrades) {
+      tradeHistory = await prisma.portfolioTrade.findMany({
+        where: { userId: req.user!.userId },
+        orderBy: { date: 'asc' },
+        select: { date: true, ticker: true, type: true, shares: true, price: true },
+      });
+      console.log(`[Chart] ${period} for user ${req.user!.userId} — using ${tradeHistory.length} trades for accurate reconstruction`);
+    }
+
+    // For 1W: always use current-holdings reconstruction (hi-res intraday candles).
+    // Trade-aware hi-res has data coverage issues. 1W composition change is minimal.
     if (period === '1W') {
-      // 15-min candles for 5 days â†’ ~130 points per ticker
       points = await reconstructPortfolioHistoryHiRes(
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
         portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
       );
     } else if (period === '1M') {
-      // 1-hour candles for 1 month â†’ ~150 points per ticker
-      points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
-      );
-    } else if (period === 'YTD') {
-      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      if (ytdDays <= 90) {
-        // Under 90 days: use 1-hour candles for smooth chart like 1M
-        // Yahoo only accepts specific range values: 1mo, 3mo, 6mo, etc.
-        const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+      // 1M: trade-aware with full cash reconstruction (deposits minimal over 1 month)
+      if (hasTrades) {
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 1.0);
+      } else {
         points = await reconstructPortfolioHistoryHiRes(
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-          portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
+          portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
         );
-        // Trim to only include data from Jan 1st of current year
-        const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
-        points = points.filter(p => p.time >= ytdStart);
+      }
+    } else if (period === 'YTD') {
+      // YTD/3M+: trade-aware with partial cash reconstruction (0.7 weight).
+      // 0.7 accounts for ~30% of net purchases coming from external deposits
+      // that aren't in the trade history, avoiding inflated starting values.
+      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+      if (hasTrades) {
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0.7);
       } else {
-        // Over 90 days: daily candles are dense enough
-        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+        if (ytdDays <= 90) {
+          const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
+          points = await reconstructPortfolioHistoryHiRes(
+            holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+            portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
+          );
+          const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+          points = points.filter(p => p.time >= ytdStart);
+        } else {
+          points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+        }
       }
     } else {
-      // 3M+ use daily candles (already enough density)
+      // 3M/1Y/ALL: trade-aware with partial cash reconstruction
       const periodDaysMap: Record<string, number> = {
         '3M': 90,
         '1Y': 365, 'ALL': 365 * 5,
       };
       const periodDays = periodDaysMap[period] ?? 30;
-      points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+      if (hasTrades) {
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0.7);
+      } else {
+        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+      }
     }
 
-    // Normalize chart points to match live portfolio value (same as 1D fix)
+    // Normalize chart points to match live portfolio value.
+    // Use proportional scaling (not constant offset) to preserve relative changes.
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
     if (points.length > 0 && liveVal > 0) {
       const lastCandleVal = points[points.length - 1].value;
-      const offset = liveVal - lastCandleVal;
-      if (Math.abs(offset) > 1) {
-        for (const p of points) p.value += offset;
+      if (lastCandleVal > 0 && Math.abs(liveVal - lastCandleVal) > 1) {
+        const scale = liveVal / lastCandleVal;
+        console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, lastCandle=${lastCandleVal.toFixed(0)}, scale=${scale.toFixed(4)}, first=${points[0].value.toFixed(0)}, last=${points[points.length - 1].value.toFixed(0)}`);
+        for (const p of points) p.value *= scale;
       }
     }
 
@@ -481,20 +512,26 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     // Rebaseline to latest composition change within the window to avoid false jumps.
-    if (points.length > 0) {
+    // Skip for trade-aware periods (1M/YTD/3M/1Y/ALL) — trades already account for composition changes.
+    // 1W always uses current-holdings, so it still needs this filter.
+    const usedTradeReconstruction = hasTrades && period !== '1W';
+    if (!usedTradeReconstruction && points.length > 0) {
       const windowStart = new Date(points[0].time);
       const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, windowStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
-        points = points.filter(p => p.time >= cutoff);
+        const filtered = points.filter(p => p.time >= cutoff);
+        if (filtered.length >= 2) {
+          points = filtered;
+        }
       }
     }
 
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
 
     res.json({ points, periodStartValue, period });
-  } catch (_error) {
-    console.error('Error fetching chart data:');
+  } catch (chartError) {
+    console.error('Error fetching chart data:', chartError instanceof Error ? chartError.stack : String(chartError));
     res.status(500).json({ error: 'Failed to fetch chart data' });
   }
 }
@@ -597,13 +634,14 @@ function normalizeHeader(value: string): string {
  */
 function parseRobinhoodTransactionCsv(
   data: Record<string, unknown>[]
-): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[] } | null {
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number }[] } | null {
   const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
   const isRobinhood = headers.includes('activity date') && headers.includes('trans code') && headers.includes('instrument');
   if (!isRobinhood) return null;
 
   const positions = new Map<string, { shares: number; totalCost: number }>();
   const warnings: { rowNumber: number; message: string }[] = [];
+  const trades: { date: string; ticker: string; type: string; shares: number; price: number }[] = [];
 
   // Codes that don't affect share counts — skip silently
   const ignoreCodes = new Set(['CDIV', 'GOLD', 'ACH', 'GDBP', 'INT', 'MINT', 'MDIV', 'DTAX', 'DFEE', 'AFEE', 'SLIP', 'MISC', 'FUTSWP']);
@@ -621,6 +659,7 @@ function parseRobinhoodTransactionCsv(
     const transCode = String(row['Trans Code'] || '').trim();
     if (ignoreCodes.has(transCode) || optionsCodes.has(transCode)) return;
 
+    const dateStr = String(row['Activity Date'] || '').trim();
     const qtyRaw = String(row['Quantity'] || '').replace(/[$,]/g, '').trim();
     const qtyClean = qtyRaw.replace(/S$/i, '');
     const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
@@ -636,6 +675,7 @@ function parseRobinhoodTransactionCsv(
       }
       pos.totalCost += qty * price;
       pos.shares += qty;
+      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price });
     } else if (transCode === 'Sell') {
       if (!Number.isFinite(qty) || qty <= 0) {
         warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Sell — invalid qty` });
@@ -652,11 +692,13 @@ function parseRobinhoodTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
+        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0 });
       }
     } else if (transCode === 'SPL') {
       // Stock split: adds shares, total cost unchanged (avg cost decreases)
       if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
         pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'split', shares: qty, price: 0 });
       }
     } else if (transCode === 'ACATI' || transCode === 'REC' || transCode === 'T/A') {
       // Transfer in / Receive / Transfer-adjustment: add shares
@@ -664,16 +706,19 @@ function parseRobinhoodTransactionCsv(
         const p = Number.isFinite(price) && price > 0 ? price : 0;
         pos.totalCost += qty * p;
         pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'transfer', shares: qty, price: p });
       }
     } else if (transCode === 'SXCH' || transCode === 'MRGS') {
       // Symbol exchange or Merger: 'S' suffix = shares removed (old symbol), plain = shares added (new symbol)
       if (qtyRaw.endsWith('S')) {
         pos.shares = 0;
         pos.totalCost = 0;
+        trades.push({ date: dateStr, ticker, type: 'sell', shares: Number.isFinite(qty) ? qty : 0, price: 0 });
       } else if (Number.isFinite(qty) && qty > 0) {
         const p = Number.isFinite(price) && price > 0 ? price : 0;
         pos.totalCost += qty * p;
         pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'merger', shares: qty, price: p });
       }
     } else if (transCode === 'BCXL') {
       // Buy cancel: reverse a buy
@@ -686,6 +731,7 @@ function parseRobinhoodTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
+        trades.push({ date: dateStr, ticker, type: 'cancel', shares: qty, price: Number.isFinite(price) ? price : 0 });
       }
     }
 
@@ -708,7 +754,7 @@ function parseRobinhoodTransactionCsv(
     }
   }
 
-  return { parsed, warnings };
+  return { parsed, warnings, trades };
 }
 
 function parseNumber(value: unknown): number | null {
@@ -751,6 +797,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         editableFields: ['ticker', 'shares', 'averageCost'],
         parsed: robinhoodResult.parsed,
         warnings: robinhoodResult.warnings,
+        trades: robinhoodResult.trades,
         totalRows: data.length,
         validRows: robinhoodResult.parsed.length,
         skippedRows: data.length - robinhoodResult.parsed.length,
@@ -846,7 +893,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
 
 export async function confirmPortfolioImportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { holdings, mode } = req.body as { holdings?: any[]; mode?: 'replace' | 'merge' };
+    const { holdings, mode, trades } = req.body as { holdings?: any[]; mode?: 'replace' | 'merge'; trades?: any[] };
     if (!Array.isArray(holdings) || holdings.length === 0) {
       res.status(400).json({ error: 'holdings must be a non-empty array' });
       return;
@@ -896,6 +943,31 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         req.user!.userId
       );
     }
+
+    // Save trade history if provided (from Robinhood CSV import)
+    if (Array.isArray(trades) && trades.length > 0) {
+      // Clear existing trades for this user on replace
+      if (mode === 'replace') {
+        await prisma.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } });
+      }
+      // Batch insert trades
+      const tradeRecords = trades
+        .filter((t: any) => t.date && t.ticker && t.type)
+        .map((t: any) => ({
+          userId: req.user!.userId,
+          date: new Date(t.date),
+          ticker: String(t.ticker).trim().toUpperCase(),
+          type: String(t.type),
+          shares: Number(t.shares) || 0,
+          price: Number(t.price) || 0,
+        }))
+        .filter(t => !isNaN(t.date.getTime()));
+      if (tradeRecords.length > 0) {
+        await prisma.portfolioTrade.createMany({ data: tradeRecords });
+        console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId}`);
+      }
+    }
+
     try {
       await recordCompositionChange(req.user!.userId, mode === 'replace' ? 'import_replace' : 'import_merge');
       await resetSnapshotsForCompositionChange(req.user!.userId);

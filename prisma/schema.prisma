@@ -122,6 +122,9 @@ model User {
   // UGC reporting
   reportsSubmitted       UserReport[]            @relation("ReportsSubmitted")
   reportsReceived        UserReport[]            @relation("ReportsReceived")
+
+  // Portfolio trade history (from CSV import)
+  portfolioTrades        PortfolioTrade[]
 }
 
 model Watchlist {
@@ -829,6 +832,22 @@ model UserReport {
   @@index([reporterUserId])
   @@index([reportedUserId])
   @@index([status])
+}
+
+// ─── Portfolio Trade History (from CSV import) ──────────────────────
+
+model PortfolioTrade {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  ticker    String
+  type      String   // 'buy' | 'sell' | 'split' | 'transfer' | 'merger' | 'cancel'
+  shares    Float
+  price     Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
 }
 
 // ─── Referral Tracking ──────────────────────────────────────────────
