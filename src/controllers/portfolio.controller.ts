@@ -32,7 +32,7 @@ import {
   setCashBalanceSchema,
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
-import { normalizeSourceBroker } from '../services/ledger/settlement-policy';
+import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
@@ -638,24 +638,51 @@ function normalizeHeader(value: string): string {
   return value.toLowerCase().replace(/[\s_-]/g, '');
 }
 
+type ImportTradeRecord = {
+  date: string;
+  ticker: string;
+  type: string;
+  shares: number;
+  price: number;
+  rowIndex: number;
+  sourceBroker: string;
+  rawAction: string;
+};
+
+type ImportLedgerEventRecord = {
+  eventType: string;
+  effectiveDate: string;
+  settleDate: string | null;
+  ticker: string | null;
+  shares: number | null;
+  price: number | null;
+  amount: number;
+  fees: number;
+  rowIndex: number;
+  sourceBroker: string;
+  rawAction: string;
+};
+
 /**
  * Detect and parse Robinhood transaction history CSV.
  * Replays Buy/Sell transactions to compute current positions with weighted avg cost.
  */
 function parseRobinhoodTransactionCsv(
   data: Record<string, unknown>[]
-): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number; sourceBroker: string; rawAction: string }[] } | null {
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: ImportTradeRecord[]; ledgerEvents: ImportLedgerEventRecord[] } | null {
   const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
   const isRobinhood = headers.includes('activity date') && headers.includes('trans code') && headers.includes('instrument');
   if (!isRobinhood) return null;
 
   const positions = new Map<string, { shares: number; totalCost: number }>();
   const warnings: { rowNumber: number; message: string }[] = [];
-  const trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number; sourceBroker: string; rawAction: string }[] = [];
+  const trades: ImportTradeRecord[] = [];
+  const ledgerEvents: ImportLedgerEventRecord[] = [];
   let tradeRowIndex = 0;
+  let ledgerRowIndex = 0;
 
   // Codes that don't affect share counts — skip silently
-  const ignoreCodes = new Set(['CDIV', 'GOLD', 'ACH', 'GDBP', 'INT', 'MINT', 'MDIV', 'DTAX', 'DFEE', 'AFEE', 'SLIP', 'MISC', 'FUTSWP']);
+  const ignoreCodes = new Set(['SLIP', 'MISC', 'FUTSWP']);
   // Options codes — contracts, not stock shares
   const optionsCodes = new Set(['BTO', 'STC', 'STO', 'OEXP']);
 
@@ -664,18 +691,60 @@ function parseRobinhoodTransactionCsv(
 
   chronological.forEach((row, index) => {
     const originalRowNum = data.length - index;
-    const ticker = String(row['Instrument'] || '').trim().toUpperCase();
-    if (!ticker || !isValidTicker(ticker)) return;
-
     const transCode = String(row['Trans Code'] || '').trim();
     if (ignoreCodes.has(transCode) || optionsCodes.has(transCode)) return;
 
     const dateStr = String(row['Activity Date'] || '').trim();
+    const settleDateStr = String(row['Settle Date'] || '').trim();
+    const tickerRaw = String(row['Instrument'] || '').trim().toUpperCase();
+    const ticker = tickerRaw && isValidTicker(tickerRaw) ? tickerRaw : null;
     const qtyRaw = String(row['Quantity'] || '').replace(/[$,]/g, '').trim();
     const qtyClean = qtyRaw.replace(/S$/i, '');
-    const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
     const qty = parseFloat(qtyClean);
+    const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
     const price = parseFloat(priceRaw);
+    const amount = parseNumber(row['Amount']);
+
+    if (
+      transCode === 'CDIV' ||
+      transCode === 'MDIV' ||
+      transCode === 'ACH' ||
+      transCode === 'GOLD' ||
+      transCode === 'INT' ||
+      transCode === 'MINT' ||
+      transCode === 'GDBP' ||
+      transCode === 'DTAX' ||
+      transCode === 'DFEE' ||
+      transCode === 'AFEE'
+    ) {
+      let eventType: string | null = null;
+      if (transCode === 'CDIV' || transCode === 'MDIV') eventType = 'CASH_DIVIDEND';
+      else if (transCode === 'INT' || transCode === 'MINT' || transCode === 'GDBP') eventType = 'INTEREST';
+      else if (transCode === 'DTAX' || transCode === 'DFEE' || transCode === 'AFEE') eventType = 'FEE';
+      else if (transCode === 'ACH' || transCode === 'GOLD') {
+        if (amount != null && amount > 0) eventType = 'DEPOSIT';
+        else if (amount != null && amount < 0) eventType = 'WITHDRAWAL';
+      }
+      if (eventType && amount != null) {
+        const normalizedAmount = eventType === 'FEE' && amount > 0 ? -amount : amount;
+        ledgerEvents.push({
+          eventType,
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker,
+          shares: qty != null && Number.isFinite(qty) ? Math.abs(qty) : null,
+          price: price != null && Number.isFinite(price) ? Math.abs(price) : null,
+          amount: normalizedAmount,
+          fees: eventType === 'FEE' ? Math.abs(amount) : 0,
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'robinhood',
+          rawAction: transCode,
+        });
+      }
+      return;
+    }
+
+    if (!ticker) return;
 
     const pos = positions.get(ticker) || { shares: 0, totalCost: 0 };
 
@@ -765,7 +834,7 @@ function parseRobinhoodTransactionCsv(
     }
   }
 
-  return { parsed, warnings, trades };
+  return { parsed, warnings, trades, ledgerEvents };
 }
 
 /**
@@ -775,24 +844,20 @@ function parseRobinhoodTransactionCsv(
  */
 function parseSchwabTransactionCsv(
   data: Record<string, unknown>[]
-): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number; sourceBroker: string; rawAction: string }[] } | null {
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: ImportTradeRecord[]; ledgerEvents: ImportLedgerEventRecord[] } | null {
   const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
   const isSchwab = headers.includes('date') && headers.includes('action') && headers.includes('symbol') && !headers.includes('activity date');
   if (!isSchwab) return null;
 
   const positions = new Map<string, { shares: number; totalCost: number }>();
   const warnings: { rowNumber: number; message: string }[] = [];
-  const trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number; sourceBroker: string; rawAction: string }[] = [];
+  const trades: ImportTradeRecord[] = [];
+  const ledgerEvents: ImportLedgerEventRecord[] = [];
   let tradeRowIndex = 0;
+  let ledgerRowIndex = 0;
 
   // Actions to skip (cash/interest/fees, not share transactions)
-  const ignoreActions = new Set([
-    'wire funds', 'wire funds received', 'moneylink transfer',
-    'bank interest', 'credit interest', 'margin interest',
-    'journal', 'cash dividend', 'qualified dividend',
-    'non-qualified div', 'foreign tax paid', 'adr mgmt fee',
-    'ira conversion', 'service fee',
-  ]);
+  const ignoreActions = new Set(['journal', 'ira conversion']);
 
   // Schwab exports newest-first — reverse to process chronologically
   const chronological = [...data].reverse();
@@ -801,15 +866,99 @@ function parseSchwabTransactionCsv(
     const originalRowNum = data.length - index;
     const action = String(row['Action'] || '').trim();
     const actionLower = action.toLowerCase();
+    const dateStr = String(row['Date'] || '').trim();
+    const settleDateStr = String(row['Settlement Date'] || row['Settle Date'] || '').trim();
+    const amount = parseNumber(row['Amount']);
+    const feesAndComm = parseNumber(row['Fees & Comm']) ?? 0;
 
     // Skip totals row and non-trade actions
     if (actionLower === 'transactions total' || actionLower === '') return;
+    if (
+      actionLower === 'cash dividend' ||
+      actionLower === 'qualified dividend' ||
+      actionLower === 'non-qualified div' ||
+      actionLower === 'non-qualified dividend'
+    ) {
+      if (amount != null) {
+        ledgerEvents.push({
+          eventType: 'CASH_DIVIDEND',
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker: null,
+          shares: null,
+          price: null,
+          amount,
+          fees: Math.abs(feesAndComm),
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'schwab',
+          rawAction: action,
+        });
+      }
+      return;
+    }
+    if (
+      actionLower === 'wire funds' ||
+      actionLower === 'wire funds received' ||
+      actionLower === 'moneylink transfer'
+    ) {
+      if (amount != null) {
+        ledgerEvents.push({
+          eventType: amount >= 0 ? 'DEPOSIT' : 'WITHDRAWAL',
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker: null,
+          shares: null,
+          price: null,
+          amount,
+          fees: Math.abs(feesAndComm),
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'schwab',
+          rawAction: action,
+        });
+      }
+      return;
+    }
+    if (actionLower === 'bank interest' || actionLower === 'credit interest' || actionLower === 'margin interest') {
+      if (amount != null) {
+        ledgerEvents.push({
+          eventType: 'INTEREST',
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker: null,
+          shares: null,
+          price: null,
+          amount,
+          fees: Math.abs(feesAndComm),
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'schwab',
+          rawAction: action,
+        });
+      }
+      return;
+    }
+    if (actionLower === 'foreign tax paid' || actionLower === 'adr mgmt fee' || actionLower === 'service fee') {
+      if (amount != null) {
+        ledgerEvents.push({
+          eventType: 'FEE',
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker: null,
+          shares: null,
+          price: null,
+          amount: amount > 0 ? -amount : amount, // Schwab exports fees as positive; negate for cash-out convention
+          fees: Math.abs(feesAndComm || amount),
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'schwab',
+          rawAction: action,
+        });
+      }
+      return;
+    }
     if (ignoreActions.has(actionLower)) return;
 
     const ticker = String(row['Symbol'] || '').trim().toUpperCase();
     if (!ticker || !isValidTicker(ticker)) return;
 
-    const dateStr = String(row['Date'] || '').trim();
     const qtyRaw = String(row['Quantity'] || '').replace(/[$,]/g, '').trim();
     const qty = parseFloat(qtyRaw);
     const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
@@ -825,6 +974,21 @@ function parseSchwabTransactionCsv(
       pos.totalCost += qty * price;
       pos.shares += qty;
       trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
+      if (actionLower === 'reinvest shares') {
+        ledgerEvents.push({
+          eventType: 'DIV_REINVEST',
+          effectiveDate: dateStr,
+          settleDate: settleDateStr || null,
+          ticker,
+          shares: qty,
+          price,
+          amount: 0,
+          fees: Math.abs(feesAndComm),
+          rowIndex: ledgerRowIndex++,
+          sourceBroker: 'schwab',
+          rawAction: action,
+        });
+      }
     } else if (actionLower === 'sell') {
       if (!Number.isFinite(qty) || qty <= 0) {
         warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Sell — invalid qty` });
@@ -884,7 +1048,7 @@ function parseSchwabTransactionCsv(
     }
   }
 
-  return { parsed, warnings, trades };
+  return { parsed, warnings, trades, ledgerEvents };
 }
 
 // parseNumber imported from ../utils/parse-number
@@ -955,6 +1119,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         parsed: robinhoodResult.parsed,
         warnings: robinhoodResult.warnings,
         trades: robinhoodResult.trades,
+        ledgerEvents: robinhoodResult.ledgerEvents,
         totalRows: data.length,
         validRows: robinhoodResult.parsed.length,
         skippedRows: data.length - robinhoodResult.parsed.length,
@@ -980,6 +1145,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         parsed: schwabResult.parsed,
         warnings: schwabResult.warnings,
         trades: schwabResult.trades,
+        ledgerEvents: schwabResult.ledgerEvents,
         totalRows: data.length,
         validRows: schwabResult.parsed.length,
         skippedRows: data.length - schwabResult.parsed.length,
@@ -1160,10 +1326,28 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       return null;
     }
 
+    function inferLedgerEventType(actionText: string, amount: number | null): string | null {
+      const lower = actionText.toLowerCase().trim();
+      if (!lower) {
+        if (amount != null && amount > 0) return 'DEPOSIT';
+        if (amount != null && amount < 0) return 'WITHDRAWAL';
+        return null;
+      }
+      if (lower.includes('dividend') || lower.includes('cash div') || lower === 'cdiv') return 'CASH_DIVIDEND';
+      if (lower.includes('interest') || lower.includes('gdbp')) return 'INTEREST';
+      if (lower.includes('fee') || lower.includes('tax') || lower.includes('withholding')) return 'FEE';
+      if (lower.includes('deposit') || lower.includes('wire') || lower.includes('ach')) return 'DEPOSIT';
+      if (lower.includes('withdraw')) return 'WITHDRAWAL';
+      if (lower.includes('reinvest')) return 'DIV_REINVEST';
+      return null;
+    }
+
     const positions = new Map<string, { shares: number; totalCost: number }>();
     const warnings: { rowNumber: number; message: string }[] = [];
-    const trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number; sourceBroker: string; rawAction: string }[] = [];
+    const trades: ImportTradeRecord[] = [];
+    const ledgerEvents: ImportLedgerEventRecord[] = [];
     let tradeRowIndex = 0;
+    let ledgerRowIndex = 0;
 
     // Process rows (assume chronological or newest-first — we reverse if dates are descending)
     const rows = [...data];
@@ -1186,9 +1370,38 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
         return;
       }
 
+      // Action/amount are needed early for cash-only ledger events
+      const rawAction = mappings.action ? String(row[mappings.action] || '').trim() : '';
+      const totalAmount = mappings.totalAmount ? parseNumber(row[mappings.totalAmount]) : null;
+      const earlyLedgerType = inferLedgerEventType(rawAction, totalAmount);
+
       // Extract ticker
       const ticker = String(row[mappings.ticker] || '').trim().toUpperCase();
       if (!ticker || !isValidTicker(ticker)) {
+        if (earlyLedgerType && earlyLedgerType !== 'DIV_REINVEST' && totalAmount != null) {
+          const effectiveDate = mappings.date
+            ? String(row[mappings.date] || '').trim()
+            : new Date().toLocaleDateString('en-US');
+          if (mappings.date && isNaN(new Date(effectiveDate).getTime())) {
+            incSkip('invalid_date');
+            warnings.push({ rowNumber: rowNum, message: `Invalid date: '${effectiveDate}' for cash event` });
+            return;
+          }
+          ledgerEvents.push({
+            eventType: earlyLedgerType,
+            effectiveDate,
+            settleDate: null,
+            ticker: null,
+            shares: null,
+            price: null,
+            amount: earlyLedgerType === 'FEE' && totalAmount > 0 ? -totalAmount : totalAmount,
+            fees: earlyLedgerType === 'FEE' ? Math.abs(totalAmount) : 0,
+            rowIndex: ledgerRowIndex++,
+            sourceBroker,
+            rawAction: rawAction || 'mapped',
+          });
+          return;
+        }
         incSkip('invalid_ticker');
         warnings.push({ rowNumber: rowNum, message: `Invalid ticker: '${ticker}'` });
         return;
@@ -1211,7 +1424,6 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       // Extract numeric fields
       const price = mappings.price ? parseNumber(row[mappings.price]) : null;
       const shares = mappings.shares ? parseNumber(row[mappings.shares]) : null;
-      const totalAmount = mappings.totalAmount ? parseNumber(row[mappings.totalAmount]) : null;
 
       // Derive missing fields
       let finalPrice = price;
@@ -1224,9 +1436,12 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
         finalShares = Math.abs(totalAmount / finalPrice);
       }
       if (finalPrice == null && finalShares == null) {
-        incSkip('missing_numeric');
-        warnings.push({ rowNumber: rowNum, message: `Missing price and shares for ${ticker}` });
-        return;
+        const candidateLedgerType = inferLedgerEventType(rawAction, totalAmount);
+        if (!(candidateLedgerType && totalAmount != null)) {
+          incSkip('missing_numeric');
+          warnings.push({ rowNumber: rowNum, message: `Missing price and shares for ${ticker}` });
+          return;
+        }
       }
 
       finalPrice = finalPrice ?? 0;
@@ -1234,10 +1449,26 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       if (finalPrice < 0) finalPrice = Math.abs(finalPrice);   // accounting format e.g. ($500)
       if (finalShares < 0) finalShares = Math.abs(finalShares);
 
-      // Extract and infer action
-      const rawAction = mappings.action ? String(row[mappings.action] || '').trim() : '';
+      // Infer action
       const inferredType = inferType(rawAction, totalAmount);
       if (inferredType == null || !CANONICAL_TYPES.has(inferredType)) {
+        const ledgerType = inferLedgerEventType(rawAction, totalAmount);
+        if (ledgerType && totalAmount != null) {
+          ledgerEvents.push({
+            eventType: ledgerType,
+            effectiveDate: dateStr,
+            settleDate: null,
+            ticker,
+            shares: ledgerType === 'DIV_REINVEST' ? finalShares : null,
+            price: ledgerType === 'DIV_REINVEST' ? finalPrice : null,
+            amount: ledgerType === 'FEE' && totalAmount > 0 ? -totalAmount : totalAmount,
+            fees: ledgerType === 'FEE' ? Math.abs(totalAmount) : 0,
+            rowIndex: ledgerRowIndex++,
+            sourceBroker,
+            rawAction: rawAction || 'mapped',
+          });
+          return;
+        }
         incSkip('unsupported_action');
         warnings.push({ rowNumber: rowNum, message: `Unsupported action '${rawAction}' for ${ticker}` });
         return;
@@ -1326,6 +1557,7 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       parsed,
       warnings,
       trades,
+      ledgerEvents,
       totalRows: data.length,
       validRows: parsed.length,
       skippedRows: Object.values(skipReasons).reduce((a, b) => a + b, 0),
@@ -1346,7 +1578,12 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
 
 export async function confirmPortfolioImportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { holdings, mode, trades } = req.body as { holdings?: any[]; mode?: 'replace' | 'merge'; trades?: any[] };
+    const { holdings, mode, trades, ledgerEvents } = req.body as {
+      holdings?: any[];
+      mode?: 'replace' | 'merge';
+      trades?: any[];
+      ledgerEvents?: any[];
+    };
     if (!Array.isArray(holdings) || holdings.length === 0) {
       res.status(400).json({ error: 'holdings must be a non-empty array' });
       return;
@@ -1383,49 +1620,91 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       removed = existingHoldings.length;
       added = normalized.length;
       updated = 0;
-
-      await prisma.holding.deleteMany({ where: { userId: req.user!.userId } });
     } else {
       added = normalized.filter(h => !existingSet.has(h.ticker)).length;
       updated = normalized.filter(h => existingSet.has(h.ticker)).length;
     }
 
-    for (const h of normalized) {
-      await upsertHolding(
-        { ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
-        req.user!.userId
-      );
-    }
+    // Generate a unique sourceFileId for this import batch if any events exist
+    const hasTrades = Array.isArray(trades) && trades.length > 0;
+    const hasLedgerEvents = Array.isArray(ledgerEvents) && ledgerEvents.length > 0;
+    const { randomUUID } = await import('crypto');
+    const sourceFileId = hasTrades || hasLedgerEvents ? randomUUID() : null;
 
-    // Save trade history if provided (from Robinhood CSV import)
-    if (Array.isArray(trades) && trades.length > 0) {
-      // Clear existing trades for this user on replace
-      if (mode === 'replace') {
-        await prisma.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } });
-      }
-      // Generate a unique sourceFileId for this import batch
-      const { randomUUID } = await import('crypto');
-      const sourceFileId = randomUUID();
-      // Batch insert trades with rowIndex for deterministic ordering
-      const tradeRecords = trades
-        .filter((t: any) => t.date && t.ticker && t.type)
-        .map((t: any, idx: number) => ({
+    const tradeRecords = (Array.isArray(trades) ? trades : [])
+      .filter((t: any) => t.date && t.ticker && t.type)
+      .map((t: any, idx: number) => ({
+        userId: req.user!.userId,
+        date: new Date(t.date),
+        ticker: String(t.ticker).trim().toUpperCase(),
+        type: String(t.type),
+        shares: Number(t.shares) || 0,
+        price: Number(t.price) || 0,
+        rowIndex: Number.isFinite(Number(t.rowIndex)) ? Number(t.rowIndex) : idx,
+        sourceFileId,
+        sourceBroker: normalizeSourceBroker(t.sourceBroker),
+        rawAction: typeof t.rawAction === 'string' ? t.rawAction : null,
+      }))
+      .filter(t => !isNaN(t.date.getTime()) && isValidTicker(t.ticker));
+
+    const ledgerRecords = (Array.isArray(ledgerEvents) ? ledgerEvents : [])
+      .filter((e: any) => e.effectiveDate && e.eventType)
+      .map((e: any, idx: number) => {
+        const effectiveDate = new Date(e.effectiveDate);
+        const settleDate = e.settleDate ? new Date(e.settleDate) : null;
+        return {
           userId: req.user!.userId,
-          date: new Date(t.date),
-          ticker: String(t.ticker).trim().toUpperCase(),
-          type: String(t.type),
-          shares: Number(t.shares) || 0,
-          price: Number(t.price) || 0,
-          rowIndex: Number(t.rowIndex) || idx,
+          eventType: String(e.eventType),
+          effectiveDate,
+          settleDate: settleDate && !isNaN(settleDate.getTime()) ? settleDate : null,
+          ticker: typeof e.ticker === 'string' && isValidTicker(String(e.ticker).trim().toUpperCase())
+            ? String(e.ticker).trim().toUpperCase()
+            : null,
+          shares: Number.isFinite(Number(e.shares)) ? Number(e.shares) : null,
+          price: Number.isFinite(Number(e.price)) ? Number(e.price) : null,
+          amount: Number(e.amount) || 0,
+          fees: Number(e.fees) || 0,
+          rowIndex: Number.isFinite(Number(e.rowIndex)) ? Number(e.rowIndex) : idx,
           sourceFileId,
-          sourceBroker: typeof t.sourceBroker === 'string' ? t.sourceBroker : null,
-          rawAction: typeof t.rawAction === 'string' ? t.rawAction : null,
-        }))
-        .filter(t => !isNaN(t.date.getTime()));
-      if (tradeRecords.length > 0) {
-        await prisma.portfolioTrade.createMany({ data: tradeRecords });
-        console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId} (batch ${sourceFileId})`);
+          sourceBroker: normalizeSourceBroker(e.sourceBroker),
+          rawAction: typeof e.rawAction === 'string' ? e.rawAction : null,
+        };
+      })
+      .filter(e => !isNaN(e.effectiveDate.getTime()) && isValidLedgerEventType(e.eventType));
+
+    await prisma.$transaction(async (tx) => {
+      if (mode === 'replace') {
+        await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
+        await tx.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } });
+        await tx.ledgerEvent.deleteMany({ where: { userId: req.user!.userId } });
       }
+
+      for (const h of normalized) {
+        await tx.holding.upsert({
+          where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
+          update: { shares: h.shares, averageCost: h.averageCost },
+          create: {
+            userId: req.user!.userId,
+            ticker: h.ticker,
+            shares: h.shares,
+            averageCost: h.averageCost,
+          },
+        });
+      }
+
+      if (tradeRecords.length > 0) {
+        await tx.portfolioTrade.createMany({ data: tradeRecords });
+      }
+      if (ledgerRecords.length > 0) {
+        await tx.ledgerEvent.createMany({ data: ledgerRecords });
+      }
+    });
+
+    if (tradeRecords.length > 0) {
+      console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
+    }
+    if (ledgerRecords.length > 0) {
+      console.log(`[Import] Saved ${ledgerRecords.length} ledger events for user ${req.user!.userId}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
     }
 
     try {
