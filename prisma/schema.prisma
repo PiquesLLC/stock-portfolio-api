@@ -118,6 +118,10 @@ model User {
   creatorSubscriptions   CreatorSubscription[]   @relation("subscriber")
   creatorSubscribedTo    CreatorSubscription[]   @relation("creator_sub")
   creatorReports         CreatorReport[]
+
+  // UGC reporting
+  reportsSubmitted       UserReport[]            @relation("ReportsSubmitted")
+  reportsReceived        UserReport[]            @relation("ReportsReceived")
 }
 
 model Watchlist {
@@ -804,6 +808,27 @@ model CreatorWebhookEvent {
   processedAt DateTime @default(now())
 
   @@index([processedAt])
+}
+
+// ─── UGC User Reporting ───────────────────────────────────────────
+
+model UserReport {
+  id             String   @id @default(uuid())
+  reporterUserId String
+  reportedUserId String
+  reason         String   // misleading | spam | inappropriate | harassment | other
+  description    String?
+  context        String?  // e.g. "activity feed", "profile"
+  status         String   @default("pending") // pending | reviewed | resolved | dismissed
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  reporter User @relation("ReportsSubmitted", fields: [reporterUserId], references: [id])
+  reported User @relation("ReportsReceived", fields: [reportedUserId], references: [id])
+
+  @@index([reporterUserId])
+  @@index([reportedUserId])
+  @@index([status])
 }
 
 // ─── Referral Tracking ──────────────────────────────────────────────

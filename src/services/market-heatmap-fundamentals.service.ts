@@ -54,6 +54,6 @@ export async function backfillHeatmapFundamentals(): Promise<void> {
   }
 
   console.log(
-    `Heatmap fundamentals: ${cachedCount}/${total} cached, ${backfilled} backfilled, ${failed} failed`
+    `[Heatmap Fundamentals] ${cachedCount}/${total} cached, ${backfilled} backfilled, ${failed} failed`
   );
 }

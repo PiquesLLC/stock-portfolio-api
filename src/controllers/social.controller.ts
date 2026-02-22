@@ -12,6 +12,8 @@ import { getFeed, getUserActivity } from '../services/activity.service';
 import { getPerformanceComparison } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
 import { getCreatorProfile } from '../services/creator.service';
+import { reportUser } from '../services/report.service';
+import { reportUserBodySchema } from '../validators/report.validators';
 
 
 
@@ -351,6 +353,31 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
   } catch (_error) {
     console.error('Error updating user settings:');
     res.status(500).json({ error: 'Failed to update user settings' });
+  }
+}
+
+// POST /users/:userId/report
+export async function reportUserHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const reporterUserId = req.user?.userId;
+    if (!reporterUserId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { userId: reportedUserId } = req.params;
+    const parsed = reportUserBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0].message });
+      return;
+    }
+
+    const { reason, description, context } = parsed.data;
+    const report = await reportUser(reporterUserId, reportedUserId, reason, description, context);
+    res.status(201).json(report);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to submit report' });
   }
 }
 

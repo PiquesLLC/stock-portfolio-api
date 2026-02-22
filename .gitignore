@@ -36,4 +36,10 @@ test_*.csv
 test_*.js
 refresh-*.js
 temp_*.js
+tmp-*.js
+tmp-*.ts
 *.traineddata
+
+# Generated assets
+share-card-redesign-preview*.png
+logo-b64.txt

@@ -5,6 +5,8 @@ const router = Router();
 
 router.get('/', healthCheck);
 router.get('/status', healthStatus);
-router.get('/auth-metrics', authMetrics);
+if (process.env.NODE_ENV !== 'production') {
+  router.get('/auth-metrics', authMetrics);
+}
 
 export default router;

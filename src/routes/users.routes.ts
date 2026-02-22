@@ -10,6 +10,7 @@ import {
   updateRegionHandler,
   getUserSettingsHandler,
   updateUserSettingsHandler,
+  reportUserHandler,
 } from '../controllers/social.controller';
 import { getUserIntelligenceHandler } from '../controllers/portfolioIntelligence.controller';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
@@ -34,5 +35,6 @@ router.delete('/:userId/follow', mutationLimiter, requireAuth, unfollowHandler);
 router.put('/:userId/region', mutationLimiter, requireAuth, updateRegionHandler);
 router.put('/:userId/holdings-visibility', mutationLimiter, requireAuth, updateHoldingsVisibilityHandler);
 router.put('/:userId/settings', mutationLimiter, requireAuth, updateUserSettingsHandler);
+router.post('/:userId/report', mutationLimiter, requireAuth, reportUserHandler);
 
 export default router;

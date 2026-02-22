@@ -1,6 +1,6 @@
 {
     "name": "stock-portfolio-api",
-    "version": "1.0.0",
+    "version": "0.1.0-beta",
     "description": "Robinhood-style REST API for real-time stock portfolio tracking with momentum-based projection engine",
     "main": "dist/index.js",
     "scripts": {

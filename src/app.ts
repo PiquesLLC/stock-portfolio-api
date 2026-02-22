@@ -190,7 +190,7 @@ if (config.sentryDsn) {
 }
 
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
+  console.error('[Express] Unhandled error:', err instanceof Error ? err.message : String(err));
   res.status(500).json({ error: 'Internal server error' });
 });
 
