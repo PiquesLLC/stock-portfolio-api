@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import { TEST_EMAIL } from './helpers';
 
 vi.mock('../middleware/rateLimiter', async () => {
   const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
@@ -32,7 +33,7 @@ describe('Password reset routes', () => {
 
       const res = await request(app)
         .post('/auth/forgot-password')
-        .send({ email: 'test@example.com' });
+        .send({ email: TEST_EMAIL });
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('If this email is registered');
@@ -56,7 +57,7 @@ describe('Password reset routes', () => {
 
       const res = await request(app)
         .post('/auth/reset-password')
-        .send({ email: 'test@example.com', code: '123456', newPassword: 'StrongPass123' });
+        .send({ email: TEST_EMAIL, code: '123456', newPassword: 'StrongPass123' });
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('Password reset');
@@ -71,7 +72,7 @@ describe('Password reset routes', () => {
 
       const res = await request(app)
         .post('/auth/reset-password')
-        .send({ email: 'test@example.com', code: '111111', newPassword: 'StrongPass123' });
+        .send({ email: TEST_EMAIL, code: '111111', newPassword: 'StrongPass123' });
 
       expect(res.status).toBe(400);
       expect(res.body.remainingAttempts).toBe(2);
@@ -86,7 +87,7 @@ describe('Password reset routes', () => {
 
       const res = await request(app)
         .post('/auth/reset-password')
-        .send({ email: 'test@example.com', code: '111111', newPassword: 'StrongPass123' });
+        .send({ email: TEST_EMAIL, code: '111111', newPassword: 'StrongPass123' });
 
       expect(res.status).toBe(429);
     });

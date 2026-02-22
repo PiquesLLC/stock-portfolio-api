@@ -17,6 +17,8 @@ import {
   resendVerificationEmail,
   requestPasswordReset,
   resetPasswordWithCode,
+  generateAccessToken,
+  generateRefreshToken,
 } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
@@ -265,18 +267,30 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
 }
 
 /**
- * POST /auth/verify-email
+ * POST /auth/verify-email (requires auth — uses authenticated user's email, not body)
  */
-export async function verifyEmailHandler(req: Request, res: Response): Promise<void> {
+export async function verifyEmailHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const parsed = verifyEmailSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: formatZodError(parsed.error) });
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
 
-    const { email, code } = parsed.data;
-    const result = await verifyEmailCode(email, code);
+    // Only accept code from body — email comes from the authenticated user
+    const code = req.body?.code;
+    if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      res.status(400).json({ error: 'Code must be 6 digits' });
+      return;
+    }
+
+    // Resolve email from authenticated user, not request body
+    const dbUser = await getUserById(req.user.userId);
+    if (!dbUser?.email) {
+      res.status(400).json({ error: 'No email associated with this account' });
+      return;
+    }
+
+    const result = await verifyEmailCode(dbUser.email, code);
 
     if (!result.success) {
       if (result.error === 'TOO_MANY_ATTEMPTS') {
@@ -285,6 +299,22 @@ export async function verifyEmailHandler(req: Request, res: Response): Promise<v
       }
       res.status(400).json({ error: 'Invalid or expired verification code', remainingAttempts: result.remainingAttempts });
       return;
+    }
+
+    // Issue fresh tokens with emailVerified: true so user is immediately unblocked
+    // Only when verification actually changed state (result.user present) AND user matches
+    if (result.user && result.user.id === req.user.userId) {
+      const token = generateAccessToken({
+        userId: result.user.id,
+        username: result.user.username,
+        plan: result.user.plan,
+        planExpiresAt: result.user.planExpiresAt ? result.user.planExpiresAt.toISOString() : null,
+        emailVerified: true,
+      });
+      const refreshToken = await generateRefreshToken(result.user.id);
+      const { accessOptions, refreshOptions } = getCookieOptions(req);
+      res.cookie('authToken', token, accessOptions);
+      res.cookie('refreshToken', refreshToken, refreshOptions);
     }
 
     res.json({ message: 'Email verified successfully' });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import { generateTestToken, testUser, TEST_EMAIL } from './helpers';
 
 vi.mock('../middleware/rateLimiter', async () => {
   const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
@@ -22,8 +23,24 @@ import app from '../app';
 import * as authService from '../services/auth.service';
 
 describe('Email verification routes', () => {
+  let authCookie: string;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // Generate auth cookie for requireAuthAllowUnverified on /verify-email
+    const token = generateTestToken({ ...testUser, emailVerified: false });
+    authCookie = `authToken=${token}`;
+    // Mock getUserById so controller can resolve email from authenticated user
+    vi.spyOn(authService, 'getUserById').mockResolvedValue({
+      id: testUser.userId,
+      username: testUser.username,
+      displayName: 'Test User',
+      email: TEST_EMAIL,
+      emailVerified: false,
+      plan: 'free',
+      planExpiresAt: null,
+      createdAt: new Date(),
+    });
   });
 
   describe('POST /auth/verify-email', () => {
@@ -35,10 +52,28 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
-        .send({ email: 'test@example.com', code: '123456' });
+        .set('Cookie', authCookie)
+        .send({ code: '123456' });
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('Email verified');
+    });
+
+    it('returns 401 without auth', async () => {
+      const res = await request(app)
+        .post('/auth/verify-email')
+        .send({ code: '123456' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 400 for invalid code format', async () => {
+      const res = await request(app)
+        .post('/auth/verify-email')
+        .set('Cookie', authCookie)
+        .send({ code: 'abc' });
+
+      expect(res.status).toBe(400);
     });
 
     it('returns 400 for invalid code with remaining attempts', async () => {
@@ -50,7 +85,8 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
-        .send({ email: 'test@example.com', code: '999999' });
+        .set('Cookie', authCookie)
+        .send({ code: '999999' });
 
       expect(res.status).toBe(400);
       expect(res.body.remainingAttempts).toBe(2);
@@ -65,9 +101,25 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
-        .send({ email: 'test@example.com', code: '111111' });
+        .set('Cookie', authCookie)
+        .send({ code: '111111' });
 
       expect(res.status).toBe(429);
+    });
+
+    it('uses authenticated user email, not body email', async () => {
+      const spy = vi.spyOn(authService, 'verifyEmailCode').mockResolvedValue({
+        success: true,
+        remainingAttempts: 5,
+      });
+
+      await request(app)
+        .post('/auth/verify-email')
+        .set('Cookie', authCookie)
+        .send({ email: 'attacker@evil.com', code: '123456' });
+
+      // Should have called verifyEmailCode with the DB user's email, not the body email
+      expect(spy).toHaveBeenCalledWith(TEST_EMAIL, '123456');
     });
   });
 
@@ -77,7 +129,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/resend-verification')
-        .send({ email: 'test@example.com' });
+        .send({ email: TEST_EMAIL });
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('verification code');
@@ -91,7 +143,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/resend-verification')
-        .send({ email: 'test@example.com' });
+        .send({ email: TEST_EMAIL });
 
       expect(res.status).toBe(429);
     });
@@ -104,7 +156,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/resend-verification')
-        .send({ email: 'test@example.com' });
+        .send({ email: TEST_EMAIL });
 
       expect(res.status).toBe(400);
     });
