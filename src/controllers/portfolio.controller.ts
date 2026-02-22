@@ -461,8 +461,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        // 1M: trade-aware with full cash reconstruction (deposits minimal over 1 month)
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 1.0);
+        // 1M: trade-aware, constant cash (no deposit/withdrawal data to reconstruct from)
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistoryHiRes(
@@ -476,8 +476,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        // YTD trade-aware with partial cash reconstruction.
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0.7);
+        // YTD trade-aware, constant cash (no deposit/withdrawal data)
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
         if (ytdDays <= 90) {
@@ -503,7 +503,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0.7);
+        // 3M/1Y/ALL trade-aware, constant cash (no deposit/withdrawal data)
+        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
