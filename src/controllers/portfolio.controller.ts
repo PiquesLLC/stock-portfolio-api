@@ -766,6 +766,125 @@ function parseRobinhoodTransactionCsv(
   return { parsed, warnings, trades };
 }
 
+/**
+ * Detect and parse Schwab transaction history CSV.
+ * Format: Date, Action, Symbol, Description, Quantity, Price, Fees & Comm, Amount
+ * Replays trades to compute current positions with weighted avg cost.
+ */
+function parseSchwabTransactionCsv(
+  data: Record<string, unknown>[]
+): { parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[]; warnings: { rowNumber: number; message: string }[]; trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number }[] } | null {
+  const headers = Object.keys(data[0] || {}).map(h => h.toLowerCase().trim());
+  const isSchwab = headers.includes('date') && headers.includes('action') && headers.includes('symbol') && !headers.includes('activity date');
+  if (!isSchwab) return null;
+
+  const positions = new Map<string, { shares: number; totalCost: number }>();
+  const warnings: { rowNumber: number; message: string }[] = [];
+  const trades: { date: string; ticker: string; type: string; shares: number; price: number; rowIndex: number }[] = [];
+  let tradeRowIndex = 0;
+
+  // Actions to skip (cash/interest/fees, not share transactions)
+  const ignoreActions = new Set([
+    'wire funds', 'wire funds received', 'moneylink transfer',
+    'bank interest', 'credit interest', 'margin interest',
+    'journal', 'cash dividend', 'qualified dividend',
+    'non-qualified div', 'foreign tax paid', 'adr mgmt fee',
+    'ira conversion', 'service fee',
+  ]);
+
+  // Schwab exports newest-first — reverse to process chronologically
+  const chronological = [...data].reverse();
+
+  chronological.forEach((row, index) => {
+    const originalRowNum = data.length - index;
+    const action = String(row['Action'] || '').trim();
+    const actionLower = action.toLowerCase();
+
+    // Skip totals row and non-trade actions
+    if (actionLower === 'transactions total' || actionLower === '') return;
+    if (ignoreActions.has(actionLower)) return;
+
+    const ticker = String(row['Symbol'] || '').trim().toUpperCase();
+    if (!ticker || !isValidTicker(ticker)) return;
+
+    const dateStr = String(row['Date'] || '').trim();
+    const qtyRaw = String(row['Quantity'] || '').replace(/[$,]/g, '').trim();
+    const qty = parseFloat(qtyRaw);
+    const priceRaw = String(row['Price'] || '').replace(/[$,()]/g, '').trim();
+    const price = parseFloat(priceRaw);
+
+    const pos = positions.get(ticker) || { shares: 0, totalCost: 0 };
+
+    if (actionLower === 'buy' || actionLower === 'reinvest shares') {
+      if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} ${action} — invalid qty/price` });
+        return;
+      }
+      pos.totalCost += qty * price;
+      pos.shares += qty;
+      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++ });
+    } else if (actionLower === 'sell') {
+      if (!Number.isFinite(qty) || qty <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `Skipped ${ticker} Sell — invalid qty` });
+        return;
+      }
+      if (pos.shares <= 0) {
+        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position` });
+      } else {
+        const avgBefore = pos.totalCost / pos.shares;
+        pos.shares -= qty;
+        if (pos.shares <= 0.001) {
+          pos.shares = 0;
+          pos.totalCost = 0;
+        } else {
+          pos.totalCost = pos.shares * avgBefore;
+        }
+        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++ });
+      }
+    } else if (actionLower === 'stock split') {
+      if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
+        pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'split', shares: qty, price: 0, rowIndex: tradeRowIndex++ });
+      }
+    } else if (actionLower === 'security transfer' || actionLower === 'receive') {
+      if (Number.isFinite(qty) && qty > 0) {
+        const p = Number.isFinite(price) && price > 0 ? price : 0;
+        pos.totalCost += qty * p;
+        pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'transfer', shares: qty, price: p, rowIndex: tradeRowIndex++ });
+      }
+    } else if (actionLower === 'stock merger') {
+      if (Number.isFinite(qty) && qty > 0) {
+        const p = Number.isFinite(price) && price > 0 ? price : 0;
+        pos.totalCost += qty * p;
+        pos.shares += qty;
+        trades.push({ date: dateStr, ticker, type: 'merger', shares: qty, price: p, rowIndex: tradeRowIndex++ });
+      }
+    } else {
+      warnings.push({ rowNumber: originalRowNum, message: `Unknown Schwab action '${action}' for ${ticker}` });
+    }
+
+    positions.set(ticker, pos);
+  });
+
+  const parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[] = [];
+  let rowNum = 1;
+  for (const [ticker, pos] of positions) {
+    if (pos.shares >= 0.01) {
+      const avgCost = pos.totalCost / pos.shares;
+      parsed.push({
+        rowNumber: rowNum++,
+        ticker,
+        shares: Math.round(pos.shares * 1000000) / 1000000,
+        averageCost: Math.round(avgCost * 100) / 100,
+        confidence: 'high',
+      });
+    }
+  }
+
+  return { parsed, warnings, trades };
+}
+
 function parseNumber(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -782,6 +901,41 @@ function isValidTicker(ticker: string): boolean {
   return /^[A-Z]{1,5}(\.[A-Z])?$/.test(ticker);
 }
 
+/**
+ * Strip brokerage-specific header/footer lines from CSV text.
+ * Schwab CSVs start with an account info line ("Transactions  for account...") before the actual headers.
+ * Also removes BOM and trailing totals lines.
+ */
+function preprocessCsvText(text: string): string {
+  // Strip BOM
+  let cleaned = text.replace(/^\uFEFF/, '');
+
+  const lines = cleaned.split(/\r?\n/);
+
+  // Schwab: first line is account info (doesn't contain enough commas to be a header row)
+  // e.g. "Transactions  for account XXXX-1234 as of 02/22/2026"
+  if (lines.length > 1) {
+    const firstLine = lines[0].trim();
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    // Real CSV headers have 3+ commas; account info lines have 0-1
+    if (commaCount <= 1 && firstLine.length > 0 && !firstLine.startsWith('"Date"') && !firstLine.toLowerCase().startsWith('date,')) {
+      lines.shift();
+    }
+  }
+
+  // Remove trailing empty lines and totals rows
+  while (lines.length > 0) {
+    const last = lines[lines.length - 1].trim().toLowerCase();
+    if (last === '' || last.startsWith('transactions total') || last.startsWith('"transactions total"')) {
+      lines.pop();
+    } else {
+      break;
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export async function importPortfolioCsvHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -790,7 +944,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       return;
     }
 
-    const csvText = file.buffer.toString('utf8');
+    const csvText = preprocessCsvText(file.buffer.toString('utf8'));
     const data = parseCsv(csvText, {
       columns: true,
       skip_empty_lines: true,
@@ -811,6 +965,23 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         validRows: robinhoodResult.parsed.length,
         skippedRows: data.length - robinhoodResult.parsed.length,
         warning: `Detected Robinhood transaction history — aggregated ${data.length} transactions into ${robinhoodResult.parsed.length} current positions`,
+      });
+      return;
+    }
+
+    // Try Schwab transaction history format
+    const schwabResult = parseSchwabTransactionCsv(data);
+    if (schwabResult) {
+      res.json({
+        reviewRequired: true,
+        editableFields: ['ticker', 'shares', 'averageCost'],
+        parsed: schwabResult.parsed,
+        warnings: schwabResult.warnings,
+        trades: schwabResult.trades,
+        totalRows: data.length,
+        validRows: schwabResult.parsed.length,
+        skippedRows: data.length - schwabResult.parsed.length,
+        warning: `Detected Schwab transaction history — aggregated ${data.length} transactions into ${schwabResult.parsed.length} current positions`,
       });
       return;
     }
