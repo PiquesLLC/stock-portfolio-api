@@ -55,6 +55,10 @@ import app from '../app';
 describe('Auth Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no MFA enabled
+    prismaMock.mfaMethod.count.mockResolvedValue(0);
+    // Default: no grace-period token for refresh rotation
+    prismaMock.refreshToken.findFirst.mockResolvedValue(null);
   });
 
   // â”€â”€ Password Hashing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -227,8 +231,15 @@ describe('Auth Service', () => {
         id: 'new-user-id',
         username: 'newuser',
         displayName: 'New User',
+        email: 'newuser@example.com',
+        emailVerified: false,
+        plan: 'free',
+        planExpiresAt: null,
       });
       prismaMock.userSettings.create.mockResolvedValue({});
+      prismaMock.consentRecord.create.mockResolvedValue({});
+      prismaMock.emailOtpCode.updateMany.mockResolvedValue({ count: 0 });
+      prismaMock.emailOtpCode.create.mockResolvedValue({});
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'refresh-tok' });
 
       const result = await signup('newuser', 'newuser@example.com', 'New User', 'StrongPass1');
@@ -254,16 +265,19 @@ describe('Auth Service', () => {
   // â”€â”€ Set Password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('setPassword', () => {
     it('should update password and return true', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'u1', username: 'alice' });
-      prismaMock.user.update.mockResolvedValue({});
+      prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await setPassword('alice', 'NewPass123');
       expect(result).toBe(true);
-      expect(prismaMock.user.update).toHaveBeenCalled();
+      expect(prismaMock.user.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ username: 'alice', passwordHash: null }),
+        })
+      );
     });
 
-    it('should return false for non-existent user', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null);
+    it('should return false when no matching user found', async () => {
+      prismaMock.user.updateMany.mockResolvedValue({ count: 0 });
       const result = await setPassword('ghost', 'NewPass123');
       expect(result).toBe(false);
     });
@@ -748,6 +762,12 @@ describe('Auth Middleware', () => {
 describe('Auth Routes (Integration)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no MFA enabled
+    prismaMock.mfaMethod.count.mockResolvedValue(0);
+    // Default: no grace-period token
+    prismaMock.refreshToken.findFirst.mockResolvedValue(null);
+    // Default: no Plaid items (for delete-account)
+    prismaMock.plaidItem.findMany.mockResolvedValue([]);
   });
 
   // â”€â”€ POST /auth/login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -853,18 +873,32 @@ describe('Auth Routes (Integration)', () => {
   // â”€â”€ POST /auth/signup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/signup', () => {
     it('should return 201 and set cookies on successful signup', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null); // username check + signup check
+      prismaMock.user.findUnique.mockResolvedValue(null); // username check + email check
       prismaMock.user.create.mockResolvedValue({
         id: 'new-id',
         username: 'newuser',
         displayName: 'New User',
+        email: 'newuser@example.com',
+        emailVerified: false,
+        plan: 'free',
+        planExpiresAt: null,
       });
       prismaMock.userSettings.create.mockResolvedValue({});
+      prismaMock.consentRecord.create.mockResolvedValue({});
+      prismaMock.emailOtpCode.updateMany.mockResolvedValue({ count: 0 });
+      prismaMock.emailOtpCode.create.mockResolvedValue({});
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'rt-new' });
 
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'newuser', email: 'newuser@example.com', displayName: 'New User', password: 'StrongPass1' });
+        .send({
+          username: 'newuser',
+          email: 'newuser@example.com',
+          displayName: 'New User',
+          password: 'StrongPass1',
+          acceptedPrivacyPolicy: true,
+          acceptedTerms: true,
+        });
 
       expect(res.status).toBe(201);
       expect(res.body.user.username).toBe('newuser');
@@ -873,7 +907,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for invalid username format', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1' });
+        .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -881,7 +915,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for weak password (no uppercase)', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1' });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -889,7 +923,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for short password', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1' });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -900,7 +934,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1' });
+        .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already taken');
@@ -909,7 +943,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 when display name is missing', async () => {
       const res = await request(app)
         .post('/auth/signup')
-        .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1' });
+        .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -918,39 +952,48 @@ describe('Auth Routes (Integration)', () => {
   // â”€â”€ POST /auth/set-password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/set-password', () => {
     it('should set password successfully', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'u1', username: 'alice' });
-      prismaMock.user.update.mockResolvedValue({});
+      const token = generateTestToken(testUser);
+      prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
 
       const res = await request(app)
         .post('/auth/set-password')
-        .send({ username: 'alice', password: 'NewPass123' });
+        .set('Cookie', `authToken=${token}`)
+        .send({ password: 'NewPass123' });
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('Password set');
     });
 
-    it('should return 404 for non-existent user', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null);
+    it('should return 400 when user already has a password', async () => {
+      const token = generateTestToken(testUser);
+      prismaMock.user.updateMany.mockResolvedValue({ count: 0 });
 
       const res = await request(app)
         .post('/auth/set-password')
-        .send({ username: 'ghost', password: 'NewPass123' });
+        .set('Cookie', `authToken=${token}`)
+        .send({ password: 'NewPass123' });
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(400);
     });
 
     it('should return 400 for weak password', async () => {
+      const token = generateTestToken(testUser);
+
       const res = await request(app)
         .post('/auth/set-password')
-        .send({ username: 'alice', password: 'weak' });
+        .set('Cookie', `authToken=${token}`)
+        .send({ password: 'weak' });
 
       expect(res.status).toBe(400);
     });
 
     it('should return 400 for password without numbers', async () => {
+      const token = generateTestToken(testUser);
+
       const res = await request(app)
         .post('/auth/set-password')
-        .send({ username: 'alice', password: 'NoNumbersHere' });
+        .set('Cookie', `authToken=${token}`)
+        .send({ password: 'NoNumbersHere' });
 
       expect(res.status).toBe(400);
     });
@@ -1016,20 +1059,7 @@ describe('Auth Routes (Integration)', () => {
         id: testUser.userId,
         passwordHash: hash,
       });
-      prismaMock.$transaction.mockImplementation(async (fn: any) => {
-        const tx = {
-          refreshToken: { deleteMany: vi.fn() },
-          activityEvent: { deleteMany: vi.fn() },
-          follow: { deleteMany: vi.fn() },
-          alertEvent: { deleteMany: vi.fn() },
-          alert: { deleteMany: vi.fn() },
-          holding: { deleteMany: vi.fn() },
-          portfolioSnapshot: { deleteMany: vi.fn() },
-          userSettings: { deleteMany: vi.fn() },
-          user: { delete: vi.fn() },
-        };
-        await fn(tx);
-      });
+      // Default $transaction passes mockPrisma as tx — all models are present
 
       const res = await request(app)
         .delete('/auth/delete-account')
