@@ -2,6 +2,8 @@
  * Import constants — re-exports broker/trade types from the canonical
  * settlement-policy module to avoid duplicate source-of-truth lists.
  */
+import type { SourceBroker as _SourceBroker } from '../services/ledger/settlement-policy';
+
 export {
   SOURCE_BROKERS,
   type SourceBroker,
@@ -37,7 +39,7 @@ export interface ImportTelemetry {
   rowsParsed: number;
   rowsSkipped: number;
   skipReasons: Record<string, number>;
-  brokerDetected: string | null;
+  brokerDetected: _SourceBroker | null;
   parseDurationMs: number;
 }
 
