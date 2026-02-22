@@ -8,12 +8,16 @@ const passwordSchema = z
   .regex(/[a-z]/, 'Password must include a lowercase letter')
   .regex(/[0-9]/, 'Password must include a number');
 
+// Reserved usernames that cannot be registered (system/admin identities)
+const RESERVED_USERNAMES = new Set(['_system', 'system', 'admin', 'nala', 'support']);
+
 // Username format: alphanumeric + underscores, 3-20 chars
 const usernameSchema = z
   .string({ error: 'Username is required' })
   .min(3, 'Username must be at least 3 characters')
   .max(20, 'Username must be at most 20 characters')
-  .regex(/^[a-zA-Z0-9_]+$/, 'Username must contain only letters, numbers, and underscores');
+  .regex(/^[a-zA-Z0-9_]+$/, 'Username must contain only letters, numbers, and underscores')
+  .refine((val) => !RESERVED_USERNAMES.has(val.toLowerCase()), 'This username is reserved');
 
 export const loginSchema = z.object({
   username: z.string({ error: 'Username is required' }).min(1, 'Username is required'),

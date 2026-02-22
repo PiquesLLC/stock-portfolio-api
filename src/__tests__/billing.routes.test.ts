@@ -34,18 +34,22 @@ vi.mock('../middleware/rateLimiter', () => {
   };
 });
 
-vi.mock('../middleware/auth.middleware', () => ({
-  requireAuth: (req: any, res: any, next: any) => {
+vi.mock('../middleware/auth.middleware', () => {
+  const authHandler = (req: any, res: any, next: any) => {
     if (req.headers['x-test-auth'] !== '1') {
       res.status(401).json({ error: 'Authorization required' });
       return;
     }
     req.user = { userId: 'user_1', username: 'tester', plan: 'pro' };
     next();
-  },
-  optionalAuth: (_req: any, _res: any, next: any) => next(),
-  requireOwnership: () => (_req: any, _res: any, next: any) => next(),
-}));
+  };
+  return {
+    requireAuth: authHandler,
+    requireAuthAllowUnverified: authHandler,
+    optionalAuth: (_req: any, _res: any, next: any) => next(),
+    requireOwnership: () => (_req: any, _res: any, next: any) => next(),
+  };
+});
 
 vi.mock('../services/billing.service', () => ({
   createCheckoutSession: createCheckoutSessionMock,

@@ -279,6 +279,7 @@ export async function issueTokens(user: OAuthUser): Promise<{
     username: user.username,
     plan: user.plan,
     planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+    emailVerified: user.emailVerified ?? false,
   });
   const refreshToken = await generateRefreshToken(user.id);
 

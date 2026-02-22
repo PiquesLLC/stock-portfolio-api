@@ -405,7 +405,7 @@ describe('Auth Service', () => {
         family: 'family-1',
         revokedAt: null,
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'user-1', username: 'alice' },
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
       prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
@@ -431,7 +431,7 @@ describe('Auth Service', () => {
         family: 'family-1',
         revokedAt: new Date(Date.now() - 60_000),
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'user-1', username: 'alice' },
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
       prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 3 });
 
@@ -452,7 +452,7 @@ describe('Auth Service', () => {
         family: 'family-1',
         revokedAt: new Date(Date.now() - 5_000),
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'user-1', username: 'alice' },
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
 
       const result = await rotateRefreshToken('revoked-token-recent');
@@ -468,7 +468,7 @@ describe('Auth Service', () => {
         family: 'family-1',
         revokedAt: null,
         expiresAt: new Date(Date.now() - 86400000), // expired yesterday
-        user: { id: 'user-1', username: 'alice' },
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
 
       const result = await rotateRefreshToken('expired-token');
@@ -579,9 +579,9 @@ describe('Auth Middleware', () => {
         userId: testUser.userId,
         revokedAt: null,
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: testUser.userId, username: testUser.username },
+        user: { id: testUser.userId, username: testUser.username, emailVerified: true, plan: 'free', planExpiresAt: null },
       });
-      prismaMock.refreshToken.update.mockResolvedValue({});
+      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
 
       requireAuth(req, res, next);
@@ -1158,7 +1158,7 @@ describe('Auth Routes (Integration)', () => {
         userId: 'user-1',
         revokedAt: null,
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'user-1', username: 'alice' },
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
       prismaMock.refreshToken.update.mockResolvedValue({});
       prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });

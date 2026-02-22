@@ -125,7 +125,7 @@ export async function rotateRefreshToken(
 ): Promise<{ accessToken: string; refreshToken: string; payload: JwtPayload } | null> {
   const stored = await prisma.refreshToken.findUnique({
     where: { token: oldToken },
-    include: { user: { select: { id: true, username: true, plan: true, planExpiresAt: true } } },
+    include: { user: { select: { id: true, username: true, plan: true, planExpiresAt: true, emailVerified: true } } },
   });
 
   if (!stored || stored.expiresAt < new Date()) {
@@ -159,6 +159,7 @@ export async function rotateRefreshToken(
       username: stored.user.username,
       plan: stored.user.plan,
       planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+      emailVerified: stored.user.emailVerified ?? false,
     };
     return { accessToken: '', refreshToken: latestValid.token, payload };
   }
@@ -185,6 +186,7 @@ export async function rotateRefreshToken(
       username: stored.user.username,
       plan: stored.user.plan,
       planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+      emailVerified: stored.user.emailVerified ?? false,
     };
     return { accessToken: '', refreshToken: latestValid.token, payload };
   }
@@ -194,6 +196,7 @@ export async function rotateRefreshToken(
     username: stored.user.username,
     plan: stored.user.plan,
     planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+    emailVerified: stored.user.emailVerified ?? false,
   };
   const accessToken = generateAccessToken(payload);
   const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
@@ -312,6 +315,7 @@ export async function loginWithPassword(
     username: user.username,
     plan: user.plan,
     planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+    emailVerified: user.emailVerified ?? false,
   });
   const refreshToken = await generateRefreshToken(user.id);
 
@@ -511,6 +515,7 @@ export async function signup(
     username: user.username,
     plan: user.plan,
     planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+    emailVerified: user.emailVerified ?? false,
   });
   const refreshToken = await generateRefreshToken(user.id);
   await issueEmailVerificationCode(user.id, normalizedEmail);
@@ -533,16 +538,17 @@ export async function signup(
 export async function verifyEmailCode(
   email: string,
   code: string
-): Promise<{ success: boolean; remainingAttempts: number; error?: 'INVALID_OR_EXPIRED' | 'TOO_MANY_ATTEMPTS' }> {
+): Promise<{ success: boolean; remainingAttempts: number; error?: 'INVALID_OR_EXPIRED' | 'TOO_MANY_ATTEMPTS'; user?: { id: string; username: string; plan: string; planExpiresAt: Date | null; emailVerified: boolean } }> {
   const normalizedEmail = normalizeEmail(email);
   const user = await prisma.user.findUnique({
     where: { email: normalizedEmail },
-    select: { id: true, emailVerified: true },
+    select: { id: true, username: true, emailVerified: true, plan: true, planExpiresAt: true },
   });
   if (!user) {
     return { success: false, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS, error: 'INVALID_OR_EXPIRED' };
   }
   if (user.emailVerified) {
+    // Already verified — return success but NO user object (prevents token reissuance)
     return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS };
   }
 
@@ -604,7 +610,7 @@ export async function verifyEmailCode(
     // Non-critical
   }
 
-  return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS };
+  return { success: true, remainingAttempts: EMAIL_VERIFY_MAX_ATTEMPTS, user: { ...user, emailVerified: true } };
 }
 
 export async function resendVerificationEmail(

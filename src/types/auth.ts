@@ -5,6 +5,7 @@ export interface JwtPayload {
   username: string;
   plan?: string;
   planExpiresAt?: string | null;
+  emailVerified?: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -42,7 +43,7 @@ export interface SetPasswordRequest {
   password: string;
 }
 
-export type AuthErrorCode = 'NO_TOKEN' | 'TOKEN_EXPIRED' | 'TOKEN_INVALID' | 'TOKEN_REVOKED';
+export type AuthErrorCode = 'NO_TOKEN' | 'TOKEN_EXPIRED' | 'TOKEN_INVALID' | 'TOKEN_REVOKED' | 'EMAIL_NOT_VERIFIED';
 
 /**
  * Auth-specific error for authentication failures (401)

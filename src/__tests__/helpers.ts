@@ -33,15 +33,19 @@ export function generateInvalidToken(payload: JwtPayload): string {
 export const testUser: JwtPayload = {
   userId: 'test-user-id-123',
   username: 'testuser',
+  emailVerified: true,
 };
 
 /**
  * Default test user DB record
  */
+export const TEST_EMAIL = 'piquesyt@gmail.com';
+
 export const testUserRecord = {
   id: 'test-user-id-123',
   username: 'testuser',
   displayName: 'Test User',
+  email: TEST_EMAIL,
   passwordHash: '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012', // placeholder
   createdAt: new Date(),
   profilePublic: true,

@@ -3,8 +3,6 @@ import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHou
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
-import { requireEmailVerifiedForAi } from '../middleware/email-verification.middleware';
-
 const router = Router();
 
 router.get('/search', searchSymbols);
@@ -20,8 +18,8 @@ router.get('/stock/:ticker/about', getAssetAboutHandler);
 router.get('/benchmark/:ticker/closes', getBenchmarkClosesHandler);
 router.get('/news', heavyReadLimiter, getMarketNews);
 router.get('/stock/:ticker/news', heavyReadLimiter, getTickerNews);
-router.get('/stock/:ticker/ai-events', heavyReadLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), getAIEventsHandler);
-router.post('/stock/:ticker/ask', mutationLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), askStockQuestionHandler);
+router.get('/stock/:ticker/ai-events', heavyReadLimiter, requireAuth, requirePlan('premium'), getAIEventsHandler);
+router.post('/stock/:ticker/ask', mutationLimiter, requireAuth, requirePlan('premium'), askStockQuestionHandler);
 router.get('/historical-cagr', heavyReadLimiter, getHistoricalCAGRHandler);
 router.get('/heatmap', heavyReadLimiter, getHeatmapHandler);
 router.get('/stock/:ticker/nala-score', heavyReadLimiter, requireAuth, requirePlan('pro'), getNalaScoreHandler);

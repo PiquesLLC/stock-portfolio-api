@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { loginSchema, signupSchema, setPasswordSchema, changePasswordSchema, deleteAccountSchema, formatZodError } from '../validators/auth.validators';
+import { TEST_EMAIL } from './helpers';
 
 describe('Auth Validators', () => {
   describe('loginSchema', () => {
@@ -23,7 +24,7 @@ describe('Auth Validators', () => {
   describe('signupSchema', () => {
     const valid = {
       username: 'testuser',
-      email: 'test@example.com',
+      email: TEST_EMAIL,
       displayName: 'Test',
       password: 'TestPass1',
       acceptedPrivacyPolicy: true,

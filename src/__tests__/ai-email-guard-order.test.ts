@@ -14,16 +14,16 @@ vi.mock('../middleware/rateLimiter', () => {
   };
 });
 
+// requireAuth now embeds the email verification gate — simulate unverified user
 vi.mock('../middleware/auth.middleware', () => ({
-  requireAuth: (req: any, _res: any, next: any) => {
-    req.user = { userId: 'user-1', plan: 'free' };
-    next();
+  requireAuth: (req: any, res: any, _next: any) => {
+    req.user = { userId: 'user-1', plan: 'free', emailVerified: false };
+    // Hard gate: block unverified users
+    res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' });
   },
-}));
-
-vi.mock('../middleware/email-verification.middleware', () => ({
-  requireEmailVerifiedForAi: (_req: any, res: any, _next: any) => {
-    res.status(403).json({ error: 'email_verification_required' });
+  requireAuthAllowUnverified: (req: any, _res: any, next: any) => {
+    req.user = { userId: 'user-1', plan: 'free', emailVerified: false };
+    next();
   },
 }));
 
@@ -93,12 +93,12 @@ vi.mock('../controllers/tax-harvest.controller', () => ({
 import marketRoutes from '../routes/market.routes';
 import insightsRoutes from '../routes/insights.routes';
 
-describe('AI route middleware order', () => {
+describe('Email verification hard gate blocks all authed routes', () => {
   beforeEach(() => {
     orderState.planCalled = false;
   });
 
-  it('blocks /market/stock/:ticker/ask at email verification before plan check', async () => {
+  it('blocks /market/stock/:ticker/ask at requireAuth before plan check', async () => {
     const app = express();
     app.use(express.json());
     app.use('/market', marketRoutes);
@@ -108,11 +108,12 @@ describe('AI route middleware order', () => {
       .send({ question: 'What is the outlook?' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe('email_verification_required');
+    expect(res.body.error).toBe('Email verification required');
+    expect(res.body.code).toBe('EMAIL_NOT_VERIFIED');
     expect(orderState.planCalled).toBe(false);
   });
 
-  it('blocks /insights/briefing at email verification before plan check', async () => {
+  it('blocks /insights/briefing at requireAuth before plan check', async () => {
     const app = express();
     app.use(express.json());
     app.use('/insights', insightsRoutes);
@@ -120,7 +121,8 @@ describe('AI route middleware order', () => {
     const res = await request(app).get('/insights/briefing');
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe('email_verification_required');
+    expect(res.body.error).toBe('Email verification required');
+    expect(res.body.code).toBe('EMAIL_NOT_VERIFIED');
     expect(orderState.planCalled).toBe(false);
   });
 });

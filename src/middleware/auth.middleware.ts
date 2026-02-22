@@ -50,10 +50,10 @@ function clearAuthCookies(res: Response, req: Request): void {
 }
 
 /**
- * Required auth middleware - rejects request if no valid token present.
- * If access token is expired but a valid refresh token exists, auto-refreshes.
+ * Internal auth implementation — validates token, auto-refreshes if needed.
+ * Does NOT check email verification.
  */
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
+function _requireAuthImpl(req: AuthRequest, res: Response, next: NextFunction): void {
   const accessToken = extractAccessToken(req);
 
   if (!accessToken) {
@@ -153,6 +153,36 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   // Token is invalid (not just expired)
   clearAuthCookies(res, req);
   res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' as AuthErrorCode });
+}
+
+/**
+ * Required auth middleware with email verification gate.
+ * Rejects unverified users with 403 EMAIL_NOT_VERIFIED (system user exempted).
+ */
+export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
+  const gatedNext = ((err?: any) => {
+    // If next was called with an error, pass through
+    if (err) {
+      next(err);
+      return;
+    }
+    // Gate: block explicitly unverified emails (exempt _system user)
+    // Use === false so tokens missing the claim (old sessions) pass through until refresh
+    if (req.user && req.user.username !== '_system' && req.user.emailVerified === false) {
+      res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' as AuthErrorCode });
+      return;
+    }
+    next();
+  }) as NextFunction;
+  _requireAuthImpl(req, res, gatedNext);
+}
+
+/**
+ * Auth middleware WITHOUT email verification gate.
+ * Use for routes that unverified users need access to (e.g. /me, /set-password, /delete-account).
+ */
+export function requireAuthAllowUnverified(req: AuthRequest, res: Response, next: NextFunction): void {
+  _requireAuthImpl(req, res, next);
 }
 
 /**

@@ -22,8 +22,6 @@ import { getTaxHarvestHandler } from '../controllers/tax-harvest.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
-import { requireEmailVerifiedForAi } from '../middleware/email-verification.middleware';
-
 const router = Router();
 
 router.get('/health', requireAuth, getHealthHandler);
@@ -31,9 +29,9 @@ router.get('/attribution', heavyReadLimiter, requireAuth, getAttributionHandler)
 router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
-router.get('/briefing', heavyReadLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), getBriefingHandler);
-router.post('/briefing/explain', mutationLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('pro'), explainBriefingHandler);
-router.get('/behavior', heavyReadLimiter, requireAuth, requireEmailVerifiedForAi, requirePlan('premium'), getBehaviorHandler);
+router.get('/briefing', heavyReadLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
+router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('pro'), explainBriefingHandler);
+router.get('/behavior', heavyReadLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, requireAuth, getDailyReportHandler);
 router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('pro'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
