@@ -847,6 +847,8 @@ model PortfolioTrade {
   price        Float    @default(0)
   rowIndex     Int      @default(0)   // Position in source CSV for deterministic ordering
   sourceFileId String?                // Which import batch this trade came from
+  sourceBroker String?                // Canonical: 'robinhood' | 'schwab' | 'mapped' (enforced in code)
+  rawAction    String?                // Original action text from CSV (e.g. "Buy", "Reinvest Shares")
   createdAt    DateTime @default(now())
 
   @@index([userId, date])

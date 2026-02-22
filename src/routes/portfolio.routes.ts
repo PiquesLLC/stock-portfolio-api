@@ -12,6 +12,7 @@ import {
   getPerformanceHandler,
   getTickerActivity,
   importPortfolioCsvHandler,
+  importMappedCsvHandler,
   confirmPortfolioImportHandler,
   clearPortfolioHandler,
   importPortfolioScreenshotHandler,
@@ -25,6 +26,7 @@ import multer from 'multer';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
+const uploadMapped = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 router.get('/', optionalAuth, getPortfolioHandler);
 router.post('/holdings', mutationLimiter, requireAuth, addHolding);
@@ -40,6 +42,7 @@ router.get('/etf-overlap', requireAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, requireAuth, getPerformanceHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);
+router.post('/import/csv/mapped', mutationLimiter, requireAuth, uploadMapped.single('file'), importMappedCsvHandler);
 router.post('/import/screenshot', mutationLimiter, requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
 router.post('/import/confirm', mutationLimiter, requireAuth, confirmPortfolioImportHandler);
 router.post('/clear', mutationLimiter, requireAuth, clearPortfolioHandler);
