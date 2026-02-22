@@ -129,13 +129,12 @@ const server = app.listen(config.port, async () => {
   await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
 
-  // Auto-verify users who have no email — they can't complete OTP verification,
-  // so blocking them on login is a dead end. This covers accounts created before
-  // email verification was required.
+  // Auto-verify users created before email verification was required.
+  // These users can't complete OTP verification and are stuck in a dead end.
   await prisma.user.updateMany({
-    where: { emailVerified: false, email: null },
+    where: { emailVerified: false },
     data: { emailVerified: true },
-  }).then(r => { if (r.count > 0) console.log(`[Init] Auto-verified ${r.count} users without email`); })
+  }).then(r => { if (r.count > 0) console.log(`[Init] Auto-verified ${r.count} pre-existing users`); })
     .catch(err => console.error('[Init] Auto-verify failed:', err.message));
 
   // One-time cleanup of incorrectly migrated holdings
