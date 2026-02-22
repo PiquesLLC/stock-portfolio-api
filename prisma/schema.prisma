@@ -125,6 +125,9 @@ model User {
 
   // Portfolio trade history (from CSV import)
   portfolioTrades        PortfolioTrade[]
+
+  // Ledger events (cash/non-trade account events from CSV import)
+  ledgerEvents           LedgerEvent[]
 }
 
 model Watchlist {
@@ -852,6 +855,36 @@ model PortfolioTrade {
   createdAt    DateTime @default(now())
 
   @@index([userId, date])
+}
+
+// ─── Ledger Events (cash/non-trade account events) ──────────────────
+
+model LedgerEvent {
+  id            String          @id @default(uuid())
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  eventType     String          // CHECK enforced: DEPOSIT|WITHDRAWAL|CASH_DIVIDEND|DIV_REINVEST|INTEREST|FEE|MARGIN_BORROW|MARGIN_REPAY
+  effectiveDate DateTime
+  settleDate    DateTime?
+
+  ticker        String?
+  shares        Float?
+  price         Float?
+
+  amount        Float           // signed cash movement: +in, -out
+  fees          Float           @default(0)
+
+  rowIndex      Int             @default(0)
+  sourceBroker  String?         // CHECK enforced: ROBINHOOD|SCHWAB|MAPPED|PLAID|UNKNOWN
+  sourceFileId  String?
+  rawAction     String?
+
+  createdAt     DateTime        @default(now())
+
+  @@index([userId, effectiveDate, rowIndex, createdAt, id])
+  @@index([userId, eventType])
+  @@index([sourceFileId])
 }
 
 // ─── Referral Tracking ──────────────────────────────────────────────
