@@ -876,7 +876,7 @@ model LedgerEvent {
   fees          Float           @default(0)
 
   rowIndex      Int             @default(0)
-  sourceBroker  String?         // CHECK enforced: ROBINHOOD|SCHWAB|MAPPED|PLAID|UNKNOWN
+  sourceBroker  String?         // CHECK enforced: robinhood|schwab|mapped|plaid|unknown
   sourceFileId  String?
   rawAction     String?
 

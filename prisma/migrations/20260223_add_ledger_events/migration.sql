@@ -29,7 +29,7 @@ CREATE TABLE "LedgerEvent" (
 
     CONSTRAINT "LedgerEvent_sourceBroker_check"
       CHECK ("sourceBroker" IS NULL OR "sourceBroker" IN (
-        'ROBINHOOD','SCHWAB','MAPPED','PLAID','UNKNOWN'
+        'robinhood','schwab','mapped','plaid','unknown'
       ))
 );
 

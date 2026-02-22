@@ -42,11 +42,11 @@ export type LedgerEventType = (typeof LEDGER_EVENT_TYPES)[number];
 // ─── Source Broker (LedgerEvent.sourceBroker) ───────────────────────
 
 export const SOURCE_BROKERS = [
-  'ROBINHOOD',
-  'SCHWAB',
-  'MAPPED',
-  'PLAID',
-  'UNKNOWN',
+  'robinhood',
+  'schwab',
+  'mapped',
+  'plaid',
+  'unknown',
 ] as const;
 
 export type SourceBroker = (typeof SOURCE_BROKERS)[number];
