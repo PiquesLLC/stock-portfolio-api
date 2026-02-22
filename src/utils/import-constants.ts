@@ -1,20 +1,20 @@
 /**
- * Canonical broker identifiers for sourceBroker field.
- * Enforced at application level (SQLite doesn't support DB enums).
+ * Import constants — re-exports broker/trade types from the canonical
+ * settlement-policy module to avoid duplicate source-of-truth lists.
  */
-export const SOURCE_BROKERS = ['robinhood', 'schwab', 'mapped'] as const;
-export type SourceBroker = typeof SOURCE_BROKERS[number];
-
-export function isValidSourceBroker(value: unknown): value is SourceBroker {
-  return typeof value === 'string' && (SOURCE_BROKERS as readonly string[]).includes(value);
-}
+export {
+  SOURCE_BROKERS,
+  type SourceBroker,
+  isValidSourceBroker,
+  TRADE_EVENT_TYPES as TRADE_TYPES,
+  type TradeEventType as TradeType,
+} from '../services/ledger/settlement-policy';
 
 /**
- * Canonical trade types accepted by the replay engine.
- * Anything not in this set is skipped with 'unsupported_action' telemetry.
+ * Normalize a sourceBroker value from user input.
+ * Returns a valid canonical broker or 'mapped' as fallback.
  */
-export const TRADE_TYPES = ['buy', 'sell', 'split', 'transfer', 'merger', 'cancel'] as const;
-export type TradeType = typeof TRADE_TYPES[number];
+export { normalizeSourceBroker } from '../services/ledger/settlement-policy';
 
 /**
  * Stable telemetry skip-reason keys. Do not rename — analytics depend on these.

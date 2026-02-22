@@ -102,3 +102,10 @@ export function isValidLedgerEventType(value: string): value is LedgerEventType 
 export function isValidSourceBroker(value: string): value is SourceBroker {
   return sourceBrokerSet.has(value);
 }
+
+/** Normalize user-provided sourceBroker; falls back to 'mapped'. */
+export function normalizeSourceBroker(value: unknown): SourceBroker {
+  if (typeof value !== 'string') return 'mapped';
+  const normalized = value.trim().toLowerCase();
+  return isValidSourceBroker(normalized) ? normalized : 'mapped';
+}

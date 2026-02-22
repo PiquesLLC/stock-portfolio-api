@@ -32,6 +32,7 @@ import {
   setCashBalanceSchema,
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
+import { normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
@@ -1119,7 +1120,7 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
     const excludedRows: Set<number> = new Set(
       JSON.parse(req.body.excludedRows || '[]')
     );
-    const sourceBroker = req.body.sourceBroker || 'mapped';
+    const sourceBroker = normalizeSourceBroker(req.body.sourceBroker);
 
     // Parse CSV — strip BOM + preamble lines (e.g. Schwab account info)
     const csvText = preprocessCsvText(file.buffer.toString('utf8'));
