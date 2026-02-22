@@ -530,8 +530,12 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
     }
 
-    // Append current live value
-    if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+    // Append current live value — only for snapshot-based reconstruction.
+    // Trade/ledger replay already has a point for the last trading day, and
+    // appending a separate live point can create a visible drop at the chart
+    // edge when normalization clamping leaves a gap between scaled history
+    // and unscaled liveVal (especially on weekends/holidays).
+    if (!usedModelReconstruction && (points.length === 0 || now - points[points.length - 1].time > 5000)) {
       points.push({ time: now, value: liveVal });
     }
 
