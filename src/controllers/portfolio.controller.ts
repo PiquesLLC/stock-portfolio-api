@@ -458,14 +458,15 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
       );
     } else if (period === '1M') {
+      // Snapshots need ≥50% coverage of expected trading days to be useful
       const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 30);
-      if (snapshotPoints.length >= 5) {
+      const minSnapshotDays = Math.max(10, Math.floor(30 * 0.5 * 5 / 7)); // ~50% of trading days
+      if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        // 1M: trade-aware, constant cash (no deposit/withdrawal data to reconstruct from)
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
@@ -477,13 +478,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     } else if (period === 'YTD') {
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
       const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, ytdDays);
-      if (snapshotPoints.length >= 5) {
+      const minSnapshotDays = Math.max(10, Math.floor(ytdDays * 0.5 * 5 / 7));
+      if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        // YTD trade-aware, constant cash (no deposit/withdrawal data)
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
@@ -507,13 +508,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       };
       const periodDays = periodDaysMap[period] ?? 30;
       const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, periodDays);
-      if (snapshotPoints.length >= 5) {
+      const minSnapshotDays = Math.max(10, Math.floor(periodDays * 0.5 * 5 / 7));
+      if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
-        // 3M/1Y/ALL trade-aware, constant cash (no deposit/withdrawal data)
         points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
