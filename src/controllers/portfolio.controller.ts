@@ -1749,7 +1749,18 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const deleted = await prisma.holding.deleteMany({ where: { userId: req.user!.userId } });
+    // Delete everything: holdings, trades, ledger events, snapshots (+ child holding snapshots)
+    const userSnapshots = await prisma.portfolioSnapshot.findMany({
+      where: { userId: req.user!.userId }, select: { id: true },
+    });
+    const snapshotIds = userSnapshots.map(s => s.id);
+    const [deleted, tradesDeleted, ledgerDeleted, , snapshotsDeleted] = await prisma.$transaction([
+      prisma.holding.deleteMany({ where: { userId: req.user!.userId } }),
+      prisma.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } }),
+      prisma.ledgerEvent.deleteMany({ where: { userId: req.user!.userId } }),
+      prisma.holdingSnapshot.deleteMany({ where: { snapshotId: { in: snapshotIds } } }),
+      prisma.portfolioSnapshot.deleteMany({ where: { userId: req.user!.userId } }),
+    ]);
     await prisma.userSettings.upsert({
       where: { userId: req.user!.userId },
       update: { cashBalance: 0, marginDebt: 0 },
@@ -1761,8 +1772,9 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after clear portfolio:');
     }
+    console.log(`[Clear] userId=${req.user!.userId.slice(0, 8)} holdings=${deleted.count} trades=${tradesDeleted.count} ledger=${ledgerDeleted.count} snapshots=${snapshotsDeleted.count}`);
 
-    res.json({ cleared: true, holdingsRemoved: deleted.count });
+    res.json({ cleared: true, holdingsRemoved: deleted.count, tradesRemoved: tradesDeleted.count, ledgerEventsRemoved: ledgerDeleted.count });
   } catch (_error) {
     console.error('Clear portfolio error:');
     res.status(500).json({ error: 'Failed to clear portfolio' });
