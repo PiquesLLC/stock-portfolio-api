@@ -210,6 +210,40 @@ export async function getSnapshotsAfter(userId: string, startDate: Date): Promis
   });
 }
 
+export async function getSnapshotChartPoints(
+  userId: string,
+  periodDays: number,
+): Promise<{ time: number; value: number }[]> {
+  const since = new Date(Date.now() - periodDays * 86400000);
+
+  const rows = await prisma.$queryRaw<Array<{ timestamp: Date | string; value: number }>>`
+    SELECT s.timestamp AS timestamp,
+           COALESCE(s.netEquity, s.totalValue) AS value
+    FROM PortfolioSnapshot s
+    JOIN (
+      SELECT DATE(timestamp) AS day, MAX(timestamp) AS max_timestamp
+      FROM PortfolioSnapshot
+      WHERE userId = ${userId}
+        AND timestamp >= ${since}
+      GROUP BY DATE(timestamp)
+    ) d
+      ON DATE(s.timestamp) = d.day
+     AND s.timestamp = d.max_timestamp
+    WHERE s.userId = ${userId}
+    ORDER BY s.timestamp ASC
+  `;
+
+  if (rows.length < 2) return [];
+
+  return rows
+    .map((row) => ({
+      time: new Date(row.timestamp).getTime(),
+      value: Number(row.value),
+    }))
+    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+    .sort((a, b) => a.time - b.time);
+}
+
 export async function getRecentSnapshots(userId: string, limit: number): Promise<PortfolioSnapshot[]> {
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: { userId },

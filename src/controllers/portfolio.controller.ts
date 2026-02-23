@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -457,7 +457,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
       );
     } else if (period === '1M') {
-      if (hasLedgerEvents) {
+      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 30);
+      if (snapshotPoints.length >= 5) {
+        points = snapshotPoints;
+      } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
         usedModelReconstruction = true;
       } else if (hasTrades) {
@@ -472,7 +475,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
     } else if (period === 'YTD') {
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      if (hasLedgerEvents) {
+      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, ytdDays);
+      if (snapshotPoints.length >= 5) {
+        points = snapshotPoints;
+      } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
@@ -499,7 +505,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         '1Y': 365, 'ALL': 365 * 5,
       };
       const periodDays = periodDaysMap[period] ?? 30;
-      if (hasLedgerEvents) {
+      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, periodDays);
+      if (snapshotPoints.length >= 5) {
+        points = snapshotPoints;
+      } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
         usedModelReconstruction = true;
       } else if (hasTrades) {
