@@ -449,6 +449,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     let usedModelReconstruction = false;
+    let usedSnapshots = false;
 
     // For 1W: always use current-holdings reconstruction (hi-res intraday candles).
     // Trade-aware hi-res has data coverage issues. 1W composition change is minimal.
@@ -463,6 +464,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       const minSnapshotDays = Math.max(10, Math.floor(30 * 0.5 * 5 / 7)); // ~50% of trading days
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
+        usedSnapshots = true;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
         usedModelReconstruction = true;
@@ -481,6 +483,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       const minSnapshotDays = Math.max(10, Math.floor(ytdDays * 0.5 * 5 / 7));
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
+        usedSnapshots = true;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
         usedModelReconstruction = true;
@@ -511,6 +514,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       const minSnapshotDays = Math.max(10, Math.floor(periodDays * 0.5 * 5 / 7));
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
+        usedSnapshots = true;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
         usedModelReconstruction = true;
@@ -525,21 +529,30 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     console.log(`[Chart] ${period} source=${usedModelReconstruction ? 'model' : 'snapshots/hiRes'} points=${points.length} first=${points[0]?.value?.toFixed(0) ?? 'n/a'} last=${points[points.length - 1]?.value?.toFixed(0) ?? 'n/a'}`);
 
     // Normalize chart points to match live portfolio value.
+    // Skip for snapshot data (already accurate recorded values).
     // Use median of last 5 points as scaling anchor (more robust than single last point).
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
-    if (points.length > 0 && liveVal > 0) {
+    if (!usedSnapshots && points.length > 0 && liveVal > 0) {
       const anchorWindow = points.slice(-Math.min(5, points.length));
       const sortedAnchor = anchorWindow.map(p => p.value).sort((a, b) => a - b);
       const anchorVal = sortedAnchor[Math.floor(sortedAnchor.length / 2)]; // median
       if (anchorVal > 0 && Math.abs(liveVal - anchorVal) > 1) {
-        const scale = liveVal / anchorVal;
-        console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
+        const rawScale = liveVal / anchorVal;
+        const scale = Math.max(0.97, Math.min(1.03, rawScale));
+        if (Math.abs(rawScale - scale) > 0.001) {
+          console.warn(`[Chart] ${period} scale clamped: raw=${rawScale.toFixed(4)} → ${scale.toFixed(4)} (liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)})`);
+        } else {
+          console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
+        }
         for (const p of points) p.value *= scale;
       }
     }
 
-    // Always append the live point so chart ends at the exact current value.
-    if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+    // Append current live value.
+    // When trade/ledger replay produced data, skip the live point — it can
+    // create a visible drop at the chart edge due to normalization clamping.
+    const skipLivePoint = usedModelReconstruction && points.length > 0;
+    if (!skipLivePoint && (points.length === 0 || now - points[points.length - 1].time > 5000)) {
       points.push({ time: now, value: liveVal });
     }
 
