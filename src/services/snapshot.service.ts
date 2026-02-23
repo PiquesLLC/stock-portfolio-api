@@ -216,32 +216,29 @@ export async function getSnapshotChartPoints(
 ): Promise<{ time: number; value: number }[]> {
   const since = new Date(Date.now() - periodDays * 86400000);
 
-  const rows = await prisma.$queryRaw<Array<{ timestamp: Date | string; value: number }>>`
-    SELECT s.timestamp AS timestamp,
-           COALESCE(s.netEquity, s.totalValue) AS value
-    FROM PortfolioSnapshot s
-    JOIN (
-      SELECT DATE(timestamp) AS day, MAX(timestamp) AS max_timestamp
-      FROM PortfolioSnapshot
-      WHERE userId = ${userId}
-        AND timestamp >= ${since}
-      GROUP BY DATE(timestamp)
-    ) d
-      ON DATE(s.timestamp) = d.day
-     AND s.timestamp = d.max_timestamp
-    WHERE s.userId = ${userId}
-    ORDER BY s.timestamp ASC
-  `;
+  const snapshots = await prisma.portfolioSnapshot.findMany({
+    where: { userId, timestamp: { gte: since } },
+    orderBy: { timestamp: 'asc' },
+    select: { timestamp: true, totalValue: true, netEquity: true },
+  });
 
-  if (rows.length < 2) return [];
+  console.log(`[SnapshotChart] userId=${userId.slice(0, 8)}, period=${periodDays}d, found=${snapshots.length} snapshots`);
 
-  return rows
-    .map((row) => ({
-      time: new Date(row.timestamp).getTime(),
-      value: Number(row.value),
-    }))
-    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
-    .sort((a, b) => a.time - b.time);
+  if (snapshots.length < 2) return [];
+
+  // Deduplicate to 1 point per calendar day (last snapshot of each day)
+  const byDay = new Map<string, { time: number; value: number }>();
+  for (const s of snapshots) {
+    const day = s.timestamp.toISOString().slice(0, 10);
+    const value = s.netEquity ?? s.totalValue;
+    if (Number.isFinite(value) && value > 0) {
+      byDay.set(day, { time: s.timestamp.getTime(), value });
+    }
+  }
+
+  const points = Array.from(byDay.values()).sort((a, b) => a.time - b.time);
+  console.log(`[SnapshotChart] Deduped to ${points.length} daily points (${points.length > 0 ? points[0].value.toFixed(0) : 'n/a'} → ${points.length > 0 ? points[points.length - 1].value.toFixed(0) : 'n/a'})`);
+  return points;
 }
 
 export async function getRecentSnapshots(userId: string, limit: number): Promise<PortfolioSnapshot[]> {

@@ -437,6 +437,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const hasTrades = tradeCount > 0;
     const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user!.userId } });
     const hasLedgerEvents = ledgerEventCount > 0;
+    console.log(`[Chart] ${period} userId=${req.user!.userId.slice(0, 8)} trades=${tradeCount} ledger=${ledgerEventCount}`);
     let tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[] = [];
     if (hasTrades && !hasLedgerEvents) {
       tradeHistory = await prisma.portfolioTrade.findMany({
@@ -519,6 +520,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
       }
     }
+
+    console.log(`[Chart] ${period} source=${usedModelReconstruction ? 'model' : 'snapshots/hiRes'} points=${points.length} first=${points[0]?.value?.toFixed(0) ?? 'n/a'} last=${points[points.length - 1]?.value?.toFixed(0) ?? 'n/a'}`);
 
     // Normalize chart points to match live portfolio value.
     // Use median of last 5 points as scaling anchor (more robust than single last point).
