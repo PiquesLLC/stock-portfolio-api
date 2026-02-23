@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromTrades, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -431,22 +431,12 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const now = Date.now();
     let points: { time: number; value: number }[];
 
-    // Check if user has trade history (from Robinhood CSV import).
-    // If so, use trade-aware reconstruction for accurate historical charts.
-    const tradeCount = await prisma.portfolioTrade.count({ where: { userId: req.user!.userId } });
-    const hasTrades = tradeCount > 0;
+    // Check if user has ledger events (deposits/withdrawals/dividends from CSV import).
+    // Only ledger-based reconstruction is accurate enough for charts — trade-only
+    // reconstruction without cash flow data produces wildly wrong portfolio values.
     const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user!.userId } });
     const hasLedgerEvents = ledgerEventCount > 0;
-    console.log(`[Chart] ${period} userId=${req.user!.userId.slice(0, 8)} trades=${tradeCount} ledger=${ledgerEventCount}`);
-    let tradeHistory: { date: Date; ticker: string; type: string; shares: number; price: number }[] = [];
-    if (hasTrades && !hasLedgerEvents) {
-      tradeHistory = await prisma.portfolioTrade.findMany({
-        where: { userId: req.user!.userId },
-        orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-        select: { date: true, ticker: true, type: true, shares: true, price: true },
-      });
-      console.log(`[Chart] ${period} for user ${req.user!.userId} — using ${tradeHistory.length} trades for accurate reconstruction`);
-    }
+    console.log(`[Chart] ${period} userId=${req.user!.userId.slice(0, 8)} ledger=${ledgerEventCount}`);
 
     let usedModelReconstruction = false;
     let usedSnapshots = false;
@@ -468,10 +458,9 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
         usedModelReconstruction = true;
-      } else if (hasTrades) {
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, 30, portfolio.marginDebt, 0);
-        usedModelReconstruction = true;
       } else {
+        // Trade reconstruction without ledger events (deposits/withdrawals) produces
+        // inaccurate portfolio values. Fall back to current-holdings × historical prices.
         points = await reconstructPortfolioHistoryHiRes(
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
           portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
@@ -486,9 +475,6 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         usedSnapshots = true;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
-        usedModelReconstruction = true;
-      } else if (hasTrades) {
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, ytdDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
         if (ytdDays <= 90) {
@@ -517,9 +503,6 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         usedSnapshots = true;
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
-        usedModelReconstruction = true;
-      } else if (hasTrades) {
-        points = await reconstructPortfolioHistoryFromTrades(tradeHistory, portfolio.cashBalance, periodDays, portfolio.marginDebt, 0);
         usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
