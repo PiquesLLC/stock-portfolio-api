@@ -56,7 +56,12 @@ GOOG,3,0,ok`;
   });
 
   it('clears portfolio with confirmation', async () => {
+    prismaMock.portfolioSnapshot.findMany.mockResolvedValue([{ id: 'snap-1' }, { id: 'snap-2' }]);
     prismaMock.holding.deleteMany.mockResolvedValue({ count: 4 });
+    prismaMock.portfolioTrade.deleteMany.mockResolvedValue({ count: 3 });
+    prismaMock.ledgerEvent.deleteMany.mockResolvedValue({ count: 2 });
+    prismaMock.holdingSnapshot.deleteMany.mockResolvedValue({ count: 6 });
+    prismaMock.portfolioSnapshot.deleteMany.mockResolvedValue({ count: 2 });
     prismaMock.userSettings.upsert.mockResolvedValue({});
 
     const res = await request(app)
@@ -67,6 +72,8 @@ GOOG,3,0,ok`;
     expect(res.status).toBe(200);
     expect(res.body.cleared).toBe(true);
     expect(res.body.holdingsRemoved).toBe(4);
+    expect(res.body.tradesRemoved).toBe(3);
+    expect(res.body.ledgerEventsRemoved).toBe(2);
   });
 
   it('rejects clear without confirmation', async () => {

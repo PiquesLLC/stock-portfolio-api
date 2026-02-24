@@ -65,10 +65,13 @@ describe('searchSymbols market-cap enrichment', () => {
 
   it('cache miss fetches search results and triggers market cap enrichment fetch', async () => {
     mockFinnhubSearchResult('ABCD');
-    finnhubQueueRequestMock.mockResolvedValue({ marketCapitalization: 123456 });
+    finnhubQueueRequestMock.mockImplementation(async (path: string) => {
+      if (path === '/stock/profile2') return { marketCapitalization: 123456 };
+      // ADV enrichment path (/stock/candle) can run in parallel; return minimal valid shape.
+      return { s: 'ok', v: [1000, 2000, 3000] };
+    });
 
     const response = await searchSymbols('ABCD');
-    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(response.partial).toBe(false);
     expect(response.results[0]?.symbol).toBe('ABCD');
@@ -77,15 +80,22 @@ describe('searchSymbols market-cap enrichment', () => {
         call => typeof call[0] === 'string' && call[0].includes('/search')
       )
     ).toBe(true);
-    expect(finnhubQueueRequestMock).toHaveBeenCalledWith('/stock/profile2', { symbol: 'ABCD' });
+    await vi.waitFor(() => {
+      expect(finnhubQueueRequestMock).toHaveBeenCalledWith('/stock/profile2', { symbol: 'ABCD' });
+    });
   });
 
   it('cache hit reuses cached search results and avoids second Finnhub search call', async () => {
     mockFinnhubSearchResult('EFGH');
-    finnhubQueueRequestMock.mockResolvedValue({ marketCapitalization: 5000 });
+    finnhubQueueRequestMock.mockImplementation(async (path: string) => {
+      if (path === '/stock/profile2') return { marketCapitalization: 5000 };
+      return { s: 'ok', v: [1000, 2000, 3000] };
+    });
 
     await searchSymbols('EFGH');
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await vi.waitFor(() => {
+      expect(finnhubQueueRequestMock).toHaveBeenCalled();
+    });
     const callsAfterFirst = axiosGetMock.mock.calls.length;
     await searchSymbols('EFGH');
 
@@ -94,10 +104,12 @@ describe('searchSymbols market-cap enrichment', () => {
 
   it('enrichment failure does not block search response', async () => {
     mockFinnhubSearchResult('IJKL');
-    finnhubQueueRequestMock.mockRejectedValue(new Error('profile2 failed'));
+    finnhubQueueRequestMock.mockImplementation(async (path: string) => {
+      if (path === '/stock/profile2') throw new Error('profile2 failed');
+      return { s: 'ok', v: [1000, 2000, 3000] };
+    });
 
     const response = await searchSymbols('IJKL');
-    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(response.partial).toBe(false);
     expect(response.results.length).toBeGreaterThan(0);

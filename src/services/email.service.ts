@@ -110,6 +110,29 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   });
 }
 
+const PERIOD_LABELS: Record<string, string> = {
+  '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
+  'YTD': 'Year to Date', '1Y': '1 Year', 'ALL': 'All Time',
+};
+
+export async function sendPerformanceReport(to: string, html: string, period: string): Promise<void> {
+  const now = new Date();
+  const monthYear = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const periodLabel = PERIOD_LABELS[period] || period;
+
+  const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — would send performance report to ${to} (period: ${period})`);
+    return;
+  }
+  await r.emails.send({
+    from: 'Nala <noreply@piques.io>',
+    to,
+    subject: `Your Nala Portfolio Report - ${monthYear} (${periodLabel})`,
+    html,
+  });
+}
+
 export function getCapturedEmailVerificationCode(email: string): string | null {
   if (process.env.NODE_ENV === 'production') {
     return null;

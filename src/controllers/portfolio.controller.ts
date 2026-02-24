@@ -342,13 +342,19 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return getUserChartHandler(req, res);
     }
 
-    const portfolio = await getPortfolio(req.user!.userId);
+    // Own-portfolio path requires authentication
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const portfolio = await getPortfolio(req.user.userId);
 
     if (period === '1D') {
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const previousCloseValue = liveValue - portfolio.dayChange;
-      const holdings = await getHoldings(req.user!.userId);
+      const holdings = await getHoldings(req.user.userId);
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
       // After hours, Yahoo range=1d still returns the last trading session's data.
@@ -357,10 +363,10 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
       );
 
-      // If Yahoo returned insufficient data, fall back to last 24h of snapshots
+      // If intraday returned insufficient data, fall back to last 24h of snapshots
       if (points.length < 5) {
         const cutoff = new Date(now - 24 * 60 * 60 * 1000);
-        const snapshots = await getAllSnapshots(req.user!.userId);
+        const snapshots = await getAllSnapshots(req.user.userId);
         const recentSnapshots = snapshots.filter(s => s.timestamp.getTime() >= cutoff.getTime());
         if (recentSnapshots.length >= 2) {
           points = recentSnapshots.map(s => ({
@@ -390,7 +396,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         const lastCandleTime = points[points.length - 1].time;
         const gapMs = now - lastCandleTime;
         if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
-          const snapshots = await getSnapshotsAfter(req.user!.userId, new Date(lastCandleTime));
+          const snapshots = await getSnapshotsAfter(req.user.userId, new Date(lastCandleTime));
           for (const s of snapshots) {
             const t = s.timestamp.getTime();
             if (t > lastCandleTime && t < now - 5000) {
@@ -408,18 +414,26 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
 
       // If composition changed within the last day, rebaseline to avoid false jumps.
-      // But don't filter if it would leave too few points for a useful chart.
-      // After-hours imports leave only a handful of snapshots (all past 8 PM ET),
-      // which cluster at the chart's right edge and render as invisible.
-      // In that case, the full-day candles (already offset-normalized to live value)
-      // produce a better chart.
+      // But don't filter if it would leave too few points for a useful chart,
+      // OR if the filtered set is entirely outside market hours (4 AM–8 PM ET).
+      // After-hours imports produce points that cluster at the chart's right edge
+      // and render as invisible. In that case, the full-day candles (already
+      // offset-normalized to live value) produce a better chart.
       const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
-      const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, rangeStart);
+      const latestChange = await getLatestCompositionChangeAfter(req.user.userId, rangeStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
         const filtered = points.filter(p => p.time >= cutoff);
-        const minUsable = Math.max(20, Math.ceil(points.length * 0.15));
-        if (filtered.length >= minUsable) {
+        const minUsable = Math.max(20, Math.ceil(points.length * 0.5));
+        // Verify filtered set has data within market hours (4 AM–8 PM ET)
+        const etHourFmt = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+        });
+        const hasMarketHours = filtered.some(p => {
+          const h = parseInt(etHourFmt.format(new Date(p.time)).split(':')[0]);
+          return h >= 4 && h < 20;
+        });
+        if (filtered.length >= minUsable && hasMarketHours) {
           points = filtered;
         }
       }
@@ -432,16 +446,16 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const holdings = await getHoldings(req.user!.userId);
+    const holdings = await getHoldings(req.user.userId);
     const now = Date.now();
     let points: { time: number; value: number }[];
 
     // Check if user has ledger events (deposits/withdrawals/dividends from CSV import).
     // Only ledger-based reconstruction is accurate enough for charts — trade-only
     // reconstruction without cash flow data produces wildly wrong portfolio values.
-    const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user!.userId } });
+    const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user.userId } });
     const hasLedgerEvents = ledgerEventCount > 0;
-    console.log(`[Chart] ${period} userId=${req.user!.userId.slice(0, 8)} ledger=${ledgerEventCount}`);
+    console.log(`[Chart] ${period} userId=${req.user.userId.slice(0, 8)} ledger=${ledgerEventCount}`);
 
     let usedModelReconstruction = false;
     let usedSnapshots = false;
@@ -450,7 +464,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // otherwise fall back to current-holdings hi-res candles.
     if (period === '1W') {
       if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 7);
+        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 7);
         usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistoryHiRes(
@@ -460,13 +474,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
     } else if (period === '1M') {
       // Snapshots need ≥50% coverage of expected trading days to be useful
-      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 30);
+      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, 30);
       const minSnapshotDays = Math.max(10, Math.floor(30 * 0.5 * 5 / 7)); // ~50% of trading days
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 30);
+        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 30);
         usedModelReconstruction = true;
       } else {
         // Trade reconstruction without ledger events (deposits/withdrawals) produces
@@ -478,13 +492,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
     } else if (period === 'YTD') {
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, ytdDays);
+      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, ytdDays);
       const minSnapshotDays = Math.max(10, Math.floor(ytdDays * 0.5 * 5 / 7));
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, ytdDays);
+        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, ytdDays);
         usedModelReconstruction = true;
       } else {
         if (ytdDays <= 90) {
@@ -506,13 +520,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         '1Y': 365, 'ALL': 365 * 5,
       };
       const periodDays = periodDaysMap[period] ?? 30;
-      const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, periodDays);
+      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, periodDays);
       const minSnapshotDays = Math.max(10, Math.floor(periodDays * 0.5 * 5 / 7));
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, periodDays);
+        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, periodDays);
         usedModelReconstruction = true;
       } else {
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
@@ -553,7 +567,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // Skip when using ledger/trade replay (already models composition changes).
     if (!usedModelReconstruction && points.length > 0) {
       const windowStart = new Date(points[0].time);
-      const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, windowStart);
+      const latestChange = await getLatestCompositionChangeAfter(req.user.userId, windowStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
         const filtered = points.filter(p => p.time >= cutoff);

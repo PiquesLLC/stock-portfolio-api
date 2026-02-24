@@ -32,7 +32,7 @@ vi.mock('../utils/prisma', () => {
     portfolioTrade: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     ledgerEvent: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     holdingSnapshot: { deleteMany: vi.fn() },
-    portfolioSnapshot: { deleteMany: vi.fn() },
+    portfolioSnapshot: { findMany: vi.fn(), deleteMany: vi.fn() },
     portfolioCompositionChange: { create: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() },
     activityEvent: { deleteMany: vi.fn() },
     follow: { deleteMany: vi.fn() },
@@ -68,7 +68,14 @@ vi.mock('../utils/prisma', () => {
     anomalyEvent: { deleteMany: vi.fn() },
     notificationAuditLog: { create: vi.fn(), deleteMany: vi.fn() },
     leaderboardCache: { deleteMany: vi.fn() },
-    $transaction: vi.fn((fn: any) => fn(mockPrisma)),
+    $transaction: vi.fn((arg: any) => {
+      // Support both Prisma transaction styles:
+      // 1) prisma.$transaction(async tx => ...)
+      // 2) prisma.$transaction([op1, op2, ...])
+      if (typeof arg === 'function') return arg(mockPrisma);
+      if (Array.isArray(arg)) return Promise.all(arg);
+      throw new Error('Unsupported prisma.$transaction mock argument');
+    }),
   };
 
   return {
