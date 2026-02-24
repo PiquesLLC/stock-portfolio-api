@@ -4,6 +4,7 @@ import {
   createCheckoutHandler,
   createPortalHandler,
   getBillingStatusHandler,
+  getPricesHandler,
   billingWebhookHandler,
 } from '../controllers/billing.controller';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -11,6 +12,7 @@ import { billingMutationLimiter, billingWebhookLimiter } from '../middleware/rat
 
 const router = Router();
 
+router.get('/prices', getPricesHandler);
 router.post('/checkout', billingMutationLimiter, requireAuth, createCheckoutHandler);
 router.post('/portal', billingMutationLimiter, requireAuth, createPortalHandler);
 router.get('/status', billingMutationLimiter, requireAuth, getBillingStatusHandler);

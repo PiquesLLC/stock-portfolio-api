@@ -10,6 +10,19 @@ import {
 } from '../services/billing.service';
 import { createCheckoutSchema } from '../validators/billing.validators';
 
+export function getPricesHandler(_req: Request, res: Response): void {
+  res.json({
+    pro: {
+      monthly: config.stripeProMonthlyPriceId || null,
+      yearly: config.stripeProYearlyPriceId || null,
+    },
+    premium: {
+      monthly: config.stripePremiumMonthlyPriceId || null,
+      yearly: config.stripePremiumYearlyPriceId || null,
+    },
+  });
+}
+
 export async function createCheckoutHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const parsed = createCheckoutSchema.safeParse(req.body);
