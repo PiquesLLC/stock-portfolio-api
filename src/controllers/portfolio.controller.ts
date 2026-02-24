@@ -446,13 +446,18 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     let usedModelReconstruction = false;
     let usedSnapshots = false;
 
-    // For 1W: always use current-holdings reconstruction (hi-res intraday candles).
-    // Trade-aware hi-res has data coverage issues. 1W composition change is minimal.
+    // For 1W: prefer ledger reconstruction when available (accurate position history),
+    // otherwise fall back to current-holdings hi-res candles.
     if (period === '1W') {
-      points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
-      );
+      if (hasLedgerEvents) {
+        points = await reconstructPortfolioHistoryFromLedger(req.user!.userId, 7);
+        usedModelReconstruction = true;
+      } else {
+        points = await reconstructPortfolioHistoryHiRes(
+          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+          portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
+        );
+      }
     } else if (period === '1M') {
       // Snapshots need ≥50% coverage of expected trading days to be useful
       const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 30);
