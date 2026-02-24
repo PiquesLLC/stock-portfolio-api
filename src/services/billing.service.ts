@@ -80,7 +80,7 @@ export async function createCheckoutSession(userId: string, priceId: string): Pr
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${config.stripeReturnUrl}?checkout=success`,
-    cancel_url: `${config.stripeReturnUrl}?checkout=cancel`,
+    cancel_url: `${config.stripeReturnUrl}?checkout=cancel#tab=pricing`,
     metadata: { userId },
     allow_promotion_codes: true,
   });

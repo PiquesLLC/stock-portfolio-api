@@ -97,7 +97,7 @@ export const config = {
   stripeProYearlyPriceId: process.env.STRIPE_PRO_YEARLY_PRICE_ID || '',
   stripePremiumMonthlyPriceId: process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_PREMIUM || '',
   stripePremiumYearlyPriceId: process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID || '',
-  stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173/settings/billing',
+  stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173',
   stripeConnectWebhookSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
   billingEnabled: process.env.BILLING_ENABLED !== 'false',
   creatorMonetizationEnabled: process.env.CREATOR_MONETIZATION_ENABLED === 'true',
