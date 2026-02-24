@@ -408,13 +408,18 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       }
 
       // If composition changed within the last day, rebaseline to avoid false jumps.
-      // But don't filter if it would leave the chart empty (e.g. fresh import on weekend).
+      // But don't filter if it would leave too few points for a useful chart.
+      // After-hours imports leave only a handful of snapshots (all past 8 PM ET),
+      // which cluster at the chart's right edge and render as invisible.
+      // In that case, the full-day candles (already offset-normalized to live value)
+      // produce a better chart.
       const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
       const latestChange = await getLatestCompositionChangeAfter(req.user!.userId, rangeStart);
       if (latestChange) {
         const cutoff = latestChange.getTime();
         const filtered = points.filter(p => p.time >= cutoff);
-        if (filtered.length >= 2) {
+        const minUsable = Math.max(20, Math.ceil(points.length * 0.15));
+        if (filtered.length >= minUsable) {
           points = filtered;
         }
       }
@@ -1594,11 +1599,12 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
 
 export async function confirmPortfolioImportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { holdings, mode, trades, ledgerEvents } = req.body as {
+    const { holdings, mode, trades, ledgerEvents, marginDebt } = req.body as {
       holdings?: any[];
       mode?: 'replace' | 'merge';
       trades?: any[];
       ledgerEvents?: any[];
+      marginDebt?: number;
     };
     if (!Array.isArray(holdings) || holdings.length === 0) {
       res.status(400).json({ error: 'holdings must be a non-empty array' });
@@ -1714,6 +1720,16 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       if (ledgerRecords.length > 0) {
         await tx.ledgerEvent.createMany({ data: ledgerRecords });
       }
+
+      // Update margin debt if provided
+      if (typeof marginDebt === 'number' && Number.isFinite(marginDebt) && marginDebt >= 0) {
+        const rounded = Math.round(marginDebt * 100) / 100;
+        await tx.userSettings.upsert({
+          where: { userId: req.user!.userId },
+          update: { marginDebt: rounded },
+          create: { userId: req.user!.userId, marginDebt: rounded },
+        });
+      }
     });
 
     if (tradeRecords.length > 0) {
@@ -1736,7 +1752,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
       return;
     }
-    console.error('Import confirm error:');
+    console.error('Import confirm error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to apply import' });
   }
 }

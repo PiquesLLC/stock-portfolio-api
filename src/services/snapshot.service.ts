@@ -47,17 +47,11 @@ export async function getLatestCompositionChangeAfter(userId: string, startDate:
   return latest?.timestamp ?? null;
 }
 
-export async function resetSnapshotsForCompositionChange(userId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  await prisma.holdingSnapshot.deleteMany({
-    where: { timestamp: { gte: cutoff } },
-  });
-  await prisma.portfolioSnapshot.deleteMany({
-    where: {
-      userId,
-      timestamp: { gte: cutoff },
-    },
-  });
+export async function resetSnapshotsForCompositionChange(_userId: string): Promise<void> {
+  // Don't delete snapshots — the chart handler's composition change filter
+  // already handles display cutoffs. Deleting snapshots destroys the 1D
+  // chart's fallback data and causes it to disappear.
+  // Just reset the timer so a new snapshot is created immediately.
   lastSnapshotTime = 0;
 }
 

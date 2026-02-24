@@ -80,6 +80,7 @@ app.use(cors({
 
 app.use(cookieParser());
 const jsonParser = express.json({
+  limit: '2mb',
   // Capture raw body for webhook signature verification (Plaid)
   verify: (req: any, _res, buf) => {
     req.rawBody = buf.toString('utf-8');
