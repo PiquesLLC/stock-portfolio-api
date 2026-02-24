@@ -168,10 +168,11 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     }
     // Gate: block explicitly unverified emails (exempt _system user)
     // Use === false so tokens missing the claim (old sessions) pass through until refresh
-    if (req.user && req.user.username !== '_system' && req.user.emailVerified === false) {
-      res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' as AuthErrorCode });
-      return;
-    }
+    // TODO: Re-enable once Resend is active in production
+    // if (req.user && req.user.username !== '_system' && req.user.emailVerified === false) {
+    //   res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' as AuthErrorCode });
+    //   return;
+    // }
     next();
   }) as NextFunction;
   _requireAuthImpl(req, res, gatedNext);
