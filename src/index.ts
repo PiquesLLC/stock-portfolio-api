@@ -118,7 +118,7 @@ const server = app.listen(config.port, async () => {
     }
   } catch (_error) {
     if (config.nodeEnv === 'production') {
-      console.error('[Init] Billing deploy safety check failed — exiting');
+      console.error('[Init] Billing deploy safety check failed — exiting:', _error instanceof Error ? _error.message : _error);
       server.close(() => process.exit(1));
       return;
     }
