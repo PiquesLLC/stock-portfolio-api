@@ -184,7 +184,9 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
     where: { userId: creatorUserId },
     include: { visibility: true },
   });
-  if (!creator || creator.status !== 'active') return null;
+  if (!creator) return null;
+  // Hide non-active profiles from external viewers; let creators see their own
+  if (creator.status !== 'active' && viewerId !== creatorUserId) return null;
 
   const [entitlement, subscriberCount] = await Promise.all([
     getEntitlement(creatorUserId, viewerId),
@@ -252,10 +254,13 @@ export async function updateCreatorSettings(userId: string, settings: CreatorSet
 
   const creator = await prisma.creator.findUnique({
     where: { userId },
-    select: { id: true },
+    select: { id: true, status: true },
   });
   if (!creator) {
     throw new Error('Creator not found');
+  }
+  if (creator.status === 'suspended') {
+    throw new Error('Account suspended');
   }
 
   await prisma.$transaction([
@@ -387,9 +392,11 @@ export async function getCreatorDashboard(userId: string): Promise<{
 }> {
   const creator = await prisma.creator.findUnique({
     where: { userId },
-    select: { pricingCents: true, id: true },
+    select: { pricingCents: true, id: true, status: true },
   });
-  if (!creator) throw new Error('Creator not found');
+  if (!creator || creator.status !== 'active') {
+    return { mrr: 0, activeSubscribers: 0, churnRatePct: 0, totalEarningsCents: 0, payoutBalanceCents: 0, monthlyEarnings: [], recentEvents: [] };
+  }
 
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -517,5 +524,84 @@ export async function reportCreator(
       description: description?.trim() || null,
       status: 'open',
     },
+  });
+}
+
+export interface CreatorSetupStatus {
+  hasApplied: boolean;
+  hasSetPrice: boolean;
+  hasConnectedStripe: boolean;
+  hasConfiguredVisibility: boolean;
+  status: string | null;
+}
+
+const DEFAULT_PRICING_CENTS = 500;
+
+export async function getCreatorSetupStatus(userId: string): Promise<CreatorSetupStatus> {
+  const creator = await prisma.creator.findUnique({
+    where: { userId },
+    include: { visibility: true },
+  });
+
+  if (!creator) {
+    return { hasApplied: false, hasSetPrice: false, hasConnectedStripe: false, hasConfiguredVisibility: false, status: null };
+  }
+
+  const v = creator.visibility;
+  const hasConfiguredVisibility = v != null && (
+    v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || !v.showHoldings || !v.showSectors
+  );
+
+  return {
+    hasApplied: true,
+    hasSetPrice: creator.pricingCents !== DEFAULT_PRICING_CENTS,
+    hasConnectedStripe: creator.stripeConnectOnboarded,
+    hasConfiguredVisibility,
+    status: creator.status,
+  };
+}
+
+export async function selfActivateCreator(userId: string): Promise<{ ok: boolean; missing?: string[] }> {
+  // Atomic: read + validate + update in a single transaction to prevent TOCTOU races
+  return prisma.$transaction(async (tx) => {
+    const creator = await tx.creator.findUnique({
+      where: { userId },
+      include: { visibility: true },
+    });
+
+    // Already active — idempotent success
+    if (creator?.status === 'active') {
+      return { ok: true };
+    }
+
+    // Suspended creators cannot self-activate
+    if (creator?.status === 'suspended') {
+      return { ok: false, missing: ['account_suspended'] };
+    }
+
+    // Validate all checklist items from the same read
+    const missing: string[] = [];
+    if (!creator) {
+      missing.push('agree_to_terms');
+    } else {
+      if (creator.pricingCents === DEFAULT_PRICING_CENTS) missing.push('set_price');
+      if (!creator.stripeConnectOnboarded) missing.push('connect_stripe');
+      const v = creator.visibility;
+      const hasConfiguredVisibility = v != null && (
+        v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || !v.showHoldings || !v.showSectors
+      );
+      if (!hasConfiguredVisibility) missing.push('configure_visibility');
+    }
+
+    if (missing.length > 0) {
+      return { ok: false, missing };
+    }
+
+    await tx.creator.update({
+      where: { userId },
+      data: { status: 'active' },
+    });
+
+    return { ok: true };
   });
 }

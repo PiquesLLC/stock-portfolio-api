@@ -620,9 +620,10 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
 export async function createStripeConnectOnboardingLink(userId: string): Promise<string> {
   const creator = await prisma.creator.findUnique({
     where: { userId },
-    select: { stripeConnectId: true, user: { select: { email: true } } },
+    select: { stripeConnectId: true, status: true, user: { select: { email: true } } },
   });
   if (!creator) throw new Error('Creator not found');
+  if (creator.status === 'suspended') throw new Error('Account suspended');
 
   const stripe = getStripeClient();
   let accountId = creator.stripeConnectId;

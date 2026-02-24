@@ -5,6 +5,7 @@ import {
   getEntitlement,
   getLockedContent,
   resolveAccessLevel,
+  selfActivateCreator,
   updateCreatorSettings,
 } from '../services/creator.service';
 
@@ -171,5 +172,69 @@ describe('creator service', () => {
         }),
       })
     );
+  });
+
+  it('updateCreatorSettings rejects suspended creators', async () => {
+    (prismaMock as any).creator.findUnique.mockResolvedValue({ id: 'creator_1', status: 'suspended' });
+    await expect(updateCreatorSettings('creator_1', { pricingCents: 1000 }))
+      .rejects.toThrow('Account suspended');
+  });
+
+  describe('selfActivateCreator', () => {
+    const fullCreator = {
+      id: 'creator_1',
+      userId: 'user_1',
+      status: 'pending',
+      pricingCents: 1500,
+      stripeConnectOnboarded: true,
+      visibility: {
+        showHoldings: true,
+        showTradeHistory: true,
+        showRationale: false,
+        showSectors: true,
+        showRiskMetrics: false,
+        showWatchlists: false,
+      },
+    };
+
+    it('returns ok:true and is idempotent when already active', async () => {
+      (prismaMock as any).creator.findUnique.mockResolvedValue({ ...fullCreator, status: 'active' });
+      const result = await selfActivateCreator('user_1');
+      expect(result).toEqual({ ok: true });
+      expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+    });
+
+    it('blocks suspended creators from self-activating', async () => {
+      (prismaMock as any).creator.findUnique.mockResolvedValue({ ...fullCreator, status: 'suspended' });
+      const result = await selfActivateCreator('user_1');
+      expect(result).toEqual({ ok: false, missing: ['account_suspended'] });
+      expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+    });
+
+    it('activates when all checklist items are complete', async () => {
+      (prismaMock as any).creator.findUnique.mockResolvedValue(fullCreator);
+      (prismaMock as any).creator.update.mockResolvedValue({});
+      const result = await selfActivateCreator('user_1');
+      expect(result).toEqual({ ok: true });
+      expect((prismaMock as any).creator.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'user_1' },
+          data: { status: 'active' },
+        })
+      );
+    });
+
+    it('rejects when checklist items are incomplete', async () => {
+      (prismaMock as any).creator.findUnique.mockResolvedValue({
+        ...fullCreator,
+        pricingCents: 500, // default = not set
+        stripeConnectOnboarded: false,
+      });
+      const result = await selfActivateCreator('user_1');
+      expect(result.ok).toBe(false);
+      expect(result.missing).toContain('set_price');
+      expect(result.missing).toContain('connect_stripe');
+      expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+    });
   });
 });

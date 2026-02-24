@@ -13,9 +13,11 @@ import {
   getCreatorLockedContentHandler,
   getCreatorPayoutBalanceHandler,
   getCreatorProfileHandler,
+  getCreatorSetupStatusHandler,
   getMyCreatorSubscriptionsHandler,
   reportCreatorHandler,
   requestCreatorPayoutHandler,
+  selfActivateCreatorHandler,
   subscribeToCreatorHandler,
   updateCreatorSettingsHandler,
 } from '../controllers/creator.controller';
@@ -24,10 +26,12 @@ const router = Router();
 
 router.post('/webhooks/stripe', billingWebhookLimiter, express.raw({ type: 'application/json' }), creatorStripeWebhookHandler);
 
+router.get('/setup-status', heavyReadLimiter, requireAuth, getCreatorSetupStatusHandler);
+router.post('/self-activate', mutationLimiter, requireAuth, selfActivateCreatorHandler);
 router.post('/apply', mutationLimiter, requireAuth, applyCreatorHandler);
-router.get('/dashboard', heavyReadLimiter, requireAuth, requireCreator, creatorDashboardHandler);
-router.patch('/settings', mutationLimiter, requireAuth, requireCreator, updateCreatorSettingsHandler);
-router.post('/connect-onboarding', mutationLimiter, requireAuth, requireCreator, connectOnboardingHandler);
+router.get('/dashboard', heavyReadLimiter, requireAuth, creatorDashboardHandler);
+router.patch('/settings', mutationLimiter, requireAuth, updateCreatorSettingsHandler);
+router.post('/connect-onboarding', mutationLimiter, requireAuth, connectOnboardingHandler);
 router.post('/payout', mutationLimiter, requireAuth, requireCreator, requestCreatorPayoutHandler);
 router.get('/payout/balance', heavyReadLimiter, requireAuth, requireCreator, getCreatorPayoutBalanceHandler);
 router.get('/ledger', heavyReadLimiter, requireAuth, requireCreator, getCreatorLedgerHandler);

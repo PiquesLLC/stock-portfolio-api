@@ -10,10 +10,12 @@ import {
   applyAsCreator,
   getCreatorDashboard,
   getCreatorProfile,
+  getCreatorSetupStatus,
   getEntitlement,
   getLockedContent,
   getMyCreatorSubscriptions,
   reportCreator,
+  selfActivateCreator,
   updateCreatorSettings,
 } from '../services/creator.service';
 import {
@@ -72,6 +74,34 @@ export async function activateCreatorHandler(req: AuthRequest, res: Response): P
     res.json({ ok: true });
   } catch (error) {
     console.error('[Creator] activateCreatorHandler failed:', error);
+    res.status(500).json({ error: 'Failed to activate creator' });
+  }
+}
+
+export async function getCreatorSetupStatusHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) { res.status(401).json({ error: 'Authentication required' }); return; }
+    const status = await getCreatorSetupStatus(userId);
+    res.json(status);
+  } catch (error) {
+    console.error('[Creator] getCreatorSetupStatusHandler failed:', error);
+    res.status(500).json({ error: 'Failed to get setup status' });
+  }
+}
+
+export async function selfActivateCreatorHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) { res.status(401).json({ error: 'Authentication required' }); return; }
+    const result = await selfActivateCreator(userId);
+    if (!result.ok) {
+      res.status(400).json({ error: 'Setup incomplete', missing: result.missing });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Creator] selfActivateCreatorHandler failed:', error);
     res.status(500).json({ error: 'Failed to activate creator' });
   }
 }
