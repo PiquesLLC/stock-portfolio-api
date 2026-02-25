@@ -96,9 +96,11 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
         const accessLevel = await resolveAccessLevel(userId, viewerId);
         const visibility = targetUser.creator.visibility;
         if (accessLevel !== 'paid') {
-          if (!visibility.showHoldings) {
+          if (visibility.showHoldings) {
+            // showHoldings=true means holdings are paywalled — clear them for non-paid viewers
             portfolio.holdings = [];
           } else {
+            // Holdings are public but may have partial restrictions
             if (visibility.hideShareCount) {
               portfolio.holdings = portfolio.holdings.map(h => ({
                 ...h,

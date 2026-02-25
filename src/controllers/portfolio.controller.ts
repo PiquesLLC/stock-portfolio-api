@@ -351,11 +351,14 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     const portfolio = await getPortfolio(req.user.userId);
 
+    const includeDebug = String(req.query.debug) === '1';
+
     if (period === '1D') {
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const previousCloseValue = liveValue - portfolio.dayChange;
       const holdings = await getHoldings(req.user.userId);
+      let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
       // After hours, Yahoo range=1d still returns the last trading session's data.
@@ -374,6 +377,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
             time: s.timestamp.getTime(),
             value: s.netEquity ?? s.totalValue,
           }));
+          source = 'snapshot';
         }
       }
 
@@ -420,6 +424,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       // After-hours imports produce points that cluster at the chart's right edge
       // and render as invisible. In that case, the full-day candles (already
       // offset-normalized to live value) produce a better chart.
+      const pointCountRaw = points.length;
+      let rebaselineApplied = false;
       const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
       const latestChange = await getLatestCompositionChangeAfter(req.user.userId, rangeStart);
       if (latestChange) {
@@ -436,6 +442,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         });
         if (filtered.length >= minUsable && hasMarketHours) {
           points = filtered;
+          rebaselineApplied = true;
         }
       }
 
@@ -443,13 +450,20 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         ? (points.length > 0 ? points[0].value : liveValue)
         : (previousCloseValue || (points.length > 0 ? points[0].value : liveValue));
 
-      res.json({ points, periodStartValue, period: '1D' });
+      const response: Record<string, unknown> = { points, periodStartValue, period: '1D', source };
+      if (includeDebug) {
+        response.rebaselineApplied = rebaselineApplied;
+        response.pointCountRaw = pointCountRaw;
+        response.pointCountFinal = points.length;
+      }
+      res.json(response);
       return;
     }
 
     const holdings = await getHoldings(req.user.userId);
     const now = Date.now();
     let points: { time: number; value: number }[];
+    let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'daily';
 
     // Check if user has ledger events (deposits/withdrawals/dividends from CSV import).
     // Only ledger-based reconstruction is accurate enough for charts — trade-only
@@ -467,11 +481,13 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 7);
         usedModelReconstruction = true;
+        source = 'model';
       } else {
         points = await reconstructPortfolioHistoryHiRes(
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
           portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
         );
+        source = 'hiRes';
       }
     } else if (period === '1M') {
       // Snapshots need ≥50% coverage of expected trading days to be useful
@@ -480,9 +496,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
+        source = 'snapshot';
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 30);
         usedModelReconstruction = true;
+        source = 'model';
       } else {
         // Trade reconstruction without ledger events (deposits/withdrawals) produces
         // inaccurate portfolio values. Fall back to current-holdings × historical prices.
@@ -490,6 +508,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
           holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
           portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
         );
+        source = 'hiRes';
       }
     } else if (period === 'YTD') {
       const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
@@ -498,9 +517,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
+        source = 'snapshot';
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user.userId, ytdDays);
         usedModelReconstruction = true;
+        source = 'model';
       } else {
         if (ytdDays <= 90) {
           const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
@@ -508,10 +529,12 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
             holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
             portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
           );
+          source = 'hiRes';
           const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
           points = points.filter(p => p.time >= ytdStart);
         } else {
           points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+          source = 'daily';
         }
       }
     } else {
@@ -526,15 +549,19 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       if (snapshotPoints.length >= minSnapshotDays) {
         points = snapshotPoints;
         usedSnapshots = true;
+        source = 'snapshot';
       } else if (hasLedgerEvents) {
         points = await reconstructPortfolioHistoryFromLedger(req.user.userId, periodDays);
         usedModelReconstruction = true;
+        source = 'model';
       } else {
         points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
+        source = 'daily';
       }
     }
 
-    console.log(`[Chart] ${period} source=${usedModelReconstruction ? 'model' : 'snapshots/hiRes'} points=${points.length} first=${points[0]?.value?.toFixed(0) ?? 'n/a'} last=${points[points.length - 1]?.value?.toFixed(0) ?? 'n/a'}`);
+    const pointCountRaw = points.length;
+    console.log(`[Chart] ${period} source=${source} points=${points.length}`);
 
     // Normalize chart points to match live portfolio value.
     // Skip for snapshot data (already accurate recorded values).
@@ -564,23 +591,20 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       points.push({ time: now, value: liveVal });
     }
 
-    // Rebaseline to latest composition change within the window to avoid false jumps.
-    // Skip when using ledger/trade replay (already models composition changes).
-    if (!usedModelReconstruction && points.length > 0) {
-      const windowStart = new Date(points[0].time);
-      const latestChange = await getLatestCompositionChangeAfter(req.user.userId, windowStart);
-      if (latestChange) {
-        const cutoff = latestChange.getTime();
-        const filtered = points.filter(p => p.time >= cutoff);
-        if (filtered.length >= 2) {
-          points = filtered;
-        }
-      }
-    }
+    // Composition-change rebaseline is handled in the 1D path only (above).
+    // All non-1D paths use current holdings × historical prices (hiRes,
+    // reconstructPortfolioHistory) or record real values (snapshots), so
+    // composition changes don't create false jumps — no rebaseline needed.
 
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
 
-    res.json({ points, periodStartValue, period });
+    const response: Record<string, unknown> = { points, periodStartValue, period, source };
+    if (includeDebug) {
+      response.rebaselineApplied = false;
+      response.pointCountRaw = pointCountRaw;
+      response.pointCountFinal = points.length;
+    }
+    res.json(response);
   } catch (chartError) {
     console.error('Error fetching chart data:', chartError instanceof Error ? chartError.stack : String(chartError));
     res.status(500).json({ error: 'Failed to fetch chart data' });

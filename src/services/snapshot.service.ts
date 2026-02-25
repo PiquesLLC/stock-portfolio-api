@@ -220,18 +220,55 @@ export async function getSnapshotChartPoints(
 
   if (snapshots.length < 2) return [];
 
-  // Deduplicate to 1 point per calendar day (last snapshot of each day)
-  const byDay = new Map<string, { time: number; value: number }>();
+  // Convert to value points
+  const allPoints: { time: number; value: number }[] = [];
   for (const s of snapshots) {
-    const day = s.timestamp.toISOString().slice(0, 10);
     const value = s.netEquity ?? s.totalValue;
     if (Number.isFinite(value) && value > 0) {
-      byDay.set(day, { time: s.timestamp.getTime(), value });
+      allPoints.push({ time: s.timestamp.getTime(), value });
     }
   }
 
-  const points = Array.from(byDay.values()).sort((a, b) => a.time - b.time);
-  console.log(`[SnapshotChart] Deduped to ${points.length} daily points (${points.length > 0 ? points[0].value.toFixed(0) : 'n/a'} → ${points.length > 0 ? points[points.length - 1].value.toFixed(0) : 'n/a'})`);
+  if (allPoints.length < 2) return [];
+
+  // Step 1: Deduplicate to 1 point per calendar day (last snapshot wins).
+  // This reduces thousands of per-minute snapshots to a manageable set.
+  const byDay = new Map<string, { time: number; value: number }>();
+  for (const p of allPoints) {
+    const day = new Date(p.time).toISOString().slice(0, 10);
+    byDay.set(day, p);
+  }
+  const dailyPoints = Array.from(byDay.values()).sort((a, b) => a.time - b.time);
+
+  if (dailyPoints.length < 2) return [];
+
+  // Step 2: Remove outlier days caused by bad quotes (e.g. $28M spikes, $88K dips).
+  // After daily dedup, each day is a single point. A day that differs from
+  // BOTH its neighbors by >3× is clearly a data-provider glitch, not real
+  // portfolio movement. Running outlier detection on daily points (not raw
+  // minute-by-minute) avoids the problem of clustered bad data hiding in crowds.
+  const points: { time: number; value: number }[] = [dailyPoints[0]];
+  let removed = 0;
+  for (let i = 1; i < dailyPoints.length - 1; i++) {
+    const prev = dailyPoints[i - 1].value;
+    const curr = dailyPoints[i].value;
+    const next = dailyPoints[i + 1].value;
+    const ratioPrev = curr / prev;
+    const ratioNext = curr / next;
+    // Outlier if >3× or <0.33× BOTH neighbors (1-day spike/drop)
+    if ((ratioPrev > 3 || ratioPrev < 0.33) && (ratioNext > 3 || ratioNext < 0.33)) {
+      removed++;
+      continue;
+    }
+    points.push(dailyPoints[i]);
+  }
+  points.push(dailyPoints[dailyPoints.length - 1]);
+
+  if (removed > 0) {
+    console.log(`[SnapshotChart] Removed ${removed} outlier days`);
+  }
+
+  console.log(`[SnapshotChart] ${allPoints.length} raw → ${byDay.size} days → ${points.length} clean daily points (period=${periodDays}d)`);
   return points;
 }
 
