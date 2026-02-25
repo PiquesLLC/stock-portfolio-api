@@ -31,6 +31,13 @@ interface HeatmapStock {
   volume: number;
   avgVolume: number;
   subSector: string;
+  // Screener fundamentals (from overview cache, may be null)
+  sector?: string;
+  pe?: number | null;
+  dividendYield?: number | null;
+  beta?: number | null;
+  week52High?: number | null;
+  week52Low?: number | null;
 }
 
 interface HeatmapSubSector {
@@ -266,6 +273,12 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           volume: polygonVolumes.get(upper) ?? 0,
           avgVolume: getCachedAdv(upper) ?? 0,
           subSector: subName,
+          sector: sectorName,
+          pe: overview?.peRatio ?? null,
+          dividendYield: overview?.dividendYield ?? null,
+          beta: overview?.beta ?? null,
+          week52High: overview?.fiftyTwoWeekHigh ?? null,
+          week52Low: overview?.fiftyTwoWeekLow ?? null,
         };
       });
 
