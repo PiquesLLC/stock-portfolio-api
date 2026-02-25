@@ -242,6 +242,7 @@ type CreatorSettingsInput = {
   showWatchlists?: boolean;
   tradeDelayHours?: number;
   hideShareCount?: boolean;
+  discoverable?: boolean;
 };
 
 export async function updateCreatorSettings(userId: string, settings: CreatorSettingsInput): Promise<void> {
@@ -283,6 +284,7 @@ export async function updateCreatorSettings(userId: string, settings: CreatorSet
         showWatchlists: settings.showWatchlists,
         tradeDelayHours: settings.tradeDelayHours,
         hideShareCount: settings.hideShareCount,
+        discoverable: settings.discoverable,
       },
     }),
   ]);
@@ -559,6 +561,234 @@ export async function getCreatorSetupStatus(userId: string): Promise<CreatorSetu
     hasConfiguredVisibility,
     status: creator.status,
   };
+}
+
+// ─── Discovery ────────────────────────────────────────────────
+
+export type DiscoverSort = 'popular' | 'newest' | 'price_low' | 'price_high' | 'performance';
+
+export interface DiscoverCreatorEntry {
+  userId: string;
+  username: string;
+  displayName: string;
+  pitch: string | null;
+  pricingCents: number | null;
+  subscriberCount: number;
+  returnPct: number | null;
+  isVerified: boolean;
+  isCreator: boolean;
+  sectionsUnlocked: string[];
+  createdAt: string;
+}
+
+interface DiscoverCursorData {
+  s: string; // sort type
+  v: number | string | null; // primary sort value
+  ca: string; // createdAt ISO
+  u: string; // userId
+}
+
+function encodeCursor(data: DiscoverCursorData): string {
+  return Buffer.from(JSON.stringify(data)).toString('base64url');
+}
+
+function decodeCursor(cursor: string): DiscoverCursorData | null {
+  try {
+    return JSON.parse(Buffer.from(cursor, 'base64url').toString());
+  } catch {
+    return null;
+  }
+}
+
+function deriveSectionsUnlocked(vis: {
+  showHoldings: boolean;
+  showTradeHistory: boolean;
+  showRationale: boolean;
+  showSectors: boolean;
+  showRiskMetrics: boolean;
+  showWatchlists: boolean;
+} | null): string[] {
+  if (!vis) return [];
+  const sections: string[] = [];
+  if (vis.showHoldings) sections.push('holdings');
+  if (vis.showTradeHistory) sections.push('tradeHistory');
+  if (vis.showRationale) sections.push('rationale');
+  if (vis.showSectors) sections.push('sectors');
+  if (vis.showRiskMetrics) sections.push('riskMetrics');
+  if (vis.showWatchlists) sections.push('watchlists');
+  return sections;
+}
+
+export async function discoverCreators(params: {
+  limit?: number;
+  cursor?: string;
+  sort?: DiscoverSort;
+  minPrice?: number;
+  maxPrice?: number;
+  search?: string;
+}): Promise<{
+  creators: DiscoverCreatorEntry[];
+  nextCursor: string | null;
+  total: number | null;
+}> {
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 50);
+  const sort: DiscoverSort = params.sort ?? 'popular';
+
+  // Build base where clause — all public, leaderboard-eligible users
+  const where: Record<string, unknown> = {
+    profilePublic: true,
+    leaderboardEligible: true,
+  };
+
+  // Price filters only apply when a creator profile exists
+  if (params.minPrice != null || params.maxPrice != null) {
+    const priceFilter: Record<string, number> = {};
+    if (params.minPrice != null && params.minPrice > 0) priceFilter.gte = params.minPrice;
+    if (params.maxPrice != null && params.maxPrice > 0) priceFilter.lte = params.maxPrice;
+    where.creator = {
+      status: 'active',
+      visibility: { discoverable: true },
+      pricingCents: priceFilter,
+    };
+  }
+
+  // Search filter — match on username, displayName, or creator pitch
+  if (params.search) {
+    const term = params.search.trim().slice(0, 100);
+    if (term) {
+      where.OR = [
+        { username: { contains: term } },
+        { displayName: { contains: term } },
+        { creator: { pitch: { contains: term } } },
+      ];
+    }
+  }
+
+  // Total count — only on first page (no cursor)
+  const total = !params.cursor
+    ? await prisma.user.count({ where: where as any })
+    : null;
+
+  const cursorData = params.cursor ? decodeCursor(params.cursor) : null;
+
+  // Include creator + visibility data (LEFT JOIN — null for non-creators)
+  const includeRelations = {
+    leaderboardCaches: { where: { window: '1M' }, take: 1 },
+    creator: {
+      include: { visibility: true },
+    },
+  };
+
+  // All sorts use in-memory approach since we're joining User + Creator + LeaderboardCache
+  // and sorting on derived fields (returnPct, subscriberCount, pricingCents)
+  const allUsers = await prisma.user.findMany({
+    where: where as any,
+    include: includeRelations,
+  });
+
+  // Collect creator userIds for subscriber counts
+  const creatorUserIds = allUsers
+    .filter((u) => u.creator?.status === 'active')
+    .map((u) => u.id);
+  const subCounts = creatorUserIds.length > 0
+    ? await prisma.creatorSubscription.groupBy({
+        by: ['creatorUserId'],
+        where: {
+          creatorUserId: { in: creatorUserIds },
+          status: { in: ['active', 'past_due', 'trialing'] },
+        },
+        _count: true,
+      })
+    : [];
+  const subCountMap = new Map(subCounts.map((s) => [s.creatorUserId, s._count]));
+
+  // Build enriched entries
+  let entries: DiscoverCreatorEntry[] = allUsers
+    .filter((u) => {
+      // Exclude creators who opted out of discovery
+      if (u.creator?.status === 'active' && u.creator.visibility?.discoverable === false) {
+        return false;
+      }
+      return true;
+    })
+    .map((u) => {
+      const lbEntry = u.leaderboardCaches[0] ?? null;
+      const creator = u.creator?.status === 'active' ? u.creator : null;
+      return {
+        userId: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        pitch: creator?.pitch ?? null,
+        pricingCents: creator?.pricingCents ?? null,
+        subscriberCount: subCountMap.get(u.id) ?? 0,
+        returnPct: lbEntry?.twrPct ?? null,
+        isVerified: lbEntry != null && !lbEntry.flagged,
+        isCreator: creator != null,
+        sectionsUnlocked: creator ? deriveSectionsUnlocked(creator.visibility) : [],
+        createdAt: (creator?.createdAt ?? u.createdAt).toISOString(),
+      };
+    });
+
+  // Sort in memory
+  if (sort === 'popular') {
+    entries.sort((a, b) =>
+      b.subscriberCount - a.subscriberCount ||
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+      a.userId.localeCompare(b.userId)
+    );
+  } else if (sort === 'performance') {
+    entries.sort((a, b) => {
+      if (a.returnPct == null && b.returnPct == null) return a.userId.localeCompare(b.userId);
+      if (a.returnPct == null) return 1;
+      if (b.returnPct == null) return -1;
+      return b.returnPct - a.returnPct || a.userId.localeCompare(b.userId);
+    });
+  } else if (sort === 'newest') {
+    entries.sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+      a.userId.localeCompare(b.userId)
+    );
+  } else if (sort === 'price_low') {
+    // Creators with price first (ASC), then non-creators last
+    entries.sort((a, b) => {
+      if (a.pricingCents == null && b.pricingCents == null) return a.userId.localeCompare(b.userId);
+      if (a.pricingCents == null) return 1;
+      if (b.pricingCents == null) return -1;
+      return a.pricingCents - b.pricingCents || a.userId.localeCompare(b.userId);
+    });
+  } else {
+    // price_high
+    entries.sort((a, b) => {
+      if (a.pricingCents == null && b.pricingCents == null) return a.userId.localeCompare(b.userId);
+      if (a.pricingCents == null) return 1;
+      if (b.pricingCents == null) return -1;
+      return b.pricingCents - a.pricingCents || a.userId.localeCompare(b.userId);
+    });
+  }
+
+  // Apply cursor: skip past cursor userId
+  if (cursorData) {
+    const idx = entries.findIndex((e) => e.userId === cursorData.u);
+    if (idx >= 0) {
+      entries = entries.slice(idx + 1);
+    }
+  }
+
+  // Apply limit
+  const hasMore = entries.length > limit;
+  entries = entries.slice(0, limit);
+
+  const lastEntry = entries[entries.length - 1];
+  const nextCursor = hasMore && lastEntry
+    ? encodeCursor({
+        s: sort,
+        v: null,
+        ca: lastEntry.createdAt,
+        u: lastEntry.userId,
+      })
+    : null;
+
+  return { creators: entries, nextCursor, total };
 }
 
 export async function selfActivateCreator(userId: string): Promise<{ ok: boolean; missing?: string[] }> {

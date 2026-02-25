@@ -18,6 +18,7 @@ export const updateSettingsSchema = z.object({
   showWatchlists: z.boolean().optional(),
   tradeDelayHours: tradeDelaySchema.optional(),
   hideShareCount: z.boolean().optional(),
+  discoverable: z.boolean().optional(),
 });
 
 export const reportSchema = z.object({

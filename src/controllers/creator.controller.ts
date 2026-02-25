@@ -8,6 +8,7 @@ import { applySchema, reportSchema, updateSettingsSchema } from '../validators/c
 import {
   activateCreator,
   applyAsCreator,
+  discoverCreators,
   getCreatorDashboard,
   getCreatorProfile,
   getCreatorSetupStatus,
@@ -350,6 +351,36 @@ export async function reportCreatorHandler(req: AuthRequest, res: Response): Pro
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to submit report';
     res.status(400).json({ error: message });
+  }
+}
+
+const VALID_DISCOVER_SORTS = new Set(['popular', 'newest', 'price_low', 'price_high', 'performance']);
+
+export async function discoverCreatorsHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.round(limitRaw), 1), 50) : 20;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const sortRaw = typeof req.query.sort === 'string' ? req.query.sort : 'popular';
+    if (!VALID_DISCOVER_SORTS.has(sortRaw)) {
+      res.status(400).json({ error: 'Invalid sort. Must be: popular, newest, price_low, price_high, performance' });
+      return;
+    }
+    const sort = sortRaw as 'popular' | 'newest' | 'price_low' | 'price_high' | 'performance';
+
+    const minPriceRaw = Number(req.query.minPrice);
+    const maxPriceRaw = Number(req.query.maxPrice);
+    const minPrice = Number.isFinite(minPriceRaw) && minPriceRaw > 0 ? Math.round(minPriceRaw) : undefined;
+    const maxPrice = Number.isFinite(maxPriceRaw) && maxPriceRaw > 0 ? Math.round(maxPriceRaw) : undefined;
+
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : undefined;
+    const search = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
+
+    const data = await discoverCreators({ limit, cursor, sort, minPrice, maxPrice, search });
+    res.json(data);
+  } catch (error) {
+    console.error('[Creator] discoverCreatorsHandler failed:', error);
+    res.status(500).json({ error: 'Failed to discover creators' });
   }
 }
 

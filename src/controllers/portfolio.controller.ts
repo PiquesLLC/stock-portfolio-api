@@ -34,6 +34,7 @@ import {
 import { PlanLimitError } from '../utils/plan-limit.error';
 import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
+import { getAccountHistory, HistoryCategory } from '../services/account-history.service';
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -1903,6 +1904,28 @@ export async function seedSamplePortfolio(req: AuthRequest, res: Response): Prom
   } catch (_error) {
     console.error('Error seeding sample portfolio:');
     res.status(500).json({ error: 'Failed to seed sample portfolio' });
+  }
+}
+
+export async function getAccountHistoryHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
+    const cursor = req.query.cursor as string | undefined;
+    const category = req.query.category as HistoryCategory | undefined;
+    const ticker = req.query.ticker as string | undefined;
+
+    // Validate category if provided
+    if (category && !['trade', 'cash', 'adjustment'].includes(category)) {
+      res.status(400).json({ error: 'Invalid category. Must be one of: trade, cash, adjustment' });
+      return;
+    }
+
+    const result = await getAccountHistory({ userId, limit, cursor, category, ticker });
+    res.json(result);
+  } catch (_error) {
+    console.error('Error fetching account history:');
+    res.status(500).json({ error: 'Failed to fetch account history' });
   }
 }
 

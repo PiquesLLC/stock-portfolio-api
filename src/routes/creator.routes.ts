@@ -8,6 +8,7 @@ import {
   connectOnboardingHandler,
   creatorDashboardHandler,
   creatorStripeWebhookHandler,
+  discoverCreatorsHandler,
   getCreatorEntitlementHandler,
   getCreatorLedgerHandler,
   getCreatorLockedContentHandler,
@@ -26,6 +27,7 @@ const router = Router();
 
 router.post('/webhooks/stripe', billingWebhookLimiter, express.raw({ type: 'application/json' }), creatorStripeWebhookHandler);
 
+router.get('/discover', heavyReadLimiter, optionalAuth, discoverCreatorsHandler);
 router.get('/setup-status', heavyReadLimiter, requireAuth, getCreatorSetupStatusHandler);
 router.post('/self-activate', mutationLimiter, requireAuth, selfActivateCreatorHandler);
 router.post('/apply', mutationLimiter, requireAuth, applyCreatorHandler);

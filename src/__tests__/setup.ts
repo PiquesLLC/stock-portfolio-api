@@ -34,7 +34,7 @@ vi.mock('../utils/prisma', () => {
     holdingSnapshot: { deleteMany: vi.fn() },
     portfolioSnapshot: { findMany: vi.fn(), deleteMany: vi.fn() },
     portfolioCompositionChange: { create: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() },
-    activityEvent: { deleteMany: vi.fn() },
+    activityEvent: { findMany: vi.fn(), deleteMany: vi.fn() },
     follow: { deleteMany: vi.fn() },
     alert: { deleteMany: vi.fn() },
     alertEvent: { deleteMany: vi.fn() },

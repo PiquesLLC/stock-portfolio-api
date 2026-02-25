@@ -725,6 +725,7 @@ model CreatorVisibility {
   showWatchlists   Boolean @default(false)
   tradeDelayHours  Int     @default(0) // 0 | 24 | 48 | 72
   hideShareCount   Boolean @default(false)
+  discoverable     Boolean @default(true)
 }
 
 model CreatorSubscription {

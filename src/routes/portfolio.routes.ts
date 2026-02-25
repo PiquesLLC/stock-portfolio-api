@@ -17,6 +17,7 @@ import {
   clearPortfolioHandler,
   importPortfolioScreenshotHandler,
   seedSamplePortfolio,
+  getAccountHistoryHandler,
 } from '../controllers/portfolio.controller';
 import { getPerformanceReportHandler, emailPerformanceReportHandler } from '../controllers/performance-report.controller';
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
@@ -35,6 +36,7 @@ router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
 router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
 router.get('/history', heavyReadLimiter, requireAuth, getHistory);
 router.get('/history/chart', heavyReadLimiter, optionalAuth, getChartHandler);
+router.get('/account-history', requireAuth, getAccountHistoryHandler);
 router.get('/projections', requireAuth, getProjectionsHandler);
 router.get('/projections/current-pace', requireAuth, getCurrentPaceHandler);
 router.get('/metrics', requireAuth, getMetricsHandler);
