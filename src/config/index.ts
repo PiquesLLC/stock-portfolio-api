@@ -84,6 +84,7 @@ export const config = {
   // MFA
   mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM
   resendApiKey: process.env.RESEND_API_KEY || '',
+  emailVerificationEnabled: process.env.EMAIL_VERIFICATION_ENABLED === 'true',
 
   // Plaid
   plaidClientId: process.env.PLAID_CLIENT_ID || '',

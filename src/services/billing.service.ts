@@ -217,12 +217,29 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         // Only act on full refunds (amount_refunded === amount)
         if (charge.amount_refunded < charge.amount) return;
 
-        // Find the user and cancel their subscription
+        // Trace the exact subscription: charge → invoice → subscription
+        const chargeInvoice = (charge as unknown as { invoice?: string | { id: string } | null }).invoice;
+        const invoiceId = typeof chargeInvoice === 'string' ? chargeInvoice : chargeInvoice?.id ?? null;
+        let refundedSubscriptionId: string | null = null;
+        if (invoiceId) {
+          const invoice = await stripe.invoices.retrieve(invoiceId);
+          const invSub = (invoice as unknown as { subscription?: string | { id: string } | null }).subscription;
+          refundedSubscriptionId = typeof invSub === 'string' ? invSub : invSub?.id ?? null;
+        }
+
+        // Find the user by customer ID
         const refundedUser = await prisma.user.findFirst({
           where: { stripeCustomerId },
           select: { id: true, stripeSubscriptionId: true },
         });
         if (!refundedUser) return;
+
+        // Only cancel if the refunded subscription matches the user's current subscription
+        // (prevents cancelling a new subscription when an old charge is refunded)
+        if (refundedSubscriptionId && refundedUser.stripeSubscriptionId !== refundedSubscriptionId) {
+          console.log(`[Billing] Refund for subscription ${refundedSubscriptionId} does not match current ${refundedUser.stripeSubscriptionId} — skipping`);
+          return;
+        }
 
         // Cancel the Stripe subscription if active
         if (refundedUser.stripeSubscriptionId) {
