@@ -1717,38 +1717,43 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
   try {
     const { holdings, mode, trades, ledgerEvents, marginDebt } = req.body as {
       holdings?: any[];
-      mode?: 'replace' | 'merge';
+      mode?: 'replace' | 'merge' | 'incremental';
       trades?: any[];
       ledgerEvents?: any[];
       marginDebt?: number;
     };
-    if (!Array.isArray(holdings) || holdings.length === 0) {
-      res.status(400).json({ error: 'holdings must be a non-empty array' });
+    if (mode !== 'replace' && mode !== 'merge' && mode !== 'incremental') {
+      res.status(400).json({ error: 'mode must be replace, merge, or incremental' });
       return;
     }
-    if (mode !== 'replace' && mode !== 'merge') {
-      res.status(400).json({ error: 'mode must be replace or merge' });
+    // Incremental mode works from trades; replace/merge need holdings
+    if (mode === 'incremental') {
+      if (!Array.isArray(trades) || trades.length === 0) {
+        res.status(400).json({ error: 'incremental mode requires trades' });
+        return;
+      }
+    } else if (!Array.isArray(holdings) || holdings.length === 0) {
+      res.status(400).json({ error: 'holdings must be a non-empty array' });
       return;
     }
 
     const existingHoldings = await prisma.holding.findMany({
       where: { userId: req.user!.userId },
-      select: { ticker: true },
+      select: { ticker: true, shares: true, averageCost: true },
     });
     const existingSet = new Set(existingHoldings.map(h => h.ticker.toUpperCase()));
+    const existingMap = new Map(existingHoldings.map(h => [h.ticker.toUpperCase(), { shares: h.shares, averageCost: h.averageCost }]));
 
-    const normalized = holdings.map((h) => ({
+    const normalized = (Array.isArray(holdings) ? holdings : []).map((h) => ({
       ticker: String(h.ticker || '').trim().toUpperCase(),
       shares: Number(h.shares),
       averageCost: Number(h.averageCost),
     })).filter(h => isValidTicker(h.ticker) && h.shares > 0 && Number.isFinite(h.averageCost) && h.averageCost >= 0);
 
-    if (normalized.length === 0) {
+    if (mode !== 'incremental' && normalized.length === 0) {
       res.status(400).json({ error: 'holdings must include at least one valid entry' });
       return;
     }
-
-    const _incomingSet = new Set(normalized.map(h => h.ticker));
 
     let added = 0;
     let updated = 0;
@@ -1758,6 +1763,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       removed = existingHoldings.length;
       added = normalized.length;
       updated = 0;
+    } else if (mode === 'incremental') {
+      // Stats calculated after applying trades below
     } else {
       added = normalized.filter(h => !existingSet.has(h.ticker)).length;
       updated = normalized.filter(h => existingSet.has(h.ticker)).length;
@@ -1817,17 +1824,71 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         await tx.ledgerEvent.deleteMany({ where: { userId: req.user!.userId } });
       }
 
-      for (const h of normalized) {
-        await tx.holding.upsert({
-          where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
-          update: { shares: h.shares, averageCost: h.averageCost },
-          create: {
-            userId: req.user!.userId,
-            ticker: h.ticker,
-            shares: h.shares,
-            averageCost: h.averageCost,
-          },
-        });
+      if (mode === 'incremental') {
+        // Apply each trade against existing holdings
+        // Sort trades chronologically so cost basis is accurate
+        const sortedTrades = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
+        const positions = new Map(existingMap);
+        const touchedTickers = new Set<string>();
+
+        for (const t of sortedTrades) {
+          const ticker = t.ticker;
+          touchedTickers.add(ticker);
+          const existing = positions.get(ticker) || { shares: 0, averageCost: 0 };
+
+          if (t.type === 'buy') {
+            // Weighted average cost
+            const totalCostBefore = existing.shares * existing.averageCost;
+            const newCost = t.shares * t.price;
+            const newShares = existing.shares + t.shares;
+            existing.shares = newShares;
+            existing.averageCost = newShares > 0 ? (totalCostBefore + newCost) / newShares : 0;
+          } else if (t.type === 'sell') {
+            existing.shares = Math.max(0, existing.shares - t.shares);
+            if (existing.shares < 0.001) {
+              existing.shares = 0;
+              existing.averageCost = 0;
+            }
+            // Avg cost stays the same on sells (cost basis method: average)
+          }
+
+          positions.set(ticker, existing);
+        }
+
+        // Write updated positions to DB
+        for (const ticker of touchedTickers) {
+          const pos = positions.get(ticker)!;
+          if (pos.shares < 0.001) {
+            // Fully sold — remove holding
+            await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
+            removed++;
+          } else if (existingSet.has(ticker)) {
+            await tx.holding.update({
+              where: { userId_ticker: { userId: req.user!.userId, ticker } },
+              data: { shares: pos.shares, averageCost: pos.averageCost },
+            });
+            updated++;
+          } else {
+            await tx.holding.create({
+              data: { userId: req.user!.userId, ticker, shares: pos.shares, averageCost: pos.averageCost },
+            });
+            added++;
+          }
+        }
+      } else {
+        // Replace or Merge: upsert from pre-calculated positions
+        for (const h of normalized) {
+          await tx.holding.upsert({
+            where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
+            update: { shares: h.shares, averageCost: h.averageCost },
+            create: {
+              userId: req.user!.userId,
+              ticker: h.ticker,
+              shares: h.shares,
+              averageCost: h.averageCost,
+            },
+          });
+        }
       }
 
       if (tradeRecords.length > 0) {
@@ -1856,7 +1917,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     }
 
     try {
-      await recordCompositionChange(req.user!.userId, mode === 'replace' ? 'import_replace' : 'import_merge');
+      await recordCompositionChange(req.user!.userId, mode === 'replace' ? 'import_replace' : mode === 'incremental' ? 'import_incremental' : 'import_merge');
       await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after import confirm:');
