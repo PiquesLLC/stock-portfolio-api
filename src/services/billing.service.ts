@@ -209,6 +209,43 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         return;
       }
 
+      case 'charge.refunded': {
+        const charge = event.data.object as Stripe.Charge;
+        const stripeCustomerId = typeof charge.customer === 'string' ? charge.customer : null;
+        if (!stripeCustomerId) return;
+
+        // Only act on full refunds (amount_refunded === amount)
+        if (charge.amount_refunded < charge.amount) return;
+
+        // Find the user and cancel their subscription
+        const refundedUser = await prisma.user.findFirst({
+          where: { stripeCustomerId },
+          select: { id: true, stripeSubscriptionId: true },
+        });
+        if (!refundedUser) return;
+
+        // Cancel the Stripe subscription if active
+        if (refundedUser.stripeSubscriptionId) {
+          try {
+            await stripe.subscriptions.cancel(refundedUser.stripeSubscriptionId);
+          } catch {
+            // Subscription may already be cancelled
+          }
+        }
+
+        // Immediately downgrade to free
+        await prisma.user.update({
+          where: { id: refundedUser.id },
+          data: {
+            plan: 'free',
+            stripeSubscriptionId: null,
+            planExpiresAt: null,
+          },
+        });
+        console.log(`[Billing] Refund processed — user ${refundedUser.id} downgraded to free`);
+        return;
+      }
+
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice;
         const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : null;
