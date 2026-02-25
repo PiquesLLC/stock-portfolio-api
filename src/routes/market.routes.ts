@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler } from '../controllers/market.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
@@ -22,6 +22,7 @@ router.get('/stock/:ticker/ai-events', heavyReadLimiter, requireAuth, requirePla
 router.post('/stock/:ticker/ask', mutationLimiter, requireAuth, requirePlan('premium'), askStockQuestionHandler);
 router.get('/historical-cagr', heavyReadLimiter, getHistoricalCAGRHandler);
 router.get('/heatmap', heavyReadLimiter, getHeatmapHandler);
+router.get('/themes/heatmap', heavyReadLimiter, getThemesHeatmapHandler);
 router.get('/stock/:ticker/nala-score', heavyReadLimiter, requireAuth, requirePlan('pro'), getNalaScoreHandler);
 router.get('/stock/:ticker/earnings-track', heavyReadLimiter, getEarningsTrackHandler);
 

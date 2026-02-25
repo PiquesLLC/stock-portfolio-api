@@ -445,6 +445,19 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
   }
 }
 
+// ── Themes Heatmap ──────────────────────────────────────────────
+import { getThemesHeatmapData } from '../services/themes-heatmap.service';
+
+export async function getThemesHeatmapHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const data = getThemesHeatmapData();
+    res.json(data);
+  } catch (_error) {
+    console.error('Error fetching themes heatmap:');
+    res.status(500).json({ error: 'Failed to fetch themes heatmap' });
+  }
+}
+
 export async function getEarningsTrackHandler(req: Request, res: Response): Promise<void> {
   try {
     const parsed = tickerParamSchema.safeParse(req.params);
