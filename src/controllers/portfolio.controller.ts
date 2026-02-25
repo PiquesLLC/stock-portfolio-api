@@ -1817,6 +1817,81 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       })
       .filter(e => !isNaN(e.effectiveDate.getTime()) && isValidLedgerEventType(e.eventType));
 
+    // --- Incremental dedup: build fingerprint set from existing trades ---
+    if (mode === 'incremental' && tradeRecords.length > 0) {
+      // Build fingerprints for existing trades to detect re-uploads
+      const existingTrades = await prisma.portfolioTrade.findMany({
+        where: { userId: req.user!.userId },
+        select: { date: true, ticker: true, type: true, shares: true, price: true, sourceBroker: true },
+      });
+      const existingFingerprints = new Set(
+        existingTrades.map(t => `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`)
+      );
+
+      // Filter out duplicate trades
+      const originalCount = tradeRecords.length;
+      const dedupedTrades = tradeRecords.filter(t => {
+        const fp = `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`;
+        return !existingFingerprints.has(fp);
+      });
+      const dupCount = originalCount - dedupedTrades.length;
+      if (dupCount > 0) {
+        console.log(`[Import] Incremental dedup: skipped ${dupCount} duplicate trades`);
+      }
+      // Replace tradeRecords with deduped version
+      tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
+
+      // Also dedup ledger events
+      if (ledgerRecords.length > 0) {
+        const existingLedger = await prisma.ledgerEvent.findMany({
+          where: { userId: req.user!.userId },
+          select: { effectiveDate: true, eventType: true, ticker: true, amount: true, sourceBroker: true },
+        });
+        const ledgerFingerprints = new Set(
+          existingLedger.map(e => `${e.effectiveDate.toISOString().slice(0, 10)}|${e.eventType}|${e.ticker ?? ''}|${e.amount}|${e.sourceBroker ?? ''}`)
+        );
+        const originalLedgerCount = ledgerRecords.length;
+        const dedupedLedger = ledgerRecords.filter(e => {
+          const fp = `${e.effectiveDate.toISOString().slice(0, 10)}|${e.eventType}|${e.ticker ?? ''}|${e.amount}|${e.sourceBroker ?? ''}`;
+          return !ledgerFingerprints.has(fp);
+        });
+        const ledgerDupCount = originalLedgerCount - dedupedLedger.length;
+        if (ledgerDupCount > 0) {
+          console.log(`[Import] Incremental dedup: skipped ${ledgerDupCount} duplicate ledger events`);
+        }
+        ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
+      }
+
+      // Pre-validate: check for oversells before entering transaction
+      const simPositions = new Map(existingMap);
+      const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
+      const oversellErrors: string[] = [];
+
+      for (const t of sortedForValidation) {
+        const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
+        if (t.type === 'buy') {
+          pos.shares += t.shares;
+        } else if (t.type === 'sell') {
+          if (t.shares > pos.shares + 0.001) {
+            oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+          }
+          pos.shares -= t.shares;
+        }
+        simPositions.set(t.ticker, pos);
+      }
+
+      if (oversellErrors.length > 0) {
+        res.status(400).json({ error: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`, details: oversellErrors });
+        return;
+      }
+
+      // If all trades were duplicates, nothing to do
+      if (tradeRecords.length === 0 && ledgerRecords.length === 0) {
+        res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates: dupCount });
+        return;
+      }
+    }
+
     await prisma.$transaction(async (tx) => {
       if (mode === 'replace') {
         await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
@@ -1826,7 +1901,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
 
       if (mode === 'incremental') {
         // Apply each trade against existing holdings
-        // Sort trades chronologically so cost basis is accurate
         const sortedTrades = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
         const positions = new Map(existingMap);
         const touchedTickers = new Set<string>();
@@ -1837,19 +1911,17 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           const existing = positions.get(ticker) || { shares: 0, averageCost: 0 };
 
           if (t.type === 'buy') {
-            // Weighted average cost
             const totalCostBefore = existing.shares * existing.averageCost;
             const newCost = t.shares * t.price;
             const newShares = existing.shares + t.shares;
             existing.shares = newShares;
             existing.averageCost = newShares > 0 ? (totalCostBefore + newCost) / newShares : 0;
           } else if (t.type === 'sell') {
-            existing.shares = Math.max(0, existing.shares - t.shares);
+            existing.shares -= t.shares;
             if (existing.shares < 0.001) {
               existing.shares = 0;
               existing.averageCost = 0;
             }
-            // Avg cost stays the same on sells (cost basis method: average)
           }
 
           positions.set(ticker, existing);
@@ -1859,7 +1931,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         for (const ticker of touchedTickers) {
           const pos = positions.get(ticker)!;
           if (pos.shares < 0.001) {
-            // Fully sold — remove holding
             await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
             removed++;
           } else if (existingSet.has(ticker)) {
