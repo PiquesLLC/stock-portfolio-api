@@ -11,6 +11,7 @@ interface HeatmapStock {
   dayChange: number;
   marketCapB: number;
   subSector: string;
+  noTradeData?: boolean;
 }
 
 interface HeatmapSubSector {
@@ -38,7 +39,9 @@ interface HeatmapResponse {
 
 // ── Cache ──────────────────────────────────────────────────────
 
-let quotesCache = new Map<string, { changePercent: number; price: number }>();
+type QuoteSource = 'regular' | 'extended' | 'prevClose';
+
+let quotesCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
 let cacheUpdatedAt: number | null = null;
 let refreshInProgress = false;
 
@@ -64,17 +67,30 @@ async function refreshQuotesBackground(): Promise<void> {
 
   try {
     const allTickers = getAllUniqueTickers();
-    const newCache = new Map<string, { changePercent: number; price: number }>();
+    const newCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
 
     for (let i = 0; i < allTickers.length; i += BATCH_SIZE) {
       const batch = allTickers.slice(i, i + BATCH_SIZE);
       try {
         const result = await fetchPrices(batch, { preferPolygon: true });
         for (const [ticker, quote] of result.quotes) {
-          newCache.set(ticker, {
-            changePercent: quote.changePercent,
-            price: quote.currentPrice,
-          });
+          // Prefer extended-hours data (Yahoo enrichment) during PRE/POST/CLOSED
+          const hasExtended = quote.extendedChangePercent != null && quote.extendedPrice != null;
+          const price = hasExtended ? quote.extendedPrice! : quote.currentPrice;
+          const changePercent = hasExtended ? quote.extendedChangePercent! : quote.changePercent;
+
+          // Detect prevClose fallback: price equals previousClose and change is 0
+          const isPrevCloseFallback = !hasExtended
+            && quote.changePercent === 0
+            && quote.change === 0
+            && quote.currentPrice === quote.previousClose
+            && quote.previousClose > 0;
+
+          const source: QuoteSource = hasExtended ? 'extended'
+            : isPrevCloseFallback ? 'prevClose'
+            : 'regular';
+
+          newCache.set(ticker, { changePercent, price, source });
         }
       } catch (err) {
         console.error(`[ThemesHeatmap] Batch ${i}-${i + batch.length} failed:`, err);
@@ -115,7 +131,7 @@ export function getThemesHeatmapData(): HeatmapResponse {
     const subSectors: HeatmapSubSector[] = theme.subthemes.map(sub => {
       const tickerStocks: HeatmapStock[] = sub.tickers.map(t => {
         const q = quotesCache.get(t);
-        return {
+        const stock: HeatmapStock = {
           ticker: t,
           name: t,
           price: q?.price ?? 0,
@@ -124,10 +140,12 @@ export function getThemesHeatmapData(): HeatmapResponse {
           marketCapB: 1,
           subSector: sub.name,
         };
+        if (q?.source === 'prevClose') stock.noTradeData = true;
+        return stock;
       });
 
       const validChanges = tickerStocks
-        .filter(s => quotesCache.has(s.ticker))
+        .filter(s => quotesCache.has(s.ticker) && !s.noTradeData)
         .map(s => s.changePercent);
       const avg = validChanges.length > 0
         ? validChanges.reduce((s, c) => s + c, 0) / validChanges.length
@@ -154,7 +172,7 @@ export function getThemesHeatmapData(): HeatmapResponse {
 
     const allChanges = subSectors
       .flatMap(sub => sub.stocks)
-      .filter(s => quotesCache.has(s.ticker))
+      .filter(s => quotesCache.has(s.ticker) && !s.noTradeData)
       .map(s => s.changePercent);
     const themeAvg = allChanges.length > 0
       ? allChanges.reduce((s, c) => s + c, 0) / allChanges.length
