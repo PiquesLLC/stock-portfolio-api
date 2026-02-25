@@ -1863,7 +1863,9 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       }
 
       // Pre-validate: check for oversells before entering transaction
-      const simPositions = new Map(existingMap);
+      const simPositions = new Map(
+        [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
+      );
       const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
       const oversellErrors: string[] = [];
 
@@ -1902,7 +1904,9 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       if (mode === 'incremental') {
         // Apply each trade against existing holdings
         const sortedTrades = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-        const positions = new Map(existingMap);
+        const positions = new Map(
+          [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
+        );
         const touchedTickers = new Set<string>();
 
         for (const t of sortedTrades) {

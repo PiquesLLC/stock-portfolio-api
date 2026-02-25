@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import app from '../app';
 import { generateTestToken, testUser } from './helpers';
@@ -9,6 +9,24 @@ function authHeader() {
 }
 
 describe('Portfolio import', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.holding.findMany.mockResolvedValue([]);
+    prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
+    prismaMock.ledgerEvent.findMany.mockResolvedValue([]);
+    prismaMock.holding.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.portfolioTrade.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.ledgerEvent.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.portfolioTrade.createMany.mockResolvedValue({ count: 0 });
+    prismaMock.ledgerEvent.createMany.mockResolvedValue({ count: 0 });
+    prismaMock.holding.upsert.mockResolvedValue({});
+    prismaMock.userSettings.upsert.mockResolvedValue({});
+    prismaMock.portfolioCompositionChange.create.mockResolvedValue({});
+    // incremental mode uses tx.holding.update/create; add missing mock methods
+    (prismaMock.holding as any).update = vi.fn().mockResolvedValue({});
+    (prismaMock.holding as any).create = vi.fn().mockResolvedValue({});
+  });
+
   it('parses a valid CSV file', async () => {
     const csv = `ticker,shares,averageCost
 AAPL,10,150
@@ -83,5 +101,219 @@ GOOG,3,0,ok`;
       .send({ confirmation: 'NOPE' });
 
     expect(res.status).toBe(400);
+  });
+
+  describe('POST /portfolio/import/confirm incremental mode', () => {
+    it('updates weighted average cost on buy', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 10, averageCost: 100 },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 5, price: 200, sourceBroker: 'robinhood' },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ added: 0, updated: 1, removed: 0 });
+      expect((prismaMock.holding as any).update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId_ticker: { userId: testUser.userId, ticker: 'AAPL' } },
+          data: { shares: 15, averageCost: expect.closeTo(133.3333333333, 6) },
+        }),
+      );
+    });
+
+    it('handles partial sell and full close', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 10, averageCost: 100 },
+        { ticker: 'MSFT', shares: 2, averageCost: 300 },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'sell', shares: 4, price: 150, sourceBroker: 'robinhood' },
+            { date: '2026-02-20', ticker: 'MSFT', type: 'sell', shares: 2, price: 350, sourceBroker: 'robinhood' },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ added: 0, updated: 1, removed: 1 });
+      expect((prismaMock.holding as any).update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId_ticker: { userId: testUser.userId, ticker: 'AAPL' } },
+          data: { shares: 6, averageCost: 100 },
+        }),
+      );
+      expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: testUser.userId, ticker: 'MSFT' } }),
+      );
+    });
+
+    it('blocks oversell atomically before DB mutation', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 1, averageCost: 100 },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'sell', shares: 5, price: 150, sourceBroker: 'robinhood' },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(String(res.body.error)).toContain('Oversell detected');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(prismaMock.portfolioTrade.createMany).not.toHaveBeenCalled();
+      expect(prismaMock.ledgerEvent.createMany).not.toHaveBeenCalled();
+    });
+
+    it('dedups replayed trades and returns skippedDuplicates without mutation', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 10, averageCost: 100 },
+      ]);
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([
+        {
+          date: new Date('2026-02-20T00:00:00.000Z'),
+          ticker: 'AAPL',
+          type: 'buy',
+          shares: 5,
+          price: 200,
+          sourceBroker: 'robinhood',
+        },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 5, price: 200, sourceBroker: 'robinhood' },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ added: 0, updated: 0, removed: 0, skippedDuplicates: 1 });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('appends only non-duplicate trade + ledger events', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 10, averageCost: 100 },
+      ]);
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([
+        {
+          date: new Date('2026-02-20T00:00:00.000Z'),
+          ticker: 'AAPL',
+          type: 'buy',
+          shares: 1,
+          price: 100,
+          sourceBroker: 'robinhood',
+        },
+      ]);
+      prismaMock.ledgerEvent.findMany.mockResolvedValue([
+        {
+          effectiveDate: new Date('2026-02-20T00:00:00.000Z'),
+          eventType: 'CASH_DIVIDEND',
+          ticker: 'AAPL',
+          amount: 12.5,
+          sourceBroker: 'robinhood',
+        },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 1, price: 100, sourceBroker: 'robinhood' }, // duplicate
+            { date: '2026-02-21', ticker: 'AAPL', type: 'buy', shares: 2, price: 120, sourceBroker: 'robinhood' }, // new
+          ],
+          ledgerEvents: [
+            { effectiveDate: '2026-02-20', eventType: 'CASH_DIVIDEND', ticker: 'AAPL', amount: 12.5, sourceBroker: 'robinhood' }, // duplicate
+            { effectiveDate: '2026-02-21', eventType: 'DIV_REINVEST', ticker: 'AAPL', shares: 0.2, amount: 0, sourceBroker: 'robinhood' }, // new
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.portfolioTrade.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ ticker: 'AAPL', shares: 2, price: 120 }),
+          ]),
+        }),
+      );
+      expect(prismaMock.ledgerEvent.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ eventType: 'DIV_REINVEST', ticker: 'AAPL', amount: 0 }),
+          ]),
+        }),
+      );
+    });
+  });
+
+  describe('POST /portfolio/import/confirm mode regression', () => {
+    it('replace deletes existing holdings/trades/ledger before write', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 1, averageCost: 100 },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'replace',
+          holdings: [{ ticker: 'MSFT', shares: 2, averageCost: 300 }],
+        });
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: testUser.userId } }),
+      );
+      expect(prismaMock.portfolioTrade.deleteMany).toHaveBeenCalled();
+      expect(prismaMock.ledgerEvent.deleteMany).toHaveBeenCalled();
+      expect(prismaMock.holding.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { userId_ticker: { userId: testUser.userId, ticker: 'MSFT' } },
+      }));
+    });
+
+    it('merge upserts without wiping existing records', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 1, averageCost: 100 },
+      ]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'merge',
+          holdings: [
+            { ticker: 'AAPL', shares: 5, averageCost: 150 },
+            { ticker: 'MSFT', shares: 2, averageCost: 300 },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.holding.deleteMany).not.toHaveBeenCalled();
+      expect(prismaMock.portfolioTrade.deleteMany).not.toHaveBeenCalled();
+      expect(prismaMock.ledgerEvent.deleteMany).not.toHaveBeenCalled();
+      expect(prismaMock.holding.upsert).toHaveBeenCalledTimes(2);
+    });
   });
 });
