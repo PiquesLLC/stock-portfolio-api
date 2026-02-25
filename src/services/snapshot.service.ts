@@ -5,9 +5,29 @@ import { config } from '../config';
 import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 import { replayDailyLedger } from './ledger/replay.service';
+import { LEDGER_SETTLEMENT_POLICY, TRADE_SETTLEMENT_POLICY, isValidLedgerEventType } from './ledger/settlement-policy';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
+
+export type LedgerReplayGap = {
+  start: string;
+  end: string;
+  reason: string;
+};
+
+export type LedgerConfidencePoint = {
+  time: number;
+  value: number;
+  confidence: number;
+  estimated: boolean;
+};
+
+export type LedgerReplayDiagnostics = {
+  points: LedgerConfidencePoint[];
+  gaps: LedgerReplayGap[];
+  confidenceThreshold: number;
+};
 
 /** Bounded concurrency executor — limits parallel async operations (like p-limit) */
 export async function limitConcurrency<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
@@ -1601,14 +1621,15 @@ export async function reconstructPortfolioHistoryFromTrades(
  * Uses replayed daily positions/cash/margin and overlays daily market prices
  * to produce market-value equity points.
  */
-export async function reconstructPortfolioHistoryFromLedger(
+export async function reconstructPortfolioHistoryFromLedgerWithDiagnostics(
   userId: string,
   periodDays: number,
-): Promise<{ time: number; value: number }[]> {
+): Promise<LedgerReplayDiagnostics> {
   const endDate = new Date();
   const startDate = new Date(Date.now() - periodDays * 86400000);
   const snapshots = await replayDailyLedger(userId, startDate, endDate);
-  if (snapshots.length === 0) return [];
+  const confidenceThreshold = 80;
+  if (snapshots.length === 0) return { points: [], gaps: [], confidenceThreshold };
 
   const allTickers = new Set<string>();
   for (const snap of snapshots) {
@@ -1618,7 +1639,11 @@ export async function reconstructPortfolioHistoryFromLedger(
   }
 
   if (allTickers.size === 0) {
-    return snapshots.map(s => ({ time: s.date.getTime(), value: s.cash - s.margin }));
+    return {
+      points: snapshots.map(s => ({ time: s.date.getTime(), value: s.cash - s.margin, confidence: 100, estimated: false })),
+      gaps: [],
+      confidenceThreshold,
+    };
   }
 
   const fetchDailyForChart = async (ticker: string): Promise<{ dates: number[]; closes: number[] } | null> => {
@@ -1674,7 +1699,13 @@ export async function reconstructPortfolioHistoryFromLedger(
   for (let i = 0; i < tickerArr.length; i++) {
     if (candleResults[i]) tickerCandles.set(tickerArr[i], candleResults[i]!);
   }
-  if (tickerCandles.size === 0) return [];
+  if (tickerCandles.size === 0) {
+    return {
+      points: snapshots.map(s => ({ time: s.date.getTime(), value: s.equity, confidence: 10, estimated: true })),
+      gaps: [{ start: startDate.toISOString(), end: endDate.toISOString(), reason: 'Missing price data for all holdings' }],
+      confidenceThreshold,
+    };
+  }
 
   function getPriceAt(ticker: string, dateMs: number): number | null {
     const candles = tickerCandles.get(ticker);
@@ -1688,16 +1719,85 @@ export async function reconstructPortfolioHistoryFromLedger(
     return bestIdx >= 0 ? candles.closes[bestIdx] : null;
   }
 
-  const points: { time: number; value: number }[] = [];
+  const toUtcDayKey = (ms: number): string => {
+    const d = new Date(ms);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  };
+
+  const addUtcDays = (date: Date, days: number): Date => new Date(date.getTime() + days * 86400000);
+
+  const [tradesInRange, ledgerEventsInRange] = await Promise.all([
+    prisma.portfolioTrade.findMany({
+      where: { userId, date: { gte: startDate, lte: endDate } },
+      select: { date: true, type: true, ticker: true },
+    }),
+    prisma.ledgerEvent.findMany({
+      where: { userId, effectiveDate: { gte: startDate, lte: endDate } },
+      select: { eventType: true, effectiveDate: true, settleDate: true, ticker: true, amount: true },
+    }),
+  ]);
+
+  const cashEventDays = new Set<string>();
+  const corporateTickersByDay = new Map<string, Set<string>>();
+  const addCorporateTicker = (dayKey: string, ticker: string | null) => {
+    if (!ticker) return;
+    if (!corporateTickersByDay.has(dayKey)) corporateTickersByDay.set(dayKey, new Set());
+    corporateTickersByDay.get(dayKey)!.add(ticker);
+  };
+
+  for (const trade of tradesInRange) {
+    const tradeType = String(trade.type).toLowerCase() as keyof typeof TRADE_SETTLEMENT_POLICY;
+    if (!(tradeType in TRADE_SETTLEMENT_POLICY)) continue;
+    const policy = TRADE_SETTLEMENT_POLICY[tradeType];
+    if (policy.cashPosting !== 'none') {
+      const settleDate = addUtcDays(new Date(Date.UTC(
+        trade.date.getUTCFullYear(),
+        trade.date.getUTCMonth(),
+        trade.date.getUTCDate(),
+        0, 0, 0, 0,
+      )), 1);
+      const cashAt = policy.cashPosting === 'settleDate' ? settleDate : trade.date;
+      cashEventDays.add(toUtcDayKey(cashAt.getTime()));
+    }
+    if (tradeType === 'split' || tradeType === 'transfer' || tradeType === 'merger' || tradeType === 'cancel') {
+      addCorporateTicker(toUtcDayKey(trade.date.getTime()), trade.ticker);
+    }
+  }
+
+  for (const event of ledgerEventsInRange) {
+    if (!isValidLedgerEventType(event.eventType)) continue;
+    const policy = LEDGER_SETTLEMENT_POLICY[event.eventType];
+    if (policy.cashPosting !== 'none' && Math.abs(event.amount) > 0) {
+      const cashAt = policy.cashPosting === 'settleDate' && event.settleDate ? event.settleDate : event.effectiveDate;
+      cashEventDays.add(toUtcDayKey(cashAt.getTime()));
+    }
+    if (policy.positionPosting !== 'none') {
+      const posAt = policy.positionPosting === 'settleDate' && event.settleDate ? event.settleDate : event.effectiveDate;
+      addCorporateTicker(toUtcDayKey(posAt.getTime()), event.ticker);
+    }
+  }
+
+  const points: LedgerConfidencePoint[] = [];
+  const dailyGaps: { day: string; reason: string }[] = [];
+  let prevSnap: (typeof snapshots)[number] | null = null;
+
   for (const snap of snapshots) {
     const time = snap.date.getTime();
+    const dayKey = toUtcDayKey(time);
     let totalValue = snap.cash - snap.margin;
     let coveredValue = 0;
     let estimatedMissing = 0;
+    let corporateCovered = 0;
+    let corporateTotal = 0;
+    const corporateTickers = corporateTickersByDay.get(dayKey);
 
     for (const [ticker, pos] of snap.positions) {
       if (pos.shares <= 0.000001) continue;
       const price = getPriceAt(ticker, time);
+      if (corporateTickers?.has(ticker)) {
+        corporateTotal += 1;
+        if (price != null) corporateCovered += 1;
+      }
       if (price != null) {
         const v = pos.shares * price;
         totalValue += v;
@@ -1709,12 +1809,80 @@ export async function reconstructPortfolioHistoryFromLedger(
     }
 
     const estimatedTotal = coveredValue + estimatedMissing;
-    if (estimatedTotal <= 0 || coveredValue / estimatedTotal >= 0.8) {
-      points.push({ time, value: totalValue });
+    const coverageRatio = estimatedTotal > 0 ? coveredValue / estimatedTotal : 1;
+    const priceScore = Math.max(0, Math.min(100, Math.round(coverageRatio * 100)));
+
+    let cashScore = 100;
+    if (prevSnap) {
+      const cashDelta = snap.cash - prevSnap.cash;
+      const changeThreshold = Math.max(100, Math.abs(prevSnap.equity) * 0.01);
+      if (Math.abs(cashDelta) > changeThreshold && !cashEventDays.has(dayKey)) {
+        cashScore = 35;
+        dailyGaps.push({ day: dayKey, reason: 'Unexplained cash balance jump' });
+      }
+    }
+
+    let corporateScore = 100;
+    if (corporateTotal > 0) {
+      corporateScore = Math.max(0, Math.min(100, Math.round((corporateCovered / corporateTotal) * 100)));
+      if (corporateCovered < corporateTotal) {
+        dailyGaps.push({ day: dayKey, reason: 'Corporate action with missing ticker price data' });
+      }
+    }
+
+    if (coverageRatio < 0.8) {
+      dailyGaps.push({ day: dayKey, reason: 'Missing price data coverage below 80%' });
+    }
+
+    const confidence = Math.max(
+      0,
+      Math.min(100, Math.round(priceScore * 0.6 + cashScore * 0.25 + corporateScore * 0.15)),
+    );
+    points.push({
+      time,
+      value: totalValue + estimatedMissing,
+      confidence,
+      estimated: confidence < confidenceThreshold,
+    });
+    prevSnap = snap;
+  }
+
+  const sortedGaps = [...dailyGaps].sort((a, b) => a.day.localeCompare(b.day));
+  const gaps: LedgerReplayGap[] = [];
+  for (const g of sortedGaps) {
+    const asDate = new Date(`${g.day}T00:00:00.000Z`);
+    const prev = gaps[gaps.length - 1];
+    if (!prev) {
+      gaps.push({ start: asDate.toISOString(), end: asDate.toISOString(), reason: g.reason });
+      continue;
+    }
+    const prevEndDay = prev.end.slice(0, 10);
+    const prevEndDate = new Date(`${prevEndDay}T00:00:00.000Z`);
+    const isConsecutive = (asDate.getTime() - prevEndDate.getTime()) === 86400000;
+    if (prev.reason === g.reason && isConsecutive) {
+      prev.end = asDate.toISOString();
+    } else {
+      gaps.push({ start: asDate.toISOString(), end: asDate.toISOString(), reason: g.reason });
     }
   }
 
-  return points;
+  return { points, gaps, confidenceThreshold };
+}
+
+export async function reconstructPortfolioHistoryFromLedger(
+  userId: string,
+  periodDays: number,
+): Promise<{ time: number; value: number }[]> {
+  const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(userId, periodDays);
+  return detailed.points.map(p => ({ time: p.time, value: p.value }));
+}
+
+export async function getLedgerReplayGapSummary(
+  userId: string,
+  periodDays: number,
+): Promise<LedgerReplayGap[]> {
+  const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(userId, periodDays);
+  return detailed.gaps;
 }
 
 /**

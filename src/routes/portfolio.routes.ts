@@ -9,6 +9,7 @@ import {
   getMetricsHandler,
   getCurrentPaceHandler,
   getChartHandler,
+  getChartGapSummaryHandler,
   getPerformanceHandler,
   getTickerActivity,
   importPortfolioCsvHandler,
@@ -36,6 +37,7 @@ router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
 router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
 router.get('/history', heavyReadLimiter, requireAuth, getHistory);
 router.get('/history/chart', heavyReadLimiter, optionalAuth, getChartHandler);
+router.get('/history/chart/gaps', heavyReadLimiter, requireAuth, getChartGapSummaryHandler);
 router.get('/account-history', requireAuth, getAccountHistoryHandler);
 router.get('/projections', requireAuth, getProjectionsHandler);
 router.get('/projections/current-pace', requireAuth, getCurrentPaceHandler);

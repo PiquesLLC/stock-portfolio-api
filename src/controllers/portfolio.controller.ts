@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromLedger, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromLedgerWithDiagnostics, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -476,8 +476,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     const holdings = await getHoldings(req.user.userId);
     const now = Date.now();
-    let points: { time: number; value: number }[];
+    let points: { time: number; value: number; confidence?: number; estimated?: boolean }[];
     let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'daily';
+    let confidenceThreshold: number | undefined;
+    let estimated = false;
+    let gapSummary: { start: string; end: string; reason: string }[] | undefined;
 
     // Check if user has ledger events (deposits/withdrawals/dividends from CSV import).
     // Only ledger-based reconstruction is accurate enough for charts — trade-only
@@ -493,7 +496,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // otherwise fall back to current-holdings hi-res candles.
     if (period === '1W') {
       if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 7);
+        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, 7);
+        points = detailed.points;
+        confidenceThreshold = detailed.confidenceThreshold;
+        estimated = detailed.points.some(p => p.estimated);
+        gapSummary = detailed.gaps;
         usedModelReconstruction = true;
         source = 'model';
       } else {
@@ -512,7 +519,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         usedSnapshots = true;
         source = 'snapshot';
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, 30);
+        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, 30);
+        points = detailed.points;
+        confidenceThreshold = detailed.confidenceThreshold;
+        estimated = detailed.points.some(p => p.estimated);
+        gapSummary = detailed.gaps;
         usedModelReconstruction = true;
         source = 'model';
       } else {
@@ -533,7 +544,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         usedSnapshots = true;
         source = 'snapshot';
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, ytdDays);
+        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, ytdDays);
+        points = detailed.points;
+        confidenceThreshold = detailed.confidenceThreshold;
+        estimated = detailed.points.some(p => p.estimated);
+        gapSummary = detailed.gaps;
         usedModelReconstruction = true;
         source = 'model';
       } else {
@@ -565,7 +580,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         usedSnapshots = true;
         source = 'snapshot';
       } else if (hasLedgerEvents) {
-        points = await reconstructPortfolioHistoryFromLedger(req.user.userId, periodDays);
+        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, periodDays);
+        points = detailed.points;
+        confidenceThreshold = detailed.confidenceThreshold;
+        estimated = detailed.points.some(p => p.estimated);
+        gapSummary = detailed.gaps;
         usedModelReconstruction = true;
         source = 'model';
       } else {
@@ -613,15 +632,54 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
 
     const response: Record<string, unknown> = { points, periodStartValue, period, source };
+    if (source === 'model') {
+      response.estimated = estimated;
+      response.confidenceThreshold = confidenceThreshold ?? 80;
+    }
     if (includeDebug) {
       response.rebaselineApplied = false;
       response.pointCountRaw = pointCountRaw;
       response.pointCountFinal = points.length;
+      if (source === 'model') {
+        response.gaps = gapSummary ?? [];
+      }
     }
     res.json(response);
   } catch (chartError) {
     console.error('Error fetching chart data:', chartError instanceof Error ? chartError.stack : String(chartError));
     res.status(500).json({ error: 'Failed to fetch chart data' });
+  }
+}
+
+export async function getChartGapSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const period = ((req.query.period as string) || '1W').toUpperCase();
+    if (!['1W', '1M', '3M', 'YTD', '1Y', 'ALL'].includes(period)) {
+      res.status(400).json({ error: 'Invalid period. Must be one of: 1W, 1M, 3M, YTD, 1Y, ALL' });
+      return;
+    }
+
+    const hasLedgerEvents = await prisma.ledgerEvent.count({ where: { userId: req.user!.userId } });
+    if (hasLedgerEvents === 0) {
+      res.json({ period, gaps: [] });
+      return;
+    }
+
+    const now = Date.now();
+    const periodDaysMap: Record<string, number> = {
+      '1W': 7,
+      '1M': 30,
+      '3M': 90,
+      'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '1Y': 365,
+      'ALL': 365 * 5,
+    };
+    const periodDays = periodDaysMap[period] ?? 30;
+    const gaps = await getLedgerReplayGapSummary(req.user!.userId, periodDays);
+    res.json({ period, gaps });
+  } catch (_error) {
+    console.error('Error fetching chart gap summary:');
+    res.status(500).json({ error: 'Failed to fetch chart gap summary' });
   }
 }
 
