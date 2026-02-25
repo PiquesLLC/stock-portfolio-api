@@ -418,6 +418,20 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         points.push({ time: now, value: liveValue });
       }
 
+      // Smooth intraday outlier spikes — a single point deviating >3% from both
+      // neighbors is likely a bad extended-hours quote or snapshot glitch.
+      if (points.length >= 3) {
+        for (let i = 1; i < points.length - 1; i++) {
+          const prev = points[i - 1].value;
+          const curr = points[i].value;
+          const next = points[i + 1].value;
+          const neighborAvg = (prev + next) / 2;
+          if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+            points[i].value = neighborAvg;
+          }
+        }
+      }
+
       // If composition changed within the last day, rebaseline to avoid false jumps.
       // But don't filter if it would leave too few points for a useful chart,
       // OR if the filtered set is entirely outside market hours (4 AM–8 PM ET).
