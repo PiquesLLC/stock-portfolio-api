@@ -1898,10 +1898,44 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
       }
 
-      // Determine whether to use trade replay or position-based import
-      const useTradeReplay = mode === 'incremental' || (mode === 'replace' && normalized.length === 0 && tradeRecords.length > 0);
+      // Determine import strategy
+      const useTradeReplay = mode === 'incremental';
+      // Replace All with trades but no positions: build holdings directly from trade data
+      const useTradesAsPositions = mode === 'replace' && normalized.length === 0 && hasTradesToProcess;
 
-      if (useTradeReplay) {
+      if (useTradesAsPositions) {
+        // User uploaded a portfolio snapshot that was parsed as trades.
+        // Build holdings directly from the trade data (ticker + shares + price = avg cost).
+        const positionMap = new Map<string, { shares: number; totalCost: number }>();
+        const rawTrades = Array.isArray(trades) ? trades : [];
+        for (const t of rawTrades) {
+          const ticker = String(t.ticker || '').trim().toUpperCase();
+          if (!isValidTicker(ticker)) continue;
+          const shares = Number(t.shares) || 0;
+          const price = Number(t.price) || 0;
+          if (shares <= 0) continue;
+          const existing = positionMap.get(ticker) || { shares: 0, totalCost: 0 };
+          existing.shares += shares;
+          existing.totalCost += shares * price;
+          positionMap.set(ticker, existing);
+        }
+
+        for (const [ticker, pos] of positionMap) {
+          const averageCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
+          await tx.holding.create({
+            data: { userId: req.user!.userId, ticker, shares: pos.shares, averageCost },
+          });
+          added++;
+        }
+
+        // Save trade records (deduped) and ledger events
+        if (tradeRecords.length > 0) {
+          await tx.portfolioTrade.createMany({ data: tradeRecords });
+        }
+        if (ledgerRecords.length > 0) {
+          await tx.ledgerEvent.createMany({ data: ledgerRecords });
+        }
+      } else if (useTradeReplay) {
         // Collect every ticker mentioned in the CSV (including deduped trades)
         // so we reconcile positions even when all trades were already recorded
         const csvTickers = new Set<string>();
@@ -1982,8 +2016,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         }
       }
 
-      // Insert trades/ledger (skip if trade replay already did it)
-      if (!useTradeReplay) {
+      // Insert trades/ledger (skip if already handled above)
+      if (!useTradeReplay && !useTradesAsPositions) {
         if (tradeRecords.length > 0) {
           await tx.portfolioTrade.createMany({ data: tradeRecords });
         }
