@@ -185,7 +185,8 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
     const ticker = parsedParams.data.ticker;
     const period = (req.query.period as string)?.toUpperCase() || '3M';
     const daysMap: Record<string, number> = {
-      '3M': 90, 'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '3M': 90,
+      'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000) + 5, // +5 to include prior year's last trading day close
       '1Y': 365, 'ALL': 365 * 5,
     };
     const days = daysMap[period] ?? 90;
