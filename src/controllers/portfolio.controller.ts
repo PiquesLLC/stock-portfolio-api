@@ -1486,6 +1486,80 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
     let tradeRowIndex = 0;
     let ledgerRowIndex = 0;
 
+    // Snapshot detection: if no action column AND no totalAmount column, this is a
+    // portfolio snapshot (current positions), not transaction history. Build positions
+    // directly without trade inference — avoids "unsupported_action" skips.
+    const isSnapshotImport = !mappings.action && !mappings.totalAmount;
+
+    if (isSnapshotImport) {
+      const excludedRowSet = new Set(
+        JSON.parse(req.body.excludedRows || '[]')
+      );
+
+      data.forEach((row, idx) => {
+        if (excludedRowSet.has(idx)) {
+          incSkip('excluded_by_user');
+          return;
+        }
+        const ticker = String(row[mappings.ticker] || '').trim().toUpperCase();
+        if (!ticker || !isValidTicker(ticker)) {
+          incSkip('invalid_ticker');
+          warnings.push({ rowNumber: idx + 1, message: `Invalid ticker: '${ticker}'` });
+          return;
+        }
+        const price = mappings.price ? parseNumber(row[mappings.price]) : null;
+        const shares = mappings.shares ? parseNumber(row[mappings.shares]) : null;
+        if (shares == null || shares <= 0) {
+          incSkip('invalid_qty_price');
+          warnings.push({ rowNumber: idx + 1, message: `Invalid shares for ${ticker}` });
+          return;
+        }
+        const finalPrice = price != null && price >= 0 ? price : 0;
+        const pos = positions.get(ticker) || { shares: 0, totalCost: 0 };
+        pos.shares += shares;
+        pos.totalCost += shares * finalPrice;
+        positions.set(ticker, pos);
+      });
+
+      // Build positions output
+      const parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[] = [];
+      let rowNum = 1;
+      for (const [ticker, pos] of positions) {
+        if (pos.shares >= 0.01) {
+          const avgCost = pos.totalCost / pos.shares;
+          parsed.push({
+            rowNumber: rowNum++,
+            ticker,
+            shares: Math.round(pos.shares * 1000000) / 1000000,
+            averageCost: Math.round(avgCost * 100) / 100,
+            confidence: 'high',
+          });
+        }
+      }
+
+      const parseDurationMs = Date.now() - parseStart;
+      res.json({
+        reviewRequired: true,
+        editableFields: ['ticker', 'shares', 'averageCost'],
+        parsed,
+        warnings,
+        trades: [],
+        ledgerEvents: [],
+        totalRows: data.length,
+        validRows: parsed.length,
+        skippedRows: Object.values(skipReasons).reduce((a, b) => a + b, 0),
+        warning: `Snapshot import — ${parsed.length} positions from ${data.length} rows`,
+        telemetry: {
+          rowsParsed: data.length,
+          rowsSkipped: Object.values(skipReasons).reduce((a, b) => a + b, 0),
+          skipReasons,
+          brokerDetected: sourceBroker,
+          parseDurationMs,
+        },
+      });
+      return;
+    }
+
     // Process rows (assume chronological or newest-first — we reverse if dates are descending)
     const rows = [...data];
 
@@ -1687,33 +1761,6 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       }
     }
 
-    // Snapshot detection: if no action column was mapped and replay produced no positions
-    // but we have trades, the CSV is a portfolio snapshot (current holdings), not transaction history.
-    // Rebuild positions directly from trade data (ticker + shares + price as avg cost).
-    const isSnapshotCsv = parsed.length === 0 && trades.length > 0 && !mappings.action;
-    if (isSnapshotCsv) {
-      const snapshotPositions = new Map<string, { shares: number; totalCost: number }>();
-      for (const t of trades) {
-        const existing = snapshotPositions.get(t.ticker) || { shares: 0, totalCost: 0 };
-        existing.shares += t.shares;
-        existing.totalCost += t.shares * t.price;
-        snapshotPositions.set(t.ticker, existing);
-      }
-      for (const [ticker, pos] of snapshotPositions) {
-        if (pos.shares >= 0.01) {
-          const avgCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
-          parsed.push({
-            rowNumber: rowNum++,
-            ticker,
-            shares: Math.round(pos.shares * 1000000) / 1000000,
-            averageCost: Math.round(avgCost * 100) / 100,
-            confidence: 'high',
-          });
-        }
-      }
-      // Clear trades since these aren't real transactions — they're snapshot rows
-      trades.length = 0;
-    }
 
     const parseDurationMs = Date.now() - parseStart;
     res.json({
