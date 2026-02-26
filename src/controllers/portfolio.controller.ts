@@ -899,7 +899,7 @@ function parseRobinhoodTransactionCsv(
         return;
       }
       if (pos.shares <= 0) {
-        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position` });
+        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position (pre-CSV holding)` });
       } else {
         const avgBefore = pos.totalCost / pos.shares;
         pos.shares -= qty;
@@ -909,8 +909,9 @@ function parseRobinhoodTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
-        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++, sourceBroker: 'robinhood', rawAction: transCode });
       }
+      // Always record sell trades — position may have been held before CSV period
+      trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++, sourceBroker: 'robinhood', rawAction: transCode });
     } else if (transCode === 'SPL') {
       // Stock split: adds shares, total cost unchanged (avg cost decreases)
       if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
@@ -1132,7 +1133,7 @@ function parseSchwabTransactionCsv(
         return;
       }
       if (pos.shares <= 0) {
-        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position` });
+        warnings.push({ rowNumber: originalRowNum, message: `${ticker} sell without open position (pre-CSV holding)` });
       } else {
         const avgBefore = pos.totalCost / pos.shares;
         pos.shares -= qty;
@@ -1142,8 +1143,9 @@ function parseSchwabTransactionCsv(
         } else {
           pos.totalCost = pos.shares * avgBefore;
         }
-        trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
       }
+      // Always record sell trades — position may have been held before CSV period
+      trades.push({ date: dateStr, ticker, type: 'sell', shares: qty, price: Number.isFinite(price) ? price : 0, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
     } else if (actionLower === 'stock split') {
       if (Number.isFinite(qty) && qty > 0 && pos.shares > 0) {
         pos.shares += qty;
@@ -1889,10 +1891,41 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       })
       .filter(e => !isNaN(e.effectiveDate.getTime()) && isValidLedgerEventType(e.eventType));
 
-    // --- Trade/ledger dedup for both replace and incremental modes ---
+    // --- Incremental preflight guards (watermark, broker consistency, oversell) ---
     let skippedDuplicates = 0;
-    if ((mode === 'replace' || mode === 'incremental') && tradeRecords.length > 0) {
-      // Build fingerprints for existing trades to detect re-uploads
+    if (mode === 'incremental' && tradeRecords.length > 0) {
+      // 1. Broker consistency: all incoming trades must share one broker
+      const incomingBrokers = new Set(tradeRecords.map(t => t.sourceBroker).filter(Boolean));
+      if (incomingBrokers.size > 1) {
+        res.status(400).json({
+          error: 'INCREMENTAL_MIXED_BROKERS',
+          message: `Incremental import requires all trades from a single broker. Found: ${[...incomingBrokers].join(', ')}`,
+        });
+        return;
+      }
+      const incomingBroker = [...incomingBrokers][0] || 'unknown';
+
+      // 2. Watermark guard: incoming trades must be strictly AFTER the last imported
+      // trade for this broker. Prevents partial-history overlap → double-counting.
+      const lastImportedTrade = await prisma.portfolioTrade.findFirst({
+        where: { userId: req.user!.userId, sourceBroker: incomingBroker },
+        orderBy: { date: 'desc' },
+        select: { date: true },
+      });
+      if (lastImportedTrade) {
+        const incomingMinDate = new Date(Math.min(...tradeRecords.map(t => t.date.getTime())));
+        if (incomingMinDate <= lastImportedTrade.date) {
+          res.status(400).json({
+            error: 'INCREMENTAL_OVERLAP',
+            message: `Incoming trades overlap with existing data. Earliest incoming: ${incomingMinDate.toISOString().slice(0, 10)}, latest existing: ${lastImportedTrade.date.toISOString().slice(0, 10)}. Use "Replace All" to re-import full history, or export only dates after ${lastImportedTrade.date.toISOString().slice(0, 10)}.`,
+            existingMaxDate: lastImportedTrade.date.toISOString().slice(0, 10),
+            incomingMinDate: incomingMinDate.toISOString().slice(0, 10),
+          });
+          return;
+        }
+      }
+
+      // 3. Dedup: fingerprint existing trades to skip re-uploads
       const existingTrades = await prisma.portfolioTrade.findMany({
         where: { userId: req.user!.userId },
         select: { date: true, ticker: true, type: true, shares: true, price: true, sourceBroker: true },
@@ -1900,8 +1933,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       const existingFingerprints = new Set(
         existingTrades.map(t => `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`)
       );
-
-      // Filter out duplicate trades
       const originalCount = tradeRecords.length;
       const dedupedTrades = tradeRecords.filter(t => {
         const fp = `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`;
@@ -1909,12 +1940,11 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       });
       skippedDuplicates = originalCount - dedupedTrades.length;
       if (skippedDuplicates > 0) {
-        console.log(`[Import] Dedup: skipped ${skippedDuplicates} duplicate trades (mode=${mode})`);
+        console.log(`[Import] Incremental dedup: skipped ${skippedDuplicates} duplicate trades`);
       }
-      // Replace tradeRecords with deduped version
       tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
 
-      // Also dedup ledger events
+      // Dedup ledger events
       if (ledgerRecords.length > 0) {
         const existingLedger = await prisma.ledgerEvent.findMany({
           where: { userId: req.user!.userId },
@@ -1935,43 +1965,61 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
       }
 
-      // Pre-validate: check for oversells (incremental only — replace sets positions from CSV).
-      // Always start simulation from CURRENT holdings — the CSV may be partial history
-      // (e.g. only Jan-Feb 2026 trades, but user held shares before that period).
-      if (mode === 'incremental') {
-        const simPositions = new Map<string, { shares: number; averageCost: number }>();
-        for (const [ticker, pos] of existingMap.entries()) {
-          simPositions.set(ticker, { shares: pos.shares, averageCost: pos.averageCost });
-        }
+      // 4. Strict oversell check — hard 400, no DB writes, no clamping
+      const simPositions = new Map(
+        [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
+      );
+      const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
+      const oversellErrors: string[] = [];
 
-        const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-        const oversellWarnings: string[] = [];
-
-        for (const t of sortedForValidation) {
-          const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
-          if (t.type === 'buy') {
-            pos.shares += t.shares;
-          } else if (t.type === 'sell') {
-            if (t.shares > pos.shares + 0.001) {
-              oversellWarnings.push(`Sell ${t.shares} ${t.ticker} exceeds held ${pos.shares.toFixed(4)} — position will be clamped to 0`);
-            }
-            pos.shares = Math.max(0, pos.shares - t.shares);
+      for (const t of sortedForValidation) {
+        const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
+        if (t.type === 'buy') {
+          pos.shares += t.shares;
+        } else if (t.type === 'sell') {
+          if (t.shares > pos.shares + 0.001) {
+            oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
           }
-          simPositions.set(t.ticker, pos);
+          pos.shares -= t.shares;
         }
-
-        if (oversellWarnings.length > 0) {
-          console.log(`[Import] Oversell warnings (clamped): ${oversellWarnings.join('; ')}`);
-        }
+        simPositions.set(t.ticker, pos);
       }
 
-      // For incremental mode, if ALL trades were duplicates AND no holdings to merge,
-      // skip — positions are already consistent from prior imports.
-      // But if we have normalized holdings (from preview), fall through to merge them.
-      if (mode === 'incremental' && tradeRecords.length === 0 && ledgerRecords.length === 0 && normalized.length === 0) {
+      if (oversellErrors.length > 0) {
+        res.status(400).json({
+          error: 'OVERSELL_DETECTED',
+          message: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`,
+          details: oversellErrors,
+        });
+        return;
+      }
+
+      // If all trades were duplicates, nothing to do
+      if (tradeRecords.length === 0 && ledgerRecords.length === 0) {
         res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates });
         return;
       }
+    }
+
+    // --- Replace mode dedup: skip re-inserting identical trades ---
+    if (mode === 'replace' && tradeRecords.length > 0) {
+      const existingTrades = await prisma.portfolioTrade.findMany({
+        where: { userId: req.user!.userId },
+        select: { date: true, ticker: true, type: true, shares: true, price: true, sourceBroker: true },
+      });
+      const existingFingerprints = new Set(
+        existingTrades.map(t => `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`)
+      );
+      const originalCount = tradeRecords.length;
+      const dedupedTrades = tradeRecords.filter(t => {
+        const fp = `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`;
+        return !existingFingerprints.has(fp);
+      });
+      skippedDuplicates = originalCount - dedupedTrades.length;
+      if (skippedDuplicates > 0) {
+        console.log(`[Import] Replace dedup: skipped ${skippedDuplicates} duplicate trades`);
+      }
+      tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
     }
 
     await prisma.$transaction(async (tx) => {
@@ -2099,20 +2147,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           }
         }
 
-        // If no new trades but we have parsed holdings (e.g. all trades deduped
-        // or mapped wizard with no action column), merge the holdings
-        if (tickerTrades.size === 0 && normalized.length > 0) {
-          for (const h of normalized) {
-            const hadHolding = existingSet.has(h.ticker);
-            await tx.holding.upsert({
-              where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
-              update: { shares: h.shares, averageCost: h.averageCost },
-              create: { userId: req.user!.userId, ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
-            });
-            if (hadHolding) updated++;
-            else added++;
-          }
-        }
       } else {
         // Replace or Merge with position data: upsert from pre-calculated positions
         for (const h of normalized) {

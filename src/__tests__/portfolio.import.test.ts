@@ -22,6 +22,8 @@ describe('Portfolio import', () => {
     prismaMock.holding.upsert.mockResolvedValue({});
     prismaMock.userSettings.upsert.mockResolvedValue({});
     prismaMock.portfolioCompositionChange.create.mockResolvedValue({});
+    // Watermark guard uses findFirst; default to no prior trades
+    (prismaMock.portfolioTrade as any).findFirst = vi.fn().mockResolvedValue(null);
     // incremental mode uses tx.holding.update/create; add missing mock methods
     (prismaMock.holding as any).update = vi.fn().mockResolvedValue({});
     (prismaMock.holding as any).create = vi.fn().mockResolvedValue({});
@@ -165,7 +167,7 @@ GOOG,3,0,ok`;
       );
     });
 
-    it('clamps oversell to zero and deletes holding', async () => {
+    it('blocks oversell atomically before DB mutation', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
@@ -182,28 +184,21 @@ GOOG,3,0,ok`;
           ],
         });
 
-      // Oversell is clamped to 0 (historical trade — already happened)
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({ added: 0, updated: 0, removed: 1 });
-      expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: testUser.userId, ticker: 'AAPL' } }),
-      );
+      // Strict oversell → 400, no DB writes
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('OVERSELL_DETECTED');
+      expect(res.body.details).toHaveLength(1);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
 
-    it('dedups replayed trades and returns skippedDuplicates without mutation', async () => {
+    it('rejects overlapping trade dates with INCREMENTAL_OVERLAP', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
-      prismaMock.portfolioTrade.findMany.mockResolvedValue([
-        {
-          date: new Date('2026-02-20T00:00:00.000Z'),
-          ticker: 'AAPL',
-          type: 'buy',
-          shares: 5,
-          price: 200,
-          sourceBroker: 'robinhood',
-        },
-      ]);
+      // Watermark: existing trades up to Feb 20
+      (prismaMock.portfolioTrade as any).findFirst.mockResolvedValue({
+        date: new Date('2026-02-20T00:00:00.000Z'),
+      });
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -215,16 +210,42 @@ GOOG,3,0,ok`;
           ],
         });
 
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({ added: 0, updated: 0, removed: 0, skippedDuplicates: 1 });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('INCREMENTAL_OVERLAP');
+      expect(res.body.existingMaxDate).toBe('2026-02-20');
       expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
 
-    it('appends only non-duplicate trade + ledger events', async () => {
+    it('rejects mixed brokers with INCREMENTAL_MIXED_BROKERS', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
-      // Dedup check: return existing trade (the duplicate one)
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'incremental',
+          trades: [
+            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 5, price: 200, sourceBroker: 'robinhood' },
+            { date: '2026-02-21', ticker: 'MSFT', type: 'buy', shares: 2, price: 300, sourceBroker: 'schwab' },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('INCREMENTAL_MIXED_BROKERS');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('appends trades after watermark and dedups fingerprint matches', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([
+        { ticker: 'AAPL', shares: 10, averageCost: 100 },
+      ]);
+      // Watermark: existing trades up to Feb 19 → Feb 20+ is allowed
+      (prismaMock.portfolioTrade as any).findFirst.mockResolvedValue({
+        date: new Date('2026-02-19T00:00:00.000Z'),
+      });
+      // Dedup check: one existing trade that fingerprint-matches the first incoming
       prismaMock.portfolioTrade.findMany.mockResolvedValue([
         {
           date: new Date('2026-02-20T00:00:00.000Z'),
@@ -251,11 +272,11 @@ GOOG,3,0,ok`;
         .send({
           mode: 'incremental',
           trades: [
-            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 1, price: 100, sourceBroker: 'robinhood' }, // duplicate
+            { date: '2026-02-20', ticker: 'AAPL', type: 'buy', shares: 1, price: 100, sourceBroker: 'robinhood' }, // fingerprint dup
             { date: '2026-02-21', ticker: 'AAPL', type: 'buy', shares: 2, price: 120, sourceBroker: 'robinhood' }, // new
           ],
           ledgerEvents: [
-            { effectiveDate: '2026-02-20', eventType: 'CASH_DIVIDEND', ticker: 'AAPL', amount: 12.5, sourceBroker: 'robinhood' }, // duplicate
+            { effectiveDate: '2026-02-20', eventType: 'CASH_DIVIDEND', ticker: 'AAPL', amount: 12.5, sourceBroker: 'robinhood' }, // dup
             { effectiveDate: '2026-02-21', eventType: 'DIV_REINVEST', ticker: 'AAPL', shares: 0.2, amount: 0, sourceBroker: 'robinhood' }, // new
           ],
         });
