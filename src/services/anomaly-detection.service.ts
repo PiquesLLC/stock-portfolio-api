@@ -7,8 +7,18 @@ import { getSector } from '../utils/sectors';
 import { callPerplexity } from '../utils/perplexity';
 
 
-// Cooldown: 1 anomaly per ticker+type per 4 hours
+// Cooldown: 1 anomaly per user+ticker+type per 4 hours (general), 7 days (dividend)
 const COOLDOWN_MS = 4 * 60 * 60 * 1000;
+const DIVIDEND_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+// ETFs with variable distributions — skip from dividend raise/cut detection
+const ETF_VARIABLE_DISTRIBUTIONS = new Set([
+  'DIA', 'SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'EEM', 'EFA',
+  'XLF', 'XLK', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE',
+  'RSP', 'IVV', 'IJH', 'IJR', 'MDY', 'FEZ', 'EWJ', 'EWY', 'EWP', 'EWZ',
+  'AGG', 'BND', 'LQD', 'HYG', 'TLT', 'SHY', 'TIP', 'VCIT', 'VCSH',
+  'GLD', 'SLV', 'IAU', 'GDXJ', 'XBI', 'XME', 'IGV', 'NLR',
+]);
 
 // Perplexity explanation cache: 1 hour per ticker
 const analysisCache = new NodeCache({ stdTTL: 3600 });
@@ -62,10 +72,11 @@ async function getVolumeBaseline(ticker: string): Promise<{ avgVolume: number; t
   return result;
 }
 
-async function checkCooldown(ticker: string, type: string): Promise<boolean> {
-  const cutoff = new Date(Date.now() - COOLDOWN_MS);
+async function checkCooldown(userId: string, ticker: string, type: string, cooldownMs: number = COOLDOWN_MS): Promise<boolean> {
+  const cutoff = new Date(Date.now() - cooldownMs);
   const recent = await prisma.anomalyEvent.findFirst({
     where: {
+      userId,
       ticker,
       type,
       createdAt: { gte: cutoff },
@@ -253,7 +264,7 @@ export async function detectAnomalies(userId: string): Promise<void> {
   // Filter by cooldown and create events
   let created = 0;
   for (const c of candidates) {
-    const onCooldown = await checkCooldown(c.ticker, c.type);
+    const onCooldown = await checkCooldown(userId, c.ticker, c.type);
     if (onCooldown) continue;
 
     // Get Perplexity analysis for price and volume spikes
@@ -296,6 +307,12 @@ export async function detectAnomalies(userId: string): Promise<void> {
 /**
  * Detect dividend increases/decreases for held tickers.
  * Creates AnomalyEvent with type 'dividend_change'.
+ *
+ * Guards:
+ * 1. Cooldown scoped by userId (7-day window prevents repeat spam)
+ * 2. ETFs with variable distributions are excluded (consecutive comparison is noisy)
+ * 3. Re-checks holding exists at emit time (avoids post-sell stale alerts)
+ * 4. Prefers YoY same-quarter comparison for equities when available
  */
 export async function detectDividendChanges(userId: string): Promise<void> {
   console.log('[Dividend Change Detection] Running scan...');
@@ -307,36 +324,56 @@ export async function detectDividendChanges(userId: string): Promise<void> {
   for (const holding of holdings) {
     const ticker = holding.ticker;
 
-    // Get the last 2 regular dividend events for this ticker
+    // Skip ETFs with variable distributions — consecutive comparison is meaningless
+    if (ETF_VARIABLE_DISTRIBUTIONS.has(ticker)) continue;
+
+    // Get recent regular dividend events for this ticker (need enough for YoY comparison)
     const events = await prisma.dividendEvent.findMany({
       where: { ticker, dividendType: 'regular' },
       orderBy: { exDate: 'desc' },
-      take: 2,
+      take: 8, // ~2 years of quarterly dividends
     });
 
     if (events.length < 2) continue;
 
-    const [latest, previous] = events;
-    if (latest.amountPerShare === previous.amountPerShare) continue;
+    const latest = events[0];
 
     // Only alert on recent dividend changes — skip if the latest ex-date
-    // is more than 7 days old. Without this, the same old dividend change
-    // triggers new notifications every cooldown cycle.
+    // is more than 7 days old.
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     if (latest.exDate < sevenDaysAgo) continue;
 
-    const onCooldown = await checkCooldown(ticker, 'dividend_change');
+    // Try YoY same-quarter comparison first: find a dividend ~12 months ago (9-15 month window)
+    let compareEvent = events.find(e => {
+      const monthsAgo = (latest.exDate.getTime() - e.exDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
+      return monthsAgo >= 9 && monthsAgo <= 15;
+    });
+    // Fallback: compare to the immediately previous dividend
+    if (!compareEvent) compareEvent = events[1];
+
+    if (latest.amountPerShare === compareEvent.amountPerShare) continue;
+
+    // User-scoped cooldown — 7 days to prevent repeat spam
+    const onCooldown = await checkCooldown(userId, ticker, 'dividend_change', DIVIDEND_COOLDOWN_MS);
     if (onCooldown) continue;
 
-    const changeAmount = latest.amountPerShare - previous.amountPerShare;
-    const changePct = (changeAmount / previous.amountPerShare) * 100;
-    const direction = changeAmount > 0 ? 'raised' : 'cut';
+    // Re-verify holding still exists (guards against stale-job post-sell alerts)
+    const stillHeld = await prisma.holding.findFirst({
+      where: { userId, ticker, shares: { gt: 0 } },
+      select: { shares: true },
+    });
+    if (!stillHeld) continue;
 
-    // Estimate annual frequency from gap between ex-dates
-    const daysBetween = Math.abs(latest.exDate.getTime() - previous.exDate.getTime()) / (1000 * 60 * 60 * 24);
+    const changeAmount = latest.amountPerShare - compareEvent.amountPerShare;
+    const changePct = (changeAmount / compareEvent.amountPerShare) * 100;
+    const direction = changeAmount > 0 ? 'raised' : 'cut';
+    const comparisonLabel = compareEvent === events[1] ? 'previous payout' : 'year-ago payout';
+
+    // Estimate annual frequency from gap between the two most recent ex-dates
+    const daysBetween = Math.abs(latest.exDate.getTime() - events[1].exDate.getTime()) / (1000 * 60 * 60 * 24);
     const estimatedFrequency = daysBetween < 45 ? 12 : daysBetween < 120 ? 4 : daysBetween < 200 ? 2 : 1;
 
-    const annualImpact = changeAmount * holding.shares * estimatedFrequency;
+    const annualImpact = changeAmount * stillHeld.shares * estimatedFrequency;
     const severity = Math.abs(changePct) >= 20 ? 'critical' : Math.abs(changePct) >= 10 ? 'warning' : 'info';
 
     await prisma.anomalyEvent.create({
@@ -346,7 +383,7 @@ export async function detectDividendChanges(userId: string): Promise<void> {
         type: 'dividend_change',
         severity,
         title: `${ticker} ${direction} dividend ${Math.abs(changePct).toFixed(1)}%`,
-        description: `${ticker} ${direction} its dividend from $${previous.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`,
+        description: `${ticker} ${direction} its dividend from $${compareEvent.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share vs ${comparisonLabel} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`,
         analysis: null,
         citations: null,
         value: changePct,

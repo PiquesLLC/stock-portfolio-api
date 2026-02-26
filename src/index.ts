@@ -26,19 +26,20 @@ function isWeekendET(): boolean {
   return etDay === 'Sat' || etDay === 'Sun';
 }
 
-// Ensure the legacy default user exists (many services reference this hardcoded ID)
-async function ensureDefaultUser(): Promise<void> {
+// Ensure the seed/demo user exists (used only for leaderboard exclusion and demo data seeding).
+// Real users authenticate via JWT — portfolio data is stored per-user, never shared.
+async function ensureSeedUser(): Promise<void> {
   const existing = await prisma.user.findUnique({ where: { id: DEFAULT_USER_ID } });
   if (!existing) {
     await prisma.user.create({
       data: {
         id: DEFAULT_USER_ID,
         username: '_system',
-        displayName: 'My Portfolio',
+        displayName: 'System (Seed)',
         profilePublic: false,
       },
     });
-    console.log('[Init] Created default system user');
+    console.log('[Init] Created seed user (demo/leaderboard exclusion only)');
   }
 }
 
@@ -126,7 +127,7 @@ const server = app.listen(config.port, async () => {
   }
 
   // Ensure default system user exists before any schedulers run
-  await ensureDefaultUser().catch(err => console.error('[Init] Failed to create default user:', err.message));
+  await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
 
   // Auto-verify users created before email verification was required.

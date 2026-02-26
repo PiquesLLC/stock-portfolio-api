@@ -43,7 +43,7 @@ const FREE_CHART_PERIODS = new Set(['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'])
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     // Only use userId if explicitly passed as query param (e.g., leaderboard/social profile views).
-    // The main portfolio always uses the system/default user's data.
+    // The main portfolio uses the authenticated user's data from their JWT.
     const userId = req.query.userId as string | undefined;
 
     let portfolio;
