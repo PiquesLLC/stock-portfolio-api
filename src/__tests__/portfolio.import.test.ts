@@ -109,17 +109,8 @@ GOOG,3,0,ok`;
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
 
-      // Trade replay queries ALL trades per ticker after inserting new ones.
-      // Mock findMany to return existing buy + new buy for AAPL.
-      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
-        if (where?.ticker === 'AAPL') {
-          return Promise.resolve([
-            { type: 'buy', shares: 10, price: 100 },
-            { type: 'buy', shares: 5, price: 200 },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      // Dedup check queries all trades (no ticker filter) — return empty (no prior trades)
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -147,23 +138,8 @@ GOOG,3,0,ok`;
         { ticker: 'MSFT', shares: 2, averageCost: 300 },
       ]);
 
-      // Trade replay queries ALL trades per ticker after inserting new ones.
-      // Mock findMany to return existing buy + new sell for each ticker.
-      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
-        if (where?.ticker === 'AAPL') {
-          return Promise.resolve([
-            { type: 'buy', shares: 10, price: 100 },
-            { type: 'sell', shares: 4, price: 150 },
-          ]);
-        }
-        if (where?.ticker === 'MSFT') {
-          return Promise.resolve([
-            { type: 'buy', shares: 2, price: 300 },
-            { type: 'sell', shares: 2, price: 350 },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      // Dedup check queries all trades — return empty (no prior trades)
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -189,10 +165,12 @@ GOOG,3,0,ok`;
       );
     });
 
-    it('blocks oversell atomically before DB mutation', async () => {
+    it('clamps oversell to zero and deletes holding', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
+      // No prior trades for dedup
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -204,11 +182,12 @@ GOOG,3,0,ok`;
           ],
         });
 
-      expect(res.status).toBe(400);
-      expect(String(res.body.error)).toContain('Oversell detected');
-      expect(prismaMock.$transaction).not.toHaveBeenCalled();
-      expect(prismaMock.portfolioTrade.createMany).not.toHaveBeenCalled();
-      expect(prismaMock.ledgerEvent.createMany).not.toHaveBeenCalled();
+      // Oversell is clamped to 0 (historical trade — already happened)
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ added: 0, updated: 0, removed: 1 });
+      expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: testUser.userId, ticker: 'AAPL' } }),
+      );
     });
 
     it('dedups replayed trades and returns skippedDuplicates without mutation', async () => {
@@ -245,28 +224,17 @@ GOOG,3,0,ok`;
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
-      // Return existing trade for dedup check AND full history for replay.
-      // Replay calls findMany with ticker filter; dedup calls without.
-      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
-        if (where?.ticker === 'AAPL') {
-          // Replay: return all trades (existing + newly inserted)
-          return Promise.resolve([
-            { type: 'buy', shares: 1, price: 100 },
-            { type: 'buy', shares: 2, price: 120 },
-          ]);
-        }
-        // Dedup: return existing trades
-        return Promise.resolve([
-          {
-            date: new Date('2026-02-20T00:00:00.000Z'),
-            ticker: 'AAPL',
-            type: 'buy',
-            shares: 1,
-            price: 100,
-            sourceBroker: 'robinhood',
-          },
-        ]);
-      });
+      // Dedup check: return existing trade (the duplicate one)
+      prismaMock.portfolioTrade.findMany.mockResolvedValue([
+        {
+          date: new Date('2026-02-20T00:00:00.000Z'),
+          ticker: 'AAPL',
+          type: 'buy',
+          shares: 1,
+          price: 100,
+          sourceBroker: 'robinhood',
+        },
+      ]);
       prismaMock.ledgerEvent.findMany.mockResolvedValue([
         {
           effectiveDate: new Date('2026-02-20T00:00:00.000Z'),

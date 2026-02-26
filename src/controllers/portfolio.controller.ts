@@ -1935,27 +1935,17 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
       }
 
-      // Pre-validate: check for oversells (incremental only — replace sets positions from CSV)
-      // For tickers that have both buys AND sells in the new trades, simulate from zero
-      // (the CSV contains complete trade history for that ticker). Only use current holdings
-      // as the starting position for tickers with sells-only (no buys in the CSV).
+      // Pre-validate: check for oversells (incremental only — replace sets positions from CSV).
+      // Always start simulation from CURRENT holdings — the CSV may be partial history
+      // (e.g. only Jan-Feb 2026 trades, but user held shares before that period).
       if (mode === 'incremental') {
-        // Determine which tickers have buys in the new trades
-        const tickersWithBuys = new Set<string>();
-        for (const t of tradeRecords) {
-          if (t.type === 'buy') tickersWithBuys.add(t.ticker);
-        }
-
         const simPositions = new Map<string, { shares: number; averageCost: number }>();
-        // Only seed current holdings for tickers that have sells-only (no buys in CSV)
         for (const [ticker, pos] of existingMap.entries()) {
-          if (!tickersWithBuys.has(ticker)) {
-            simPositions.set(ticker, { shares: pos.shares, averageCost: pos.averageCost });
-          }
+          simPositions.set(ticker, { shares: pos.shares, averageCost: pos.averageCost });
         }
 
         const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-        const oversellErrors: string[] = [];
+        const oversellWarnings: string[] = [];
 
         for (const t of sortedForValidation) {
           const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
@@ -1963,23 +1953,22 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
             pos.shares += t.shares;
           } else if (t.type === 'sell') {
             if (t.shares > pos.shares + 0.001) {
-              oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+              oversellWarnings.push(`Sell ${t.shares} ${t.ticker} exceeds held ${pos.shares.toFixed(4)} — position will be clamped to 0`);
             }
-            pos.shares -= t.shares;
+            pos.shares = Math.max(0, pos.shares - t.shares);
           }
           simPositions.set(t.ticker, pos);
         }
 
-        if (oversellErrors.length > 0) {
-          res.status(400).json({ error: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`, details: oversellErrors });
-          return;
+        if (oversellWarnings.length > 0) {
+          console.log(`[Import] Oversell warnings (clamped): ${oversellWarnings.join('; ')}`);
         }
       }
 
-      // For replace mode with no new trades, still need to update holdings
-      // For incremental mode, if ALL trades were duplicates (no new records to insert),
-      // skip replay — positions are already consistent from prior imports
-      if (mode === 'incremental' && tradeRecords.length === 0 && ledgerRecords.length === 0) {
+      // For incremental mode, if ALL trades were duplicates AND no holdings to merge,
+      // skip — positions are already consistent from prior imports.
+      // But if we have normalized holdings (from preview), fall through to merge them.
+      if (mode === 'incremental' && tradeRecords.length === 0 && ledgerRecords.length === 0 && normalized.length === 0) {
         res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates });
         return;
       }
@@ -2037,14 +2026,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           await tx.ledgerEvent.createMany({ data: ledgerRecords });
         }
       } else if (useTradeReplay) {
-        // Collect every ticker mentioned in the CSV (including deduped trades)
-        // so we reconcile positions even when all trades were already recorded
-        const csvTickers = new Set<string>();
-        for (const t of (Array.isArray(trades) ? trades : [])) {
-          const ticker = String(t.ticker || '').trim().toUpperCase();
-          if (isValidTicker(ticker)) csvTickers.add(ticker);
-        }
-
         // Insert new (non-duplicate) trade records first
         if (tradeRecords.length > 0) {
           await tx.portfolioTrade.createMany({ data: tradeRecords });
@@ -2053,20 +2034,28 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           await tx.ledgerEvent.createMany({ data: ledgerRecords });
         }
 
-        // Replay the FULL trade history for each CSV ticker to reconcile positions
-        // This ensures positions are always consistent with trade records,
-        // even if a sell was deduped (already in DB but position never adjusted)
-        for (const ticker of csvTickers) {
-          const allTrades = await tx.portfolioTrade.findMany({
-            where: { userId: req.user!.userId, ticker },
-            orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }, { createdAt: 'asc' }],
-            select: { type: true, shares: true, price: true },
+        // Apply NEW trades as deltas to current positions.
+        // Start from existing holding (not zero) because the CSV may be partial
+        // history — the user may hold shares acquired before the CSV period.
+        const tickerTrades = new Map<string, typeof tradeRecords>();
+        for (const t of tradeRecords) {
+          const arr = tickerTrades.get(t.ticker) || [];
+          arr.push(t);
+          tickerTrades.set(t.ticker, arr);
+        }
+
+        for (const [ticker, trs] of tickerTrades) {
+          const sorted = [...trs].sort((a, b) => {
+            const d = a.date.getTime() - b.date.getTime();
+            if (d !== 0) return d;
+            return (a.rowIndex ?? 0) - (b.rowIndex ?? 0);
           });
 
-          // Replay all trades to calculate correct position
-          let shares = 0;
-          let averageCost = 0;
-          for (const t of allTrades) {
+          const existing = existingMap.get(ticker);
+          let shares = existing?.shares ?? 0;
+          let averageCost = existing?.averageCost ?? 0;
+
+          for (const t of sorted) {
             if (t.type === 'buy') {
               const totalCostBefore = shares * averageCost;
               const newCost = t.shares * t.price;
@@ -2078,10 +2067,18 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
                 shares = 0;
                 averageCost = 0;
               }
+            } else if (t.type === 'split' || t.type === 'transfer' || t.type === 'merger') {
+              shares += t.shares;
+            } else if (t.type === 'cancel') {
+              shares -= t.shares;
+              if (shares < 0.001) {
+                shares = 0;
+                averageCost = 0;
+              }
             }
           }
 
-          // Reconcile DB holding with replayed position
+          // Reconcile DB holding with updated position
           const hadHolding = existingSet.has(ticker);
           if (shares < 0.001) {
             if (hadHolding) {
@@ -2099,6 +2096,21 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
               data: { userId: req.user!.userId, ticker, shares, averageCost },
             });
             added++;
+          }
+        }
+
+        // If no new trades but we have parsed holdings (e.g. all trades deduped
+        // or mapped wizard with no action column), merge the holdings
+        if (tickerTrades.size === 0 && normalized.length > 0) {
+          for (const h of normalized) {
+            const hadHolding = existingSet.has(h.ticker);
+            await tx.holding.upsert({
+              where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
+              update: { shares: h.shares, averageCost: h.averageCost },
+              create: { userId: req.user!.userId, ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
+            });
+            if (hadHolding) updated++;
+            else added++;
           }
         }
       } else {
