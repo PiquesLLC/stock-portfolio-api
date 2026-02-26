@@ -1936,10 +1936,24 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       }
 
       // Pre-validate: check for oversells (incremental only — replace sets positions from CSV)
+      // For tickers that have both buys AND sells in the new trades, simulate from zero
+      // (the CSV contains complete trade history for that ticker). Only use current holdings
+      // as the starting position for tickers with sells-only (no buys in the CSV).
       if (mode === 'incremental') {
-        const simPositions = new Map(
-          [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
-        );
+        // Determine which tickers have buys in the new trades
+        const tickersWithBuys = new Set<string>();
+        for (const t of tradeRecords) {
+          if (t.type === 'buy') tickersWithBuys.add(t.ticker);
+        }
+
+        const simPositions = new Map<string, { shares: number; averageCost: number }>();
+        // Only seed current holdings for tickers that have sells-only (no buys in CSV)
+        for (const [ticker, pos] of existingMap.entries()) {
+          if (!tickersWithBuys.has(ticker)) {
+            simPositions.set(ticker, { shares: pos.shares, averageCost: pos.averageCost });
+          }
+        }
+
         const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
         const oversellErrors: string[] = [];
 
