@@ -1817,8 +1817,9 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       })
       .filter(e => !isNaN(e.effectiveDate.getTime()) && isValidLedgerEventType(e.eventType));
 
-    // --- Incremental dedup: build fingerprint set from existing trades ---
-    if (mode === 'incremental' && tradeRecords.length > 0) {
+    // --- Trade/ledger dedup for both replace and incremental modes ---
+    let skippedDuplicates = 0;
+    if ((mode === 'replace' || mode === 'incremental') && tradeRecords.length > 0) {
       // Build fingerprints for existing trades to detect re-uploads
       const existingTrades = await prisma.portfolioTrade.findMany({
         where: { userId: req.user!.userId },
@@ -1834,9 +1835,9 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         const fp = `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`;
         return !existingFingerprints.has(fp);
       });
-      const dupCount = originalCount - dedupedTrades.length;
-      if (dupCount > 0) {
-        console.log(`[Import] Incremental dedup: skipped ${dupCount} duplicate trades`);
+      skippedDuplicates = originalCount - dedupedTrades.length;
+      if (skippedDuplicates > 0) {
+        console.log(`[Import] Dedup: skipped ${skippedDuplicates} duplicate trades (mode=${mode})`);
       }
       // Replace tradeRecords with deduped version
       tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
@@ -1862,94 +1863,112 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
       }
 
-      // Pre-validate: check for oversells before entering transaction
-      const simPositions = new Map(
-        [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
-      );
-      const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-      const oversellErrors: string[] = [];
+      // Pre-validate: check for oversells (incremental only — replace sets positions from CSV)
+      if (mode === 'incremental') {
+        const simPositions = new Map(
+          [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
+        );
+        const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
+        const oversellErrors: string[] = [];
 
-      for (const t of sortedForValidation) {
-        const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
-        if (t.type === 'buy') {
-          pos.shares += t.shares;
-        } else if (t.type === 'sell') {
-          if (t.shares > pos.shares + 0.001) {
-            oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+        for (const t of sortedForValidation) {
+          const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
+          if (t.type === 'buy') {
+            pos.shares += t.shares;
+          } else if (t.type === 'sell') {
+            if (t.shares > pos.shares + 0.001) {
+              oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+            }
+            pos.shares -= t.shares;
           }
-          pos.shares -= t.shares;
+          simPositions.set(t.ticker, pos);
         }
-        simPositions.set(t.ticker, pos);
+
+        if (oversellErrors.length > 0) {
+          res.status(400).json({ error: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`, details: oversellErrors });
+          return;
+        }
       }
 
-      if (oversellErrors.length > 0) {
-        res.status(400).json({ error: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`, details: oversellErrors });
-        return;
-      }
-
-      // If all trades were duplicates, nothing to do
-      if (tradeRecords.length === 0 && ledgerRecords.length === 0) {
-        res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates: dupCount });
-        return;
-      }
+      // For replace mode with no new trades, still need to update holdings
+      // For incremental mode, always proceed — replay reconciles positions
+      // even when all trade records were deduped
     }
 
     await prisma.$transaction(async (tx) => {
       if (mode === 'replace') {
+        // Delete holdings (will be re-created from CSV positions below)
+        // Trades and ledger events are NOT deleted — dedup handles duplicates above
         await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
-        await tx.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } });
-        await tx.ledgerEvent.deleteMany({ where: { userId: req.user!.userId } });
       }
 
       if (mode === 'incremental') {
-        // Apply each trade against existing holdings
-        const sortedTrades = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-        const positions = new Map(
-          [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
-        );
-        const touchedTickers = new Set<string>();
+        // Collect every ticker mentioned in the CSV (including deduped trades)
+        // so we reconcile positions even when all trades were already recorded
+        const csvTickers = new Set<string>();
+        for (const t of (Array.isArray(trades) ? trades : [])) {
+          const ticker = String(t.ticker || '').trim().toUpperCase();
+          if (isValidTicker(ticker)) csvTickers.add(ticker);
+        }
 
-        for (const t of sortedTrades) {
-          const ticker = t.ticker;
-          touchedTickers.add(ticker);
-          const existing = positions.get(ticker) || { shares: 0, averageCost: 0 };
+        // Insert new (non-duplicate) trade records first
+        if (tradeRecords.length > 0) {
+          await tx.portfolioTrade.createMany({ data: tradeRecords });
+        }
+        if (ledgerRecords.length > 0) {
+          await tx.ledgerEvent.createMany({ data: ledgerRecords });
+        }
 
-          if (t.type === 'buy') {
-            const totalCostBefore = existing.shares * existing.averageCost;
-            const newCost = t.shares * t.price;
-            const newShares = existing.shares + t.shares;
-            existing.shares = newShares;
-            existing.averageCost = newShares > 0 ? (totalCostBefore + newCost) / newShares : 0;
-          } else if (t.type === 'sell') {
-            existing.shares -= t.shares;
-            if (existing.shares < 0.001) {
-              existing.shares = 0;
-              existing.averageCost = 0;
+        // Now replay the FULL trade history for each CSV ticker to reconcile positions
+        // This ensures positions are always consistent with trade records,
+        // even if a sell was deduped (already in DB but position never adjusted)
+        for (const ticker of csvTickers) {
+          const allTrades = await tx.portfolioTrade.findMany({
+            where: { userId: req.user!.userId, ticker },
+            orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }, { createdAt: 'asc' }],
+            select: { type: true, shares: true, price: true },
+          });
+
+          // Replay all trades to calculate correct position
+          let shares = 0;
+          let averageCost = 0;
+          for (const t of allTrades) {
+            if (t.type === 'buy') {
+              const totalCostBefore = shares * averageCost;
+              const newCost = t.shares * t.price;
+              shares += t.shares;
+              averageCost = shares > 0 ? (totalCostBefore + newCost) / shares : 0;
+            } else if (t.type === 'sell') {
+              shares -= t.shares;
+              if (shares < 0.001) {
+                shares = 0;
+                averageCost = 0;
+              }
             }
           }
 
-          positions.set(ticker, existing);
-        }
-
-        // Write updated positions to DB
-        for (const ticker of touchedTickers) {
-          const pos = positions.get(ticker)!;
-          if (pos.shares < 0.001) {
-            await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
-            removed++;
-          } else if (existingSet.has(ticker)) {
+          // Reconcile DB holding with replayed position
+          const hadHolding = existingSet.has(ticker);
+          if (shares < 0.001) {
+            // Position is zero — delete holding if it exists
+            if (hadHolding) {
+              await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
+              removed++;
+            }
+          } else if (hadHolding) {
             await tx.holding.update({
               where: { userId_ticker: { userId: req.user!.userId, ticker } },
-              data: { shares: pos.shares, averageCost: pos.averageCost },
+              data: { shares, averageCost },
             });
             updated++;
           } else {
             await tx.holding.create({
-              data: { userId: req.user!.userId, ticker, shares: pos.shares, averageCost: pos.averageCost },
+              data: { userId: req.user!.userId, ticker, shares, averageCost },
             });
             added++;
           }
         }
+
       } else {
         // Replace or Merge: upsert from pre-calculated positions
         for (const h of normalized) {
@@ -1966,11 +1985,14 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         }
       }
 
-      if (tradeRecords.length > 0) {
-        await tx.portfolioTrade.createMany({ data: tradeRecords });
-      }
-      if (ledgerRecords.length > 0) {
-        await tx.ledgerEvent.createMany({ data: ledgerRecords });
+      // Incremental mode already inserted trades/ledger above during replay
+      if (mode !== 'incremental') {
+        if (tradeRecords.length > 0) {
+          await tx.portfolioTrade.createMany({ data: tradeRecords });
+        }
+        if (ledgerRecords.length > 0) {
+          await tx.ledgerEvent.createMany({ data: ledgerRecords });
+        }
       }
 
       // Update margin debt if provided
@@ -1998,7 +2020,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       console.warn('[Snapshot] Reset failed after import confirm:');
     }
 
-    res.json({ added, updated, removed });
+    res.json({ added, updated, removed, ...(skippedDuplicates > 0 ? { skippedDuplicates } : {}) });
   } catch (error) {
     if (error instanceof PlanLimitError) {
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
