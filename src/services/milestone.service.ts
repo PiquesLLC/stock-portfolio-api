@@ -8,7 +8,16 @@ import { getMarketSession } from '../utils/market-hours';
 // Track which milestones we've already notified (ticker-userId-type -> timestamp)
 // This prevents spam if a stock hovers near a milestone
 const recentNotifications = new Map<string, number>();
-const NOTIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Cooldowns per event type — ATH/ATL/52W use 4 hours to avoid spam during
+// rapid price movements while still catching genuinely new records later in the day
+const COOLDOWN_MS: Record<string, number> = {
+  'ath': 4 * 60 * 60 * 1000,       // 4 hours
+  'atl': 4 * 60 * 60 * 1000,       // 4 hours
+  '52w_high': 4 * 60 * 60 * 1000,  // 4 hours
+  '52w_low': 4 * 60 * 60 * 1000,   // 4 hours
+};
+const DEFAULT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours fallback
 
 interface TickerHolders {
   ticker: string;
@@ -105,13 +114,28 @@ export async function checkMilestoneAlerts(): Promise<void> {
         console.error(`[Milestone] Failed to get all-time range for ${ticker}`);
       }
 
-      // Check milestones and create events for each user who holds this ticker
+      // Check milestones and create events for each user who holds this ticker.
+      // ATH/ATL are checked FIRST so we can suppress redundant 52W notifications:
+      //   - ATH firing suppresses 52W_HIGH (ATH implies 52-week high)
+      //   - ATL firing suppresses 52W_LOW  (ATL implies 52-week low)
       const milestones = [
-        { type: '52w_high', threshold: week52High, check: (p: number, t: number) => p >= t * 0.998, isHigh: true },
-        { type: '52w_low', threshold: week52Low, check: (p: number, t: number) => p <= t * 1.002, isHigh: false },
         { type: 'ath', threshold: allTimeHigh, check: (p: number, t: number) => p >= t, isHigh: true },
         { type: 'atl', threshold: allTimeLow, check: (p: number, t: number) => t > 0 && p <= t, isHigh: false },
+        { type: '52w_high', threshold: week52High, check: (p: number, t: number) => p >= t * 0.998, isHigh: true },
+        { type: '52w_low', threshold: week52Low, check: (p: number, t: number) => p <= t * 1.002, isHigh: false },
       ];
+
+      // Track which users got ATH/ATL for this ticker in this cycle,
+      // so we can suppress the redundant 52W counterpart
+      const athFiredForUser = new Set<string>();
+      const atlFiredForUser = new Set<string>();
+
+      const typeLabels: Record<string, string> = {
+        '52w_high': '52-week high',
+        '52w_low': '52-week low',
+        'ath': 'all-time high',
+        'atl': 'all-time low',
+      };
 
       for (const { type, threshold, check, isHigh } of milestones) {
         if (!threshold || !check(currentPrice, threshold)) continue;
@@ -119,12 +143,22 @@ export async function checkMilestoneAlerts(): Promise<void> {
         const isNewRecord = isHigh ? currentPrice > threshold : currentPrice < threshold;
 
         for (const userId of userIds) {
+          // Suppress 52W_HIGH if ATH already fired for this ticker+user
+          if (type === '52w_high' && athFiredForUser.has(userId)) {
+            continue;
+          }
+          // Suppress 52W_LOW if ATL already fired for this ticker+user
+          if (type === '52w_low' && atlFiredForUser.has(userId)) {
+            continue;
+          }
+
           const notificationKey = `${ticker}-${userId}-${type}`;
           const lastNotified = recentNotifications.get(notificationKey) || 0;
           const now = Date.now();
+          const cooldown = COOLDOWN_MS[type] ?? DEFAULT_COOLDOWN_MS;
 
-          // Skip if we've notified recently
-          if (now - lastNotified < NOTIFICATION_COOLDOWN_MS) continue;
+          // Skip if we've notified recently (in-memory cooldown)
+          if (now - lastNotified < cooldown) continue;
 
           // Check if we already have a recent event in the database
           const recentEvent = await prisma.milestoneEvent.findFirst({
@@ -132,19 +166,36 @@ export async function checkMilestoneAlerts(): Promise<void> {
               userId,
               ticker,
               eventType: type,
-              createdAt: { gte: new Date(now - NOTIFICATION_COOLDOWN_MS) },
+              createdAt: { gte: new Date(now - cooldown) },
             },
           });
 
           if (recentEvent) continue;
 
-          // Create the milestone event
-          const typeLabels: Record<string, string> = {
-            '52w_high': '52-week high',
-            '52w_low': '52-week low',
-            'ath': 'all-time high',
-            'atl': 'all-time low',
-          };
+          // For 52W_HIGH suppression: also check if an ATH was recently created
+          // in the DB (covers cases where ATH fired in a previous cycle within cooldown)
+          if (type === '52w_high') {
+            const recentAth = await prisma.milestoneEvent.findFirst({
+              where: {
+                userId,
+                ticker,
+                eventType: 'ath',
+                createdAt: { gte: new Date(now - cooldown) },
+              },
+            });
+            if (recentAth) continue;
+          }
+          if (type === '52w_low') {
+            const recentAtl = await prisma.milestoneEvent.findFirst({
+              where: {
+                userId,
+                ticker,
+                eventType: 'atl',
+                createdAt: { gte: new Date(now - cooldown) },
+              },
+            });
+            if (recentAtl) continue;
+          }
 
           const message = isNewRecord
             ? `${ticker} hit a new ${typeLabels[type]} of $${currentPrice.toFixed(2)}`
@@ -163,6 +214,11 @@ export async function checkMilestoneAlerts(): Promise<void> {
           });
 
           recentNotifications.set(notificationKey, now);
+
+          // Record that ATH/ATL fired for this user so 52W counterpart is suppressed
+          if (type === 'ath') athFiredForUser.add(userId);
+          if (type === 'atl') atlFiredForUser.add(userId);
+
           console.log(`[Milestone] ${message}`);
         }
       }

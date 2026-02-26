@@ -77,7 +77,15 @@ async function refreshQuotesBackground(): Promise<void> {
           // Prefer extended-hours data (Yahoo enrichment) during PRE/POST/CLOSED
           const hasExtended = quote.extendedChangePercent != null && quote.extendedPrice != null;
           const price = hasExtended ? quote.extendedPrice! : quote.currentPrice;
-          const changePercent = hasExtended ? quote.extendedChangePercent! : quote.changePercent;
+
+          // During extended hours, compute TOTAL change from previous close
+          // (not just the after-hours delta). This matches Finviz behavior.
+          let changePercent: number;
+          if (hasExtended && quote.previousClose > 0) {
+            changePercent = ((quote.extendedPrice! - quote.previousClose) / quote.previousClose) * 100;
+          } else {
+            changePercent = quote.changePercent;
+          }
 
           // Detect prevClose fallback: price equals previousClose and change is 0
           const isPrevCloseFallback = !hasExtended
