@@ -1687,6 +1687,34 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       }
     }
 
+    // Snapshot detection: if no action column was mapped and replay produced no positions
+    // but we have trades, the CSV is a portfolio snapshot (current holdings), not transaction history.
+    // Rebuild positions directly from trade data (ticker + shares + price as avg cost).
+    const isSnapshotCsv = parsed.length === 0 && trades.length > 0 && !mappings.action;
+    if (isSnapshotCsv) {
+      const snapshotPositions = new Map<string, { shares: number; totalCost: number }>();
+      for (const t of trades) {
+        const existing = snapshotPositions.get(t.ticker) || { shares: 0, totalCost: 0 };
+        existing.shares += t.shares;
+        existing.totalCost += t.shares * t.price;
+        snapshotPositions.set(t.ticker, existing);
+      }
+      for (const [ticker, pos] of snapshotPositions) {
+        if (pos.shares >= 0.01) {
+          const avgCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
+          parsed.push({
+            rowNumber: rowNum++,
+            ticker,
+            shares: Math.round(pos.shares * 1000000) / 1000000,
+            averageCost: Math.round(avgCost * 100) / 100,
+            confidence: 'high',
+          });
+        }
+      }
+      // Clear trades since these aren't real transactions — they're snapshot rows
+      trades.length = 0;
+    }
+
     const parseDurationMs = Date.now() - parseStart;
     res.json({
       reviewRequired: true,
@@ -1888,8 +1916,12 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       }
 
       // For replace mode with no new trades, still need to update holdings
-      // For incremental mode, always proceed — replay reconciles positions
-      // even when all trade records were deduped
+      // For incremental mode, if ALL trades were duplicates (no new records to insert),
+      // skip replay — positions are already consistent from prior imports
+      if (mode === 'incremental' && tradeRecords.length === 0 && ledgerRecords.length === 0) {
+        res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates });
+        return;
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -1908,17 +1940,25 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         // Build holdings directly from the trade data (ticker + shares + price = avg cost).
         const positionMap = new Map<string, { shares: number; totalCost: number }>();
         const rawTrades = Array.isArray(trades) ? trades : [];
+        console.log(`[Import] useTradesAsPositions: ${rawTrades.length} raw trades`);
         for (const t of rawTrades) {
           const ticker = String(t.ticker || '').trim().toUpperCase();
-          if (!isValidTicker(ticker)) continue;
+          if (!isValidTicker(ticker)) {
+            console.log(`[Import] skipped invalid ticker: '${ticker}'`);
+            continue;
+          }
           const shares = Number(t.shares) || 0;
           const price = Number(t.price) || 0;
-          if (shares <= 0) continue;
+          if (shares <= 0) {
+            console.log(`[Import] skipped ${ticker}: shares=${t.shares} → ${shares}`);
+            continue;
+          }
           const existing = positionMap.get(ticker) || { shares: 0, totalCost: 0 };
           existing.shares += shares;
           existing.totalCost += shares * price;
           positionMap.set(ticker, existing);
         }
+        console.log(`[Import] useTradesAsPositions: ${positionMap.size} tickers in positionMap`);
 
         for (const [ticker, pos] of positionMap) {
           const averageCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;

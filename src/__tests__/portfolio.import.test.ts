@@ -109,6 +109,18 @@ GOOG,3,0,ok`;
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
 
+      // Trade replay queries ALL trades per ticker after inserting new ones.
+      // Mock findMany to return existing buy + new buy for AAPL.
+      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
+        if (where?.ticker === 'AAPL') {
+          return Promise.resolve([
+            { type: 'buy', shares: 10, price: 100 },
+            { type: 'buy', shares: 5, price: 200 },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
       const res = await request(app)
         .post('/portfolio/import/confirm')
         .set(authHeader())
@@ -134,6 +146,24 @@ GOOG,3,0,ok`;
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
         { ticker: 'MSFT', shares: 2, averageCost: 300 },
       ]);
+
+      // Trade replay queries ALL trades per ticker after inserting new ones.
+      // Mock findMany to return existing buy + new sell for each ticker.
+      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
+        if (where?.ticker === 'AAPL') {
+          return Promise.resolve([
+            { type: 'buy', shares: 10, price: 100 },
+            { type: 'sell', shares: 4, price: 150 },
+          ]);
+        }
+        if (where?.ticker === 'MSFT') {
+          return Promise.resolve([
+            { type: 'buy', shares: 2, price: 300 },
+            { type: 'sell', shares: 2, price: 350 },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -215,16 +245,28 @@ GOOG,3,0,ok`;
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
-      prismaMock.portfolioTrade.findMany.mockResolvedValue([
-        {
-          date: new Date('2026-02-20T00:00:00.000Z'),
-          ticker: 'AAPL',
-          type: 'buy',
-          shares: 1,
-          price: 100,
-          sourceBroker: 'robinhood',
-        },
-      ]);
+      // Return existing trade for dedup check AND full history for replay.
+      // Replay calls findMany with ticker filter; dedup calls without.
+      prismaMock.portfolioTrade.findMany.mockImplementation(({ where }: any) => {
+        if (where?.ticker === 'AAPL') {
+          // Replay: return all trades (existing + newly inserted)
+          return Promise.resolve([
+            { type: 'buy', shares: 1, price: 100 },
+            { type: 'buy', shares: 2, price: 120 },
+          ]);
+        }
+        // Dedup: return existing trades
+        return Promise.resolve([
+          {
+            date: new Date('2026-02-20T00:00:00.000Z'),
+            ticker: 'AAPL',
+            type: 'buy',
+            shares: 1,
+            price: 100,
+            sourceBroker: 'robinhood',
+          },
+        ]);
+      });
       prismaMock.ledgerEvent.findMany.mockResolvedValue([
         {
           effectiveDate: new Date('2026-02-20T00:00:00.000Z'),
@@ -269,7 +311,7 @@ GOOG,3,0,ok`;
   });
 
   describe('POST /portfolio/import/confirm mode regression', () => {
-    it('replace deletes existing holdings/trades/ledger before write', async () => {
+    it('replace deletes existing holdings before write (preserves trades/ledger)', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
@@ -286,8 +328,9 @@ GOOG,3,0,ok`;
       expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: testUser.userId } }),
       );
-      expect(prismaMock.portfolioTrade.deleteMany).toHaveBeenCalled();
-      expect(prismaMock.ledgerEvent.deleteMany).toHaveBeenCalled();
+      // Replace mode uses dedup instead of deleting trades/ledger
+      expect(prismaMock.portfolioTrade.deleteMany).not.toHaveBeenCalled();
+      expect(prismaMock.ledgerEvent.deleteMany).not.toHaveBeenCalled();
       expect(prismaMock.holding.upsert).toHaveBeenCalledWith(expect.objectContaining({
         where: { userId_ticker: { userId: testUser.userId, ticker: 'MSFT' } },
       }));

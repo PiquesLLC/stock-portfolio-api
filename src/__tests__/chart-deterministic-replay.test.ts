@@ -146,8 +146,12 @@ describe('Deterministic trade replay', () => {
       // Mock prisma operations used by confirm handler
       (prismaMock as any).holding.findMany.mockResolvedValue([]);
       (prismaMock as any).holding.deleteMany.mockResolvedValue({ count: 0 });
+      (prismaMock as any).holding.upsert.mockResolvedValue({});
+      (prismaMock as any).portfolioTrade.findMany.mockResolvedValue([]);
       (prismaMock as any).portfolioTrade.deleteMany.mockResolvedValue({ count: 0 });
       (prismaMock as any).portfolioTrade.createMany.mockResolvedValue({ count: 3 });
+      (prismaMock as any).portfolioCompositionChange.create.mockResolvedValue({});
+      (prismaMock as any).userSettings.upsert.mockResolvedValue({});
 
       const trades = [
         { date: '02/10/2026', ticker: 'XYZ', type: 'buy', shares: 10, price: 100, rowIndex: 0 },
@@ -191,8 +195,12 @@ describe('Deterministic trade replay', () => {
 
       (prismaMock as any).holding.findMany.mockResolvedValue([]);
       (prismaMock as any).holding.deleteMany.mockResolvedValue({ count: 0 });
+      (prismaMock as any).holding.upsert.mockResolvedValue({});
+      (prismaMock as any).portfolioTrade.findMany.mockResolvedValue([]);
       (prismaMock as any).portfolioTrade.deleteMany.mockResolvedValue({ count: 0 });
       (prismaMock as any).portfolioTrade.createMany.mockResolvedValue({ count: 1 });
+      (prismaMock as any).portfolioCompositionChange.create.mockResolvedValue({});
+      (prismaMock as any).userSettings.upsert.mockResolvedValue({});
 
       const payload = {
         holdings: [{ ticker: 'AAPL', shares: 10, averageCost: 200 }],
