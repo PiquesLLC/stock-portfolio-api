@@ -1726,14 +1726,11 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       res.status(400).json({ error: 'mode must be replace, merge, or incremental' });
       return;
     }
-    // Incremental mode works from trades; replace/merge need holdings
-    if (mode === 'incremental') {
-      if (!Array.isArray(trades) || trades.length === 0) {
-        res.status(400).json({ error: 'incremental mode requires trades' });
-        return;
-      }
-    } else if (!Array.isArray(holdings) || holdings.length === 0) {
-      res.status(400).json({ error: 'holdings must be a non-empty array' });
+    // Validate: need either holdings or trades (or both)
+    const hasHoldings = Array.isArray(holdings) && holdings.length > 0;
+    const hasTradesToProcess = Array.isArray(trades) && trades.length > 0;
+    if (!hasHoldings && !hasTradesToProcess) {
+      res.status(400).json({ error: 'Must provide either holdings or trades' });
       return;
     }
 
@@ -1750,8 +1747,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       averageCost: Number(h.averageCost),
     })).filter(h => isValidTicker(h.ticker) && h.shares > 0 && Number.isFinite(h.averageCost) && h.averageCost >= 0);
 
-    if (mode !== 'incremental' && normalized.length === 0) {
-      res.status(400).json({ error: 'holdings must include at least one valid entry' });
+    if (normalized.length === 0 && !hasTradesToProcess) {
+      res.status(400).json({ error: 'No valid holdings or trades found' });
       return;
     }
 
@@ -1897,12 +1894,14 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
 
     await prisma.$transaction(async (tx) => {
       if (mode === 'replace') {
-        // Delete holdings (will be re-created from CSV positions below)
-        // Trades and ledger events are NOT deleted — dedup handles duplicates above
+        // Delete all holdings — will be re-created below
         await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
       }
 
-      if (mode === 'incremental') {
+      // Determine whether to use trade replay or position-based import
+      const useTradeReplay = mode === 'incremental' || (mode === 'replace' && normalized.length === 0 && tradeRecords.length > 0);
+
+      if (useTradeReplay) {
         // Collect every ticker mentioned in the CSV (including deduped trades)
         // so we reconcile positions even when all trades were already recorded
         const csvTickers = new Set<string>();
@@ -1919,7 +1918,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           await tx.ledgerEvent.createMany({ data: ledgerRecords });
         }
 
-        // Now replay the FULL trade history for each CSV ticker to reconcile positions
+        // Replay the FULL trade history for each CSV ticker to reconcile positions
         // This ensures positions are always consistent with trade records,
         // even if a sell was deduped (already in DB but position never adjusted)
         for (const ticker of csvTickers) {
@@ -1950,7 +1949,6 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           // Reconcile DB holding with replayed position
           const hadHolding = existingSet.has(ticker);
           if (shares < 0.001) {
-            // Position is zero — delete holding if it exists
             if (hadHolding) {
               await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
               removed++;
@@ -1968,9 +1966,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
             added++;
           }
         }
-
       } else {
-        // Replace or Merge: upsert from pre-calculated positions
+        // Replace or Merge with position data: upsert from pre-calculated positions
         for (const h of normalized) {
           await tx.holding.upsert({
             where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
@@ -1985,8 +1982,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         }
       }
 
-      // Incremental mode already inserted trades/ledger above during replay
-      if (mode !== 'incremental') {
+      // Insert trades/ledger (skip if trade replay already did it)
+      if (!useTradeReplay) {
         if (tradeRecords.length > 0) {
           await tx.portfolioTrade.createMany({ data: tradeRecords });
         }
