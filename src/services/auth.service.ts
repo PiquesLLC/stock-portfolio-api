@@ -426,6 +426,27 @@ export async function emailExists(email: string): Promise<boolean> {
 /**
  * Create a new user account with password
  */
+// Usernames that conflict with API route prefixes, UI tabs, or common reserved words.
+// Checked case-insensitively during signup.
+const RESERVED_USERNAMES = new Set([
+  // API route prefixes
+  'auth', 'health', 'market', 'portfolio', 'dividends', 'settings', 'insights',
+  'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
+  'alerts', 'price-alerts', 'analyst', 'milestones', 'fundamentals', 'nala',
+  'watchlists', 'stock-follows', 'creator', 'referral', 'notifications', 'plaid',
+  'billing',
+  // UI tab names / routes
+  'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
+  // Common reserved words
+  'admin', 'api', 'www', 'app', 'help', 'support', 'about', 'login', 'signup',
+  'register', 'account', 'dashboard', 'home', 'index', 'privacy', 'terms',
+  'tos', 'null', 'undefined', 'favicon', 'robots', 'sitemap',
+]);
+
+export function isReservedUsername(username: string): boolean {
+  return RESERVED_USERNAMES.has(username.toLowerCase());
+}
+
 export async function signup(
   username: string,
   email: string,
@@ -433,8 +454,13 @@ export async function signup(
   password: string,
   consentMeta?: { ipAddress?: string; userAgent?: string },
   referralCode?: string
-): Promise<LoginResponse | null> {
+): Promise<LoginResponse | { error: string } | null> {
   const normalizedEmail = normalizeEmail(email);
+
+  // Block reserved usernames that would conflict with routes
+  if (isReservedUsername(username)) {
+    return { error: 'Username is reserved' };
+  }
 
   // Check if username already exists
   const existing = await prisma.user.findUnique({

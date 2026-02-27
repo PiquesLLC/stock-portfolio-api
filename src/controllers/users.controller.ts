@@ -10,6 +10,37 @@ import { resolveAccessLevel } from '../services/creator.service';
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
 
 /**
+ * GET /users/by-username/:username
+ * Public endpoint — returns minimal user info for shareable profile URLs.
+ * Case-insensitive lookup.
+ */
+export async function getUserByUsernameHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { username } = req.params;
+    if (!username || username.length > 30) {
+      res.status(400).json({ error: 'Invalid username' });
+      return;
+    }
+
+    // SQLite doesn't support Prisma's mode: 'insensitive', so use raw query with LOWER()
+    const users = await prisma.$queryRaw<{ id: string; username: string; displayName: string; profilePublic: boolean }[]>`
+      SELECT id, username, "displayName", "profilePublic" FROM "User" WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+    `;
+    const user = users[0] ?? null;
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json(user);
+  } catch (_error) {
+    console.error('Error looking up user by username:');
+    res.status(500).json({ error: 'Failed to look up user' });
+  }
+}
+
+/**
  * GET /users
  * Returns only users with public profiles to prevent enumeration
  * Does NOT expose username (only displayName) to prevent login enumeration

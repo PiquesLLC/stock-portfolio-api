@@ -253,6 +253,12 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Handle reserved username or other validation errors
+    if ('error' in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);

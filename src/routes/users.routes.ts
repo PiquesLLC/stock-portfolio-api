@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUsersHandler, getUserPortfolioHandler, getUserChartHandler, updateHoldingsVisibilityHandler } from '../controllers/users.controller';
+import { getUsersHandler, getUserPortfolioHandler, getUserChartHandler, updateHoldingsVisibilityHandler, getUserByUsernameHandler } from '../controllers/users.controller';
 import {
   followHandler,
   unfollowHandler,
@@ -14,9 +14,12 @@ import {
 } from '../controllers/social.controller';
 import { getUserIntelligenceHandler } from '../controllers/portfolioIntelligence.controller';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
-import { mutationLimiter } from '../middleware/rateLimiter';
+import { mutationLimiter, enumerationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
+
+// Username lookup — MUST be before /:userId routes to avoid conflict
+router.get('/by-username/:username', enumerationLimiter, getUserByUsernameHandler);
 
 // Public endpoints (optionalAuth for privacy-respecting endpoints)
 router.get('/', optionalAuth, getUsersHandler); // Only shows public profiles

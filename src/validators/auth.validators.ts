@@ -8,8 +8,25 @@ const passwordSchema = z
   .regex(/[a-z]/, 'Password must include a lowercase letter')
   .regex(/[0-9]/, 'Password must include a number');
 
-// Reserved usernames that cannot be registered (system/admin identities)
-const RESERVED_USERNAMES = new Set(['_system', 'system', 'admin', 'nala', 'support']);
+// Reserved usernames that cannot be registered.
+// Blocks API route prefixes, UI tab names, and common reserved words
+// to prevent collision with shareable profile URLs (nalaai.com/<username>).
+// Defense-in-depth: auth.service.ts has the same check.
+const RESERVED_USERNAMES = new Set([
+  // System / admin
+  '_system', 'system', 'admin', 'nala', 'support',
+  // API route prefixes
+  'auth', 'health', 'market', 'portfolio', 'dividends', 'settings', 'insights',
+  'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
+  'alerts', 'analyst', 'milestones', 'fundamentals', 'watchlists', 'creator',
+  'referral', 'notifications', 'plaid', 'billing',
+  // UI tab names / routes
+  'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
+  // Common reserved words
+  'api', 'www', 'app', 'help', 'about', 'login', 'signup', 'register',
+  'account', 'dashboard', 'home', 'index', 'privacy', 'terms', 'tos',
+  'null', 'undefined', 'favicon', 'robots', 'sitemap',
+]);
 
 // Username format: alphanumeric + underscores, 3-20 chars
 const usernameSchema = z
