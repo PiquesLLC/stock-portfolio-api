@@ -399,13 +399,21 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       // Yahoo candles already contain the complete last trading session.
       if (points.length > 0) {
         const lastCandleTime = points[points.length - 1].time;
+        const lastCandleValue = points[points.length - 1].value;
         const gapMs = now - lastCandleTime;
         if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
           const snapshots = await getSnapshotsAfter(req.user.userId, new Date(lastCandleTime));
           for (const s of snapshots) {
             const t = s.timestamp.getTime();
+            const v = s.netEquity ?? s.totalValue;
+            // Skip snapshots that are wildly different from candle data (e.g. $0
+            // snapshots recorded before holdings were added, or stale values from
+            // a previous portfolio composition).
+            if (lastCandleValue > 0 && (v <= 0 || Math.abs(v - lastCandleValue) / lastCandleValue > 0.15)) {
+              continue;
+            }
             if (t > lastCandleTime && t < now - 5000) {
-              points.push({ time: t, value: s.netEquity ?? s.totalValue });
+              points.push({ time: t, value: v });
             }
           }
         }
