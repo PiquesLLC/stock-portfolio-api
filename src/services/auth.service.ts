@@ -465,7 +465,7 @@ export async function signup(
         displayName,
         passwordHash,
         profilePublic: true,
-        leaderboardEligible: false,
+        leaderboardEligible: true,
         trackingStartAt: new Date(),
       },
       select: {
