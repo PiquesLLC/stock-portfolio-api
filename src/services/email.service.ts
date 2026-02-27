@@ -32,7 +32,7 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
     return;
   }
   await r.emails.send({
-    from: 'Nala <noreply@piques.io>',
+    from: `Nala <${config.resendFromEmail}>`,
     to,
     subject: `${code} is your Nala verification code`,
     html: `
@@ -63,7 +63,7 @@ export async function sendEmailVerification(to: string, code: string): Promise<v
     return;
   }
   await r.emails.send({
-    from: 'Nala <noreply@piques.io>',
+    from: `Nala <${config.resendFromEmail}>`,
     to,
     subject: 'Verify your email for Nala',
     html: `
@@ -94,7 +94,7 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
     return;
   }
   await r.emails.send({
-    from: 'Nala <noreply@piques.io>',
+    from: `Nala <${config.resendFromEmail}>`,
     to,
     subject: 'Reset your Nala password',
     html: `
@@ -126,7 +126,7 @@ export async function sendPerformanceReport(to: string, html: string, period: st
     return;
   }
   await r.emails.send({
-    from: 'Nala <noreply@piques.io>',
+    from: `Nala <${config.resendFromEmail}>`,
     to,
     subject: `Your Nala Portfolio Report - ${monthYear} (${periodLabel})`,
     html,
