@@ -120,6 +120,15 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
       return null;
     }
 
+    // Skip if any holding with shares has a $0 price — clearly bad quote data
+    const zeroPrice = portfolio.holdings.filter(h => h.shares > 0 && h.currentPrice <= 0);
+    if (zeroPrice.length > 0) {
+      console.log(
+        `[Snapshot] Skipped - ${zeroPrice.length} holdings have $0 price: ${zeroPrice.map(h => h.ticker).join(', ')} (bad quote data)`
+      );
+      return null;
+    }
+
     // Don't create snapshot if portfolio assets seem suspiciously low
     // Note: We use totalAssets which excludes marginDebt
     const minValueForSnapshot = 100;
@@ -130,14 +139,14 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
       return null;
     }
 
-    // Skip if sudden large drop AND any quotes unavailable (likely data issue)
-    // A 25% drop in 2 minutes is almost certainly bad data, not a real market move
-    if (latestSnapshot && unavailable > 0) {
+    // Skip if sudden large drop — likely bad data, not a real market move
+    // A 25% drop in a single snapshot interval is almost impossible in normal markets
+    if (latestSnapshot) {
       const prevValue = latestSnapshot.netEquity ?? latestSnapshot.totalValue;
       const dropPercent = ((prevValue - portfolio.totalAssets) / prevValue) * 100;
       if (dropPercent > 25) {
         console.log(
-          `[Snapshot] Skipped - ${dropPercent.toFixed(1)}% sudden drop with ${unavailable} unavailable quotes (likely bad data)`
+          `[Snapshot] Skipped - ${dropPercent.toFixed(1)}% sudden drop (prev: $${prevValue.toFixed(2)}, now: $${portfolio.totalAssets.toFixed(2)}) — likely bad data`
         );
         return null;
       }
