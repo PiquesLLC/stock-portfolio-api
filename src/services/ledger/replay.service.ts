@@ -125,10 +125,10 @@ export async function replayDailyLedger(
     if (!tradeType) continue;
 
     const effectiveMs = t.date.getTime();
-    const settleMs =
-      TRADE_SETTLEMENT_POLICY[tradeType].cashPosting === 'settleDate'
-        ? addUtcDays(startOfUtcDay(t.date), 1).getTime()
-        : effectiveMs;
+    // For chart reconstruction, use trade date for cash to avoid settlement gaps
+    // (positions removed on trade date but cash arriving on T+1 creates false dips).
+    // The settlement delay matters for accounting but not for portfolio valuation.
+    const settleMs = effectiveMs;
 
     if (TRADE_SETTLEMENT_POLICY[tradeType].positionPosting !== 'none') {
       positionPostings.push({
