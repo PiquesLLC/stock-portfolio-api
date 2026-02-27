@@ -189,7 +189,12 @@ export async function getPerformanceComparison(
     where: { userId },
   });
 
-  if (holdings.length > 0 && windowDays > 1) {
+  // Only reconstruct from candles if user has SOME snapshot history.
+  // Without snapshots, candle reconstruction fabricates performance —
+  // it pretends the user held current positions for the entire window.
+  const hasSnapshotHistory = snapshots.length >= 2 || baselineSnapshot != null;
+
+  if (holdings.length > 0 && windowDays > 1 && hasSnapshotHistory) {
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
       where: { userId },
       orderBy: { timestamp: 'desc' },
