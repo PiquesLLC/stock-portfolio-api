@@ -1,5 +1,6 @@
-import { fetchPrices } from './market.service';
+import { fetchPrices, fetchDailyCandles } from './market.service';
 import themesData from '../data/finviz-themes-detailed.json';
+import type { HeatmapPeriod } from './market-heatmap.service';
 
 // ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
 
@@ -48,6 +49,14 @@ let refreshInProgress = false;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const BATCH_SIZE = 80;
 const BATCH_DELAY = 2000; // 2s between batches
+
+const PERIOD_DAYS: Record<HeatmapPeriod, number> = {
+  '1D': 0, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365,
+};
+
+// Cache for non-1D period changes (keyed by period)
+import NodeCache from 'node-cache';
+const periodChangesCache = new NodeCache({ stdTTL: 300 }); // 5 min
 
 // ── Background refresh ─────────────────────────────────────────
 
@@ -128,32 +137,75 @@ setInterval(() => {
   refreshQuotesBackground();
 }, CACHE_TTL);
 
+// ── Historical period changes ─────────────────────────────────
+
+async function fetchThemePeriodChanges(
+  tickers: string[],
+  days: number,
+): Promise<Map<string, number>> {
+  const changes = new Map<string, number>();
+  const HIST_BATCH = 20;
+
+  for (let i = 0; i < tickers.length; i += HIST_BATCH) {
+    const batch = tickers.slice(i, i + HIST_BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        const candles = await fetchDailyCandles(ticker, days);
+        if (candles.length < 2) return { ticker, change: 0 };
+        const startPrice = candles[0].close;
+        const endPrice = candles[candles.length - 1].close;
+        if (startPrice <= 0) return { ticker, change: 0 };
+        return { ticker, change: Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100 };
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled') changes.set(r.value.ticker, r.value.change);
+    }
+  }
+  return changes;
+}
+
 // ── Public API — returns HeatmapResponse shape ─────────────────
 // Each theme = sector, each subtheme = a visible tile (HeatmapStock)
 // with avgChangePercent across its constituent tickers.
 // Individual tickers live inside subSector.stocks for tooltip display.
 
-export function getThemesHeatmapData(): HeatmapResponse {
+export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promise<HeatmapResponse> {
+  const cacheKey = `themes-${period}`;
+  const cached = periodChangesCache.get<HeatmapResponse>(cacheKey);
+  if (cached) return cached;
+
+  // For non-1D periods, fetch historical changes
+  let periodChangeMap: Map<string, number> | null = null;
+  const days = PERIOD_DAYS[period];
+  if (days > 0) {
+    const allTickers = getAllUniqueTickers();
+    periodChangeMap = await fetchThemePeriodChanges(allTickers, days);
+  }
+
   const sectors: HeatmapSector[] = themesData.themes.map(theme => {
     // Build subSectors with real ticker data inside each
     const subSectors: HeatmapSubSector[] = theme.subthemes.map(sub => {
       const tickerStocks: HeatmapStock[] = sub.tickers.map(t => {
         const q = quotesCache.get(t);
+        const changePercent = periodChangeMap
+          ? (periodChangeMap.get(t) ?? 0)
+          : (q?.changePercent ?? 0);
         const stock: HeatmapStock = {
           ticker: t,
           name: t,
           price: q?.price ?? 0,
-          changePercent: q?.changePercent ?? 0,
+          changePercent,
           dayChange: 0,
           marketCapB: 1,
           subSector: sub.name,
         };
-        if (q?.source === 'prevClose') stock.noTradeData = true;
+        if (!periodChangeMap && q?.source === 'prevClose') stock.noTradeData = true;
         return stock;
       });
 
       const validChanges = tickerStocks
-        .filter(s => quotesCache.has(s.ticker) && !s.noTradeData)
+        .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)))
         .map(s => s.changePercent);
       const avg = validChanges.length > 0
         ? validChanges.reduce((s, c) => s + c, 0) / validChanges.length
@@ -180,7 +232,7 @@ export function getThemesHeatmapData(): HeatmapResponse {
 
     const allChanges = subSectors
       .flatMap(sub => sub.stocks)
-      .filter(s => quotesCache.has(s.ticker) && !s.noTradeData)
+      .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)))
       .map(s => s.changePercent);
     const themeAvg = allChanges.length > 0
       ? allChanges.reduce((s, c) => s + c, 0) / allChanges.length
@@ -197,9 +249,14 @@ export function getThemesHeatmapData(): HeatmapResponse {
     };
   });
 
-  return {
+  const result: HeatmapResponse = {
     sectors,
-    period: '1D',
+    period,
     generated: cacheUpdatedAt ?? Date.now(),
   };
+
+  // Cache non-1D results for 5 min, 1D for 1 min
+  periodChangesCache.set(cacheKey, result, days > 0 ? 300 : 60);
+
+  return result;
 }

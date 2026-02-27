@@ -27,7 +27,9 @@ export function requirePlan(requiredPlan: PlanTier) {
       let userPlan = normalizePlan(req.user.plan);
       let planExpiresAt = req.user.planExpiresAt ? new Date(req.user.planExpiresAt) : null;
 
-      if (!req.user.plan) {
+      // Always check DB when JWT plan is insufficient — handles JWT plan lag
+      // (e.g. plan updated in DB but JWT not yet refreshed)
+      if (!req.user.plan || PLAN_LEVEL[userPlan] < PLAN_LEVEL[requiredPlan]) {
         const user = await prisma.user.findUnique({
           where: { id: req.user.userId },
           select: { plan: true, planExpiresAt: true },

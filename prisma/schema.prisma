@@ -128,6 +128,9 @@ model User {
 
   // Ledger events (cash/non-trade account events from CSV import)
   ledgerEvents           LedgerEvent[]
+
+  // NALA AI Deep Research jobs
+  deepResearchJobs       DeepResearchJob[]
 }
 
 model Watchlist {
@@ -886,6 +889,59 @@ model LedgerEvent {
   @@index([userId, effectiveDate, rowIndex, createdAt, id])
   @@index([userId, eventType])
   @@index([sourceFileId])
+}
+
+// ─── NALA AI Deep Research ───────────────────────────────────────────
+
+model DeepResearchJob {
+  id                    String    @id @default(uuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Request
+  ticker                String?
+  prompt                String
+  researchType          String    @default("stock") // stock | portfolio | sector | custom
+  clientRequestId       String?   // Idempotency key from client to prevent duplicate submissions
+
+  // Gemini interaction tracking
+  geminiInteractionId   String?
+  parentInteractionId   String?   // For follow-up jobs linked to a parent interaction
+
+  // Status lifecycle: queued → submitted → in_progress → completed | failed | cancelled
+  status                String    @default("queued")
+
+  // Thinking summaries (SSE stream) — JSON array of { text, timestamp, index }
+  thinkingSummaries     String?
+
+  // Results — store both raw payload and parsed report for auditability
+  resultJson            String?   // Parsed structured report JSON
+  resultText            String?   // Fallback raw text if JSON parse fails
+  rawResultPayload      String?   // Full raw model response for audit
+  parseError            String?   // JSON parse error reason if extraction failed
+  errorMessage          String?   // Error message if status = failed
+
+  // Cost telemetry
+  inputTokens           Int?
+  outputTokens          Int?
+  searchCalls           Int?
+  costUsdEstimate       Float?
+  modelUsed             String?
+
+  // Polling / lease (single-worker safety)
+  polledBy              String?   // Instance ID holding the lease
+  leaseUntil            DateTime? // Lease expiry — other instances skip until expired
+  pollCount             Int       @default(0)
+  submittedAt           DateTime?
+  completedAt           DateTime?
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+  @@index([status])
+  @@unique([userId, clientRequestId])
 }
 
 // ─── Referral Tracking ──────────────────────────────────────────────

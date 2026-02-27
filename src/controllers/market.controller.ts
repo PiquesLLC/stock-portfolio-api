@@ -449,9 +449,13 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
 // ── Themes Heatmap ──────────────────────────────────────────────
 import { getThemesHeatmapData } from '../services/themes-heatmap.service';
 
-export async function getThemesHeatmapHandler(_req: Request, res: Response): Promise<void> {
+export async function getThemesHeatmapHandler(req: Request, res: Response): Promise<void> {
   try {
-    const data = getThemesHeatmapData();
+    const period = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1D';
+    const validPeriods = ['1D', '1W', '1M', '3M', '6M', '1Y'];
+    const data = await getThemesHeatmapData(
+      (validPeriods.includes(period) ? period : '1D') as import('../services/market-heatmap.service').HeatmapPeriod
+    );
     res.json(data);
   } catch (_error) {
     console.error('Error fetching themes heatmap:');

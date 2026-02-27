@@ -107,6 +107,13 @@ export const config = {
     .map((id) => id.trim())
     .filter(Boolean),
 
+  // NALA AI Deep Research (Gemini)
+  googleGeminiApiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
+  deepResearchEnabled: process.env.DEEP_RESEARCH_ENABLED === 'true',
+  deepResearchMaxConcurrent: parseInt(process.env.DEEP_RESEARCH_MAX_CONCURRENT || '1', 10),
+  deepResearchMonthlyLimit: parseInt(process.env.DEEP_RESEARCH_MONTHLY_LIMIT || '10', 10),
+  deepResearchPollIntervalMs: parseInt(process.env.DEEP_RESEARCH_POLL_INTERVAL_MS || '15000', 10),
+
   // OAuth
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   appleClientId: process.env.APPLE_CLIENT_ID || '',

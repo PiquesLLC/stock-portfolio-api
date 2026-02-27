@@ -17,6 +17,7 @@ import { backfillHeatmapFundamentals } from './services/market-heatmap-fundament
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
+import { pollActiveResearchJobs } from './services/deep-research.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -413,6 +414,18 @@ const server = app.listen(config.port, async () => {
     }, 24 * 60 * 60 * 1000);
   } else {
     console.log('[Creator Reconciliation] Skipped (creator monetization disabled)');
+  }
+
+  // NALA AI Deep Research — background poller for Gemini async jobs
+  if (config.deepResearchEnabled) {
+    console.log(`[Deep Research] Poller running every ${config.deepResearchPollIntervalMs / 1000}s`);
+    setInterval(() => {
+      pollActiveResearchJobs().catch(err =>
+        console.error('[Deep Research] Poll error:', err instanceof Error ? err.message : err)
+      );
+    }, config.deepResearchPollIntervalMs);
+  } else {
+    console.log('[Deep Research] Disabled (DEEP_RESEARCH_ENABLED not set)');
   }
 });
 
