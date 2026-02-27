@@ -251,6 +251,7 @@ model UserSettings {
   marginDebt  Float    @default(0)
   dripEnabled Boolean  @default(false)
   cashInterestRate Float @default(0)
+  ytdBaselineValue Float?
   updatedAt   DateTime @updatedAt
 }
 

@@ -1,7 +1,7 @@
 ﻿import { Response } from 'express';
 import prisma from '../utils/prisma';
 import { getUserPortfolio } from '../services/user-portfolio.service';
-import { createUserSnapshotIfNeeded, getUserChartSnapshots, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
+import { createUserSnapshotIfNeeded, getUserChartSnapshots, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { AuthRequest } from '../types/auth';
 import { resolveAccessLevel } from '../services/creator.service';
 
@@ -255,62 +255,78 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       return;
     }
 
-    // For other periods: reconstruct from candle data
-    const holdings = await prisma.holding.findMany({ where: { userId } });
+    // Non-1D periods: snapshot-only approach.
+    // Use real recorded snapshot data — no reconstruction, no candle fetching.
     const now = Date.now();
-    let points: { time: number; value: number }[];
+    const periodDaysMap: Record<string, number> = {
+      '1W': 7, '1M': 30, '3M': 90,
+      'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '1Y': 365, 'ALL': 365 * 5,
+    };
+    const periodDays = periodDaysMap[period] ?? 30;
+    let points = await getSnapshotChartPoints(userId, periodDays);
 
-    // Use high-resolution data for short periods (like main portfolio)
-    if (period === '1W') {
-      // 15-min candles for 5 days
-      points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
-      );
-    } else if (period === '1M') {
-      // 1-hour candles for 1 month
-      points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
-      );
-    } else if (period === 'YTD') {
-      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      if (ytdDays <= 90) {
-        const yahooRange: '1mo' | '3mo' = ytdDays <= 30 ? '1mo' : '3mo';
-        points = await reconstructPortfolioHistoryHiRes(
-          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-          portfolio.cashBalance, portfolio.marginDebt, yahooRange, '1h',
-        );
-        const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
-        points = points.filter(p => p.time >= ytdStart);
-      } else {
-        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
+    // YTD baseline: if target user set a Jan 1 portfolio value, use it to anchor YTD returns
+    let ytdBaselineValue: number | null = null;
+    if (period === 'YTD') {
+      const userSettings = await prisma.userSettings.findUnique({
+        where: { userId },
+        select: { ytdBaselineValue: true },
+      });
+      ytdBaselineValue = userSettings?.ytdBaselineValue ?? null;
+
+      // getSnapshotChartPoints enforces >=2 points internally, so with only 1 snapshot
+      // it returns []. For YTD baseline we only need 1 snapshot — fetch directly.
+      if (points.length === 0 && ytdBaselineValue != null) {
+        const since = new Date(now - periodDays * 86400000);
+        const rawSnaps = await prisma.portfolioSnapshot.findMany({
+          where: { userId, timestamp: { gte: since } },
+          orderBy: { timestamp: 'asc' },
+          select: { timestamp: true, totalValue: true, netEquity: true },
+        });
+        for (const s of rawSnaps) {
+          const v = s.netEquity ?? s.totalValue;
+          if (Number.isFinite(v) && v > 0) {
+            points.push({ time: s.timestamp.getTime(), value: v });
+          }
+        }
       }
-    } else {
-      // 3M+ use daily candles
-      const periodDaysMap: Record<string, number> = {
-        '3M': 90, '1Y': 365, 'ALL': 365 * 5,
-      };
-      const periodDays = periodDaysMap[period] ?? 30;
-      points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
     }
 
-    // Normalize chart data so last candle aligns with live value (same as 1D fix)
+    // Progressive unlock: each period requires minimum days of snapshot data.
+    // YTD with baseline bypasses progressive unlock (minDays=0, minPoints=1).
+    const minDaysRequired: Record<string, number> = {
+      '1W': 2, '1M': 7, '3M': 30, 'YTD': 30, '1Y': 90, 'ALL': 90,
+    };
+    const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
+    const spanDays = spanMs / 86400000;
+    const minDays = (period === 'YTD' && ytdBaselineValue != null) ? 0 : (minDaysRequired[period] ?? 2);
+    const minPoints = (period === 'YTD' && ytdBaselineValue != null) ? 1 : 2;
+
+    if (points.length < minPoints || spanDays < minDays) {
+      res.json({ points: [], insufficientData: true, period, periodStartValue: 0, source: 'snapshot' });
+      return;
+    }
+
+    // Append current live value to connect last snapshot to now
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
-    if (points.length > 0 && liveVal > 0) {
-      const lastCandleVal = points[points.length - 1].value;
-      const offset = liveVal - lastCandleVal;
-      if (Math.abs(offset) > 1) {
-        for (const p of points) p.value += offset;
-      }
-    }
-
-    if (points.length === 0 || now - points[points.length - 1].time > 5000) {
+    if (now - points[points.length - 1].time > 5000) {
       points.push({ time: now, value: liveVal });
     }
 
-    const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
-    res.json({ points, periodStartValue, period });
+    // If YTD with baseline, prepend synthetic Jan 1 point and use baseline as periodStartValue
+    let periodStartValue: number;
+    if (period === 'YTD' && ytdBaselineValue != null) {
+      const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+      if (points[0].time > jan1) {
+        points = [{ time: jan1, value: ytdBaselineValue }, ...points];
+      }
+      periodStartValue = ytdBaselineValue;
+    } else {
+      periodStartValue = points[0].value;
+    }
+
+    res.json({ points, periodStartValue, period, source: 'snapshot' });
   } catch (_error) {
     console.error('Error fetching user chart:');
     res.status(500).json({ error: 'Failed to fetch user chart data' });

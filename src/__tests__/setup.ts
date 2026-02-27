@@ -17,6 +17,7 @@ vi.mock('../utils/prisma', () => {
     },
     userSettings: {
       create: vi.fn(),
+      findUnique: vi.fn(),
       upsert: vi.fn(),
       deleteMany: vi.fn(),
     },

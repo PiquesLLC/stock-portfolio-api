@@ -240,6 +240,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
         settings: {
           select: {
             dripEnabled: true,
+            ytdBaselineValue: true,
           },
         },
       },
@@ -259,6 +260,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       showRegion: user.showRegion,
       holdingsVisibility: user.holdingsVisibility,
       dripEnabled: user.settings?.dripEnabled ?? false,
+      ytdBaselineValue: user.settings?.ytdBaselineValue ?? null,
       createdAt: user.createdAt.toISOString(),
     });
   } catch (_error) {
@@ -288,6 +290,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       holdingsVisibility,
       dripEnabled,
       bio,
+      ytdBaselineValue,
     } = req.body;
 
     // Validate inputs
@@ -301,6 +304,13 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (holdingsVisibility !== undefined && !VALID_VISIBILITY.includes(holdingsVisibility)) {
       res.status(400).json({ error: `Invalid holdingsVisibility. Must be one of: ${VALID_VISIBILITY.join(', ')}` });
       return;
+    }
+
+    if (ytdBaselineValue !== undefined && ytdBaselineValue !== null) {
+      if (typeof ytdBaselineValue !== 'number' || !Number.isFinite(ytdBaselineValue) || ytdBaselineValue <= 0) {
+        res.status(400).json({ error: 'ytdBaselineValue must be a positive number or null' });
+        return;
+      }
     }
 
     // Build update data for User model
@@ -328,27 +338,42 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       },
     });
 
-    // Update UserSettings if dripEnabled is provided
+    // Update UserSettings if dripEnabled or ytdBaselineValue is provided
     let dripEnabledResult = false;
-    if (dripEnabled !== undefined) {
+    let ytdBaselineResult: number | null = null;
+    const hasSettingsUpdate = dripEnabled !== undefined || ytdBaselineValue !== undefined;
+    if (hasSettingsUpdate) {
+      const settingsUpdate: { dripEnabled?: boolean; ytdBaselineValue?: number | null } = {};
+      const settingsCreate: { userId: string; dripEnabled?: boolean; ytdBaselineValue?: number | null } = { userId };
+      if (dripEnabled !== undefined) {
+        settingsUpdate.dripEnabled = dripEnabled;
+        settingsCreate.dripEnabled = dripEnabled;
+      }
+      if (ytdBaselineValue !== undefined) {
+        settingsUpdate.ytdBaselineValue = ytdBaselineValue;
+        settingsCreate.ytdBaselineValue = ytdBaselineValue;
+      }
       const userSettings = await prisma.userSettings.upsert({
         where: { userId },
-        update: { dripEnabled },
-        create: { userId, dripEnabled },
-        select: { dripEnabled: true },
+        update: settingsUpdate,
+        create: settingsCreate,
+        select: { dripEnabled: true, ytdBaselineValue: true },
       });
       dripEnabledResult = userSettings.dripEnabled;
+      ytdBaselineResult = userSettings.ytdBaselineValue;
     } else {
       const existing = await prisma.userSettings.findUnique({
         where: { userId },
-        select: { dripEnabled: true },
+        select: { dripEnabled: true, ytdBaselineValue: true },
       });
       dripEnabledResult = existing?.dripEnabled ?? false;
+      ytdBaselineResult = existing?.ytdBaselineValue ?? null;
     }
 
     res.json({
       ...user,
       dripEnabled: dripEnabledResult,
+      ytdBaselineValue: ytdBaselineResult,
     });
   } catch (_error) {
     console.error('Error updating user settings:');

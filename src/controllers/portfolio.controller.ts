@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistory, reconstructPortfolioHistoryHiRes, reconstructPortfolioHistoryFromLedgerWithDiagnostics, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -474,175 +474,88 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const holdings = await getHoldings(req.user.userId);
+    // Non-1D periods: snapshot-only approach.
+    // Use real recorded snapshot data — no reconstruction, no candle fetching.
+    // If not enough snapshots, return insufficientData flag for the UI.
     const now = Date.now();
-    let points: { time: number; value: number; confidence?: number; estimated?: boolean }[];
-    let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'daily';
-    let confidenceThreshold: number | undefined;
-    let estimated = false;
-    let gapSummary: { start: string; end: string; reason: string }[] | undefined;
+    const periodDaysMap: Record<string, number> = {
+      '1W': 7, '1M': 30, '3M': 90,
+      'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+      '1Y': 365, 'ALL': 365 * 5,
+    };
+    const periodDays = periodDaysMap[period] ?? 30;
+    let points = await getSnapshotChartPoints(req.user!.userId, periodDays);
 
-    // Check if user has ledger events (deposits/withdrawals/dividends from CSV import).
-    // Only ledger-based reconstruction is accurate enough for charts — trade-only
-    // reconstruction without cash flow data produces wildly wrong portfolio values.
-    const ledgerEventCount = await prisma.ledgerEvent.count({ where: { userId: req.user.userId } });
-    const hasLedgerEvents = ledgerEventCount > 0;
-    console.log(`[Chart] ${period} userId=${req.user.userId.slice(0, 8)} ledger=${ledgerEventCount}`);
+    // YTD baseline: if user set a Jan 1 portfolio value, use it to anchor YTD returns
+    let ytdBaselineValue: number | null = null;
+    if (period === 'YTD') {
+      const userSettings = await prisma.userSettings.findUnique({
+        where: { userId: req.user!.userId },
+        select: { ytdBaselineValue: true },
+      });
+      ytdBaselineValue = userSettings?.ytdBaselineValue ?? null;
 
-    let usedModelReconstruction = false;
-    let usedSnapshots = false;
-
-    // For 1W: prefer ledger reconstruction when available (accurate position history),
-    // otherwise fall back to current-holdings hi-res candles.
-    if (period === '1W') {
-      if (hasLedgerEvents) {
-        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, 7);
-        points = detailed.points;
-        confidenceThreshold = detailed.confidenceThreshold;
-        estimated = detailed.points.some(p => p.estimated);
-        gapSummary = detailed.gaps;
-        usedModelReconstruction = true;
-        source = 'model';
-      } else {
-        points = await reconstructPortfolioHistoryHiRes(
-          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-          portfolio.cashBalance, portfolio.marginDebt, '5d', '15m',
-        );
-        source = 'hiRes';
-      }
-    } else if (period === '1M') {
-      // Snapshots need ≥50% coverage of expected trading days to be useful
-      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, 30);
-      const minSnapshotDays = Math.max(10, Math.floor(30 * 0.5 * 5 / 7)); // ~50% of trading days
-      if (snapshotPoints.length >= minSnapshotDays) {
-        points = snapshotPoints;
-        usedSnapshots = true;
-        source = 'snapshot';
-      } else if (hasLedgerEvents) {
-        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, 30);
-        points = detailed.points;
-        confidenceThreshold = detailed.confidenceThreshold;
-        estimated = detailed.points.some(p => p.estimated);
-        gapSummary = detailed.gaps;
-        usedModelReconstruction = true;
-        source = 'model';
-      } else {
-        // Trade reconstruction without ledger events (deposits/withdrawals) produces
-        // inaccurate portfolio values. Fall back to current-holdings × historical prices.
-        points = await reconstructPortfolioHistoryHiRes(
-          holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-          portfolio.cashBalance, portfolio.marginDebt, '1mo', '1h',
-        );
-        source = 'hiRes';
-      }
-    } else if (period === 'YTD') {
-      const ytdDays = Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, ytdDays);
-      const minSnapshotDays = Math.max(10, Math.floor(ytdDays * 0.5 * 5 / 7));
-      if (snapshotPoints.length >= minSnapshotDays) {
-        points = snapshotPoints;
-        usedSnapshots = true;
-        source = 'snapshot';
-      } else if (hasLedgerEvents) {
-        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, ytdDays);
-        points = detailed.points;
-        confidenceThreshold = detailed.confidenceThreshold;
-        estimated = detailed.points.some(p => p.estimated);
-        gapSummary = detailed.gaps;
-        usedModelReconstruction = true;
-        source = 'model';
-      } else {
-        if (ytdDays <= 90) {
-          const yahooRange = ytdDays <= 30 ? '1mo' : '3mo';
-          points = await reconstructPortfolioHistoryHiRes(
-            holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-            portfolio.cashBalance, portfolio.marginDebt, yahooRange as any, '1h',
-          );
-          source = 'hiRes';
-          const ytdStart = new Date(new Date().getFullYear(), 0, 1).getTime();
-          points = points.filter(p => p.time >= ytdStart);
-        } else {
-          points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt);
-          source = 'daily';
+      // getSnapshotChartPoints enforces >=2 points internally, so with only 1 snapshot
+      // it returns []. For YTD baseline we only need 1 snapshot — fetch directly.
+      if (points.length === 0 && ytdBaselineValue != null) {
+        const since = new Date(now - periodDays * 86400000);
+        const rawSnaps = await prisma.portfolioSnapshot.findMany({
+          where: { userId: req.user!.userId, timestamp: { gte: since } },
+          orderBy: { timestamp: 'asc' },
+          select: { timestamp: true, totalValue: true, netEquity: true },
+        });
+        for (const s of rawSnaps) {
+          const v = s.netEquity ?? s.totalValue;
+          if (Number.isFinite(v) && v > 0) {
+            points.push({ time: s.timestamp.getTime(), value: v });
+          }
         }
       }
-    } else {
-      // 3M/1Y/ALL
-      const periodDaysMap: Record<string, number> = {
-        '3M': 90,
-        '1Y': 365, 'ALL': 365 * 5,
-      };
-      const periodDays = periodDaysMap[period] ?? 30;
-      const snapshotPoints = await getSnapshotChartPoints(req.user.userId, periodDays);
-      const minSnapshotDays = Math.max(10, Math.floor(periodDays * 0.5 * 5 / 7));
-      if (snapshotPoints.length >= minSnapshotDays) {
-        points = snapshotPoints;
-        usedSnapshots = true;
-        source = 'snapshot';
-      } else if (hasLedgerEvents) {
-        const detailed = await reconstructPortfolioHistoryFromLedgerWithDiagnostics(req.user.userId, periodDays);
-        points = detailed.points;
-        confidenceThreshold = detailed.confidenceThreshold;
-        estimated = detailed.points.some(p => p.estimated);
-        gapSummary = detailed.gaps;
-        usedModelReconstruction = true;
-        source = 'model';
-      } else {
-        points = await reconstructPortfolioHistory(holdings, portfolio.cashBalance, periodDays, portfolio.marginDebt);
-        source = 'daily';
-      }
+    }
+
+    // Progressive unlock: each period requires a minimum number of days of snapshot data.
+    // Prevents showing e.g. 6 days of data on a 1Y chart with misleading returns.
+    // YTD with baseline bypasses progressive unlock (minDays=0, minPoints=1).
+    const minDaysRequired: Record<string, number> = {
+      '1W': 2, '1M': 7, '3M': 30, 'YTD': 30, '1Y': 90, 'ALL': 90,
+    };
+    const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
+    const spanDays = spanMs / 86400000;
+    const minDays = (period === 'YTD' && ytdBaselineValue != null) ? 0 : (minDaysRequired[period] ?? 2);
+    const minPoints = (period === 'YTD' && ytdBaselineValue != null) ? 1 : 2;
+    console.log(`[Chart] ${period} snapshot-only points=${points.length} span=${spanDays.toFixed(1)}d required=${minDays}d minPts=${minPoints} ytdBaseline=${ytdBaselineValue}`);
+
+    if (points.length < minPoints || spanDays < minDays) {
+      res.json({ points: [], insufficientData: true, period, periodStartValue: 0, source: 'snapshot' });
+      return;
     }
 
     const pointCountRaw = points.length;
-    console.log(`[Chart] ${period} source=${source} points=${points.length}`);
 
-    // Normalize chart points to match live portfolio value.
-    // Skip for snapshot data (already accurate recorded values).
-    // Use median of last 5 points as scaling anchor (more robust than single last point).
+    // Append current live value to connect last snapshot to now
     const liveVal = portfolio.totalAssets - portfolio.marginDebt;
-    if (!usedSnapshots && points.length > 0 && liveVal > 0) {
-      const anchorWindow = points.slice(-Math.min(5, points.length));
-      const sortedAnchor = anchorWindow.map(p => p.value).sort((a, b) => a - b);
-      const anchorVal = sortedAnchor[Math.floor(sortedAnchor.length / 2)]; // median
-      if (anchorVal > 0 && Math.abs(liveVal - anchorVal) > 1) {
-        const rawScale = liveVal / anchorVal;
-        const scale = Math.max(0.97, Math.min(1.03, rawScale));
-        if (Math.abs(rawScale - scale) > 0.001) {
-          console.warn(`[Chart] ${period} scale clamped: raw=${rawScale.toFixed(4)} → ${scale.toFixed(4)} (liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)})`);
-        } else {
-          console.log(`[Chart] ${period} normalization: liveVal=${liveVal.toFixed(0)}, anchor=${anchorVal.toFixed(0)}, scale=${scale.toFixed(4)}`);
-        }
-        for (const p of points) p.value *= scale;
-      }
-    }
-
-    // Append current live value.
-    // When trade/ledger replay produced data, skip the live point — it can
-    // create a visible drop at the chart edge due to normalization clamping.
-    const skipLivePoint = usedModelReconstruction && points.length > 0;
-    if (!skipLivePoint && (points.length === 0 || now - points[points.length - 1].time > 5000)) {
+    if (now - points[points.length - 1].time > 5000) {
       points.push({ time: now, value: liveVal });
     }
 
-    // Composition-change rebaseline is handled in the 1D path only (above).
-    // All non-1D paths use current holdings × historical prices (hiRes,
-    // reconstructPortfolioHistory) or record real values (snapshots), so
-    // composition changes don't create false jumps — no rebaseline needed.
-
-    const periodStartValue = points.length > 0 ? points[0].value : portfolio.totalAssets;
-
-    const response: Record<string, unknown> = { points, periodStartValue, period, source };
-    if (source === 'model') {
-      response.estimated = estimated;
-      response.confidenceThreshold = confidenceThreshold ?? 80;
+    // If YTD with baseline, prepend synthetic Jan 1 point and use baseline as periodStartValue
+    let periodStartValue: number;
+    if (period === 'YTD' && ytdBaselineValue != null) {
+      const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+      // Only prepend if first real point is after Jan 1
+      if (points[0].time > jan1) {
+        points = [{ time: jan1, value: ytdBaselineValue }, ...points];
+      }
+      periodStartValue = ytdBaselineValue;
+    } else {
+      periodStartValue = points[0].value;
     }
+
+    const response: Record<string, unknown> = { points, periodStartValue, period, source: 'snapshot' };
     if (includeDebug) {
       response.rebaselineApplied = false;
       response.pointCountRaw = pointCountRaw;
       response.pointCountFinal = points.length;
-      if (source === 'model') {
-        response.gaps = gapSummary ?? [];
-      }
     }
     res.json(response);
   } catch (chartError) {
