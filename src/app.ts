@@ -38,7 +38,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com", "https://static.cloudflareinsights.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com"],
