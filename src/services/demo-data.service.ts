@@ -77,9 +77,11 @@ function collectHeatmapTickers(): string[] {
 }
 
 export async function ensureLeaderboardUsersHaveHoldings(): Promise<{ filled: number; skipped: number }> {
+  const demoUsernames = DEMO_USERS.map(u => u.username);
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
+      username: { in: demoUsernames },
       id: { not: DEFAULT_USER_ID },
     },
     select: { id: true, displayName: true },
@@ -147,9 +149,11 @@ export async function ensureLeaderboardUsersHaveHoldings(): Promise<{ filled: nu
 export async function seedLeaderboardActivityEvents(
   options: { force?: boolean } = {}
 ): Promise<{ seeded: number; skipped: number }> {
+  const demoUsernames = DEMO_USERS.map(u => u.username);
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
+      username: { in: demoUsernames },
       id: { not: DEFAULT_USER_ID },
     },
     select: { id: true, displayName: true },
@@ -229,9 +233,11 @@ export async function reseedLeaderboardActivityEvents(): Promise<void> {
 export async function seedLeaderboardFollows(
   options: { force?: boolean } = {}
 ): Promise<{ seeded: number; skipped: number }> {
+  const demoUsernames = DEMO_USERS.map(u => u.username);
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
+      username: { in: demoUsernames },
       id: { not: DEFAULT_USER_ID },
     },
     select: { id: true, displayName: true },
