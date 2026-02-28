@@ -4,8 +4,8 @@ import { getPortfolio } from './portfolio.service';
 import { getUserActivity } from './activity.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
-// Cache behavior insights for 1 hour
-const behaviorCache = new NodeCache({ stdTTL: 3600 });
+// Cache behavior insights for 12 hours (43200s) — portfolio composition doesn't change hourly
+const behaviorCache = new NodeCache({ stdTTL: 43200 });
 
 
 export interface BehaviorInsight {

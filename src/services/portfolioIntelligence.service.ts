@@ -711,14 +711,33 @@ async function computeHeroStats(
 // MAIN EXPORT
 // ============================================================================
 
-export async function getPortfolioIntelligence(
-  userId: string,
-  window: IntelligenceWindow = '1d'
-): Promise<PortfolioIntelligenceResponse> {
-  const cacheKey = `intelligence:${userId}:${window}`;
-  const cached = insightsCache.get<PortfolioIntelligenceResponse>(cacheKey);
-  if (cached) return cached;
+// ============================================================================
+// STALE-WHILE-REVALIDATE CACHE
+// ============================================================================
 
+interface CachedIntelligence {
+  data: PortfolioIntelligenceResponse;
+  freshUntil: number;  // timestamp (ms) — serve without refresh
+  staleUntil: number;  // timestamp (ms) — serve immediately + background refresh
+}
+
+const intelligenceCache = new Map<string, CachedIntelligence>();
+const refreshInFlight = new Map<string, Promise<PortfolioIntelligenceResponse>>();
+
+function getFreshTtlMs(window: IntelligenceWindow, isIncomplete: boolean): number {
+  if (isIncomplete) return 60_000;
+  return window === '1d' ? 300_000 : 3_600_000;
+}
+
+function getStaleTtlMs(window: IntelligenceWindow, isIncomplete: boolean): number {
+  if (isIncomplete) return 120_000;
+  return window === '1d' ? 600_000 : 7_200_000;
+}
+
+async function computeIntelligence(
+  userId: string,
+  window: IntelligenceWindow
+): Promise<PortfolioIntelligenceResponse> {
   const portfolio = await getPortfolio(userId);
   const holdings = portfolio.holdings;
 
@@ -789,9 +808,70 @@ export async function getPortfolioIntelligence(
     netPnL: Math.round(netPnL * 100) / 100,
   };
 
-  // Short TTL if data is incomplete (candles still caching), otherwise normal TTL
+  return result;
+}
+
+function cacheResult(cacheKey: string, result: PortfolioIntelligenceResponse, window: IntelligenceWindow): void {
+  const isIncomplete = result.partial && window !== '1d';
+  const now = Date.now();
+  intelligenceCache.set(cacheKey, {
+    data: result,
+    freshUntil: now + getFreshTtlMs(window, isIncomplete),
+    staleUntil: now + getStaleTtlMs(window, isIncomplete),
+  });
+  // Also store in insightsCache for backward compat (other code may read it)
   const ttl = isIncomplete ? 60 : (window === '1d' ? 300 : 3600);
   insightsCache.set(cacheKey, result, ttl);
+}
 
+function refreshInBackground(userId: string, window: IntelligenceWindow, cacheKey: string): void {
+  // Deduplicate: if a refresh is already in flight for this key, skip
+  if (refreshInFlight.has(cacheKey)) return;
+
+  const promise = computeIntelligence(userId, window)
+    .then(result => {
+      cacheResult(cacheKey, result, window);
+      return result;
+    })
+    .catch(err => {
+      console.error(`[Intelligence] Background refresh failed for ${cacheKey}:`, err.message);
+      return null as any;
+    })
+    .finally(() => {
+      refreshInFlight.delete(cacheKey);
+    });
+
+  refreshInFlight.set(cacheKey, promise);
+}
+
+export async function getPortfolioIntelligence(
+  userId: string,
+  window: IntelligenceWindow = '1d'
+): Promise<PortfolioIntelligenceResponse> {
+  const cacheKey = `intelligence:${userId}:${window}`;
+  const now = Date.now();
+
+  // Check our SWR cache first
+  const cached = intelligenceCache.get(cacheKey);
+  if (cached) {
+    if (now < cached.freshUntil) {
+      // Still fresh — serve as-is
+      return cached.data;
+    }
+    if (now < cached.staleUntil) {
+      // Stale but within grace period — serve immediately, refresh in background
+      refreshInBackground(userId, window, cacheKey);
+      return cached.data;
+    }
+    // Expired past stale window — fall through to full compute
+  }
+
+  // Also check the legacy insightsCache (may have been populated by other code)
+  const legacyCached = insightsCache.get<PortfolioIntelligenceResponse>(cacheKey);
+  if (legacyCached) return legacyCached;
+
+  // Cold miss — compute synchronously
+  const result = await computeIntelligence(userId, window);
+  cacheResult(cacheKey, result, window);
   return result;
 }

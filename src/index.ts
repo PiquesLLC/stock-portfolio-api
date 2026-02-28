@@ -18,6 +18,7 @@ import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
+import { warmHoldingsCache } from './services/market.service';
 
 const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
 
@@ -143,7 +144,12 @@ const server = app.listen(config.port, async () => {
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));
 
   // Cache benchmark data on startup and every 6 hours
-  ensureBenchmarksCached().catch(err => console.error('Benchmark cache init failed:', err));
+  ensureBenchmarksCached()
+    .then(() => {
+      // After benchmarks are ready, warm holdings cache in background (non-blocking)
+      warmHoldingsCache().catch(err => console.error('[Startup] Holdings cache warm failed:', err));
+    })
+    .catch(err => console.error('Benchmark cache init failed:', err));
   setInterval(() => {
     ensureBenchmarksCached().catch(err => console.error('Benchmark cache refresh failed:', err));
   }, 6 * 60 * 60 * 1000);

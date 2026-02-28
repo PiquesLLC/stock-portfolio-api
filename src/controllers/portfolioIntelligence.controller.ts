@@ -1,21 +1,61 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
-import { getPortfolioIntelligence, IntelligenceWindow } from '../services/portfolioIntelligence.service';
+import { getPortfolioIntelligence, IntelligenceWindow, PortfolioIntelligenceResponse } from '../services/portfolioIntelligence.service';
 
 const VALID_WINDOWS: IntelligenceWindow[] = ['1d', '5d', '1m'];
+const INTELLIGENCE_TIMEOUT_MS = 12_000;
+
+function timeoutResponse(window: IntelligenceWindow) {
+  return {
+    window,
+    contributors: [],
+    detractors: [],
+    sectorExposure: [],
+    beta: null,
+    explanation: 'Loading portfolio intelligence...',
+    partial: true,
+    loading: true,
+    source: 'timeout' as const,
+    heroStats: null,
+    winnersCount: 0,
+    losersCount: 0,
+    totalGains: 0,
+    totalLosses: 0,
+    totalAbsMovement: 0,
+    netPnL: 0,
+  };
+}
+
+async function fetchWithTimeout(
+  userId: string,
+  window: IntelligenceWindow
+): Promise<PortfolioIntelligenceResponse> {
+  const result = await Promise.race([
+    getPortfolioIntelligence(userId, window),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('intelligence_timeout')), INTELLIGENCE_TIMEOUT_MS)
+    ),
+  ]);
+  return result;
+}
 
 export async function getIntelligenceHandler(req: AuthRequest, res: Response): Promise<void> {
+  const windowParam = req.query.window as string | undefined;
+  let window: IntelligenceWindow = '1d';
+
+  if (windowParam && VALID_WINDOWS.includes(windowParam as IntelligenceWindow)) {
+    window = windowParam as IntelligenceWindow;
+  }
+
   try {
-    const windowParam = req.query.window as string | undefined;
-    let window: IntelligenceWindow = '1d';
-
-    if (windowParam && VALID_WINDOWS.includes(windowParam as IntelligenceWindow)) {
-      window = windowParam as IntelligenceWindow;
-    }
-
-    const intelligence = await getPortfolioIntelligence(req.user!.userId, window);
+    const intelligence = await fetchWithTimeout(req.user!.userId, window);
     res.json(intelligence);
-  } catch (_error) {
+  } catch (err) {
+    if (err instanceof Error && err.message === 'intelligence_timeout') {
+      console.warn(`[Intelligence] Timeout after ${INTELLIGENCE_TIMEOUT_MS}ms for window=${window}`);
+      res.json(timeoutResponse(window));
+      return;
+    }
     console.error('Error getting portfolio intelligence:');
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',
@@ -25,18 +65,23 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
 }
 
 export async function getUserIntelligenceHandler(req: AuthRequest, res: Response): Promise<void> {
+  const { userId } = req.params;
+  const windowParam = req.query.window as string | undefined;
+  let window: IntelligenceWindow = '1d';
+
+  if (windowParam && VALID_WINDOWS.includes(windowParam as IntelligenceWindow)) {
+    window = windowParam as IntelligenceWindow;
+  }
+
   try {
-    const { userId } = req.params;
-    const windowParam = req.query.window as string | undefined;
-    let window: IntelligenceWindow = '1d';
-
-    if (windowParam && VALID_WINDOWS.includes(windowParam as IntelligenceWindow)) {
-      window = windowParam as IntelligenceWindow;
-    }
-
-    const intelligence = await getPortfolioIntelligence(userId, window);
+    const intelligence = await fetchWithTimeout(userId, window);
     res.json(intelligence);
-  } catch (_error) {
+  } catch (err) {
+    if (err instanceof Error && err.message === 'intelligence_timeout') {
+      console.warn(`[Intelligence] Timeout after ${INTELLIGENCE_TIMEOUT_MS}ms for user ${userId.slice(0, 8)} window=${window}`);
+      res.json(timeoutResponse(window));
+      return;
+    }
     console.error('Error getting user intelligence:');
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',

@@ -5,8 +5,8 @@ import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
 import { getEarningsSummary } from './earnings-summary.service';
 
-// Cache daily reports for 4 hours
-const reportCache = new NodeCache({ stdTTL: 14400 });
+// Cache daily reports for 8 hours (28800s) — news doesn't shift fast enough to justify 4h
+const reportCache = new NodeCache({ stdTTL: 28800 });
 
 // Non-ticker acronyms that Perplexity sometimes returns as "relatedTickers"
 const TICKER_BLACKLIST = new Set([
