@@ -40,8 +40,8 @@ export async function upsertHolding(input: HoldingInput, userId: string): Promis
   const plan = user?.plan ?? 'free';
   if (plan === 'free') {
     const currentCount = await prisma.holding.count({ where: { userId: uid } });
-    if (currentCount >= 25) {
-      throw new PlanLimitError(25, 'free');
+    if (currentCount >= 10) {
+      throw new PlanLimitError(10, 'free');
     }
   }
 

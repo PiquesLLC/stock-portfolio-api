@@ -2,15 +2,17 @@ import { NextFunction, Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 
-type PlanTier = 'free' | 'pro' | 'premium';
+type PlanTier = 'free' | 'pro' | 'premium' | 'elite';
 
 const PLAN_LEVEL: Record<PlanTier, number> = {
   free: 0,
   pro: 1,
   premium: 2,
+  elite: 3,
 };
 
 function normalizePlan(plan: string | null | undefined): PlanTier {
+  if (plan === 'elite') return 'elite';
   if (plan === 'premium') return 'premium';
   if (plan === 'pro') return 'pro';
   return 'free';

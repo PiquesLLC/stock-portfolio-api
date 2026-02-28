@@ -99,6 +99,8 @@ export const config = {
   stripeProYearlyPriceId: process.env.STRIPE_PRO_YEARLY_PRICE_ID || '',
   stripePremiumMonthlyPriceId: process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_PREMIUM || '',
   stripePremiumYearlyPriceId: process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID || '',
+  stripeEliteMonthlyPriceId: process.env.STRIPE_ELITE_MONTHLY_PRICE_ID || '',
+  stripeEliteYearlyPriceId: process.env.STRIPE_ELITE_YEARLY_PRICE_ID || '',
   stripeReturnUrl: process.env.STRIPE_RETURN_URL || 'http://localhost:5173',
   stripeConnectWebhookSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
   billingEnabled: process.env.BILLING_ENABLED !== 'false',

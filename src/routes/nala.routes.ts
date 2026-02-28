@@ -6,7 +6,7 @@ import { requirePlan } from '../middleware/plan.middleware';
 
 const router = Router();
 
-router.post('/ask', mutationLimiter, requireAuth, requirePlan('pro'), askNalaHandler);
+router.post('/ask', mutationLimiter, requireAuth, requirePlan('premium'), askNalaHandler);
 router.get('/suggestions', getSuggestionsHandler);
 
 export default router;

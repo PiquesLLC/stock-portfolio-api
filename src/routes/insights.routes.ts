@@ -30,10 +30,10 @@ router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandl
 router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
 router.get('/briefing', heavyReadLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
-router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('pro'), explainBriefingHandler);
+router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('premium'), explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);
 router.get('/daily-report', heavyReadLimiter, requireAuth, getDailyReportHandler);
-router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('pro'), regenerateDailyReportHandler);
+router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
 
 // Tax-Loss Harvesting
