@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { AuthRequest, AuthErrorCode } from '../types/auth';
-import { verifyTokenDetailed, rotateRefreshToken } from '../services/auth.service';
+import { verifyTokenDetailed } from '../services/auth.service';
 
 function isCapacitorRequest(req: Request): boolean {
   return req.headers['x-capacitor'] === 'true';
@@ -50,53 +50,23 @@ function clearAuthCookies(res: Response, req: Request): void {
 }
 
 /**
- * Internal auth implementation — validates token, auto-refreshes if needed.
+ * Internal auth implementation — validates token, returns 401 if invalid/expired.
+ * Does NOT attempt token rotation — that is handled exclusively by POST /auth/refresh
+ * on the client side (single-threaded via mutex) to prevent race conditions where
+ * parallel middleware rotations produce conflicting Set-Cookie headers.
  * Does NOT check email verification.
  */
 function _requireAuthImpl(req: AuthRequest, res: Response, next: NextFunction): void {
   const accessToken = extractAccessToken(req);
 
   if (!accessToken) {
-    // Access token cookie expired (browser deleted it) — try refresh token
-    const refreshToken = extractRefreshToken(req);
-    if (refreshToken) {
-      rotateRefreshToken(refreshToken)
-        .then((result) => {
-          if (result && result.accessToken) {
-            const options = getCookieOptions(req);
-            res.cookie('authToken', result.accessToken, {
-              ...options,
-              maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
-            });
-            res.cookie('refreshToken', result.refreshToken, {
-              ...options,
-              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-            });
-            req.user = result.payload;
-            next();
-          } else if (result && result.refreshToken) {
-            // Race-loser path returns empty accessToken — update refresh cookie but reject
-            const options = getCookieOptions(req);
-            res.cookie('refreshToken', result.refreshToken, {
-              ...options,
-              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-            });
-            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-          } else {
-            // rotateRefreshToken returned null — possible race condition where winner
-            // hasn't finished creating the new token yet. Do NOT clear cookies here;
-            // the client will retry via POST /auth/refresh with whatever cookie it has.
-            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-          }
-        })
-        .catch(() => {
-          // Server error during rotation — don't clear cookies, session may still be valid
-          res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-        });
-      return;
-    }
-    clearAuthCookies(res, req);
-    res.status(401).json({ error: 'Authorization required', code: 'NO_TOKEN' as AuthErrorCode });
+    // No access token — tell client to refresh via POST /auth/refresh.
+    // Don't clear cookies: the refresh token cookie may still be valid.
+    const hasRefreshToken = !!extractRefreshToken(req);
+    res.status(401).json({
+      error: hasRefreshToken ? 'Access token expired' : 'Authorization required',
+      code: (hasRefreshToken ? 'TOKEN_EXPIRED' : 'NO_TOKEN') as AuthErrorCode,
+    });
     return;
   }
 
@@ -109,48 +79,12 @@ function _requireAuthImpl(req: AuthRequest, res: Response, next: NextFunction): 
   }
 
   if (expired) {
-    // Try auto-refresh using refresh token cookie
-    const refreshToken = extractRefreshToken(req);
-    if (refreshToken) {
-      rotateRefreshToken(refreshToken)
-        .then((result) => {
-          if (result && result.accessToken) {
-            const options = getCookieOptions(req);
-            res.cookie('authToken', result.accessToken, {
-              ...options,
-              maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
-            });
-            res.cookie('refreshToken', result.refreshToken, {
-              ...options,
-              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-            });
-            req.user = result.payload;
-            next();
-          } else if (result && result.refreshToken) {
-            const options = getCookieOptions(req);
-            res.cookie('refreshToken', result.refreshToken, {
-              ...options,
-              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-            });
-            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-          } else {
-            // Don't clear cookies — race condition may resolve via client-side refresh
-            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-          }
-        })
-        .catch(() => {
-          // Don't clear cookies on server error — session may still be valid
-          res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
-        });
-      return;
-    }
-
-    clearAuthCookies(res, req);
+    // Don't clear cookies — refresh token may still be valid for POST /auth/refresh
     res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' as AuthErrorCode });
     return;
   }
 
-  // Token is invalid (not just expired)
+  // Token is invalid (not just expired) — cryptographically bad
   clearAuthCookies(res, req);
   res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' as AuthErrorCode });
 }
@@ -188,7 +122,7 @@ export function requireAuthAllowUnverified(req: AuthRequest, res: Response, next
 
 /**
  * Optional auth middleware - extracts user if token present, continues regardless.
- * If access token is expired but refresh token exists, silently refreshes.
+ * Does NOT attempt token rotation — same reasoning as _requireAuthImpl.
  */
 export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction): void {
   const accessToken = extractAccessToken(req);
@@ -203,35 +137,9 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
     }
 
     if (expired) {
-      // Try silent refresh instead of just clearing cookies
-      const refreshToken = extractRefreshToken(req);
-      if (refreshToken) {
-        rotateRefreshToken(refreshToken)
-          .then((result) => {
-            if (result && result.accessToken) {
-              const options = getCookieOptions(req);
-              res.cookie('authToken', result.accessToken, {
-                ...options,
-                maxAge: 15 * 60 * 1000,
-              });
-              res.cookie('refreshToken', result.refreshToken, {
-                ...options,
-                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-              });
-              req.user = result.payload;
-            } else if (result && result.refreshToken) {
-              // Race-loser: update refresh cookie but don't authenticate
-              const options = getCookieOptions(req);
-              res.cookie('refreshToken', result.refreshToken, {
-                ...options,
-                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-              });
-            }
-            next();
-          })
-          .catch(() => { next(); });
-        return;
-      }
+      // Token expired — continue without auth. Client will refresh via POST /auth/refresh.
+      next();
+      return;
     }
 
     // Token is invalid (not just expired) — clear cookies
