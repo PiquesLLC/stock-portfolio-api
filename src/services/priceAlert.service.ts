@@ -44,8 +44,8 @@ export async function createPriceAlert(input: CreatePriceAlertInput) {
     const plan = user?.plan ?? 'free';
     if (plan === 'free') {
       const count = await prisma.priceAlert.count({ where: { userId } });
-      if (count >= 3) {
-        throw new PlanLimitError(3, 'free');
+      if (count >= 1) {
+        throw new PlanLimitError(1, 'free');
       }
     }
   }

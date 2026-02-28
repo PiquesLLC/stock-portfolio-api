@@ -38,7 +38,7 @@ import { getAccountHistory, HistoryCategory } from '../services/account-history.
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
-const FREE_CHART_PERIODS = new Set(['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL']);
+const FREE_CHART_PERIODS = new Set(['1D', '1W', 'YTD']);
 
 export async function getPortfolioHandler(req: AuthRequest, res: Response): Promise<void> {
   try {

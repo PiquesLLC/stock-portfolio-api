@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 
-export type PlanTier = 'free' | 'pro' | 'premium';
+export type PlanTier = 'free' | 'pro' | 'premium' | 'elite';
 
 interface BillingWebhookEventDelegate {
   create(args: { data: { eventId: string; eventType: string } }): Promise<unknown>;
@@ -23,6 +23,12 @@ function getStripeClient(): Stripe {
 
 function resolvePlanFromPriceId(priceId: string | null): PlanTier {
   if (!priceId) return 'free';
+  if (
+    (config.stripeEliteMonthlyPriceId && priceId === config.stripeEliteMonthlyPriceId) ||
+    (config.stripeEliteYearlyPriceId && priceId === config.stripeEliteYearlyPriceId)
+  ) {
+    return 'elite';
+  }
   if (
     (config.stripePremiumMonthlyPriceId && priceId === config.stripePremiumMonthlyPriceId) ||
     (config.stripePremiumYearlyPriceId && priceId === config.stripePremiumYearlyPriceId)

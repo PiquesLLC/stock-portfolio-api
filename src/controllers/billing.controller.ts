@@ -20,6 +20,10 @@ export function getPricesHandler(_req: Request, res: Response): void {
       monthly: config.stripePremiumMonthlyPriceId || null,
       yearly: config.stripePremiumYearlyPriceId || null,
     },
+    elite: {
+      monthly: config.stripeEliteMonthlyPriceId || null,
+      yearly: config.stripeEliteYearlyPriceId || null,
+    },
   });
 }
 
