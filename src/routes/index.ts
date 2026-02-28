@@ -26,6 +26,7 @@ import billingRoutes from './billing.routes';
 import stockFollowRoutes from './stock-follow.routes';
 import creatorRoutes from './creator.routes';
 import referralRoutes from './referral.routes';
+import waitlistRoutes from './waitlist.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -54,6 +55,7 @@ router.use('/watchlists', watchlistRoutes);
 router.use('/stock-follows', stockFollowRoutes);
 router.use('/creator', creatorRoutes);
 router.use('/referral', referralRoutes);
+router.use('/waitlist', waitlistRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/plaid', plaidRoutes);
 if (config.billingEnabled) {

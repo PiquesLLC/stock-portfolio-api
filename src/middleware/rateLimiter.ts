@@ -144,6 +144,18 @@ export const billingWebhookLimiter = rateLimit({
 });
 
 /**
+ * Waitlist join rate limiter - prevent spam signups
+ * 5 attempts per hour per IP in production
+ */
+export const waitlistJoinLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 5 : 50,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Global API rate limiter - general protection
  * Higher limits in dev to support pre-fetching and background tasks
  */

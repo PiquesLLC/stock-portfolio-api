@@ -434,7 +434,7 @@ const RESERVED_USERNAMES = new Set([
   'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
   'alerts', 'price-alerts', 'analyst', 'milestones', 'fundamentals', 'nala',
   'watchlists', 'stock-follows', 'creator', 'referral', 'notifications', 'plaid',
-  'billing',
+  'billing', 'waitlist',
   // UI tab names / routes
   'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
   // Common reserved words
@@ -460,6 +460,14 @@ export async function signup(
   // Block reserved usernames that would conflict with routes
   if (isReservedUsername(username)) {
     return { error: 'Username is reserved' };
+  }
+
+  // Gate signup behind waitlist approval (when enabled)
+  if (config.waitlistEnabled) {
+    const waitlistEntry = await prisma.waitlist.findUnique({ where: { email: normalizedEmail } });
+    if (!waitlistEntry || waitlistEntry.status !== 'approved') {
+      return { error: 'WAITLIST_NOT_APPROVED' };
+    }
   }
 
   // Check if username already exists
@@ -525,6 +533,14 @@ export async function signup(
 
     return newUser;
   });
+
+  // Mark waitlist entry as converted (non-blocking)
+  if (config.waitlistEnabled) {
+    prisma.waitlist.update({
+      where: { email: normalizedEmail },
+      data: { convertedAt: new Date() },
+    }).catch(() => { /* non-critical */ });
+  }
 
   // Process referral (non-blocking — don't fail signup if referral fails)
   if (referralCode) {

@@ -74,22 +74,23 @@ function _requireAuthImpl(req: AuthRequest, res: Response, next: NextFunction): 
             });
             req.user = result.payload;
             next();
-          } else {
+          } else if (result && result.refreshToken) {
             // Race-loser path returns empty accessToken — update refresh cookie but reject
-            if (result && result.refreshToken) {
-              const options = getCookieOptions(req);
-              res.cookie('refreshToken', result.refreshToken, {
-                ...options,
-                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-              });
-            } else {
-              clearAuthCookies(res, req);
-            }
+            const options = getCookieOptions(req);
+            res.cookie('refreshToken', result.refreshToken, {
+              ...options,
+              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+            });
+            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
+          } else {
+            // rotateRefreshToken returned null — possible race condition where winner
+            // hasn't finished creating the new token yet. Do NOT clear cookies here;
+            // the client will retry via POST /auth/refresh with whatever cookie it has.
             res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           }
         })
         .catch(() => {
-          clearAuthCookies(res, req);
+          // Server error during rotation — don't clear cookies, session may still be valid
           res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
         });
       return;
@@ -125,21 +126,20 @@ function _requireAuthImpl(req: AuthRequest, res: Response, next: NextFunction): 
             });
             req.user = result.payload;
             next();
+          } else if (result && result.refreshToken) {
+            const options = getCookieOptions(req);
+            res.cookie('refreshToken', result.refreshToken, {
+              ...options,
+              maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+            });
+            res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           } else {
-            if (result && result.refreshToken) {
-              const options = getCookieOptions(req);
-              res.cookie('refreshToken', result.refreshToken, {
-                ...options,
-                maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-              });
-            } else {
-              clearAuthCookies(res, req);
-            }
+            // Don't clear cookies — race condition may resolve via client-side refresh
             res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
           }
         })
         .catch(() => {
-          clearAuthCookies(res, req);
+          // Don't clear cookies on server error — session may still be valid
           res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' as AuthErrorCode });
         });
       return;

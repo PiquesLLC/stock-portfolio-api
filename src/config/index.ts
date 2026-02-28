@@ -107,6 +107,12 @@ export const config = {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean),
+  waitlistAdminUserIds: (process.env.WAITLIST_ADMIN_USER_IDS || process.env.CREATOR_ADMIN_USER_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
+  waitlistEnabled: process.env.WAITLIST_ENABLED !== 'false',
+  waitlistNotifyEmail: process.env.WAITLIST_NOTIFY_EMAIL || '',
 
   // NALA AI Deep Research (Gemini)
   googleGeminiApiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
@@ -138,6 +144,10 @@ export const config = {
     signup: {
       windowMs: 60 * 60 * 1000, // 1 hour
       maxAttempts: 5,
+    },
+    waitlistJoin: {
+      windowMs: 60 * 60 * 1000, // 1 hour
+      maxAttempts: process.env.NODE_ENV === 'production' ? 5 : 50,
     },
     mutation: {
       windowMs: 60 * 1000, // 1 minute

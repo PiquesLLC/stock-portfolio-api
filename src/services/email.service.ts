@@ -110,6 +110,56 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   });
 }
 
+export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
+  const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — waitlist approval for ${to}`);
+    return;
+  }
+  const signupUrl = config.stripeReturnUrl || 'https://nalaai.com';
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to,
+    subject: "You're in! Create your Nala account",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
+        <h2 style="color: #00c805; margin: 0 0 24px;">Nala</h2>
+        <p style="color: #333; font-size: 16px; margin: 0 0 16px;">Great news — your spot is ready.</p>
+        <p style="color: #666; font-size: 14px; margin: 0 0 24px;">You've been approved to join Nala. Click below to create your account and start tracking your portfolio.</p>
+        <a href="${signupUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Create Your Account</a>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;" />
+        <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
+      </div>
+    `,
+  });
+}
+
+export async function sendWaitlistJoinNotificationEmail(adminEmail: string, waitlistEmail: string): Promise<void> {
+  const r = getResend();
+  const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const appUrl = config.stripeReturnUrl || 'https://nalaai.com';
+  if (!r) {
+    console.log(`[Email] Dev mode — waitlist join notification: ${waitlistEmail} joined at ${now}`);
+    return;
+  }
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to: adminEmail,
+    subject: `New Waitlist Signup: ${waitlistEmail}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
+        <h2 style="color: #00c805; margin: 0 0 24px;">Nala — Waitlist</h2>
+        <p style="color: #333; font-size: 16px; margin: 0 0 8px;">New signup on the waitlist:</p>
+        <p style="font-size: 18px; font-weight: bold; color: #111; margin: 16px 0; font-family: monospace;">${waitlistEmail}</p>
+        <p style="color: #666; font-size: 14px; margin: 0 0 24px;">Joined at ${now} ET</p>
+        <a href="${appUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Review in App</a>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;" />
+        <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
+      </div>
+    `,
+  });
+}
+
 const PERIOD_LABELS: Record<string, string> = {
   '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
   'YTD': 'Year to Date', '1Y': '1 Year', 'ALL': 'All Time',

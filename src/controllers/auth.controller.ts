@@ -253,9 +253,10 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Handle reserved username or other validation errors
+    // Handle reserved username, waitlist gate, or other validation errors
     if ('error' in result) {
-      res.status(400).json({ error: result.error });
+      const status = result.error === 'WAITLIST_NOT_APPROVED' ? 403 : 400;
+      res.status(status).json({ error: result.error });
       return;
     }
 

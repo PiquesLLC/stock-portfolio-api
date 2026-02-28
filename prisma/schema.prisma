@@ -945,6 +945,20 @@ model DeepResearchJob {
   @@unique([userId, clientRequestId])
 }
 
+// ─── Waitlist ────────────────────────────────────────────────────────
+
+model Waitlist {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  status      String    @default("pending") // pending | approved | rejected
+  createdAt   DateTime  @default(now())
+  approvedAt  DateTime?
+  approvedBy  String?
+  rejectedAt  DateTime?
+  convertedAt DateTime?
+  notes       String?
+}
+
 // ─── Referral Tracking ──────────────────────────────────────────────
 
 model Referral {
