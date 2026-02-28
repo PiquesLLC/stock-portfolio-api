@@ -134,19 +134,12 @@ export async function rotateRefreshToken(
   const tokenFamily = stored.family ?? stored.id;
 
   if (stored.revokedAt) {
-    const msSinceRevoked = Date.now() - stored.revokedAt.getTime();
-    if (msSinceRevoked > 30_000) {
-      // Genuine reuse attack — revoke the entire family for safety
-      await prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      return null;
-    }
-
-    // Grace period: revoked less than 30s ago — concurrent request that raced
-    // with the first refresh. Return latest valid refresh token only — NO new
-    // access token. Client must use the new refresh token to get an access token.
+    // Token was already revoked (by a previous rotation). Try to find the
+    // latest valid token in the family and return it with a fresh access token.
+    // This handles both concurrent-request races AND the case where a browser
+    // held a stale token (e.g., network drop prevented cookie update).
+    // We intentionally do NOT revoke the entire family — doing so causes
+    // false-positive session kills when the browser's cookie jar is stale.
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
@@ -161,7 +154,7 @@ export async function rotateRefreshToken(
       planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
       emailVerified: stored.user.emailVerified ?? false,
     };
-    return { accessToken: '', refreshToken: latestValid.token, payload };
+    return { accessToken: generateAccessToken(payload), refreshToken: latestValid.token, payload };
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds
@@ -171,8 +164,8 @@ export async function rotateRefreshToken(
   });
 
   if (revoked.count === 0) {
-    // Another request already revoked it — return latest valid refresh token only,
-    // NO access token. Client must use the new refresh token to get an access token.
+    // Another request already revoked it — find the latest valid token in the
+    // family and return it with a fresh access token.
     await new Promise(r => setTimeout(r, 50));
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -188,7 +181,7 @@ export async function rotateRefreshToken(
       planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
       emailVerified: stored.user.emailVerified ?? false,
     };
-    return { accessToken: '', refreshToken: latestValid.token, payload };
+    return { accessToken: generateAccessToken(payload), refreshToken: latestValid.token, payload };
   }
 
   const payload: JwtPayload = {

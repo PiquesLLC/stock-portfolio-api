@@ -613,10 +613,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     }
 
     const { accessOptions, refreshOptions } = getCookieOptions(req);
-    // Race-loser path returns empty accessToken — only update refresh cookie, client retries
-    if (result.accessToken) {
-      res.cookie('authToken', result.accessToken, accessOptions);
-    }
+    res.cookie('authToken', result.accessToken, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.json({ message: 'Token refreshed successfully' });
   } catch (_error) {
