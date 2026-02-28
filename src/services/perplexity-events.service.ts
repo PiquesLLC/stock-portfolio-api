@@ -118,7 +118,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     const result: AIEventsResponse = { ticker: upper, events: validEvents };
     // Only cache non-empty results — longer TTL for historical data
     if (validEvents.length > 0) {
-      const ttl = isMax ? 3600 : days >= 365 ? 1800 : 600; // 1hr for MAX, 30min for 1Y+, 10min default
+      const ttl = isMax ? 7200 : days >= 365 ? 3600 : 1800; // 2hr for MAX, 1hr for 1Y+, 30min default
       aiEventsCache.set(cacheKey, result, ttl);
     }
     console.log(`[Perplexity] ${upper}: ${validEvents.length}/${rawEvents.length} events (${isMax ? 'MAX' : `${startDate} to ${endDate}`}), ${resp.citations.length} citations`);

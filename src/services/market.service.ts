@@ -617,6 +617,50 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
   return { ticker: upperTicker, quote, profile, metrics, candles };
 }
 
+/**
+ * Warm the quote cache on startup by pre-fetching prices for all held tickers.
+ * Runs in background — non-blocking. Uses Polygon (saves Finnhub quota).
+ * Capped at MAX_WARM_TICKERS to bound startup work as user count grows.
+ */
+const MAX_WARM_TICKERS = 100;
+
+export async function warmHoldingsCache(): Promise<void> {
+  const prisma = (await import('../utils/prisma')).default;
+
+  const holdings = await prisma.holding.findMany({
+    select: { ticker: true },
+    distinct: ['ticker'],
+    where: { shares: { gt: 0 } },
+  });
+
+  const tickers = [...new Set(holdings.map(h => h.ticker.toUpperCase()))];
+  if (tickers.length === 0) {
+    console.log('[Startup] No holdings to warm');
+    return;
+  }
+
+  const toWarm = tickers.slice(0, MAX_WARM_TICKERS);
+  console.log(`[Startup] Warming holdings cache: ${toWarm.length} tickers${tickers.length > MAX_WARM_TICKERS ? ` (capped from ${tickers.length})` : ''}`);
+
+  const startTime = Date.now();
+  let succeeded = 0;
+
+  // Fetch in batches of 10 using Polygon (no Finnhub queue pressure)
+  const batchSize = 10;
+  for (let i = 0; i < toWarm.length; i += batchSize) {
+    const batch = toWarm.slice(i, i + batchSize);
+    try {
+      const result = await fetchPrices(batch, { preferPolygon: true });
+      succeeded += result.quotes.size;
+    } catch (err) {
+      console.warn(`[Startup] Batch ${i}-${i + batch.length} warm failed:`, (err as Error).message);
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[Startup] Warmed ${succeeded}/${toWarm.length} tickers in ${elapsed}s`);
+}
+
 export async function searchTickers(
   query: string,
   heldTickers: string[] = []

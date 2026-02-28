@@ -20,8 +20,8 @@ const ETF_VARIABLE_DISTRIBUTIONS = new Set([
   'GLD', 'SLV', 'IAU', 'GDXJ', 'XBI', 'XME', 'IGV', 'NLR',
 ]);
 
-// Perplexity explanation cache: 1 hour per ticker
-const analysisCache = new NodeCache({ stdTTL: 3600 });
+// Perplexity explanation cache: 4 hours per ticker — news explanation is stable after initial break
+const analysisCache = new NodeCache({ stdTTL: 14400 });
 
 // Volume baseline cache: daily candles cached 6 hours (historical data won't change intraday)
 const volumeCache = new NodeCache({ stdTTL: 21600 });

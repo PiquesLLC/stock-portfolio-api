@@ -1,3 +1,4 @@
+import NodeCache from 'node-cache';
 import { callPerplexity } from '../utils/perplexity';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
@@ -7,6 +8,14 @@ export interface StockQAResponse {
   answer: string;
   citations: string[];
   answeredAt: string;
+}
+
+// Cache QA answers for 15 minutes — keyed by normalized(ticker + question)
+const qaCache = new NodeCache({ stdTTL: 900 });
+
+/** Normalize question for cache key: lowercase, trim, collapse whitespace, strip trailing punctuation */
+function normalizeQuestion(q: string): string {
+  return q.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[?.!]+$/, '');
 }
 
 const SYSTEM_PROMPT = `You are a stock research assistant. Answer the user's question about the given stock ticker.
@@ -24,6 +33,11 @@ export async function askStockQuestion(
   await ensureEmailVerifiedForAi(userId);
   const upperTicker = ticker.toUpperCase();
 
+  // Strong cache key: ticker + normalized question (not user-specific since answers are stock-specific, not portfolio-aware)
+  const cacheKey = `qa:${upperTicker}:${normalizeQuestion(question)}`;
+  const cached = qaCache.get<StockQAResponse>(cacheKey);
+  if (cached) return cached;
+
   try {
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
@@ -40,13 +54,17 @@ export async function askStockQuestion(
       };
     }
 
-    return {
+    const result: StockQAResponse = {
       ticker: upperTicker,
       question,
       answer: resp.content.trim(),
       citations: resp.citations,
       answeredAt: new Date().toISOString(),
     };
+
+    // Only cache successful answers
+    qaCache.set(cacheKey, result);
+    return result;
   } catch (_error) {
     console.error(`[Perplexity Q&A] Error for ${upperTicker}`);
     return {

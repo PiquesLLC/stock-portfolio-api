@@ -10,7 +10,7 @@ import { fetchPrices } from './market.service';
 import { getSector } from '../utils/sectors';
 import { callPerplexity } from '../utils/perplexity';
 
-const cache = new NodeCache({ stdTTL: 3600 }); // 1-hour cache
+const cache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — tax situation only changes on trades
 
 const SHORT_TERM_TAX_RATE = 0.25;
 const LONG_TERM_TAX_RATE = 0.15;

@@ -6,8 +6,8 @@ import { getPortfolio } from './portfolio.service';
 
 
 
-// Cache research results for 30 minutes
-const nalaCache = new NodeCache({ stdTTL: 1800 });
+// Cache research results for 2 hours (7200s) — screening data doesn't shift in 30 min
+const nalaCache = new NodeCache({ stdTTL: 7200 });
 
 // â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

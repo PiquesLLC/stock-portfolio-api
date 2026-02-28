@@ -3,8 +3,8 @@ import { callPerplexity, extractJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
-// Cache briefings for 30 minutes
-const briefingCache = new NodeCache({ stdTTL: 1800 });
+// Cache briefings for 2 hours (7200s) — weekly analysis doesn't need 30-min refresh
+const briefingCache = new NodeCache({ stdTTL: 7200 });
 
 export interface BriefingSection {
   title: string;
