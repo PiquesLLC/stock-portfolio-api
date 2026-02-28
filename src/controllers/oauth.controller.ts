@@ -5,6 +5,7 @@ import { getCookieOptions } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
 import { googleCallbackSchema, appleCallbackSchema } from '../validators/oauth.validators';
 import { trackOAuthSuccess, trackOAuthFail, trackOAuthMfa } from '../utils/auth-metrics';
+import prisma from '../utils/prisma';
 
 /**
  * POST /auth/oauth/google/callback
@@ -36,6 +37,19 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       undefined,
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
+
+    // Waitlist gate: block new OAuth signups unless email is approved
+    if (isNewUser && config.waitlistEnabled && profile.email) {
+      const entry = await prisma.waitlist.findUnique({ where: { email: profile.email.trim().toLowerCase() } });
+      if (!entry || entry.status !== 'approved') {
+        // Delete the just-created user — they aren't approved
+        await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+        res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
+        return;
+      }
+      // Mark waitlist entry as converted
+      prisma.waitlist.update({ where: { email: profile.email.trim().toLowerCase() }, data: { convertedAt: new Date() } }).catch(() => {});
+    }
 
     // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {
@@ -96,6 +110,17 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       appleUser, // { firstName, lastName } — only on first auth
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
+
+    // Waitlist gate: block new OAuth signups unless email is approved
+    if (isNewUser && config.waitlistEnabled && profile.email) {
+      const entry = await prisma.waitlist.findUnique({ where: { email: profile.email.trim().toLowerCase() } });
+      if (!entry || entry.status !== 'approved') {
+        await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+        res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
+        return;
+      }
+      prisma.waitlist.update({ where: { email: profile.email.trim().toLowerCase() }, data: { convertedAt: new Date() } }).catch(() => {});
+    }
 
     // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {
