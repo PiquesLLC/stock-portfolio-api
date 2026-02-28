@@ -1,11 +1,55 @@
 import { Request, Response } from 'express';
-import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens } from '../services/oauth.service';
+import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens, OAuthProfile } from '../services/oauth.service';
 import { config } from '../config';
 import { getCookieOptions } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
 import { googleCallbackSchema, appleCallbackSchema } from '../validators/oauth.validators';
 import { trackOAuthSuccess, trackOAuthFail, trackOAuthMfa } from '../utils/auth-metrics';
 import prisma from '../utils/prisma';
+
+/**
+ * Pre-creation waitlist gate for OAuth signups.
+ * Returns true if the user is allowed to proceed, false if blocked.
+ * Must be called BEFORE findOrCreateOAuthUser() to avoid create-then-delete races.
+ */
+async function checkWaitlistForNewOAuthUser(profile: OAuthProfile, res: Response): Promise<boolean> {
+  if (!config.waitlistEnabled) return true;
+
+  const email = profile.email?.trim().toLowerCase();
+
+  // No email from provider — can't verify against waitlist, block signup
+  if (!email) {
+    res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
+    return false;
+  }
+
+  // Check if this provider ID already has an account (existing user login, not new signup)
+  const existingByGoogle = await prisma.user.findUnique({ where: { googleId: profile.providerId }, select: { id: true } }).catch(() => null);
+  const existingByApple = await prisma.user.findUnique({ where: { appleId: profile.providerId }, select: { id: true } }).catch(() => null);
+  if (existingByGoogle || existingByApple) return true; // existing user, skip waitlist
+
+  // Check if email already has an account (will link, not create)
+  const existingByEmail = await prisma.user.findUnique({ where: { email }, select: { id: true, emailVerified: true } }).catch(() => null);
+  if (existingByEmail && existingByEmail.emailVerified) return true; // existing user, skip waitlist
+
+  // New user — check waitlist
+  const entry = await prisma.waitlist.findUnique({ where: { email } });
+  if (!entry || entry.status !== 'approved') {
+    res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Mark waitlist entry as converted after successful OAuth signup (non-blocking).
+ */
+function markWaitlistConverted(email: string | undefined): void {
+  if (!config.waitlistEnabled || !email) return;
+  const normalized = email.trim().toLowerCase();
+  prisma.waitlist.update({ where: { email: normalized }, data: { convertedAt: new Date() } }).catch(() => {});
+}
 
 /**
  * POST /auth/oauth/google/callback
@@ -31,6 +75,9 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
 
     const profile = await verifyGoogleToken(accessToken);
 
+    // Waitlist gate: check BEFORE creating any user record
+    if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
+
     const { user, isNewUser } = await findOrCreateOAuthUser(
       'google',
       profile,
@@ -38,18 +85,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
 
-    // Waitlist gate: block new OAuth signups unless email is approved
-    if (isNewUser && config.waitlistEnabled && profile.email) {
-      const entry = await prisma.waitlist.findUnique({ where: { email: profile.email.trim().toLowerCase() } });
-      if (!entry || entry.status !== 'approved') {
-        // Delete the just-created user — they aren't approved
-        await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
-        res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
-        return;
-      }
-      // Mark waitlist entry as converted
-      prisma.waitlist.update({ where: { email: profile.email.trim().toLowerCase() }, data: { convertedAt: new Date() } }).catch(() => {});
-    }
+    if (isNewUser) markWaitlistConverted(profile.email);
 
     // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {
@@ -104,6 +140,9 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
 
     const profile = await verifyAppleToken(id_token, nonce);
 
+    // Waitlist gate: check BEFORE creating any user record
+    if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
+
     const { user, isNewUser } = await findOrCreateOAuthUser(
       'apple',
       profile,
@@ -111,16 +150,7 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
     );
 
-    // Waitlist gate: block new OAuth signups unless email is approved
-    if (isNewUser && config.waitlistEnabled && profile.email) {
-      const entry = await prisma.waitlist.findUnique({ where: { email: profile.email.trim().toLowerCase() } });
-      if (!entry || entry.status !== 'approved') {
-        await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
-        res.status(403).json({ error: 'WAITLIST_NOT_APPROVED' });
-        return;
-      }
-      prisma.waitlist.update({ where: { email: profile.email.trim().toLowerCase() }, data: { convertedAt: new Date() } }).catch(() => {});
-    }
+    if (isNewUser) markWaitlistConverted(profile.email);
 
     // Check if existing user has MFA enabled — before issuing tokens
     if (!isNewUser) {

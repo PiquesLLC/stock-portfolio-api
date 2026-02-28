@@ -7,7 +7,7 @@ import { trackP2002 } from '../utils/auth-metrics';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface OAuthProfile {
+export interface OAuthProfile {
   providerId: string;       // Google sub or Apple sub
   email?: string;
   emailVerified?: boolean;

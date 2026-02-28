@@ -47,7 +47,7 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
 
 // Admin — list waitlist entries with optional status filter
 router.get('/', requireAuth, async (req: Request, res: Response) => {
-  if (!isWaitlistAdmin((req as any).user?.id)) {
+  if (!isWaitlistAdmin((req as any).user?.userId)) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
@@ -65,7 +65,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
 // Admin — approve a waitlist entry
 router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => {
-  const adminId = (req as any).user?.id;
+  const adminId = (req as any).user?.userId;
   if (!isWaitlistAdmin(adminId)) {
     res.status(403).json({ error: 'Admin access required' });
     return;
@@ -90,7 +90,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
 
 // Admin — reject a waitlist entry
 router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
-  if (!isWaitlistAdmin((req as any).user?.id)) {
+  if (!isWaitlistAdmin((req as any).user?.userId)) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
