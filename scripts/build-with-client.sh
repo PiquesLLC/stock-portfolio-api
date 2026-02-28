@@ -12,8 +12,12 @@ echo "=== Building UI Client ==="
 git clone --depth 1 https://github.com/PiquesLLC/stock-portfolio-ui.git /tmp/ui-build
 cd /tmp/ui-build
 
-# Set the API URL to empty string (same origin in production)
+# Inject VITE_ env vars for the production build
 echo "VITE_API_URL=" > .env.production
+[ -n "$VITE_ADMIN_USER_ID" ] && echo "VITE_ADMIN_USER_ID=$VITE_ADMIN_USER_ID" >> .env.production
+[ -n "$VITE_WAITLIST_ENABLED" ] && echo "VITE_WAITLIST_ENABLED=$VITE_WAITLIST_ENABLED" >> .env.production
+[ -n "$VITE_GOOGLE_CLIENT_ID" ] && echo "VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID" >> .env.production
+[ -n "$VITE_APPLE_CLIENT_ID" ] && echo "VITE_APPLE_CLIENT_ID=$VITE_APPLE_CLIENT_ID" >> .env.production
 npm install
 npx vite build
 
