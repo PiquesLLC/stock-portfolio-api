@@ -94,6 +94,20 @@ router.post('/admin-set-password', async (req, res) => {
     res.json({ users });
     return;
   }
+  if (action === 'find-holdings') {
+    const holdings = await prisma.holding.findMany({
+      where: { shares: { gt: 0 } },
+      select: { userId: true, ticker: true, shares: true },
+    });
+    const byUser: Record<string, { count: number; tickers: string[] }> = {};
+    for (const h of holdings) {
+      if (!byUser[h.userId]) byUser[h.userId] = { count: 0, tickers: [] };
+      byUser[h.userId].count++;
+      byUser[h.userId].tickers.push(h.ticker);
+    }
+    res.json({ holdingsByUser: byUser });
+    return;
+  }
   if (!username || !password) {
     res.status(400).json({ error: 'username and password required' });
     return;
