@@ -68,6 +68,14 @@ vi.mock('../utils/prisma', () => {
     milestoneEvent: { deleteMany: vi.fn() },
     anomalyEvent: { deleteMany: vi.fn() },
     notificationAuditLog: { create: vi.fn(), deleteMany: vi.fn() },
+    pushSubscription: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      upsert: vi.fn(),
+      create: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     leaderboardCache: { deleteMany: vi.fn() },
     $transaction: vi.fn((arg: any) => {
       // Support both Prisma transaction styles:

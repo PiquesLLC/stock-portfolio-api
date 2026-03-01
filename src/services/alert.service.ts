@@ -1,4 +1,5 @@
 ﻿import prisma from '../utils/prisma';
+import { sendPushToUser } from './push.service';
 
 
 
@@ -136,13 +137,22 @@ async function checkDrawdown(alertId: string, userId: string, thresholdPct: numb
     });
 
     if (!recent) {
+      const alertMessage = `Portfolio drawdown reached ${maxDrawdown.toFixed(1)}% (threshold: ${thresholdPct}%)`;
       await prisma.alertEvent.create({
         data: {
           alertId,
-          message: `Portfolio drawdown reached ${maxDrawdown.toFixed(1)}% (threshold: ${thresholdPct}%)`,
+          message: alertMessage,
           data: JSON.stringify({ maxDrawdown, threshold: thresholdPct }),
         },
       });
+
+      // Fire-and-forget push notification
+      sendPushToUser(userId, {
+        title: 'Portfolio Alert',
+        body: alertMessage,
+        tag: `alert-${alertId}`,
+        data: { type: 'alert', url: '/' },
+      }).catch(() => {});
     }
   }
 }
