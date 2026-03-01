@@ -76,16 +76,23 @@ export async function getSettings(userId: string): Promise<Settings> {
     } as Settings;
   }
 
-  // If no UserSettings yet, create one with defaults
-  const created = await prisma.userSettings.create({
-    data: { userId, cashBalance: 0, marginDebt: 0 },
-  });
-  return {
-    id: 'default',
-    cashBalance: created.cashBalance,
-    marginDebt: created.marginDebt ?? 0,
-    cashInterestRate: created.cashInterestRate ?? 0,
-  } as Settings;
+  // If no UserSettings yet, create one with defaults (upsert to handle races)
+  try {
+    const created = await prisma.userSettings.upsert({
+      where: { userId },
+      update: {},
+      create: { userId, cashBalance: 0, marginDebt: 0 },
+    });
+    return {
+      id: 'default',
+      cashBalance: created.cashBalance,
+      marginDebt: created.marginDebt ?? 0,
+      cashInterestRate: created.cashInterestRate ?? 0,
+    } as Settings;
+  } catch {
+    // FK constraint failure = user doesn't exist, return safe defaults
+    return { id: 'default', cashBalance: 0, marginDebt: 0, cashInterestRate: 0 } as Settings;
+  }
 }
 
 export async function updateCashBalance(userId: string, cashBalance: number): Promise<Settings> {
