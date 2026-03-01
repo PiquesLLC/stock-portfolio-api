@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
-import { saveSubscription, removeSubscription, sendPushToUser } from '../services/push.service';
+import { saveSubscription, removeSubscription, sendPushToUser, getSubscriptionCount } from '../services/push.service';
 
 const MAX_ENDPOINT_LENGTH = 2048;
 const MAX_KEY_LENGTH = 512;
@@ -108,6 +108,11 @@ export async function testPushHandler(req: AuthRequest, res: Response): Promise<
   }
 
   try {
+    const count = await getSubscriptionCount(req.user.userId);
+    if (count === 0) {
+      res.json({ ok: false, message: 'No push subscriptions found for your account. Enable push notifications in the app first.', subscriptions: 0 });
+      return;
+    }
     await sendPushToUser(req.user.userId, {
       title: 'Nala Push Test',
       body: 'If you see this on your lock screen, push notifications are working!',
@@ -116,7 +121,7 @@ export async function testPushHandler(req: AuthRequest, res: Response): Promise<
       tag: 'push-test',
       data: { url: '/', type: 'test' },
     });
-    res.json({ ok: true, message: 'Test push sent' });
+    res.json({ ok: true, message: `Test push sent to ${count} subscription(s)`, subscriptions: count });
   } catch (err) {
     console.error('[Push] Test push error:', err);
     res.status(500).json({ error: 'Failed to send test push' });

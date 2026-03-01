@@ -56,7 +56,7 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
       res.json(timeoutResponse(window));
       return;
     }
-    console.error('Error getting portfolio intelligence:');
+    console.error('Error getting portfolio intelligence:', err);
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',
       partial: true,
@@ -82,7 +82,7 @@ export async function getUserIntelligenceHandler(req: AuthRequest, res: Response
       res.json(timeoutResponse(window));
       return;
     }
-    console.error('Error getting user intelligence:');
+    console.error('Error getting user intelligence:', err);
     res.status(500).json({
       error: 'Failed to compute portfolio intelligence',
       partial: true,
