@@ -799,7 +799,7 @@ export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number
   isRefreshingLeaderboard = true;
 
   try {
-    const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+    const DEFAULT_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
 
     const users = await prisma.user.findMany({
       where: {
@@ -924,7 +924,7 @@ function randomNormal(mean: number, stdDev: number): number {
 }
 
 export async function backfillDemoUserSnapshots(days: number = 90, minSnapshots: number = 5): Promise<void> {
-  const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+  const DEFAULT_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
 
   const users = await prisma.user.findMany({
     where: {

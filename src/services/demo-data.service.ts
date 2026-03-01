@@ -4,7 +4,7 @@ import { backfillDemoUserSnapshots } from './snapshot.service';
 import { followUser } from './follow.service';
 import { fetchPrices } from './market.service';
 
-const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+const DEFAULT_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
 
 const DEMO_USERS = [
   { username: 'alex_trades', displayName: 'Alex Chen', region: 'NA' },
