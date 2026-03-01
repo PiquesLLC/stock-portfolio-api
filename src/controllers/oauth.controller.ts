@@ -32,6 +32,9 @@ async function checkWaitlistForNewOAuthUser(profile: OAuthProfile, res: Response
   const existingByEmail = await prisma.user.findUnique({ where: { email }, select: { id: true, emailVerified: true } }).catch(() => null);
   if (existingByEmail && existingByEmail.emailVerified) return true; // existing user, skip waitlist
 
+  // Admin emails bypass the waitlist gate
+  if (config.waitlistAdminEmails.includes(email)) return true;
+
   // New user — check waitlist
   const entry = await prisma.waitlist.findUnique({ where: { email } });
   if (!entry || entry.status !== 'approved') {
@@ -111,7 +114,9 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
     trackOAuthSuccess('google');
     console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
-    res.json({ user: loginResponse.user, isNewUser });
+    const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
+      (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
+    res.json({ user: { ...loginResponse.user, isWaitlistAdmin: isAdmin }, isNewUser });
   } catch (error: unknown) {
     trackOAuthFail('google');
     console.error('Google OAuth error:', error instanceof Error ? error.message : error);
@@ -176,7 +181,9 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
     trackOAuthSuccess('apple');
     console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
-    res.json({ user: loginResponse.user, isNewUser });
+    const isAppleAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
+      (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
+    res.json({ user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin }, isNewUser });
   } catch (error: unknown) {
     trackOAuthFail('apple');
     console.error('Apple OAuth error:', error instanceof Error ? error.message : error);

@@ -234,15 +234,16 @@ export async function disableTotp(userId: string): Promise<void> {
 // ─── Email OTP ──────────────────────────────────────────
 
 export async function updateEmail(userId: string, email: string): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
   // Check uniqueness
   const existing = await prisma.user.findFirst({
-    where: { email, id: { not: userId } },
+    where: { email: normalizedEmail, id: { not: userId } },
   });
   if (existing) throw new Error('Email already in use');
 
   await prisma.user.update({
     where: { id: userId },
-    data: { email, emailVerified: false },
+    data: { email: normalizedEmail, emailVerified: false },
   });
 
   // Send verification code
@@ -260,7 +261,7 @@ export async function updateEmail(userId: string, email: string): Promise<void> 
     data: { userId, codeHash, expiresAt },
   });
 
-  await sendEmailVerification(email, code);
+  await sendEmailVerification(normalizedEmail, code);
 }
 
 export async function verifyEmail(userId: string, code: string): Promise<boolean> {

@@ -456,7 +456,8 @@ export async function signup(
   }
 
   // Gate signup behind waitlist approval (when enabled)
-  if (config.waitlistEnabled) {
+  // Admin emails bypass the waitlist gate entirely
+  if (config.waitlistEnabled && !config.waitlistAdminEmails.includes(normalizedEmail)) {
     const waitlistEntry = await prisma.waitlist.findUnique({ where: { email: normalizedEmail } });
     if (!waitlistEntry || waitlistEntry.status !== 'approved') {
       return { error: 'WAITLIST_NOT_APPROVED' };

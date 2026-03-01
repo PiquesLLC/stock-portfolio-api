@@ -71,7 +71,7 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     // MFA passed — issue real auth tokens
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, username: true, displayName: true },
+      select: { id: true, username: true, displayName: true, email: true, emailVerified: true },
     });
     if (!user) {
       res.status(404).json({ error: 'User not found' });
@@ -81,10 +81,13 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const token = generateAccessToken({ userId: user.id, username: user.username });
     const refreshToken = await generateRefreshToken(user.id);
 
+    const isAdmin = config.waitlistAdminUserIds.includes(user.id) ||
+      (user.email && user.emailVerified ? config.waitlistAdminEmails.includes(user.email.toLowerCase()) : false);
+
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', token, accessOptions);
     res.cookie('refreshToken', refreshToken, refreshOptions);
-    res.json({ user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: config.waitlistAdminUserIds.includes(user.id) } });
+    res.json({ user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin } });
   } catch (_error) {
     console.error('MFA verify error:');
     res.status(500).json({ error: 'Verification failed' });
