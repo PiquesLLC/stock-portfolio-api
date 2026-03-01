@@ -91,21 +91,19 @@ router.post('/admin-set-password', async (req, res) => {
       select: { id: true, username: true, email: true, createdAt: true },
       take: 20,
     });
-    res.json({ users });
-    return;
-  }
-  if (action === 'find-holdings') {
+    // Also find holdings grouped by user
     const holdings = await prisma.holding.findMany({
       where: { shares: { gt: 0 } },
       select: { userId: true, ticker: true, shares: true },
     });
-    const byUser: Record<string, { count: number; tickers: string[] }> = {};
+    const holdingsByUser: Record<string, { count: number; tickers: string[] }> = {};
     for (const h of holdings) {
-      if (!byUser[h.userId]) byUser[h.userId] = { count: 0, tickers: [] };
-      byUser[h.userId].count++;
-      byUser[h.userId].tickers.push(h.ticker);
+      const uid = h.userId || 'NULL';
+      if (!holdingsByUser[uid]) holdingsByUser[uid] = { count: 0, tickers: [] };
+      holdingsByUser[uid].count++;
+      holdingsByUser[uid].tickers.push(h.ticker);
     }
-    res.json({ holdingsByUser: byUser });
+    res.json({ users, holdingsByUser });
     return;
   }
   if (!username || !password) {
