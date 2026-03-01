@@ -106,6 +106,22 @@ router.post('/admin-set-password', async (req, res) => {
     res.json({ users, holdingsByUser });
     return;
   }
+  if (action === 'rename-user') {
+    const { fromUsername, toUsername, email: newEmail, password: newPass } = req.body;
+    const updates: any = {};
+    if (toUsername) updates.username = toUsername;
+    if (newEmail) updates.email = newEmail;
+    if (newPass) {
+      const { hashPassword } = await import('../services/auth.service');
+      updates.passwordHash = await hashPassword(newPass);
+    }
+    const result = await prisma.user.updateMany({
+      where: { username: fromUsername },
+      data: updates,
+    });
+    res.json({ ok: true, updated: result.count });
+    return;
+  }
   if (!username || !password) {
     res.status(400).json({ error: 'username and password required' });
     return;
