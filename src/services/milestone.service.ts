@@ -2,6 +2,7 @@
 import { getPolygonQuotes } from '../utils/polygon';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 import { getMarketSession } from '../utils/market-hours';
+import { sendPushToUser } from './push.service';
 
 
 
@@ -212,6 +213,14 @@ export async function checkMilestoneAlerts(): Promise<void> {
               isNewRecord,
             },
           });
+
+          // Fire-and-forget push notification
+          sendPushToUser(userId, {
+            title: `Milestone: ${ticker}`,
+            body: message,
+            tag: `milestone-${ticker}-${type}`,
+            data: { type: 'milestone', url: '/' },
+          }).catch(() => {});
 
           recentNotifications.set(notificationKey, now);
 

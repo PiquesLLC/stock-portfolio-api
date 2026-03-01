@@ -1,6 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import axios, { AxiosError } from 'axios';
 import { config } from '../config';
+import { sendPushToUser } from './push.service';
 
 
 
@@ -217,8 +218,24 @@ export async function checkAnalystUpdates(tickers: string[]): Promise<void> {
           }),
         ]);
 
+        // Fire-and-forget push to all users holding this ticker
+        const holders = await prisma.holding.findMany({
+          where: { ticker: ticker.toUpperCase(), shares: { gt: 0 }, userId: { not: null } },
+          select: { userId: true },
+          distinct: ['userId'],
+        });
         for (const event of events) {
           console.log(`[Analyst] ${event.message}`);
+          for (const holder of holders) {
+            if (holder.userId) {
+              sendPushToUser(holder.userId, {
+                title: `Analyst Update: ${ticker.toUpperCase()}`,
+                body: event.message,
+                tag: `analyst-${ticker.toUpperCase()}`,
+                data: { type: 'analyst', url: '/' },
+              }).catch(() => {});
+            }
+          }
         }
       } else {
         // Just update the snapshot timestamp

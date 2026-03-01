@@ -5,6 +5,7 @@ import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { getSector } from '../utils/sectors';
 import { callPerplexity } from '../utils/perplexity';
+import { sendPushToUser } from './push.service';
 
 
 // Cooldown: 1 anomaly per user+ticker+type per 4 hours (general), 7 days (dividend)
@@ -298,6 +299,17 @@ export async function detectAnomalies(userId: string): Promise<void> {
         threshold: c.threshold,
       },
     });
+
+    // Fire-and-forget push for warning+critical only
+    if (c.severity === 'warning' || c.severity === 'critical') {
+      sendPushToUser(userId, {
+        title: c.title,
+        body: c.description,
+        tag: `anomaly-${c.ticker}-${c.type}`,
+        data: { type: 'anomaly', url: '/' },
+      }).catch(() => {});
+    }
+
     created++;
   }
 
@@ -376,20 +388,34 @@ export async function detectDividendChanges(userId: string): Promise<void> {
     const annualImpact = changeAmount * stillHeld.shares * estimatedFrequency;
     const severity = Math.abs(changePct) >= 20 ? 'critical' : Math.abs(changePct) >= 10 ? 'warning' : 'info';
 
+    const divTitle = `${ticker} ${direction} dividend ${Math.abs(changePct).toFixed(1)}%`;
+    const divDescription = `${ticker} ${direction} its dividend from $${compareEvent.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share vs ${comparisonLabel} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`;
+
     await prisma.anomalyEvent.create({
       data: {
         userId,
         ticker,
         type: 'dividend_change',
         severity,
-        title: `${ticker} ${direction} dividend ${Math.abs(changePct).toFixed(1)}%`,
-        description: `${ticker} ${direction} its dividend from $${compareEvent.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share vs ${comparisonLabel} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`,
+        title: divTitle,
+        description: divDescription,
         analysis: null,
         citations: null,
         value: changePct,
         threshold: 0,
       },
     });
+
+    // Fire-and-forget push for warning+critical only
+    if (severity === 'warning' || severity === 'critical') {
+      sendPushToUser(userId, {
+        title: divTitle,
+        body: divDescription,
+        tag: `anomaly-${ticker}-dividend_change`,
+        data: { type: 'anomaly', url: '/' },
+      }).catch(() => {});
+    }
+
     created++;
   }
 

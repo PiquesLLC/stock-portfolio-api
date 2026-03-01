@@ -115,6 +115,10 @@ export const config = {
     .filter(Boolean),
   waitlistEnabled: process.env.WAITLIST_ENABLED !== 'false',
   waitlistNotifyEmail: process.env.WAITLIST_NOTIFY_EMAIL || '',
+  waitlistAdminEmails: (process.env.WAITLIST_ADMIN_EMAILS || process.env.WAITLIST_NOTIFY_EMAIL || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
   appFrontendUrl: process.env.APP_FRONTEND_URL || process.env.STRIPE_RETURN_URL || 'https://nalaai.com',
 
   // NALA AI Deep Research (Gemini)
@@ -123,6 +127,12 @@ export const config = {
   deepResearchMaxConcurrent: parseInt(process.env.DEEP_RESEARCH_MAX_CONCURRENT || '1', 10),
   deepResearchMonthlyLimit: parseInt(process.env.DEEP_RESEARCH_MONTHLY_LIMIT || '10', 10),
   deepResearchPollIntervalMs: parseInt(process.env.DEEP_RESEARCH_POLL_INTERVAL_MS || '15000', 10),
+
+  // Web Push Notifications (VAPID)
+  pushEnabled: process.env.PUSH_ENABLED === 'true',
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
+  vapidSubject: process.env.VAPID_SUBJECT || 'mailto:contact@nalaai.com',
 
   // OAuth
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
