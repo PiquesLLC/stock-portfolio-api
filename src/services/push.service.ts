@@ -69,6 +69,14 @@ export async function removeSubscription(userId: string, endpoint: string): Prom
 }
 
 /**
+ * Get the number of push subscriptions for a user (debug helper).
+ */
+export async function getSubscriptionCount(userId: string): Promise<number> {
+  const subs = await prisma.pushSubscription.findMany({ where: { userId }, select: { id: true } });
+  return subs.length;
+}
+
+/**
  * Send a push notification to all subscriptions for a given user.
  * Auto-deletes expired subscriptions (410 Gone / 404).
  * Fire-and-forget — logs errors but never throws.
