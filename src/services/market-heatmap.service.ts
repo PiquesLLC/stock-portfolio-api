@@ -190,8 +190,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   }
   const uniqueTickers = Array.from(new Set(allTickers));
 
-  // Always fetch current prices + fundamentals
-  const [{ quotes }, fundamentals, polygonVolumes, polygonMarketCaps] = await Promise.all([
+  // Always fetch current prices + fundamentals + screener cache
+  const [{ quotes }, fundamentals, polygonVolumes, polygonMarketCaps, screenerRows] = await Promise.all([
     fetchPrices(uniqueTickers),
     prisma.fundamentalsCache.findMany({
       where: { ticker: { in: uniqueTickers } },
@@ -199,7 +199,13 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     }),
     getPolygonSnapshotVolumes(uniqueTickers),
     getPolygonMarketCaps(uniqueTickers),
+    prisma.screenerCache.findMany({
+      where: { ticker: { in: uniqueTickers } },
+    }),
   ]);
+
+  // Build screener lookup map
+  const screenerMap = new Map(screenerRows.map(r => [r.ticker, r]));
 
   // Best-effort ADV refresh (non-blocking). Heatmap response uses currently cached values.
   void queueAdvFetches(uniqueTickers).catch(() => {
@@ -263,10 +269,34 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           ? (quote?.change ?? 0)
           : 0; // dayChange only meaningful for 1D
 
+        // Compute P/E and dividend yield from ScreenerCache + live price
+        const screener = screenerMap.get(upper);
+        const currentPrice = quote?.currentPrice ?? 0;
+
+        let pe: number | null = overview?.peRatio ?? null;
+        let dividendYield: number | null = overview?.dividendYield ?? null;
+        let beta: number | null = overview?.beta ?? null;
+        let week52High: number | null = overview?.fiftyTwoWeekHigh ?? null;
+        let week52Low: number | null = overview?.fiftyTwoWeekLow ?? null;
+
+        if (screener) {
+          // P/E: price / TTM EPS (only if EPS > 0)
+          if (screener.eps != null && screener.eps > 0 && currentPrice > 0) {
+            pe = Math.round((currentPrice / screener.eps) * 100) / 100;
+          }
+          // Dividend yield: (annual dividend / price) * 100
+          if (screener.annualDividend != null && screener.annualDividend > 0 && currentPrice > 0) {
+            dividendYield = Math.round((screener.annualDividend / currentPrice) * 10000) / 100;
+          }
+          if (screener.beta != null) beta = screener.beta;
+          if (screener.week52High != null) week52High = screener.week52High;
+          if (screener.week52Low != null) week52Low = screener.week52Low;
+        }
+
         return {
           ticker: upper,
           name: resolveName(overview, upper),
-          price: quote?.currentPrice ?? 0,
+          price: currentPrice,
           changePercent,
           dayChange,
           marketCapB,
@@ -274,11 +304,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           avgVolume: getCachedAdv(upper) ?? 0,
           subSector: subName,
           sector: sectorName,
-          pe: overview?.peRatio ?? null,
-          dividendYield: overview?.dividendYield ?? null,
-          beta: overview?.beta ?? null,
-          week52High: overview?.fiftyTwoWeekHigh ?? null,
-          week52Low: overview?.fiftyTwoWeekLow ?? null,
+          pe,
+          dividendYield,
+          beta,
+          week52High,
+          week52Low,
         };
       });
 

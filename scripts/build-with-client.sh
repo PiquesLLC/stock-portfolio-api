@@ -1,5 +1,6 @@
 #!/bin/bash
 # Railway build script: builds the API and the UI client
+# UI build rev: 6
 set -e
 
 echo "=== Building API ==="
@@ -8,8 +9,10 @@ npx prisma generate
 npx tsc
 
 echo "=== Building UI Client ==="
-# Clone and build the UI
+# Clone and build the UI (force fresh clone every deploy)
+rm -rf /tmp/ui-build
 git clone --depth 1 https://github.com/PiquesLLC/stock-portfolio-ui.git /tmp/ui-build
+echo "UI commit: $(cd /tmp/ui-build && git rev-parse HEAD)"
 cd /tmp/ui-build
 
 # Inject VITE_ env vars for the production build

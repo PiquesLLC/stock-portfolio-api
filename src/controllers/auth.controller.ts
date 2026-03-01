@@ -118,7 +118,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.json({ user: result.user });
+    res.json({ user: { ...result.user, isWaitlistAdmin: config.waitlistAdminUserIds.includes(result.user.id) } });
   } catch (_error) {
     console.error('Login error:');
     res.status(500).json({ error: 'Login failed' });
@@ -159,7 +159,10 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    res.json(user);
+    res.json({
+      ...user,
+      isWaitlistAdmin: config.waitlistAdminUserIds.includes(user.id),
+    });
   } catch (_error) {
     console.error('Me error:');
     res.status(500).json({ error: 'Failed to get user info' });
