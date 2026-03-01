@@ -20,7 +20,6 @@ import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
-import { sendWaitlistApprovalEmail } from './services/email.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -136,11 +135,6 @@ const server = app.listen(config.port, async () => {
   // Ensure default system user exists before any schedulers run
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
-
-  // ONE-TIME: Test email delivery (remove after confirmed)
-  sendWaitlistApprovalEmail('piquesjonpaul@gmail.com')
-    .then(() => console.log('[Init] Test approval email sent to piquesjonpaul@gmail.com'))
-    .catch(err => console.error('[Init] Test email failed:', err.message));
 
   // Auto-verify users created before email verification was required.
   // These users can't complete OTP verification and are stuck in a dead end.
