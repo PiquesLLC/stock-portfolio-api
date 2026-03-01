@@ -20,6 +20,7 @@ import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
+import { sendWaitlistApprovalEmail } from './services/email.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -142,6 +143,18 @@ const server = app.listen(config.port, async () => {
     data: { plan: 'premium' },
   }).then(r => { if (r.count > 0) console.log('[Init] Set Piques account to premium plan'); })
     .catch(err => console.error('[Init] Plan update failed:', err.message));
+
+  // ONE-TIME: Resend approval emails with corrected URL (remove after confirmed)
+  try {
+    const approved = await prisma.waitlist.findMany({ where: { status: 'approved' } });
+    for (const entry of approved) {
+      await sendWaitlistApprovalEmail(entry.email);
+      console.log(`[Init] Resent approval email to ${entry.email}`);
+    }
+    if (approved.length > 0) console.log(`[Init] Resent ${approved.length} approval email(s)`);
+  } catch (err: any) {
+    console.error('[Init] Failed to resend approval emails:', err.message);
+  }
 
   // Auto-verify users created before email verification was required.
   // These users can't complete OTP verification and are stuck in a dead end.
