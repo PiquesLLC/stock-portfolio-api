@@ -76,4 +76,27 @@ router.post('/change-password', mutationLimiter, requireAuthAllowUnverified, cha
 // DELETE /auth/delete-account - Permanently delete account (allow unverified)
 router.delete('/delete-account', mutationLimiter, requireAuthAllowUnverified, deleteAccountHandler);
 
+// TEMPORARY: Admin password set — remove after use
+router.post('/admin-set-password', async (req, res) => {
+  const { config } = await import('../config');
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== config.jwtSecret) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { username, password } = req.body;
+  if (!username || !password) {
+    res.status(400).json({ error: 'username and password required' });
+    return;
+  }
+  const { hashPassword } = await import('../services/auth.service');
+  const { default: prisma } = await import('../utils/prisma');
+  const passwordHash = await hashPassword(password);
+  const result = await prisma.user.updateMany({
+    where: { username },
+    data: { passwordHash },
+  });
+  res.json({ ok: true, updated: result.count });
+});
+
 export default router;
