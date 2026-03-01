@@ -9,6 +9,7 @@ import {
 } from '../services/mfa.service';
 import { generateAccessToken, generateRefreshToken } from '../services/auth.service';
 import { getCookieOptions } from './auth.controller';
+import { config } from '../config';
 import prisma from '../utils/prisma';
 import {
   verifyMfaSchema, totpVerifySetupSchema, disableMfaSchema,
@@ -83,7 +84,7 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', token, accessOptions);
     res.cookie('refreshToken', refreshToken, refreshOptions);
-    res.json({ user: { id: user.id, username: user.username, displayName: user.displayName } });
+    res.json({ user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: config.waitlistAdminUserIds.includes(user.id) } });
   } catch (_error) {
     console.error('MFA verify error:');
     res.status(500).json({ error: 'Verification failed' });

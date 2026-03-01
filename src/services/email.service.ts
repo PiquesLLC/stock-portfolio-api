@@ -137,7 +137,8 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
 export async function sendWaitlistJoinNotificationEmail(adminEmail: string, waitlistEmail: string): Promise<void> {
   const r = getResend();
   const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const appUrl = config.stripeReturnUrl || 'https://nalaai.com';
+  const frontendUrl = config.appFrontendUrl;
+  const reviewUrl = `${frontendUrl}#tab=admin-waitlist`;
   if (!r) {
     console.log(`[Email] Dev mode — waitlist join notification: ${waitlistEmail} joined at ${now}`);
     return;
@@ -152,7 +153,7 @@ export async function sendWaitlistJoinNotificationEmail(adminEmail: string, wait
         <p style="color: #333; font-size: 16px; margin: 0 0 8px;">New signup on the waitlist:</p>
         <p style="font-size: 18px; font-weight: bold; color: #111; margin: 16px 0; font-family: monospace;">${waitlistEmail}</p>
         <p style="color: #666; font-size: 14px; margin: 0 0 24px;">Joined at ${now} ET</p>
-        <a href="${appUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Review in App</a>
+        <a href="${reviewUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Review in App</a>
         <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;" />
         <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
       </div>

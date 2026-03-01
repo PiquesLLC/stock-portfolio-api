@@ -14,6 +14,7 @@ import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { rotateTickerFundamentals } from './services/fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
+import { backfillPolygonScreenerData } from './services/polygon-screener.service';
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
@@ -317,6 +318,19 @@ const server = app.listen(config.port, async () => {
       console.error('[Heatmap Fundamentals] Backfill error:', (err as Error).message)
     );
   }, 24 * 60 * 60 * 1000);
+
+  // Polygon Screener backfill — fetch EPS, dividends, beta, 52W range on startup + every 12 hours
+  console.log('[Polygon Screener] Backfill scheduled');
+  setTimeout(() => {
+    backfillPolygonScreenerData().catch(err =>
+      console.error('[Polygon Screener] Startup backfill failed:', (err as Error).message)
+    );
+  }, 180000); // 180s delay after startup
+  setInterval(() => {
+    backfillPolygonScreenerData().catch(err =>
+      console.error('[Polygon Screener] Backfill error:', (err as Error).message)
+    );
+  }, 12 * 60 * 60 * 1000); // Every 12 hours
 
   // Earnings alerts — audit log for upcoming earnings (every 6 hours, skip weekends)
   console.log('[Notifications] Earnings alerts scheduled');

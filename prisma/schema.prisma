@@ -945,6 +945,24 @@ model DeepResearchJob {
   @@unique([userId, clientRequestId])
 }
 
+// ─── Polygon Screener Fundamentals Cache ─────────────────────────────
+
+model ScreenerCache {
+  id             String   @id @default(uuid())
+  ticker         String   @unique
+  eps            Float?
+  annualDividend Float?
+  beta           Float?
+  week52High     Float?
+  week52Low      Float?
+  lastFetchedAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ticker])
+  @@index([lastFetchedAt])
+}
+
 // ─── Waitlist ────────────────────────────────────────────────────────
 
 model Waitlist {

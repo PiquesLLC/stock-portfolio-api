@@ -115,6 +115,7 @@ export const config = {
     .filter(Boolean),
   waitlistEnabled: process.env.WAITLIST_ENABLED !== 'false',
   waitlistNotifyEmail: process.env.WAITLIST_NOTIFY_EMAIL || '',
+  appFrontendUrl: process.env.APP_FRONTEND_URL || process.env.STRIPE_RETURN_URL || 'https://nalaai.com',
 
   // NALA AI Deep Research (Gemini)
   googleGeminiApiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
