@@ -136,6 +136,13 @@ const server = app.listen(config.port, async () => {
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
 
+  // ONE-TIME: Ensure Jon's Piques account has premium plan (remove after confirmed)
+  await prisma.user.updateMany({
+    where: { id: '237198da-612e-411c-9ef8-f267c887a9f1', plan: { not: 'premium' } },
+    data: { plan: 'premium' },
+  }).then(r => { if (r.count > 0) console.log('[Init] Set Piques account to premium plan'); })
+    .catch(err => console.error('[Init] Plan update failed:', err.message));
+
   // Auto-verify users created before email verification was required.
   // These users can't complete OTP verification and are stuck in a dead end.
   await prisma.user.updateMany({
