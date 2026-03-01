@@ -117,7 +117,7 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
     return;
   }
   const signupUrl = config.appFrontendUrl;
-  await r.emails.send({
+  const result = await r.emails.send({
     from: `Nala <${config.resendFromEmail}>`,
     to,
     subject: "You're in! Create your Nala account",
@@ -132,6 +132,11 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
       </div>
     `,
   });
+  if (result.error) {
+    console.error(`[Email] Waitlist approval to ${to} FAILED:`, result.error);
+    throw new Error(`Email send failed: ${result.error.message}`);
+  }
+  console.log(`[Email] Waitlist approval sent to ${to}, id: ${result.data?.id}`);
 }
 
 export async function sendWaitlistJoinNotificationEmail(adminEmail: string, waitlistEmail: string): Promise<void> {
