@@ -39,6 +39,14 @@ import { getCapturedEmailVerificationCode } from '../services/email.service';
 
 
 
+/** Check if user is a waitlist admin by ID or verified email */
+function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: boolean): boolean {
+  if (config.waitlistAdminUserIds.includes(userId)) return true;
+  // Only grant admin via email if the email is verified — prevents impersonation
+  if (email && emailVerified && config.waitlistAdminEmails.includes(email.trim().toLowerCase())) return true;
+  return false;
+}
+
 // Detect Capacitor requests (cross-origin native app) via custom header
 function isCapacitorRequest(req: Request): boolean {
   return req.headers['x-capacitor'] === 'true';
@@ -118,7 +126,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.json({ user: { ...result.user, isWaitlistAdmin: config.waitlistAdminUserIds.includes(result.user.id) } });
+    res.json({ user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } });
   } catch (_error) {
     console.error('Login error:');
     res.status(500).json({ error: 'Login failed' });
@@ -161,7 +169,7 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
 
     res.json({
       ...user,
-      isWaitlistAdmin: config.waitlistAdminUserIds.includes(user.id),
+      isWaitlistAdmin: isWaitlistAdmin(user.id, user.email, user.emailVerified),
     });
   } catch (_error) {
     console.error('Me error:');
@@ -267,7 +275,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     res.status(201).json({
-      user: result.user,
+      user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       emailVerificationRequired: !result.user.emailVerified,
     });
   } catch (_error) {
