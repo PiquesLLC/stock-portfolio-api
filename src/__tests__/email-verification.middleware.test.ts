@@ -65,7 +65,7 @@ describe('requireEmailVerifiedForAi middleware', () => {
 
   it('allows SYSTEM_USER_ID bypass path when guard service resolves', async () => {
     const { req, res, next } = createMocks();
-    req.user = { userId: '237198da-612e-411c-9ef8-f267c887a9f1' };
+    req.user = { userId: '515d3ef4-2b46-4133-8c08-84327b420eba' };
     vi.spyOn(guardService, 'ensureEmailVerifiedForAi').mockResolvedValue(undefined);
 
     await requireEmailVerifiedForAi(req, res, next);

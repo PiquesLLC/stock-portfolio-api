@@ -21,7 +21,10 @@ import { runCreatorLedgerReconciliation } from './services/creator-reconciliatio
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
 
-const DEFAULT_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+// Dedicated seed/system user — must NOT collide with any real user account.
+// Previously this was Jon's real Piques account which caused his account to be
+// renamed to '_system' during DB rebuilds. Changed 2026-03-01 to a dedicated UUID.
+const DEFAULT_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
 
 /** Returns true on Saturday/Sunday ET — used to skip notification-generating jobs on weekends */
 function isWeekendET(): boolean {
