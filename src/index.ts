@@ -147,6 +147,23 @@ const server = app.listen(config.port, async () => {
   // One-time cleanup of incorrectly migrated holdings
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));
 
+  // ONE-TIME: Resend waitlist approval emails with corrected #signup URL
+  // Remove this block after deploy on 2026-03-01
+  (async () => {
+    const { sendWaitlistApprovalEmail } = await import('./services/email.service');
+    const emails = ['marc@m2.digital', 'parkinsonalissa00@gmail.com'];
+    for (const email of emails) {
+      try {
+        await sendWaitlistApprovalEmail(email);
+        console.log(`[Init] Resent approval email to ${email}`);
+      } catch (err: any) {
+        console.error(`[Init] Failed to resend approval to ${email}:`, err.message);
+      }
+      // 1.5s delay to avoid Resend 2 req/sec rate limit
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  })().catch(err => console.error('[Init] Approval email resend failed:', err));
+
   // Cache benchmark data on startup and every 6 hours
   ensureBenchmarksCached()
     .then(() => {
