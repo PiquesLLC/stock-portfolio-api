@@ -7,8 +7,14 @@ import { sendWaitlistApprovalEmail, sendWaitlistJoinNotificationEmail } from '..
 
 const router = Router();
 
-function isWaitlistAdmin(userId: string): boolean {
-  return config.waitlistAdminUserIds.includes(userId);
+async function isWaitlistAdmin(userId: string): Promise<boolean> {
+  if (config.waitlistAdminUserIds.includes(userId)) return true;
+  // Also check by verified email for newly created admin accounts
+  if (config.waitlistAdminEmails.length > 0) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, emailVerified: true } });
+    if (user?.email && user.emailVerified && config.waitlistAdminEmails.includes(user.email.toLowerCase())) return true;
+  }
+  return false;
 }
 
 // Public — join the waitlist (idempotent)
@@ -21,6 +27,13 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+
+    // If email already has an account, no need to join the waitlist
+    const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail }, select: { id: true } });
+    if (existingUser) {
+      res.json({ success: true, status: 'approved', alreadyRegistered: true });
+      return;
+    }
 
     // Idempotent: if already on the list, return same success response
     const existing = await prisma.waitlist.findUnique({ where: { email: normalizedEmail } });
@@ -47,7 +60,7 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
 
 // Admin — list waitlist entries with optional status filter
 router.get('/', requireAuth, async (req: Request, res: Response) => {
-  if (!isWaitlistAdmin((req as any).user?.userId)) {
+  if (!(await isWaitlistAdmin((req as any).user?.userId))) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
@@ -66,7 +79,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 // Admin — approve a waitlist entry
 router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => {
   const adminId = (req as any).user?.userId;
-  if (!isWaitlistAdmin(adminId)) {
+  if (!(await isWaitlistAdmin(adminId))) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
@@ -77,10 +90,13 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
       data: { status: 'approved', approvedAt: new Date(), approvedBy: adminId },
     });
 
-    // Send approval email (non-blocking)
-    sendWaitlistApprovalEmail(entry.email).catch(err => {
-      console.error('Failed to send waitlist approval email:', err);
-    });
+    // Only send approval email if user doesn't already have an account
+    const alreadyRegistered = await prisma.user.findUnique({ where: { email: entry.email }, select: { id: true } });
+    if (!alreadyRegistered) {
+      sendWaitlistApprovalEmail(entry.email).catch(err => {
+        console.error('Failed to send waitlist approval email:', err);
+      });
+    }
 
     res.json({ entry });
   } catch {
@@ -90,7 +106,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
 
 // Admin — reject a waitlist entry
 router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
-  if (!isWaitlistAdmin((req as any).user?.userId)) {
+  if (!(await isWaitlistAdmin((req as any).user?.userId))) {
     res.status(403).json({ error: 'Admin access required' });
     return;
   }
