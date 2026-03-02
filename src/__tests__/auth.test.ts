@@ -21,6 +21,7 @@ vi.mock('../middleware/rateLimiter', async () => {
     heavyReadLimiter: passthrough,
     apiLimiter: passthrough,
     oauthLimiter: passthrough,
+    waitlistJoinLimiter: passthrough,
   };
 });
 
@@ -59,6 +60,8 @@ describe('Auth Service', () => {
     prismaMock.mfaMethod.count.mockResolvedValue(0);
     // Default: no grace-period token for refresh rotation
     prismaMock.refreshToken.findFirst.mockResolvedValue(null);
+    // Default: waitlist not blocking signup
+    (prismaMock as any).waitlist.findUnique.mockResolvedValue({ status: 'approved' });
   });
 
   // â”€â”€ Password Hashing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -423,7 +426,7 @@ describe('Auth Service', () => {
       expect(result).toBeNull();
     });
 
-    it('should return null and revoke family if token was already revoked', async () => {
+    it('should return null when revoked token has no valid family successor', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
         id: 'rt-2',
         token: 'revoked-token',
@@ -433,18 +436,14 @@ describe('Auth Service', () => {
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice', emailVerified: true },
       });
-      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 3 });
+      // No valid token in the family
+      prismaMock.refreshToken.findFirst.mockResolvedValue(null);
 
       const result = await rotateRefreshToken('revoked-token');
       expect(result).toBeNull();
-      expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ userId: 'user-1', family: 'family-1', revokedAt: null }),
-        })
-      );
     });
 
-    it('should return null without revoking family if token was recently revoked', async () => {
+    it('should return latest valid token when revoked token has family successor', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
         id: 'rt-2b',
         token: 'revoked-token-recent',
@@ -452,12 +451,14 @@ describe('Auth Service', () => {
         family: 'family-1',
         revokedAt: new Date(Date.now() - 5_000),
         expiresAt: new Date(Date.now() + 86400000),
-        user: { id: 'user-1', username: 'alice', emailVerified: true },
+        user: { id: 'user-1', username: 'alice', plan: 'free', planExpiresAt: null, emailVerified: true },
       });
+      // Valid successor exists in the family
+      prismaMock.refreshToken.findFirst.mockResolvedValue({ token: 'latest-valid-token' });
 
       const result = await rotateRefreshToken('revoked-token-recent');
-      expect(result).toBeNull();
-      expect(prismaMock.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(result).not.toBeNull();
+      expect(result!.refreshToken).toBe('latest-valid-token');
     });
 
     it('should return null for expired refresh token', async () => {
@@ -567,32 +568,19 @@ describe('Auth Middleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('should attempt refresh when access token is expired and refresh token exists', async () => {
+    it('should return 401 TOKEN_EXPIRED when expired token has refresh token (client must call /auth/refresh)', () => {
       const { req, res, next } = createMockReqResNext();
       const expiredToken = generateExpiredToken(testUser);
       req.cookies = { authToken: expiredToken, refreshToken: 'valid-refresh-tok' };
 
-      // Mock the rotateRefreshToken to succeed
-      prismaMock.refreshToken.findUnique.mockResolvedValue({
-        id: 'rt-1',
-        token: 'valid-refresh-tok',
-        userId: testUser.userId,
-        revokedAt: null,
-        expiresAt: new Date(Date.now() + 86400000),
-        user: { id: testUser.userId, username: testUser.username, emailVerified: true, plan: 'free', planExpiresAt: null },
-      });
-      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
-      prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
-
       requireAuth(req, res, next);
 
-      // requireAuth with expired token + refresh is async, need to wait
-      await vi.waitFor(() => {
-        expect(next).toHaveBeenCalled();
-      }, { timeout: 2000 });
-
-      expect(res.cookie).toHaveBeenCalledWith('authToken', expect.any(String), expect.any(Object));
-      expect(res.cookie).toHaveBeenCalledWith('refreshToken', expect.any(String), expect.any(Object));
+      // Middleware no longer does inline refresh — returns 401 for client to POST /auth/refresh
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'TOKEN_EXPIRED' })
+      );
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('should return 401 TOKEN_EXPIRED when expired token has no refresh token', () => {
@@ -665,14 +653,17 @@ describe('Auth Middleware', () => {
       expect(req.user).toBeUndefined();
     });
 
-    it('should clear cookies for expired tokens', () => {
+    it('should continue without auth for expired tokens (client handles refresh)', () => {
       const { req, res, next } = createMockReqResNext();
       const token = generateExpiredToken(testUser);
       req.cookies = { authToken: token };
 
       optionalAuth(req, res, next);
 
-      expect(res.clearCookie).toHaveBeenCalled();
+      // Expired tokens: continue without auth, don't clear cookies (refresh token may be valid)
+      expect(next).toHaveBeenCalled();
+      expect(req.user).toBeUndefined();
+      expect(res.clearCookie).not.toHaveBeenCalled();
     });
   });
 
@@ -768,6 +759,8 @@ describe('Auth Routes (Integration)', () => {
     prismaMock.refreshToken.findFirst.mockResolvedValue(null);
     // Default: no Plaid items (for delete-account)
     prismaMock.plaidItem.findMany.mockResolvedValue([]);
+    // Default: waitlist not blocking signup
+    (prismaMock as any).waitlist.findUnique.mockResolvedValue({ status: 'approved' });
   });
 
   // â”€â”€ POST /auth/login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

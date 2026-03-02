@@ -20,18 +20,18 @@ describe('Ledger Replay v1', () => {
     const series = await replayDailyLedger('u1', new Date('2026-01-02T00:00:00Z'), new Date('2026-01-05T00:00:00Z'));
     const byDay = Object.fromEntries(series.map(s => [s.date.toISOString().slice(0, 10), s]));
 
-    // Jan 2: position exists, cash unchanged (0) because buy settles next day
+    // Jan 2: position exists, cash posts same day (trade date settlement for chart accuracy)
     expect(byDay['2026-01-02'].positions.get('AAPL')?.shares).toBe(10);
-    expect(byDay['2026-01-02'].cash).toBe(0);
+    expect(byDay['2026-01-02'].cash).toBe(-1000);
 
-    // Jan 3: buy cash outflow posted
+    // Jan 3: no change
     expect(byDay['2026-01-03'].cash).toBe(-1000);
 
-    // Jan 4: sell executed (shares reduced), proceeds not settled yet
+    // Jan 4: sell executed (shares reduced), proceeds post same day
     expect(byDay['2026-01-04'].positions.get('AAPL')?.shares).toBe(8);
-    expect(byDay['2026-01-04'].cash).toBe(-1000);
+    expect(byDay['2026-01-04'].cash).toBe(-760);
 
-    // Jan 5: sell proceeds posted
+    // Jan 5: no change
     expect(byDay['2026-01-05'].cash).toBe(-760);
   });
 
