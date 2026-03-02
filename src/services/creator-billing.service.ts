@@ -437,16 +437,6 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const incrementalCreator = totalCreatorShare - previouslyDebitedCreator;
         if (incrementalCreator <= 0) return; // Already fully accounted for
 
-        const totalPlatformShare = cumulativeRefunded - totalCreatorShare;
-        // Approximate previous platform debit from count of entries (1:1 with creator entries)
-        const previousPlatformEntries = await prisma.creatorWalletLedger.count({
-          where: {
-            creatorUserId: sub.creatorUserId,
-            type: 'platform_fee',
-            subscriptionId: sub.id,
-            amountCents: { lt: 0 }, // refund platform entries are negative
-          },
-        });
         // For simplicity, compute incremental platform share from the incremental total
         const incrementalTotal = incrementalCreator / 0.8; // back-calculate incremental refund amount
         const incrementalPlatform = Math.round(incrementalTotal) - incrementalCreator;

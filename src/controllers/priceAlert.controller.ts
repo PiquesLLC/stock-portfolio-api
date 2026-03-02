@@ -9,7 +9,6 @@ import {
   getPriceAlertEvents,
   markEventRead,
   getUnreadCount,
-  PriceAlertCondition,
 } from '../services/priceAlert.service';
 import { PlanLimitError } from '../utils/plan-limit.error';
 import { z } from 'zod';

@@ -8,11 +8,11 @@ import { getLeaderboard } from './leaderboard.service';
 import { getUserChartSnapshots } from './snapshot.service';
 
 // Load and cache logo as base64 at startup
-let LOGO_B64 = '';
+let _LOGO_B64 = '';
 try {
   const logoPath = path.join(__dirname, '..', '..', 'assets', 'north-signal-logo-80.png');
   if (fs.existsSync(logoPath)) {
-    LOGO_B64 = fs.readFileSync(logoPath).toString('base64');
+    _LOGO_B64 = fs.readFileSync(logoPath).toString('base64');
   }
 } catch {
   // logo optional

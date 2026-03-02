@@ -12,36 +12,6 @@ const cache = new NodeCache({ stdTTL: 15 });
 // Backup cache with longer TTL (1 hour) for fallback
 const backupCache = new NodeCache({ stdTTL: 3600 });
 
-interface YahooChartResult {
-  chart: {
-    result: Array<{
-      meta: {
-        symbol: string;
-        regularMarketPrice: number;
-        previousClose: number;
-        regularMarketTime: number;
-        regularMarketDayHigh: number;
-        regularMarketDayLow: number;
-        regularMarketOpen: number;
-      };
-      timestamp?: number[];
-      indicators: {
-        quote: Array<{
-          close: (number | null)[];
-          high: (number | null)[];
-          low: (number | null)[];
-          open: (number | null)[];
-          volume: (number | null)[];
-        }>;
-      };
-    }>;
-    error?: {
-      code: string;
-      description: string;
-    };
-  };
-}
-
 export async function getYahooQuote(ticker: string): Promise<Quote> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `yahoo:${upperTicker}`;
@@ -643,42 +613,6 @@ export interface AssetAbout {
   // Stock-specific fields
   fullTimeEmployees: number | null;
   headquarters: string | null;
-}
-
-interface YahooAssetProfileResponse {
-  quoteSummary: {
-    result: Array<{
-      assetProfile?: {
-        longBusinessSummary?: string;
-        sector?: string;
-        industry?: string;
-        fullTimeEmployees?: number;
-        city?: string;
-        state?: string;
-        country?: string;
-      };
-      summaryProfile?: {
-        longBusinessSummary?: string;
-        sector?: string;
-        industry?: string;
-      };
-      fundProfile?: {
-        categoryName?: string;
-        family?: string;
-        legalType?: string;
-      };
-      summaryDetail?: {
-        totalAssets?: { raw: number };
-      };
-      topHoldings?: {
-        holdings?: Array<unknown>;
-      };
-      price?: {
-        quoteType?: string;
-      };
-    }>;
-    error?: { code: string; description: string };
-  };
 }
 
 const aboutCache = new NodeCache({ stdTTL: 86400 }); // 24 hour cache

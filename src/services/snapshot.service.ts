@@ -523,7 +523,7 @@ export async function reconstructPortfolioHistoryHiRes(
   marginDebt: number,
   yahooRange: string,   // e.g. '5d', '1mo'
   yahooInterval: string, // e.g. '15m', '1h'
-  minActualRatio: number = 0.5, // minimum fraction of tickers with real data
+  _minActualRatio: number = 0.5, // minimum fraction of tickers with real data
 ): Promise<{ time: number; value: number }[]> {
   if (holdings.length === 0) return [];
 

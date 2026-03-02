@@ -15,25 +15,6 @@ export interface HistoricalCAGR {
   endDate: string | null;
 }
 
-interface YahooQuoteData {
-  close: (number | null)[];
-  high?: (number | null)[];
-  low?: (number | null)[];
-  open?: (number | null)[];
-  volume?: (number | null)[];
-}
-
-interface YahooChartResult {
-  chart: {
-    result?: Array<{
-      meta: { regularMarketPrice?: number };
-      timestamp?: number[];
-      indicators: { quote: YahooQuoteData[] };
-    }>;
-    error?: { code: string; description: string };
-  };
-}
-
 /**
  * Fetch monthly candle data from Yahoo Finance for max available range.
  * Monthly interval keeps data compact even for 50yr history.
