@@ -147,38 +147,57 @@ const server = app.listen(config.port, async () => {
   // One-time cleanup of incorrectly migrated holdings
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));
 
-  // ONE-TIME DIAGNOSTIC: Compare production Piques holdings vs expected — remove after checking
+  // ONE-TIME FIX: Correct production Piques holdings to match local jppiques
+  // Remove this block after deploy on 2026-03-01
   (async () => {
     const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
-    const holdings = await prisma.holding.findMany({ where: { userId }, select: { ticker: true, shares: true, averageCost: true }, orderBy: { ticker: 'asc' } });
-    const settings = await prisma.userSettings.findUnique({ where: { userId }, select: { cashBalance: true, marginDebt: true } });
-    console.log(`[DIAG] Piques holdings (${holdings.length}):`);
-    holdings.forEach(h => console.log(`[DIAG]   ${h.ticker.padEnd(6)} shares=${h.shares} avgCost=${h.averageCost}`));
-    console.log(`[DIAG] Settings: cash=${settings?.cashBalance} margin=${settings?.marginDebt}`);
+    const correct: { ticker: string; shares: number; averageCost: number }[] = [
+      { ticker: 'AMZN', shares: 150, averageCost: 234.05 },
+      { ticker: 'ASML', shares: 15, averageCost: 1069.38 },
+      { ticker: 'AXP', shares: 75.169, averageCost: 373.62 },
+      { ticker: 'BABA', shares: 60, averageCost: 179.44 },
+      { ticker: 'CAT', shares: 20, averageCost: 692.78 },
+      { ticker: 'CSX', shares: 250, averageCost: 41.02 },
+      { ticker: 'EEM', shares: 300, averageCost: 60.13 },
+      { ticker: 'FEZ', shares: 150, averageCost: 67.9 },
+      { ticker: 'GOOGL', shares: 200, averageCost: 192.39 },
+      { ticker: 'LMT', shares: 30, averageCost: 503.01 },
+      { ticker: 'MLM', shares: 20, averageCost: 700 },
+      { ticker: 'MSFT', shares: 28, averageCost: 412.12 },
+      { ticker: 'PWR', shares: 20, averageCost: 530.48 },
+      { ticker: 'RDDT', shares: 83, averageCost: 199.49 },
+      { ticker: 'SPY', shares: 285.211295, averageCost: 542.11 },
+      { ticker: 'TSM', shares: 70, averageCost: 186.44 },
+      { ticker: 'VRT', shares: 60, averageCost: 188.58 },
+      { ticker: 'WMT', shares: 282.19, averageCost: 98.78 },
+    ];
 
-    // Expected from local jppiques (the correct account):
-    const expected: Record<string, { shares: number; avgCost: number }> = {
-      AMZN: { shares: 150, avgCost: 234.05 }, ASML: { shares: 15, avgCost: 1069.38 },
-      AXP: { shares: 75.169, avgCost: 373.62 }, BABA: { shares: 60, avgCost: 179.44 },
-      CAT: { shares: 20, avgCost: 692.78 }, CSX: { shares: 250, avgCost: 41.02 },
-      EEM: { shares: 300, avgCost: 60.13 }, FEZ: { shares: 150, avgCost: 67.9 },
-      GOOGL: { shares: 200, avgCost: 192.39 }, LMT: { shares: 30, avgCost: 503.01 },
-      MLM: { shares: 20, avgCost: 700 }, MSFT: { shares: 28, avgCost: 412.12 },
-      PWR: { shares: 20, avgCost: 530.48 }, RDDT: { shares: 83, avgCost: 199.49 },
-      SPY: { shares: 285.211295, avgCost: 542.11 }, TSM: { shares: 70, avgCost: 186.44 },
-      VRT: { shares: 60, avgCost: 188.58 }, WMT: { shares: 282.19, avgCost: 98.78 },
-    };
-    const prodTickers = new Set(holdings.map(h => h.ticker));
-    const expectedTickers = new Set(Object.keys(expected));
-    for (const t of expectedTickers) { if (!prodTickers.has(t)) console.log(`[DIAG] MISSING: ${t}`); }
-    for (const t of prodTickers) { if (!expectedTickers.has(t)) console.log(`[DIAG] EXTRA: ${t}`); }
-    for (const h of holdings) {
-      const e = expected[h.ticker];
-      if (e && (h.shares !== e.shares || h.averageCost !== e.avgCost)) {
-        console.log(`[DIAG] MISMATCH ${h.ticker}: prod shares=${h.shares} avgCost=${h.averageCost} vs expected shares=${e.shares} avgCost=${e.avgCost}`);
-      }
+    // Delete the extra DIA holding that shouldn't be there
+    await prisma.holding.deleteMany({ where: { userId, ticker: 'DIA' } });
+    console.log('[FIX] Deleted extra DIA holding');
+
+    // Upsert all correct holdings
+    for (const h of correct) {
+      await prisma.holding.upsert({
+        where: { userId_ticker: { userId, ticker: h.ticker } },
+        update: { shares: h.shares, averageCost: h.averageCost },
+        create: { userId, ticker: h.ticker, shares: h.shares, averageCost: h.averageCost },
+      });
     }
-  })().catch(err => console.error('[DIAG] Failed:', err.message));
+    console.log('[FIX] Upserted all 18 correct holdings');
+
+    // Fix margin to match local jppiques
+    await prisma.userSettings.update({
+      where: { userId },
+      data: { cashBalance: 0, marginDebt: 46427.22 },
+    });
+    console.log('[FIX] Updated margin to 46427.22');
+
+    // Verify
+    const holdings = await prisma.holding.findMany({ where: { userId }, select: { ticker: true, shares: true, averageCost: true }, orderBy: { ticker: 'asc' } });
+    console.log(`[FIX] Final holdings count: ${holdings.length}`);
+    holdings.forEach(h => console.log(`[FIX]   ${h.ticker.padEnd(6)} shares=${h.shares} avgCost=${h.averageCost}`));
+  })().catch(err => console.error('[FIX] Failed:', err.message));
 
   // Cache benchmark data on startup and every 6 hours
   ensureBenchmarksCached()
