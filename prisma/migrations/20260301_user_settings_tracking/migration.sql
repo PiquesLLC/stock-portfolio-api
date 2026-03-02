@@ -10,21 +10,20 @@ ALTER TABLE "UserSettings" ADD COLUMN "trackingStartDate" DATETIME;
 ALTER TABLE "UserSettings" ADD COLUMN "ytdNetContributions" REAL;
 ALTER TABLE "UserSettings" ADD COLUMN "ytdStartEquity" REAL;
 
--- Migrate existing data from global Settings to Jon's UserSettings
-INSERT OR IGNORE INTO "UserSettings" ("id", "userId", "cashBalance", "marginDebt", "updatedAt")
-SELECT 'migration-seed', 'a7d26fc5-514f-4d80-8f8c-25c8e92d41df', 0, 0, datetime('now')
-WHERE NOT EXISTS (SELECT 1 FROM "UserSettings" WHERE "userId" = 'a7d26fc5-514f-4d80-8f8c-25c8e92d41df');
-
+-- Migrate existing data from global Settings to ALL users who have a UserSettings row.
+-- If the global Settings singleton exists, copy its values to every user's settings.
+-- This is idempotent — columns default to NULL, and this UPDATE only overwrites NULLs
+-- for users who haven't already been migrated.
 UPDATE "UserSettings"
 SET
-  "trackingStartDate" = (SELECT "trackingStartDate" FROM "Settings" WHERE "id" = 'default'),
-  "baselineTotalValue" = (SELECT "baselineTotalValue" FROM "Settings" WHERE "id" = 'default'),
-  "baselineCashBalance" = (SELECT "baselineCashBalance" FROM "Settings" WHERE "id" = 'default'),
-  "baselineType" = (SELECT "baselineType" FROM "Settings" WHERE "id" = 'default'),
-  "brokerLifetimeDeposits" = (SELECT "brokerLifetimeDeposits" FROM "Settings" WHERE "id" = 'default'),
-  "brokerLifetimeWithdrawals" = (SELECT "brokerLifetimeWithdrawals" FROM "Settings" WHERE "id" = 'default'),
-  "brokerLifetimeValue" = (SELECT "brokerLifetimeValue" FROM "Settings" WHERE "id" = 'default'),
-  "brokerLifetimeAsOf" = (SELECT "brokerLifetimeAsOf" FROM "Settings" WHERE "id" = 'default'),
-  "ytdStartEquity" = (SELECT "ytdStartEquity" FROM "Settings" WHERE "id" = 'default'),
-  "ytdNetContributions" = (SELECT "ytdNetContributions" FROM "Settings" WHERE "id" = 'default')
-WHERE "userId" = 'a7d26fc5-514f-4d80-8f8c-25c8e92d41df';
+  "trackingStartDate" = COALESCE("trackingStartDate", (SELECT "trackingStartDate" FROM "Settings" WHERE "id" = 'default')),
+  "baselineTotalValue" = COALESCE("baselineTotalValue", (SELECT "baselineTotalValue" FROM "Settings" WHERE "id" = 'default')),
+  "baselineCashBalance" = COALESCE("baselineCashBalance", (SELECT "baselineCashBalance" FROM "Settings" WHERE "id" = 'default')),
+  "baselineType" = COALESCE("baselineType", (SELECT "baselineType" FROM "Settings" WHERE "id" = 'default')),
+  "brokerLifetimeDeposits" = COALESCE("brokerLifetimeDeposits", (SELECT "brokerLifetimeDeposits" FROM "Settings" WHERE "id" = 'default')),
+  "brokerLifetimeWithdrawals" = COALESCE("brokerLifetimeWithdrawals", (SELECT "brokerLifetimeWithdrawals" FROM "Settings" WHERE "id" = 'default')),
+  "brokerLifetimeValue" = COALESCE("brokerLifetimeValue", (SELECT "brokerLifetimeValue" FROM "Settings" WHERE "id" = 'default')),
+  "brokerLifetimeAsOf" = COALESCE("brokerLifetimeAsOf", (SELECT "brokerLifetimeAsOf" FROM "Settings" WHERE "id" = 'default')),
+  "ytdStartEquity" = COALESCE("ytdStartEquity", (SELECT "ytdStartEquity" FROM "Settings" WHERE "id" = 'default')),
+  "ytdNetContributions" = COALESCE("ytdNetContributions", (SELECT "ytdNetContributions" FROM "Settings" WHERE "id" = 'default'))
+WHERE EXISTS (SELECT 1 FROM "Settings" WHERE "id" = 'default');
