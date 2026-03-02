@@ -28,17 +28,17 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // If email already has an account, return generic response (prevent enumeration)
+    // If email already has an account, return identical response (prevent enumeration)
     const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail }, select: { id: true } });
     if (existingUser) {
-      res.json({ success: true, status: 'approved' });
+      res.json({ success: true });
       return;
     }
 
-    // Idempotent: if already on the list, return uniform response (prevent status enumeration)
+    // Idempotent: if already on the list, return identical response (prevent enumeration)
     const existing = await prisma.waitlist.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
-      res.json({ success: true, status: 'pending' });
+      res.json({ success: true });
       return;
     }
 
@@ -51,7 +51,7 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
       });
     }
 
-    res.json({ success: true, status: 'pending' });
+    res.json({ success: true });
   } catch (err) {
     console.error('Waitlist join error:', err);
     res.status(500).json({ error: 'Failed to join waitlist' });

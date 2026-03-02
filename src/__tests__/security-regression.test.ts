@@ -513,7 +513,7 @@ describe('Waitlist join — anti-enumeration', () => {
     app.use('/waitlist', waitlistRoutes);
   });
 
-  it('returns { success: true } for brand new email', async () => {
+  it('returns exactly { success: true } for brand new email', async () => {
     (__mockPrisma as any).user.findUnique.mockResolvedValue(null);
     (__mockPrisma as any).waitlist.findUnique.mockResolvedValue(null);
     (__mockPrisma as any).waitlist.create.mockResolvedValue({ id: 'w1', email: 'new@example.com', status: 'pending' });
@@ -522,10 +522,10 @@ describe('Waitlist join — anti-enumeration', () => {
       .post('/waitlist/join')
       .send({ email: 'new@example.com' });
     expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.body).toEqual({ success: true });
   });
 
-  it('returns { success: true } for email already on waitlist', async () => {
+  it('returns exactly { success: true } for email already on waitlist', async () => {
     (__mockPrisma as any).user.findUnique.mockResolvedValue(null);
     (__mockPrisma as any).waitlist.findUnique.mockResolvedValue({ id: 'w2', email: 'existing@example.com', status: 'pending' });
 
@@ -533,20 +533,20 @@ describe('Waitlist join — anti-enumeration', () => {
       .post('/waitlist/join')
       .send({ email: 'existing@example.com' });
     expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.body).toEqual({ success: true });
   });
 
-  it('returns { success: true } for email already registered as user', async () => {
+  it('returns exactly { success: true } for email already registered as user', async () => {
     (__mockPrisma as any).user.findUnique.mockResolvedValue({ id: 'user-1' });
 
     const res = await request(app)
       .post('/waitlist/join')
       .send({ email: 'registered@example.com' });
     expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.body).toEqual({ success: true });
   });
 
-  it('all three responses have identical HTTP status and body keys (anti-enumeration)', async () => {
+  it('all three responses are byte-identical (anti-enumeration)', async () => {
     // Scenario 1: new email
     (__mockPrisma as any).user.findUnique.mockResolvedValue(null);
     (__mockPrisma as any).waitlist.findUnique.mockResolvedValue(null);
@@ -569,30 +569,12 @@ describe('Waitlist join — anti-enumeration', () => {
     expect(res2.status).toBe(200);
     expect(res3.status).toBe(200);
 
-    // All must have success: true
-    expect(res1.body.success).toBe(true);
-    expect(res2.body.success).toBe(true);
-    expect(res3.body.success).toBe(true);
+    // Bodies must be deeply identical — not just same keys, same values
+    expect(res1.body).toEqual(res2.body);
+    expect(res2.body).toEqual(res3.body);
 
-    // All must have the same top-level keys — no extra fields leak
-    const keys1 = Object.keys(res1.body).sort();
-    const keys2 = Object.keys(res2.body).sort();
-    const keys3 = Object.keys(res3.body).sort();
-    expect(keys1).toEqual(keys2);
-    expect(keys2).toEqual(keys3);
-
-    // No error field should be present in any response
-    expect(res1.body).not.toHaveProperty('error');
-    expect(res2.body).not.toHaveProperty('error');
-    expect(res3.body).not.toHaveProperty('error');
-
-    // No email or user details should leak
-    expect(JSON.stringify(res1.body)).not.toContain('email');
-    expect(JSON.stringify(res2.body)).not.toContain('email');
-    expect(JSON.stringify(res3.body)).not.toContain('email');
-    expect(JSON.stringify(res1.body)).not.toContain('userId');
-    expect(JSON.stringify(res2.body)).not.toContain('userId');
-    expect(JSON.stringify(res3.body)).not.toContain('userId');
+    // Exact expected shape: only { success: true }, nothing else
+    expect(res1.body).toEqual({ success: true });
   });
 
   it('rejects invalid email format', async () => {
