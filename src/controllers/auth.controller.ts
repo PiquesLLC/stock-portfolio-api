@@ -4,7 +4,6 @@ import {
   loginWithPassword,
   setPassword,
   getUserById,
-  hasPassword,
   signup,
   usernameExists,
   emailExists,
@@ -28,7 +27,6 @@ import {
   setPasswordSchema,
   changePasswordSchema,
   deleteAccountSchema,
-  verifyEmailSchema,
   resendVerificationSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
@@ -73,23 +71,6 @@ export function getCookieOptions(req: Request) {
   };
   return { accessOptions, refreshOptions };
 }
-
-// Legacy static options (used where req is not available)
-const _ACCESS_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT access token expiry
-  path: '/',
-};
-
-const _REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
-  path: '/',
-};
 
 function clearAllAuthCookies(res: Response, req?: Request): void {
   const capacitor = req ? isCapacitorRequest(req) : false;

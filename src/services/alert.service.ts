@@ -3,8 +3,8 @@ import { sendPushToUser } from './push.service';
 
 
 
-const ALERT_TYPES = ['drawdown', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
-type AlertType = (typeof ALERT_TYPES)[number];
+const _ALERT_TYPES = ['drawdown', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl'] as const;
+type AlertType = (typeof _ALERT_TYPES)[number];
 
 const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
   { type: 'drawdown', threshold: 10 },        // Alert if drawdown > 10%

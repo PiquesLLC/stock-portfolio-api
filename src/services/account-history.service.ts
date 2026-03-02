@@ -27,9 +27,7 @@ const SOURCE_PRIORITY: Record<string, number> = { activity: 0, trade: 1, ledger:
 //   cash:       LedgerEvent (DEPOSIT, WITHDRAWAL, CASH_DIVIDEND, INTEREST, FEE)
 //   adjustment: PortfolioTrade (split, merger, transfer, cancel) + LedgerEvent (DIV_REINVEST)
 
-const TRADE_PORTFOLIO_TYPES = new Set(['buy', 'sell']);
 const ADJUSTMENT_PORTFOLIO_TYPES = new Set(['split', 'merger', 'transfer', 'cancel']);
-const CASH_LEDGER_TYPES = new Set(['DEPOSIT', 'WITHDRAWAL', 'CASH_DIVIDEND', 'INTEREST', 'FEE']);
 const ADJUSTMENT_LEDGER_TYPES = new Set(['DIV_REINVEST']);
 
 function getActivityCategory(_type: string): HistoryCategory {

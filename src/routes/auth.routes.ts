@@ -16,7 +16,7 @@ import {
   resetPasswordHandler,
   testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
-import { requireAuth, requireAuthAllowUnverified } from '../middleware/auth.middleware';
+import { requireAuthAllowUnverified } from '../middleware/auth.middleware';
 import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
 import oauthRoutes from './oauth.routes';

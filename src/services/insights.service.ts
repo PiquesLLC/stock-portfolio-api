@@ -98,45 +98,6 @@ function calculateMaxDrawdown(values: number[]): number | null {
 }
 
 /**
- * Get portfolio returns from historical candle data
- */
-function calculatePortfolioReturns(
-  holdings: HoldingWithQuote[],
-  candleData: Map<string, HistoricalCandles>,
-  minDays: number = 20
-): number[] {
-  let minLength = Infinity;
-  const holdingReturns: { weight: number; returns: number[] }[] = [];
-
-  const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
-  if (totalValue === 0) return [];
-
-  for (const holding of holdings) {
-    const candles = candleData.get(holding.ticker);
-    if (!candles || candles.partial || candles.returns.length < minDays) continue;
-
-    const weight = holding.currentValue / totalValue;
-    holdingReturns.push({ weight, returns: candles.returns });
-    minLength = Math.min(minLength, candles.returns.length);
-  }
-
-  if (holdingReturns.length === 0 || minLength === 0 || minLength === Infinity) {
-    return [];
-  }
-
-  const portfolioReturns: number[] = [];
-  for (let i = 0; i < minLength; i++) {
-    let dayReturn = 0;
-    for (const hr of holdingReturns) {
-      dayReturn += hr.weight * hr.returns[hr.returns.length - minLength + i];
-    }
-    portfolioReturns.push(dayReturn);
-  }
-
-  return portfolioReturns;
-}
-
-/**
  * Simple sector-based pseudo-diversification estimate
  * (Used as fallback when correlation data unavailable)
  */

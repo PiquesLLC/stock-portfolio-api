@@ -60,14 +60,6 @@ function parseQuarterly(raw: AVQuarterlyEarning[]): ParsedQuarterlyEarning[] {
 export async function getEarningsData(ticker: string): Promise<EarningsResponse> {
   const upper = ticker.toUpperCase();
 
-  const _empty: EarningsResponse = {
-    ticker: upper,
-    quarterly: [],
-    annual: [],
-    lastUpdated: '',
-    dataAge: 'stale',
-  };
-
   // Check if we already have earnings cached in FundamentalsCache
   const cached = await prisma.fundamentalsCache.findUnique({ where: { ticker: upper } });
 

@@ -22,7 +22,7 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
 
     const result = await getLeaderboard(window as LeaderboardWindow, region as LeaderboardRegion);
     // Strip sensitive fields from public response
-    const sanitizedEntries = result.entries.map(({ flagReason, ...entry }) => ({
+    const sanitizedEntries = result.entries.map(({ flagReason: _flagReason, ...entry }) => ({
       ...entry,
       flagReason: entry.flagged ? 'Under review' : null,
     }));
