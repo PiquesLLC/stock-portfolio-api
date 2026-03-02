@@ -48,6 +48,7 @@ vi.mock('../middleware/rateLimiter', () => {
     apiLimiter: passthrough, oauthLimiter: passthrough, enumerationLimiter: passthrough,
     webhookLimiter: passthrough, billingMutationLimiter: passthrough, billingWebhookLimiter: passthrough,
     chartLimiter: passthrough,
+    waitlistJoinLimiter: passthrough,
   };
 });
 

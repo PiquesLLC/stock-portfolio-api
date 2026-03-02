@@ -11,6 +11,7 @@ vi.mock('../middleware/rateLimiter', () => {
   return {
     heavyReadLimiter: passthrough,
     mutationLimiter: passthrough,
+    waitlistJoinLimiter: passthrough,
   };
 });
 
@@ -54,6 +55,7 @@ vi.mock('../controllers/market.controller', () => {
     askStockQuestionHandler: ok,
     getHistoricalCAGRHandler: ok,
     getHeatmapHandler: ok,
+    getThemesHeatmapHandler: ok,
     getNalaScoreHandler: ok,
     getEarningsTrackHandler: ok,
   };

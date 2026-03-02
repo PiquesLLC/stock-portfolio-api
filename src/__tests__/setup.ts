@@ -77,6 +77,13 @@ vi.mock('../utils/prisma', () => {
       deleteMany: vi.fn(),
     },
     leaderboardCache: { deleteMany: vi.fn() },
+    waitlist: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: vi.fn((arg: any) => {
       // Support both Prisma transaction styles:
       // 1) prisma.$transaction(async tx => ...)
