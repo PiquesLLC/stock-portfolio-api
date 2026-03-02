@@ -85,7 +85,8 @@ export async function getUserIntelligenceHandler(req: AuthRequest, res: Response
       return;
     }
     const vis = targetUser.holdingsVisibility ?? 'all';
-    if (vis === 'hidden') {
+    if (vis !== 'all') {
+      // Intelligence reveals full-position signals — deny unless holdings are fully public
       res.status(404).json({ error: 'Not found' });
       return;
     }

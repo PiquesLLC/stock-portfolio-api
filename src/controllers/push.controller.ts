@@ -37,7 +37,8 @@ export async function subscribeHandler(req: AuthRequest, res: Response): Promise
   try {
     const endpointUrl = new URL(subscription.endpoint);
     const PUSH_DOMAINS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', 'push.services.mozilla.com'];
-    if (endpointUrl.protocol !== 'https:' || !PUSH_DOMAINS.some(d => endpointUrl.hostname.endsWith(d))) {
+    const host = endpointUrl.hostname;
+    if (endpointUrl.protocol !== 'https:' || !PUSH_DOMAINS.some(d => host === d || host.endsWith('.' + d))) {
       res.status(400).json({ error: 'Invalid push endpoint domain' });
       return;
     }
