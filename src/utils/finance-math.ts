@@ -64,7 +64,21 @@ export function calculateTWR(
 
     // New period starts with value + cashflow
     periodStartValue = valueBeforeCF + cf.amount;
-    if (periodStartValue <= 0) periodStartValue = 0.01; // prevent division by zero
+    if (periodStartValue <= 0) {
+      // Portfolio was fully withdrawn — break the TWR chain and restart
+      // from the next valid snapshot. The $0.01 floor creates astronomical
+      // returns (e.g., recovery to $1K from $0.01 = 100,000x).
+      twrProduct *= valueBeforeCF / (periodStartValue - cf.amount || 1);
+      // Find next snapshot with positive value
+      while (snapshotIdx < sorted.length && sorted[snapshotIdx].value <= 0) snapshotIdx++;
+      if (snapshotIdx < sorted.length) {
+        periodStartValue = sorted[snapshotIdx].value;
+        snapshotIdx++;
+      } else {
+        break;
+      }
+      continue;
+    }
   }
 
   // Final sub-period: from last cashflow to end
@@ -141,9 +155,9 @@ export function calculateXIRR(
     rate = newRate;
   }
 
-  // Fallback: try bisection if Newton fails
-  let lo = -0.5;
-  let hi = 5.0;
+  // Fallback: try bisection if Newton fails — wide range for extreme performance
+  let lo = -0.99;
+  let hi = 10.0;
   const fLo = npv(lo);
   const fHi = npv(hi);
 
@@ -176,7 +190,7 @@ export function calculateCorrelation(
   returns2: number[]
 ): number | null {
   const len = Math.min(returns1.length, returns2.length);
-  if (len < 10) return null;
+  if (len < 20) return null; // Need >=20 points for statistically meaningful correlation
 
   // Use the last `len` values from each array
   const r1 = returns1.slice(-len);
@@ -271,12 +285,15 @@ export function maxDrawdown(values: number[]): number {
   if (values.length < 2) return 0;
 
   let peak = values[0];
+  if (peak <= 0) return 0; // Cannot compute drawdown from zero/negative base
   let maxDD = 0;
 
   for (const v of values) {
     if (v > peak) peak = v;
-    const dd = (peak - v) / peak;
-    if (dd > maxDD) maxDD = dd;
+    if (peak > 0) {
+      const dd = (peak - v) / peak;
+      if (dd > maxDD) maxDD = dd;
+    }
   }
 
   return maxDD;
@@ -330,8 +347,9 @@ export function dailyReturnsFromValues(values: number[]): number[] {
 export function isSuspiciousReturn(returnPct: number, days: number): boolean {
   // Single day > 300% is impossible without corporate action
   if (days <= 1 && Math.abs(returnPct) > 300) return true;
-  // Annualized Sharpe > 5 is extremely suspicious
-  // (We check this separately with volatility data)
+  // Multi-period cumulative return checks
+  if (days <= 30 && Math.abs(returnPct) > 500) return true;
+  if (days <= 365 && Math.abs(returnPct) > 2000) return true;
   return false;
 }
 

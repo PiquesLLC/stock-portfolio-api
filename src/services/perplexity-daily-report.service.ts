@@ -4,6 +4,7 @@ import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
 import { getEarningsSummary } from './earnings-summary.service';
+import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache daily reports for 8 hours (28800s) — news doesn't shift fast enough to justify 4h
 const reportCache = new NodeCache({ stdTTL: 28800 });
@@ -50,6 +51,7 @@ function isWeekendET(): boolean {
 }
 
 export async function getDailyReport(userId: string): Promise<DailyReportResponse> {
+  await ensureEmailVerifiedForAi(userId);
   const cacheKey = `daily-report:${userId}`;
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };

@@ -41,6 +41,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/check-isolation.sh
 
+  mock-lint:
+    name: Mock Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-mocks.sh
+
   test:
     name: Tests
     runs-on: ubuntu-latest

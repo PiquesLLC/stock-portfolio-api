@@ -666,7 +666,7 @@ export interface LeaderboardEntry {
   snapshotCount: number;
   startDateUsed: string | null;
   endDateUsed: string | null;
-  currentAssets: number | null;
+  // currentAssets intentionally removed — exact portfolio values are private
 }
 
 export interface LeaderboardResponse {

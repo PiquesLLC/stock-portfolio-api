@@ -24,7 +24,7 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
 const router = Router();
 
-router.get('/health', requireAuth, getHealthHandler);
+router.get('/health', heavyReadLimiter, requireAuth, getHealthHandler);
 router.get('/attribution', heavyReadLimiter, requireAuth, getAttributionHandler);
 router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
@@ -32,12 +32,12 @@ router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
 router.get('/briefing', heavyReadLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
 router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('premium'), explainBriefingHandler);
 router.get('/behavior', heavyReadLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);
-router.get('/daily-report', heavyReadLimiter, requireAuth, getDailyReportHandler);
+router.get('/daily-report', heavyReadLimiter, requireAuth, requirePlan('premium'), getDailyReportHandler);
 router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
 
 // Tax-Loss Harvesting
-router.get('/tax-harvest', heavyReadLimiter, requireAuth, getTaxHarvestHandler);
+router.get('/tax-harvest', heavyReadLimiter, requireAuth, requirePlan('premium'), getTaxHarvestHandler);
 
 // Anomaly Detection
 router.get('/anomalies', requireAuth, getAnomaliesHandler);

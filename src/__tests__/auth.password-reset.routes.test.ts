@@ -2,22 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { TEST_EMAIL } from './helpers';
 
-vi.mock('../middleware/rateLimiter', async () => {
-  const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
-  const passthrough = (req: any, res: any, next: any) => next();
-  return {
-    ...actual,
-    loginLimiter: passthrough,
-    mfaVerifyLimiter: passthrough,
-    mfaSendLimiter: passthrough,
-    setPasswordLimiter: passthrough,
-    signupLimiter: passthrough,
-    mutationLimiter: passthrough,
-    heavyReadLimiter: passthrough,
-    apiLimiter: passthrough,
-    enumerationLimiter: passthrough,
-    waitlistJoinLimiter: passthrough,
-  };
+vi.mock('../middleware/rateLimiter', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const passthrough = (_req: any, _res: any, next: any) => next();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? passthrough : v]),
+  );
 });
 
 import app from '../app';

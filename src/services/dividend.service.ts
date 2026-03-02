@@ -113,10 +113,11 @@ export async function getUpcomingDividendEvents(userId: string) {
  * Get total dividend amount between two dates (for projection service compat).
  * Uses DividendCredit (posted amounts) if available, falls back to events.
  */
-export async function getTotalDividendsBetween(startDate: Date, endDate: Date): Promise<number> {
-  // First try credits (actual posted amounts)
+export async function getTotalDividendsBetween(userId: string, startDate: Date, endDate: Date): Promise<number> {
+  // First try credits (actual posted amounts) — scoped to user
   const credits = await prisma.dividendCredit.findMany({
     where: {
+      userId,
       status: 'posted',
       creditedAt: { gte: startDate, lte: endDate },
     },
@@ -126,21 +127,38 @@ export async function getTotalDividendsBetween(startDate: Date, endDate: Date): 
     return credits.reduce((sum, c) => sum + c.amountGross, 0);
   }
 
-  // Fallback: sum from events (estimated)
+  // Fallback: sum from events × user's shares (estimated)
+  // Events are per-ticker, so filter by tickers the user holds
+  const userHoldings = await prisma.holding.findMany({
+    where: { userId },
+    select: { ticker: true, shares: true },
+  });
+  if (userHoldings.length === 0) return 0;
+
+  const tickerMap = new Map(userHoldings.map(h => [h.ticker.toUpperCase(), h.shares]));
   const events = await prisma.dividendEvent.findMany({
     where: {
+      ticker: { in: [...tickerMap.keys()] },
       payDate: { gte: startDate, lte: endDate },
     },
   });
 
-  return events.reduce((sum, e) => sum + e.amountPerShare, 0);
+  return events.reduce((sum, e) => {
+    const shares = tickerMap.get(e.ticker.toUpperCase()) ?? 0;
+    return sum + e.amountPerShare * shares;
+  }, 0);
 }
 
 export async function deleteDividendEvent(id: string) {
-  // Delete associated credits first
-  await prisma.dividendCredit.deleteMany({
+  // Prevent deletion if credits have been posted (affects other users' cash balances)
+  const creditCount = await prisma.dividendCredit.count({
     where: { dividendEventId: id },
   });
+  if (creditCount > 0) {
+    const err = new Error('Cannot delete dividend event with posted credits');
+    (err as Error & { code?: string }).code = 'HAS_CREDITS';
+    throw err;
+  }
   return prisma.dividendEvent.delete({
     where: { id },
   });

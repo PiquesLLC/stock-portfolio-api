@@ -1,6 +1,10 @@
 import { Resend } from 'resend';
 import { config } from '../config';
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 let resend: Resend | null = null;
 const capturedEmailVerificationCodes = new Map<string, { code: string; expiresAt: number }>();
 
@@ -34,7 +38,7 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
   await r.emails.send({
     from: `Nala <${config.resendFromEmail}>`,
     to,
-    subject: `${code} is your Nala verification code`,
+    subject: 'Your Nala verification code',
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
         <h2 style="color: #00c805; margin: 0 0 24px;">Nala</h2>
@@ -151,12 +155,12 @@ export async function sendWaitlistJoinNotificationEmail(adminEmail: string, wait
   await r.emails.send({
     from: `Nala <${config.resendFromEmail}>`,
     to: adminEmail,
-    subject: `New Waitlist Signup: ${waitlistEmail}`,
+    subject: `New Waitlist Signup: ${escapeHtml(waitlistEmail)}`,
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
         <h2 style="color: #00c805; margin: 0 0 24px;">Nala — Waitlist</h2>
         <p style="color: #333; font-size: 16px; margin: 0 0 8px;">New signup on the waitlist:</p>
-        <p style="font-size: 18px; font-weight: bold; color: #111; margin: 16px 0; font-family: monospace;">${waitlistEmail}</p>
+        <p style="font-size: 18px; font-weight: bold; color: #111; margin: 16px 0; font-family: monospace;">${escapeHtml(waitlistEmail)}</p>
         <p style="color: #666; font-size: 14px; margin: 0 0 24px;">Joined at ${now} ET</p>
         <a href="${reviewUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Review in App</a>
         <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;" />

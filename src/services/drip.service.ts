@@ -241,9 +241,9 @@ export interface DividendTimeline {
  * Get the timeline for a dividend credit (for UI display).
  * Shows: Announced â†’ Payment â†’ Reinvestment
  */
-export async function getDividendTimeline(creditId: string): Promise<DividendTimeline> {
-  const credit = await prisma.dividendCredit.findUnique({
-    where: { id: creditId },
+export async function getDividendTimeline(creditId: string, userId: string): Promise<DividendTimeline> {
+  const credit = await prisma.dividendCredit.findFirst({
+    where: { id: creditId, userId },
     include: {
       dividendEvent: true,
       reinvestment: true,

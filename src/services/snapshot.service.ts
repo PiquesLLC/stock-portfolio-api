@@ -43,9 +43,9 @@ export async function limitConcurrency<T>(tasks: (() => Promise<T>)[], concurren
   return results;
 }
 
-// In-memory lock to prevent race conditions in snapshot creation
-let lastSnapshotTime: number = 0;
-let isCreatingSnapshot = false;
+// Per-user in-memory locks to prevent race conditions in snapshot creation
+const lastSnapshotTimeByUser = new Map<string, number>();
+const creatingSnapshotForUser = new Set<string>();
 
 export async function recordCompositionChange(userId: string, reason?: string): Promise<void> {
   await prisma.portfolioCompositionChange.create({
@@ -67,29 +67,30 @@ export async function getLatestCompositionChangeAfter(userId: string, startDate:
   return latest?.timestamp ?? null;
 }
 
-export async function resetSnapshotsForCompositionChange(_userId: string): Promise<void> {
+export async function resetSnapshotsForCompositionChange(userId: string): Promise<void> {
   // Don't delete snapshots — the chart handler's composition change filter
   // already handles display cutoffs. Deleting snapshots destroys the 1D
   // chart's fallback data and causes it to disappear.
-  // Just reset the timer so a new snapshot is created immediately.
-  lastSnapshotTime = 0;
+  // Just reset the timer so a new snapshot is created immediately for this user.
+  lastSnapshotTimeByUser.delete(userId);
 }
 
 export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioSnapshot | null> {
   const now = Date.now();
   const intervalMs = config.snapshotIntervalSeconds * 1000;
 
-  // Fast path: check in-memory timestamp first (avoids DB query in most cases)
-  if (now - lastSnapshotTime < intervalMs) {
+  // Fast path: check per-user in-memory timestamp first (avoids DB query in most cases)
+  const lastTime = lastSnapshotTimeByUser.get(userId) ?? 0;
+  if (now - lastTime < intervalMs) {
     return null;
   }
 
-  // Prevent concurrent snapshot creation (race condition fix)
-  if (isCreatingSnapshot) {
+  // Prevent concurrent snapshot creation per-user
+  if (creatingSnapshotForUser.has(userId)) {
     return null;
   }
 
-  isCreatingSnapshot = true;
+  creatingSnapshotForUser.add(userId);
 
   try {
     // Double-check with database (in case server restarted)
@@ -101,8 +102,8 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
     if (latestSnapshot) {
       const timeSinceLastSnapshot = now - new Date(latestSnapshot.timestamp).getTime();
       if (timeSinceLastSnapshot < intervalMs) {
-        // Update in-memory timestamp to avoid future DB queries
-        lastSnapshotTime = new Date(latestSnapshot.timestamp).getTime();
+        // Update per-user in-memory timestamp to avoid future DB queries
+        lastSnapshotTimeByUser.set(userId, new Date(latestSnapshot.timestamp).getTime());
         return null;
       }
     }
@@ -195,8 +196,8 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
       });
     }
 
-    // Update in-memory timestamp
-    lastSnapshotTime = snapshotTime.getTime();
+    // Update per-user in-memory timestamp
+    lastSnapshotTimeByUser.set(userId, snapshotTime.getTime());
 
     console.log(
       `[Snapshot] Created at ${snapshotTime.toISOString()} | ` +
@@ -208,7 +209,7 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
 
     return snapshot;
   } finally {
-    isCreatingSnapshot = false;
+    creatingSnapshotForUser.delete(userId);
   }
 }
 
@@ -349,16 +350,18 @@ export async function getOldestSnapshot(userId: string): Promise<PortfolioSnapsh
  * Get per-holding snapshots for the last N distinct calendar days.
  * Returns rows ordered by timestamp ascending.
  */
-export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
+export async function getRecentHoldingSnapshots(userId: string, days: number = 5): Promise<{
   ticker: string;
   dayPL: number;
   dayPLPercent: number;
   timestamp: Date;
 }[]> {
-  // Get the N most recent distinct calendar dates efficiently via raw SQL
+  // Get the N most recent distinct calendar dates for THIS user via raw SQL
   const recentDates = await prisma.$queryRaw<{ d: string }[]>`
-    SELECT DISTINCT date(timestamp / 1000, 'unixepoch') AS d
-    FROM HoldingSnapshot
+    SELECT DISTINCT date(hs.timestamp / 1000, 'unixepoch') AS d
+    FROM HoldingSnapshot hs
+    INNER JOIN PortfolioSnapshot ps ON hs.snapshotId = ps.id
+    WHERE ps.userId = ${userId}
     ORDER BY d DESC
     LIMIT ${days}
   `;
@@ -367,8 +370,16 @@ export async function getRecentHoldingSnapshots(days: number = 5): Promise<{
 
   const oldestDate = new Date(recentDates[recentDates.length - 1].d);
 
+  // Get user's snapshot IDs for the date range, then filter HoldingSnapshots
+  const userSnapshots = await prisma.portfolioSnapshot.findMany({
+    where: { userId, timestamp: { gte: oldestDate } },
+    select: { id: true },
+  });
+  const snapshotIds = userSnapshots.map(s => s.id);
+  if (snapshotIds.length === 0) return [];
+
   return prisma.holdingSnapshot.findMany({
-    where: { timestamp: { gte: oldestDate } },
+    where: { snapshotId: { in: snapshotIds }, timestamp: { gte: oldestDate } },
     select: { ticker: true, dayPL: true, dayPLPercent: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
     take: 5000,
@@ -654,22 +665,12 @@ export async function reconstructPortfolioHistoryHiRes(
       const neighborAvg = (prev + next) / 2;
       if (neighborAvg > 0) {
         const deviation = Math.abs(curr - neighborAvg) / neighborAvg;
-        if (deviation > 0.05) {
+        if (deviation > 0.25) {
           points[i].value = neighborAvg;
         }
       }
     }
-    // Check last point against its predecessor
-    if (points.length >= 2) {
-      const last = points[points.length - 1];
-      const secondLast = points[points.length - 2];
-      if (secondLast.value > 0) {
-        const deviation = Math.abs(last.value - secondLast.value) / secondLast.value;
-        if (deviation > 0.05) {
-          points[points.length - 1].value = secondLast.value;
-        }
-      }
-    }
+    // Never smooth the last point — it should always show the real current value.
   }
 
   // Gap-fill: when consecutive points are more than 1.5× the expected interval
@@ -864,7 +865,6 @@ export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number
 
         for (const h of userHoldings) {
           const ticker = h.ticker.toUpperCase();
-          totalCost += h.shares * h.averageCost; // always counted
 
           const quote = quotes.get(ticker);
           const price = (quote?.extendedPrice && quote.extendedPrice > 0)
@@ -872,6 +872,7 @@ export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number
             : (quote?.currentPrice ?? 0);
           if (price <= 0) continue;
 
+          totalCost += h.shares * h.averageCost; // only count if price is valid
           const previousClose = quote?.previousClose ?? price;
           const value = h.shares * price;
           const prevValue = h.shares * previousClose;
@@ -1259,16 +1260,17 @@ export async function getChartSnapshots(userId: string, period: string): Promise
 }
 
 // Utility to clean up duplicate snapshots (for fixing existing data)
-export async function cleanupDuplicateSnapshots(): Promise<number> {
+export async function cleanupDuplicateSnapshots(scopeUserId?: string): Promise<number> {
   const toDelete: string[] = [];
   const fetchBatchSize = 1000;
-  let lastKeptTimestamp = 0;
+  // Per-user last-kept timestamp to prevent cross-user snapshot deletion
+  const lastKeptByUser = new Map<string, number>();
   const intervalMs = config.snapshotIntervalSeconds * 1000;
   let cursor: { timestamp: Date; id: string } | null = null;
 
   for (;;) {
     const where: any = {
-      userId: { not: undefined }, // All users
+      ...(scopeUserId ? { userId: scopeUserId } : { userId: { not: undefined } }),
       ...(cursor
         ? {
             OR: [
@@ -1288,12 +1290,14 @@ export async function cleanupDuplicateSnapshots(): Promise<number> {
 
     for (const snapshot of snapshots) {
       const snapshotTime = new Date(snapshot.timestamp).getTime();
-      if (snapshotTime - lastKeptTimestamp < intervalMs) {
-        // This snapshot is too close to the last kept one - mark for deletion
+      const userKey = snapshot.userId ?? '__null__';
+      const lastKept = lastKeptByUser.get(userKey) ?? 0;
+      if (snapshotTime - lastKept < intervalMs) {
+        // This snapshot is too close to the last kept one for THIS user
         toDelete.push(snapshot.id);
       } else {
         // Keep this snapshot
-        lastKeptTimestamp = snapshotTime;
+        lastKeptByUser.set(userKey, snapshotTime);
       }
     }
 

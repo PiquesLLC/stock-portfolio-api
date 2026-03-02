@@ -28,17 +28,17 @@ router.post('/join', waitlistJoinLimiter, async (req: Request, res: Response) =>
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // If email already has an account, no need to join the waitlist
+    // If email already has an account, return generic response (prevent enumeration)
     const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail }, select: { id: true } });
     if (existingUser) {
-      res.json({ success: true, status: 'approved', alreadyRegistered: true });
+      res.json({ success: true, status: 'approved' });
       return;
     }
 
-    // Idempotent: if already on the list, return same success response
+    // Idempotent: if already on the list, return uniform response (prevent status enumeration)
     const existing = await prisma.waitlist.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
-      res.json({ success: true, status: existing.status });
+      res.json({ success: true, status: 'pending' });
       return;
     }
 

@@ -88,6 +88,8 @@ export async function replayDailyLedger(
 
   if (rangeEnd.getTime() < rangeStart.getTime()) return [];
 
+  // Cap row counts to prevent memory exhaustion on pathological data
+  const MAX_REPLAY_ROWS = 50000;
   const [trades, ledgerEvents] = await Promise.all([
     prisma.portfolioTrade.findMany({
       where: {
@@ -96,6 +98,7 @@ export async function replayDailyLedger(
       },
       orderBy: [{ date: 'asc' }, { rowIndex: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: { date: true, ticker: true, type: true, shares: true, price: true, rowIndex: true },
+      take: MAX_REPLAY_ROWS,
     }),
     prisma.ledgerEvent.findMany({
       where: {
@@ -113,6 +116,7 @@ export async function replayDailyLedger(
         amount: true,
         rowIndex: true,
       },
+      take: MAX_REPLAY_ROWS,
     }),
   ]);
 
@@ -225,6 +229,9 @@ export async function replayDailyLedger(
           if (current.shares <= 0) {
             positions.delete(posting.ticker);
           } else {
+            if (current.shares - posting.shares < -0.001) {
+              console.warn(`[Replay] Over-sell: ${posting.ticker} held=${current.shares} sold=${posting.shares}`);
+            }
             const avg = current.costBasis / current.shares;
             current.shares -= posting.shares;
             if (current.shares <= 0.000001) {

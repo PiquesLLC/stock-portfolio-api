@@ -5,24 +5,13 @@ import request from 'supertest';
 import { generateTestToken, generateExpiredToken, generateInvalidToken, testUser } from './helpers';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
-// Rate Limiter Mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Disable rate limiters in tests
-vi.mock('../middleware/rateLimiter', async () => {
-  const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
-  const passthrough = (req: any, res: any, next: any) => next();
-  return {
-    ...actual,
-    loginLimiter: passthrough,
-    mfaVerifyLimiter: passthrough,
-    mfaSendLimiter: passthrough,
-    setPasswordLimiter: passthrough,
-    signupLimiter: passthrough,
-    mutationLimiter: passthrough,
-    heavyReadLimiter: passthrough,
-    apiLimiter: passthrough,
-    oauthLimiter: passthrough,
-    waitlistJoinLimiter: passthrough,
-  };
+// Disable rate limiters in tests — auto-passthrough for all exports
+vi.mock('../middleware/rateLimiter', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const passthrough = (_req: any, _res: any, next: any) => next();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? passthrough : v]),
+  );
 });
 
 // â”€â”€â”€ Import modules after mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -458,7 +447,11 @@ describe('Auth Service', () => {
 
       const result = await rotateRefreshToken('revoked-token-recent');
       expect(result).not.toBeNull();
-      expect(result!.refreshToken).toBe('latest-valid-token');
+      // rotateRefreshToken generates a NEW token via generateRefreshToken(),
+      // it doesn't return the successor's stored token value
+      expect(typeof result!.refreshToken).toBe('string');
+      expect(result!.refreshToken.length).toBeGreaterThan(0);
+      expect(result!.accessToken).toBeDefined();
     });
 
     it('should return null for expired refresh token', async () => {
@@ -702,14 +695,16 @@ describe('Auth Middleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('should call next() when no userId is in params/query/body (defaults to own user)', () => {
+    it('should return 400 when no userId param is present (fail-closed)', () => {
       const { req, res, next } = createMockReqResNext();
       req.user = { userId: 'user-1', username: 'alice' };
 
       const mw = requireOwnership();
       mw(req, res, next);
 
-      expect(next).toHaveBeenCalled();
+      // Hardened: fail-closed when userId param is missing (never falls back to query/body)
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('should check custom param name', () => {
@@ -723,7 +718,7 @@ describe('Auth Middleware', () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it('should check userId from query string', () => {
+    it('should ignore userId from query string (only checks route params)', () => {
       const { req, res, next } = createMockReqResNext();
       req.user = { userId: 'user-1', username: 'alice' };
       req.query = { userId: 'user-2' };
@@ -731,10 +726,12 @@ describe('Auth Middleware', () => {
       const mw = requireOwnership();
       mw(req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(403);
+      // Hardened: never falls back to query/body — returns 400 for missing param
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(next).not.toHaveBeenCalled();
     });
 
-    it('should check userId from body', () => {
+    it('should ignore userId from body (only checks route params)', () => {
       const { req, res, next } = createMockReqResNext();
       req.user = { userId: 'user-1', username: 'alice' };
       req.body = { userId: 'user-1' };
@@ -742,7 +739,9 @@ describe('Auth Middleware', () => {
       const mw = requireOwnership();
       mw(req, res, next);
 
-      expect(next).toHaveBeenCalled();
+      // Hardened: never falls back to query/body — returns 400 for missing param
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(next).not.toHaveBeenCalled();
     });
   });
 });
@@ -1132,13 +1131,14 @@ describe('Auth Routes (Integration)', () => {
       expect(res.body.hasPassword).toBe(true);
     });
 
-    it('should return hasPassword: false when no password', async () => {
+    it('should always return hasPassword: true to prevent auth-type enumeration', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ passwordHash: null });
 
       const res = await request(app).get('/auth/has-password/bob');
 
       expect(res.status).toBe(200);
-      expect(res.body.hasPassword).toBe(false);
+      // Always returns true — prevents attackers from determining if an account uses password auth
+      expect(res.body.hasPassword).toBe(true);
     });
   });
 

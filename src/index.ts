@@ -136,10 +136,10 @@ const server = app.listen(config.port, async () => {
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
 
-  // Auto-verify users created before email verification was required.
-  // These users can't complete OTP verification and are stuck in a dead end.
+  // Auto-verify users created before email verification was required (one-time, cutoff date).
+  // Only applies to pre-existing users; new users must complete OTP verification.
   await prisma.user.updateMany({
-    where: { emailVerified: false },
+    where: { emailVerified: false, createdAt: { lt: new Date('2026-03-01') } },
     data: { emailVerified: true },
   }).then(r => { if (r.count > 0) console.log(`[Init] Auto-verified ${r.count} pre-existing users`); })
     .catch(err => console.error('[Init] Auto-verify failed:', err.message));

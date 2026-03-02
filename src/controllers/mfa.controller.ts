@@ -11,6 +11,7 @@ import { generateAccessToken, generateRefreshToken } from '../services/auth.serv
 import { getCookieOptions } from './auth.controller';
 import { config } from '../config';
 import prisma from '../utils/prisma';
+import { commitOAuthLink } from '../services/oauth.service';
 import {
   verifyMfaSchema, totpVerifySetupSchema, disableMfaSchema,
   updateEmailSchema, verifyEmailSchema, sendEmailOtpSchema,
@@ -61,11 +62,16 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     }
 
     // Code is valid — NOW consume the challenge atomically
-    const consumed = await consumeMfaChallenge(challengeToken);
-    if (!consumed) {
+    const consumeResult = await consumeMfaChallenge(challengeToken);
+    if (!consumeResult) {
       // Race: another request consumed it between peek and here
       res.status(401).json({ error: 'Challenge already used. Please log in again.' });
       return;
+    }
+
+    // MFA passed — commit any pending OAuth provider link
+    if (consumeResult.pendingOAuthLink) {
+      await commitOAuthLink(userId, consumeResult.pendingOAuthLink);
     }
 
     // MFA passed — issue real auth tokens
@@ -146,6 +152,19 @@ export async function mfaStatusHandler(req: AuthRequest, res: Response): Promise
 export async function totpSetupHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!req.user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    // Require password verification before MFA setup (matches disable flow)
+    const { password } = req.body ?? {};
+    if (!password) {
+      res.status(400).json({ error: 'Password is required to set up MFA' });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { passwordHash: true } });
+    if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+      res.status(401).json({ error: 'Invalid password' });
+      return;
+    }
+
     const result = await beginTotpSetup(req.user.userId);
     res.json(result);
   } catch (_error) {
@@ -213,6 +232,16 @@ export async function updateEmailHandler(req: AuthRequest, res: Response): Promi
       res.status(400).json({ error: formatZodError(parsed.error) });
       return;
     }
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { passwordHash: true } });
+    if (!user?.passwordHash) {
+      res.status(400).json({ error: 'Password not set' });
+      return;
+    }
+    const valid = await verifyPassword(parsed.data.password, user.passwordHash);
+    if (!valid) {
+      res.status(401).json({ error: 'Incorrect password' });
+      return;
+    }
     await updateEmail(req.user.userId, parsed.data.email);
     res.json({ email: parsed.data.email, verified: false });
   } catch (error: unknown) {
@@ -250,6 +279,19 @@ export async function verifyEmailHandler(req: AuthRequest, res: Response): Promi
 export async function emailOtpSetupHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!req.user) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+    // Require password verification before MFA setup
+    const { password } = req.body ?? {};
+    if (!password) {
+      res.status(400).json({ error: 'Password is required to set up MFA' });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { passwordHash: true } });
+    if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+      res.status(401).json({ error: 'Invalid password' });
+      return;
+    }
+
     await beginEmailOtpSetup(req.user.userId);
     res.json({ codeSent: true });
   } catch (error: unknown) {

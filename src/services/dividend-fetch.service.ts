@@ -209,9 +209,10 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
  * Sync dividend events for all currently held tickers.
  * Rate-limited to ~1 ticker/second to avoid Yahoo throttling.
  */
-export async function syncAllHeldTickers(): Promise<{ synced: number; tickers: number }> {
-  // Get all distinct tickers from holdings
+export async function syncAllHeldTickers(userId?: string): Promise<{ synced: number; tickers: number }> {
+  // Get distinct tickers — scoped to user if provided, otherwise global (for background jobs)
   const holdings = await prisma.holding.findMany({
+    where: userId ? { userId } : undefined,
     select: { ticker: true },
     distinct: ['ticker'],
   });

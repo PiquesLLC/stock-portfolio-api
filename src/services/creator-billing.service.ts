@@ -419,11 +419,41 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         if (!sub) return;
 
         const amount = typeof charge.amount === 'number' ? charge.amount : 0;
-        const amountRefunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
-        if (amountRefunded <= 0) return;
+        const cumulativeRefunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
+        if (cumulativeRefunded <= 0) return;
 
-        const creatorRefund = -Math.round(amountRefunded * 0.8);
-        const platformRefund = -(amountRefunded - Math.round(amountRefunded * 0.8));
+        // charge.amount_refunded is CUMULATIVE across all refund events for this charge.
+        // To get the incremental refund for THIS event, check what we've already debited.
+        const previousRefundEntries = await prisma.creatorWalletLedger.findMany({
+          where: {
+            creatorUserId: sub.creatorUserId,
+            type: 'refund',
+            subscriptionId: sub.id,
+          },
+          select: { amountCents: true },
+        });
+        const previouslyDebitedCreator = previousRefundEntries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        const totalCreatorShare = Math.round(cumulativeRefunded * 0.8);
+        const incrementalCreator = totalCreatorShare - previouslyDebitedCreator;
+        if (incrementalCreator <= 0) return; // Already fully accounted for
+
+        const totalPlatformShare = cumulativeRefunded - totalCreatorShare;
+        // Approximate previous platform debit from count of entries (1:1 with creator entries)
+        const previousPlatformEntries = await prisma.creatorWalletLedger.count({
+          where: {
+            creatorUserId: sub.creatorUserId,
+            type: 'platform_fee',
+            subscriptionId: sub.id,
+            amountCents: { lt: 0 }, // refund platform entries are negative
+          },
+        });
+        // For simplicity, compute incremental platform share from the incremental total
+        const incrementalTotal = incrementalCreator / 0.8; // back-calculate incremental refund amount
+        const incrementalPlatform = Math.round(incrementalTotal) - incrementalCreator;
+
+        const creatorRefund = -incrementalCreator;
+        const platformRefund = -incrementalPlatform;
+        const amountRefunded = cumulativeRefunded;
         const creatorRefundKey = `stripe_event:${event.id}:refund_creator`;
         const platformRefundKey = `stripe_event:${event.id}:refund_platform`;
 
@@ -527,11 +557,30 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
 
         const outcome = dispute.status ?? 'unknown';
         if (outcome === 'won') {
+          // Restore access: fetch real period end from Stripe
+          let currentPeriodEnd: Date | null = null;
+          try {
+            const stripeSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+            const periodEndUnix = stripeSub.items.data[0]?.current_period_end;
+            if (periodEndUnix) currentPeriodEnd = new Date(periodEndUnix * 1000);
+          } catch { /* use null if retrieval fails */ }
+
           await prisma.creatorSubscription.update({
             where: { id: sub.id },
             data: {
               status: 'active',
               disputedAt: null,
+              ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+            },
+          });
+
+          // Reverse the $15 dispute fee
+          await prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: sub.creatorUserId,
+              type: 'platform_fee',
+              amountCents: -1500,
+              description: `stripe_event:${event.id}:dispute_fee_reversal`,
             },
           });
         } else {
@@ -693,40 +742,42 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   if (!creator || creator.status !== 'active') throw new Error('Creator not active');
   if (!creator.stripeConnectId) throw new Error('Stripe Connect onboarding required');
 
-  const pendingCount = await prisma.creatorPayout.count({
-    where: { creatorUserId: userId, status: 'pending' },
+  // Wrap check + create in transaction to prevent TOCTOU double-payout
+  const result = await prisma.$transaction(async (tx) => {
+    const pendingCount = await tx.creatorPayout.count({
+      where: { creatorUserId: userId, status: 'pending' },
+    });
+    if (pendingCount > 0) {
+      throw new Error('Existing payout request is still pending');
+    }
+
+    const { availableCents } = await getPayoutBalance(userId);
+    if (availableCents < 500) {
+      throw new Error('Minimum payout is $5');
+    }
+
+    const payout = await tx.creatorPayout.create({
+      data: {
+        creatorUserId: userId,
+        amountCents: availableCents,
+        status: 'pending',
+      },
+      select: { id: true, amountCents: true },
+    });
+
+    await tx.creatorWalletLedger.create({
+      data: {
+        creatorUserId: userId,
+        type: 'payout',
+        amountCents: availableCents,
+        description: 'Payout requested',
+      },
+    });
+
+    return { payoutId: payout.id, amountCents: payout.amountCents };
   });
-  if (pendingCount > 0) {
-    throw new Error('Existing payout request is still pending');
-  }
 
-  const { availableCents } = await getPayoutBalance(userId);
-  if (availableCents < 500) {
-    throw new Error('Minimum payout is $5');
-  }
-
-  const payout = await prisma.creatorPayout.create({
-    data: {
-      creatorUserId: userId,
-      amountCents: availableCents,
-      status: 'pending',
-    },
-    select: { id: true, amountCents: true },
-  });
-
-  await prisma.creatorWalletLedger.create({
-    data: {
-      creatorUserId: userId,
-      type: 'payout',
-      amountCents: availableCents,
-      description: 'Payout requested',
-    },
-  });
-
-  return {
-    payoutId: payout.id,
-    amountCents: payout.amountCents,
-  };
+  return result;
 }
 
 type LedgerType = 'earning' | 'platform_fee' | 'refund' | 'payout';

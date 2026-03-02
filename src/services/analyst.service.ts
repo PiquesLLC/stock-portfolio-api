@@ -260,23 +260,24 @@ export async function getAnalystEvents(limit = 50, ticker?: string): Promise<any
   });
 }
 
-export async function getUnreadAnalystCount(): Promise<number> {
+export async function getUnreadAnalystCount(userId: string): Promise<number> {
+  // Per-user unread: events created after user's last read timestamp
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { analystLastReadAt: true },
+  });
+  const lastReadAt = settings?.analystLastReadAt;
   return prisma.analystEvent.count({
-    where: { read: false },
+    where: lastReadAt ? { createdAt: { gt: lastReadAt } } : {},
   });
 }
 
-export async function markAnalystEventRead(eventId: string): Promise<void> {
-  await prisma.analystEvent.update({
-    where: { id: eventId },
-    data: { read: true },
-  });
-}
 
-export async function markAllAnalystEventsRead(): Promise<void> {
-  await prisma.analystEvent.updateMany({
-    where: { read: false },
-    data: { read: true },
+export async function markAllAnalystEventsRead(userId: string): Promise<void> {
+  await prisma.userSettings.upsert({
+    where: { userId },
+    update: { analystLastReadAt: new Date() },
+    create: { userId, analystLastReadAt: new Date() },
   });
 }
 

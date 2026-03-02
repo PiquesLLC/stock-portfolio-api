@@ -8,6 +8,7 @@ import { resolveAccessLevel } from '../services/creator.service';
 
 
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const FREE_CHART_PERIODS = new Set(['1D', '1W', 'YTD']);
 
 /**
  * GET /users/by-username/:username
@@ -47,16 +48,26 @@ export async function getUserByUsernameHandler(req: AuthRequest, res: Response):
  */
 export async function getUsersHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const take = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
+    const cursor = req.query.cursor as string | undefined;
+
     const users = await prisma.user.findMany({
-      where: { profilePublic: true }, // Only show public profiles
+      where: { profilePublic: true },
       orderBy: { createdAt: 'asc' },
+      take: take + 1, // Fetch one extra to detect next page
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: {
         id: true,
-        displayName: true, // Exclude username to prevent enumeration
+        displayName: true,
         createdAt: true,
       },
     });
-    res.json(users);
+
+    const hasMore = users.length > take;
+    const results = hasMore ? users.slice(0, take) : users;
+    const nextCursor = hasMore ? results[results.length - 1].id : undefined;
+
+    res.json({ users: results, nextCursor });
   } catch (_error) {
     console.error('Error fetching users:');
     res.status(500).json({ error: 'Failed to fetch users' });
@@ -97,7 +108,7 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
     // IDOR Protection: If profile is private and viewer is not the owner, deny access
     const isOwner = viewerId === userId;
     if (!targetUser.profilePublic && !isOwner) {
-      res.status(403).json({ error: 'This profile is private' });
+      res.status(404).json({ error: 'Not found' });
       return;
     }
 
@@ -157,13 +168,14 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
           .sort((a, b) => b.currentValue - a.currentValue)
           .slice(0, 5);
       } else if (vis === 'sectors') {
-        // Show only sector names, zero out individual holding details
+        // Show only sector names, zero out individual holding details including currentValue
         portfolio.holdings = portfolio.holdings.map(h => ({
           ...h,
           shares: 0,
           averageCost: 0,
           totalCost: 0,
           currentPrice: 0,
+          currentValue: 0,
           previousClose: 0,
           pl: 0,
           plPercent: 0,
@@ -217,6 +229,14 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       return;
     }
 
+    // Plan-based chart period gating (same as portfolio.controller.ts)
+    const plan = req.user?.plan ?? 'free';
+    const isProOrHigher = plan === 'pro' || plan === 'premium';
+    if (!isProOrHigher && !FREE_CHART_PERIODS.has(period)) {
+      res.status(403).json({ error: 'upgrade_required', requiredPlan: 'pro' });
+      return;
+    }
+
     // Privacy check: if viewer is not the owner, verify profile is public
     const isOwner = viewerId === userId;
     if (!isOwner) {
@@ -229,7 +249,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
         return;
       }
       if (!targetUser.profilePublic) {
-        res.status(403).json({ error: 'This profile is private' });
+        res.status(404).json({ error: 'Not found' });
         return;
       }
     }

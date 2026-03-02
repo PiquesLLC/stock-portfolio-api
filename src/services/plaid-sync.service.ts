@@ -99,7 +99,7 @@ export async function syncHoldingsFromPlaid(plaidItemId: string, userId: string)
       }
 
       const quantity = typeof plaidHolding.quantity === 'number' ? plaidHolding.quantity : null;
-      if (quantity == null || !Number.isFinite(quantity) || quantity < 0) {
+      if (quantity == null || !Number.isFinite(quantity) || quantity <= 0) {
         skipped += 1;
         skippedDetails.push({ ticker, name: security?.name ?? null, reason: 'Invalid quantity' });
         continue;
@@ -136,7 +136,7 @@ export async function syncHoldingsFromPlaid(plaidItemId: string, userId: string)
 
     // Standard equity/ETF/mutual fund
     const quantity = typeof plaidHolding.quantity === 'number' ? plaidHolding.quantity : null;
-    if (quantity == null || !Number.isFinite(quantity) || quantity < 0) {
+    if (quantity == null || !Number.isFinite(quantity) || quantity <= 0) {
       skipped += 1;
       skippedDetails.push({ ticker, name: security?.name ?? null, reason: 'Invalid quantity' });
       continue;

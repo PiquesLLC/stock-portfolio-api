@@ -59,7 +59,7 @@ model User {
   displayName            String
   passwordHash           String?
   plan                   String                 @default("free")
-  stripeCustomerId       String?
+  stripeCustomerId       String?                @unique
   stripeSubscriptionId   String?
   planExpiresAt          DateTime?
   planStartedAt          DateTime?
@@ -256,6 +256,25 @@ model UserSettings {
   cashInterestRate Float @default(0)
   ytdBaselineValue Float?
   updatedAt   DateTime @updatedAt
+
+  // Baseline tracking for performance measurement (per-user)
+  trackingStartDate   DateTime?
+  baselineTotalValue  Float?
+  baselineCashBalance Float?
+  baselineType        String?   // 'fresh_start' | 'existing_portfolio'
+
+  // Optional broker lifetime stats (user-provided, display-only)
+  brokerLifetimeDeposits    Float?
+  brokerLifetimeWithdrawals Float?
+  brokerLifetimeValue       Float?
+  brokerLifetimeAsOf        DateTime?
+
+  // Optional YTD tracking (user-provided for True YTD calculation)
+  ytdStartEquity       Float?
+  ytdNetContributions   Float?
+
+  // Per-user analyst event read tracking
+  analystLastReadAt    DateTime?
 }
 
 model Settings {

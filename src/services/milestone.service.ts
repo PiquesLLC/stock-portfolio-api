@@ -3,12 +3,12 @@ import { getPolygonQuotes } from '../utils/polygon';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 import { getMarketSession } from '../utils/market-hours';
 import { sendPushToUser } from './push.service';
-
-
+import NodeCache from 'node-cache';
 
 // Track which milestones we've already notified (ticker-userId-type -> timestamp)
 // This prevents spam if a stock hovers near a milestone
-const recentNotifications = new Map<string, number>();
+// Auto-evicts entries after 24h to prevent memory leaks
+const recentNotifications = new NodeCache({ stdTTL: 24 * 60 * 60, checkperiod: 600 });
 
 // Cooldowns per event type — ATH/ATL/52W use 4 hours to avoid spam during
 // rapid price movements while still catching genuinely new records later in the day
@@ -154,7 +154,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
           }
 
           const notificationKey = `${ticker}-${userId}-${type}`;
-          const lastNotified = recentNotifications.get(notificationKey) || 0;
+          const lastNotified = recentNotifications.get<number>(notificationKey) || 0;
           const now = Date.now();
           const cooldown = COOLDOWN_MS[type] ?? DEFAULT_COOLDOWN_MS;
 

@@ -663,7 +663,7 @@ export async function startDeepResearch(
     where: {
       userId,
       createdAt: { gte: monthStart },
-      status: { notIn: ['cancelled'] },
+      status: { notIn: ['failed'] },
     },
   });
   if (monthlyUsed >= config.deepResearchMonthlyLimit) {
@@ -907,7 +907,7 @@ export async function submitFollowUp(
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
   const monthlyUsed = await prisma.deepResearchJob.count({
-    where: { userId, createdAt: { gte: monthStart }, status: { notIn: ['cancelled'] } },
+    where: { userId, createdAt: { gte: monthStart }, status: { notIn: ['failed'] } },
   });
   if (monthlyUsed >= config.deepResearchMonthlyLimit) {
     throw new MonthlyLimitError(config.deepResearchMonthlyLimit, monthlyUsed);
@@ -1054,7 +1054,7 @@ export async function pollActiveResearchJobs(): Promise<void> {
     try {
       // Try to acquire lease. If another instance grabbed it first, this will
       // succeed but the job may have already been processed.
-      await prisma.deepResearchJob.updateMany({
+      const leaseResult = await prisma.deepResearchJob.updateMany({
         where: {
           id: job.id,
           OR: [
@@ -1067,6 +1067,7 @@ export async function pollActiveResearchJobs(): Promise<void> {
           leaseUntil: leaseExpiry,
         },
       });
+      if (leaseResult.count === 0) continue; // Another instance acquired the lease
     } catch {
       continue; // Another instance acquired the lease
     }

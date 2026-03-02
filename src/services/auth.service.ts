@@ -12,6 +12,11 @@ import { sendEmailVerification, sendPasswordResetEmail } from './email.service';
 const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+
+/** Hash a refresh token for storage — raw token is only returned to the client. */
+function hashRefreshToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
 const EMAIL_VERIFY_MAX_ATTEMPTS = 5;
 const EMAIL_RESEND_LIMIT_PER_HOUR = 3;
 const PASSWORD_RESET_MAX_ATTEMPTS = 5;
@@ -22,7 +27,7 @@ function normalizeEmail(email: string): string {
 }
 
 function generateEmailOtpCode(): string {
-  return String(crypto.randomInt(100000, 999999));
+  return String(crypto.randomInt(100000, 1000000));
 }
 
 async function issueEmailVerificationCode(userId: string, email: string): Promise<void> {
@@ -92,7 +97,8 @@ export function generateAccessToken(payload: JwtPayload): string {
 }
 
 /**
- * Generate a JWT token for a user (backward-compatible, uses legacy 7d expiry)
+ * @deprecated Use generateAccessToken() for short-lived (15m) access tokens
+ * paired with refresh tokens. This function exists only for test compatibility.
  */
 export function generateToken(payload: JwtPayload): string {
   const secret: Secret = config.jwtSecret;
@@ -104,16 +110,17 @@ export function generateToken(payload: JwtPayload): string {
  * Generate a cryptographically random refresh token and store it in the database
  */
 export async function generateRefreshToken(userId: string, family?: string): Promise<string> {
-  const token = crypto.randomBytes(64).toString('hex');
+  const rawToken = crypto.randomBytes(64).toString('hex');
+  const tokenHash = hashRefreshToken(rawToken);
   const tokenFamily = family ?? crypto.randomUUID();
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + config.refreshTokenExpiresInDays);
 
   await prisma.refreshToken.create({
-    data: { token, userId, family: tokenFamily, expiresAt },
+    data: { token: tokenHash, userId, family: tokenFamily, expiresAt },
   });
 
-  return token;
+  return rawToken;
 }
 
 /**
@@ -123,8 +130,9 @@ export async function generateRefreshToken(userId: string, family?: string): Pro
 export async function rotateRefreshToken(
   oldToken: string
 ): Promise<{ accessToken: string; refreshToken: string; payload: JwtPayload } | null> {
+  const oldTokenHash = hashRefreshToken(oldToken);
   const stored = await prisma.refreshToken.findUnique({
-    where: { token: oldToken },
+    where: { token: oldTokenHash },
     include: { user: { select: { id: true, username: true, plan: true, planExpiresAt: true, emailVerified: true } } },
   });
 
@@ -133,9 +141,17 @@ export async function rotateRefreshToken(
   }
   const tokenFamily = stored.family ?? stored.id;
 
+  const buildPayload = (): JwtPayload => ({
+    userId: stored.user.id,
+    username: stored.user.username,
+    plan: stored.user.plan,
+    planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
+    emailVerified: stored.user.emailVerified ?? false,
+  });
+
   if (stored.revokedAt) {
-    // Token was already revoked (by a previous rotation). Try to find the
-    // latest valid token in the family and return it with a fresh access token.
+    // Token was already revoked (by a previous rotation). Check if there's
+    // still a valid token in the family — if so, issue a fresh token pair.
     // This handles both concurrent-request races AND the case where a browser
     // held a stale token (e.g., network drop prevented cookie update).
     // We intentionally do NOT revoke the entire family — doing so causes
@@ -147,14 +163,10 @@ export async function rotateRefreshToken(
     if (!latestValid) {
       return null;
     }
-    const payload: JwtPayload = {
-      userId: stored.user.id,
-      username: stored.user.username,
-      plan: stored.user.plan,
-      planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
-      emailVerified: stored.user.emailVerified ?? false,
-    };
-    return { accessToken: generateAccessToken(payload), refreshToken: latestValid.token, payload };
+    // Issue a new token pair (we can't return the stored hash as a raw token)
+    const payload = buildPayload();
+    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
+    return { accessToken: generateAccessToken(payload), refreshToken, payload };
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds
@@ -164,9 +176,8 @@ export async function rotateRefreshToken(
   });
 
   if (revoked.count === 0) {
-    // Another request already revoked it — find the latest valid token in the
-    // family and return it with a fresh access token.
-    await new Promise(r => setTimeout(r, 50));
+    // Another request already revoked it — find if a valid token exists in the
+    // family, and if so issue a new token pair.
     const latestValid = await prisma.refreshToken.findFirst({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
@@ -174,23 +185,12 @@ export async function rotateRefreshToken(
     if (!latestValid) {
       return null;
     }
-    const payload: JwtPayload = {
-      userId: stored.user.id,
-      username: stored.user.username,
-      plan: stored.user.plan,
-      planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
-      emailVerified: stored.user.emailVerified ?? false,
-    };
-    return { accessToken: generateAccessToken(payload), refreshToken: latestValid.token, payload };
+    const payload = buildPayload();
+    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
+    return { accessToken: generateAccessToken(payload), refreshToken, payload };
   }
 
-  const payload: JwtPayload = {
-    userId: stored.user.id,
-    username: stored.user.username,
-    plan: stored.user.plan,
-    planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
-    emailVerified: stored.user.emailVerified ?? false,
-  };
+  const payload = buildPayload();
   const accessToken = generateAccessToken(payload);
   const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
 
@@ -201,8 +201,9 @@ export async function rotateRefreshToken(
  * Revoke a single refresh token family (e.g., on logout — only affects current device)
  */
 export async function revokeRefreshTokenFamily(refreshTokenValue: string): Promise<void> {
+  const tokenHash = hashRefreshToken(refreshTokenValue);
   const stored = await prisma.refreshToken.findUnique({
-    where: { token: refreshTokenValue },
+    where: { token: tokenHash },
     select: { userId: true, family: true, id: true },
   });
   if (!stored) return;
@@ -393,6 +394,10 @@ export async function changePassword(
     data: { passwordHash },
   });
 
+  // Revoke all existing sessions — if the user changed their password because
+  // they suspect compromise, the attacker's sessions must be invalidated.
+  await revokeAllRefreshTokens(userId);
+
   return { success: true };
 }
 
@@ -484,49 +489,58 @@ export async function signup(
 
   const passwordHash = await hashPassword(password);
 
-  const user = await prisma.$transaction(async (tx) => {
-    const newUser = await tx.user.create({
-      data: {
-        username,
-        email: normalizedEmail,
-        emailVerified: false,
-        displayName,
-        passwordHash,
-        profilePublic: true,
-        leaderboardEligible: true,
-        trackingStartAt: new Date(),
-      },
-      select: {
-        id: true,
-        username: true,
-        displayName: true,
-        email: true,
-        emailVerified: true,
-        plan: true,
-        planExpiresAt: true,
-      },
-    });
+  let user;
+  try {
+    user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          username,
+          email: normalizedEmail,
+          emailVerified: false,
+          displayName,
+          passwordHash,
+          profilePublic: true,
+          leaderboardEligible: true,
+          trackingStartAt: new Date(),
+        },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          email: true,
+          emailVerified: true,
+          plan: true,
+          planExpiresAt: true,
+        },
+      });
 
-    await tx.userSettings.create({
-      data: {
-        userId: newUser.id,
-        cashBalance: 0,
-        marginDebt: 0,
-        dripEnabled: false,
-      },
-    });
+      await tx.userSettings.create({
+        data: {
+          userId: newUser.id,
+          cashBalance: 0,
+          marginDebt: 0,
+          dripEnabled: false,
+        },
+      });
 
-    await tx.consentRecord.create({
-      data: {
-        userId: newUser.id,
-        policyVersion: CURRENT_POLICY_VERSION,
-        ipAddress: consentMeta?.ipAddress,
-        userAgent: consentMeta?.userAgent,
-      },
-    });
+      await tx.consentRecord.create({
+        data: {
+          userId: newUser.id,
+          policyVersion: CURRENT_POLICY_VERSION,
+          ipAddress: consentMeta?.ipAddress,
+          userAgent: consentMeta?.userAgent,
+        },
+      });
 
-    return newUser;
-  });
+      return newUser;
+    });
+  } catch (e: unknown) {
+    // Handle race condition: username or email taken between check and create
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
+      return null;
+    }
+    throw e;
+  }
 
   // Mark waitlist entry as converted (non-blocking)
   if (config.waitlistEnabled) {

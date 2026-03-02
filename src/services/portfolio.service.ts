@@ -15,7 +15,17 @@ export async function getHoldings(userId: string): Promise<Holding[]> {
   });
 }
 
-export async function upsertHolding(input: HoldingInput, userId: string): Promise<Holding> {
+export async function upsertHolding(
+  input: HoldingInput,
+  userId: string,
+  mode: 'replace' | 'add' = 'replace',
+): Promise<Holding> {
+  if (!Number.isFinite(input.shares) || input.shares <= 0) {
+    throw new Error('shares must be a positive number');
+  }
+  if (!Number.isFinite(input.averageCost) || input.averageCost <= 0) {
+    throw new Error('averageCost must be a positive number');
+  }
   const ticker = input.ticker.toUpperCase();
   const uid = userId;
 
@@ -24,6 +34,21 @@ export async function upsertHolding(input: HoldingInput, userId: string): Promis
   });
 
   if (existing) {
+    if (mode === 'add') {
+      // Weighted-average cost basis blending
+      const totalShares = existing.shares + input.shares;
+      const blendedCost = totalShares > 0
+        ? (existing.shares * existing.averageCost + input.shares * input.averageCost) / totalShares
+        : input.averageCost;
+      return prisma.holding.update({
+        where: { id: existing.id },
+        data: {
+          shares: totalShares,
+          averageCost: Math.round(blendedCost * 100) / 100,
+        },
+      });
+    }
+    // mode === 'replace': explicit overwrite
     return prisma.holding.update({
       where: { id: existing.id },
       data: {
@@ -33,34 +58,46 @@ export async function upsertHolding(input: HoldingInput, userId: string): Promis
     });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: uid },
-    select: { plan: true },
-  });
-  const plan = user?.plan ?? 'free';
-  if (plan === 'free') {
-    const currentCount = await prisma.holding.count({ where: { userId: uid } });
-    if (currentCount >= 10) {
-      throw new PlanLimitError(10, 'free');
+  // Wrap count check + create in a transaction to prevent TOCTOU race
+  // (two concurrent requests both reading count=9, both passing, both creating → 11 holdings)
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: uid },
+      select: { plan: true },
+    });
+    const plan = user?.plan ?? 'free';
+    if (plan === 'free') {
+      const currentCount = await tx.holding.count({ where: { userId: uid } });
+      if (currentCount >= 10) {
+        throw new PlanLimitError(10, 'free');
+      }
     }
-  }
 
-  return prisma.holding.create({
-    data: {
-      ticker,
-      shares: input.shares,
-      averageCost: input.averageCost,
-      userId: uid,
-    },
+    return tx.holding.create({
+      data: {
+        ticker,
+        shares: input.shares,
+        averageCost: input.averageCost,
+        userId: uid,
+      },
+    });
   });
 }
 
 export async function deleteHolding(ticker: string, userId: string): Promise<void> {
+  const normalizedTicker = ticker.toUpperCase();
   const existing = await prisma.holding.findFirst({
-    where: { ticker: ticker.toUpperCase(), userId },
+    where: { ticker: normalizedTicker, userId },
   });
   if (existing) {
-    await prisma.holding.delete({ where: { id: existing.id } });
+    await prisma.$transaction(async (tx) => {
+      // Cascade cleanup: lots, trades, and dividend records tied to this ticker
+      await tx.lot.deleteMany({ where: { ticker: normalizedTicker, userId } });
+      await tx.portfolioTrade.deleteMany({ where: { ticker: normalizedTicker, userId } });
+      await tx.dividendCredit.deleteMany({ where: { ticker: normalizedTicker, userId } });
+      await tx.dividendReinvestment.deleteMany({ where: { ticker: normalizedTicker, userId } });
+      await tx.holding.delete({ where: { id: existing.id } });
+    });
   }
 }
 
@@ -245,8 +282,8 @@ export async function getPortfolio(userId: string, options?: { preferPolygon?: b
       regularHoldingsValue += regValue;
       regularDayChange += regValue - previousValue;
       afterHoursChange += currentValue - regValue;
+      totalCost += holdingTotalCost;
     }
-    totalCost += holdingTotalCost;
 
     return {
       ...holding,
@@ -265,25 +302,8 @@ export async function getPortfolio(userId: string, options?: { preferPolygon?: b
     };
   });
 
-  // Calculate portfolio totals
-  // totalAssets = holdingsValue + cashBalance (NO marginDebt - for performance tracking)
-  const totalAssets = holdingsValue + settings.cashBalance;
-  // netEquity = totalAssets - marginDebt (for balance sheet display only)
-  const netEquity = totalAssets - marginDebt;
-
-  // Total P/L is unrealized P/L from holdings (market value - cost basis)
-  const totalPL = holdingsValue - totalCost;
-  const totalPLPercent = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
-
-  // Day change is based on holdings price movement
-  const previousHoldingsValue = holdingsValue - dayChange;
-  const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
-
-  // Regular-hours and after-hours change percents
-  const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
-  const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
-
-  // Price options via Finnhub option chain
+  // Price options via Finnhub option chain (BEFORE computing portfolio totals,
+  // so holdingsValue/totalCost include options)
   let optionsWithQuotes: OptionWithQuote[] = [];
   if (optionHoldings.length > 0) {
     const optionPositions = optionHoldings
@@ -346,6 +366,24 @@ export async function getPortfolio(userId: string, options?: { preferPolygon?: b
       };
     });
   }
+
+  // Calculate portfolio totals AFTER options are included in holdingsValue/totalCost
+  // totalAssets = holdingsValue + cashBalance (NO marginDebt - for performance tracking)
+  const totalAssets = holdingsValue + settings.cashBalance;
+  // netEquity = totalAssets - marginDebt (for balance sheet display only)
+  const netEquity = totalAssets - marginDebt;
+
+  // Total P/L is unrealized P/L from holdings (market value - cost basis)
+  const totalPL = holdingsValue - totalCost;
+  const totalPLPercent = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
+
+  // Day change is based on holdings price movement
+  const previousHoldingsValue = holdingsValue - dayChange;
+  const dayChangePercent = previousHoldingsValue > 0 ? (dayChange / previousHoldingsValue) * 100 : 0;
+
+  // Regular-hours and after-hours change percents
+  const regularDayChangePercent = previousHoldingsValue > 0 ? (regularDayChange / previousHoldingsValue) * 100 : 0;
+  const afterHoursChangePercent = regularHoldingsValue > 0 ? (afterHoursChange / regularHoldingsValue) * 100 : 0;
 
   // Build quotes metadata
   const quotesMeta: QuotesMeta = {

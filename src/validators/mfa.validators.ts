@@ -16,6 +16,7 @@ export const disableMfaSchema = z.object({
 
 export const updateEmailSchema = z.object({
   email: z.string().email('Invalid email address'),
+  password: z.string().min(1, 'Password is required'),
 });
 
 export const verifyEmailSchema = z.object({

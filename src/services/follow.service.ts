@@ -48,6 +48,7 @@ export async function getFollowers(userId: string): Promise<{ id: string; userna
       },
     },
     orderBy: { createdAt: 'desc' },
+    take: 200,
   });
   return follows.map((f) => f.follower);
 }
@@ -61,6 +62,7 @@ export async function getFollowing(userId: string): Promise<{ id: string; userna
       },
     },
     orderBy: { createdAt: 'desc' },
+    take: 200,
   });
   return follows.map((f) => f.following);
 }

@@ -164,6 +164,8 @@ function ensureCreatorMockShape(): void {
 
   p.creatorWalletLedger ??= {};
   p.creatorWalletLedger.findFirst ??= vi.fn();
+  p.creatorWalletLedger.findMany ??= vi.fn().mockResolvedValue([]);
+  p.creatorWalletLedger.count ??= vi.fn().mockResolvedValue(0);
   p.creatorWalletLedger.create ??= vi.fn();
   p.creatorWalletLedger.createMany ??= vi.fn();
 

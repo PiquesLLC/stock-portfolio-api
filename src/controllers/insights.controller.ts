@@ -183,7 +183,11 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
     if (!requirePremium(res)) return;
     const report = await getDailyReport(req.user!.userId);
     res.json(report);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('Daily report error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
@@ -215,7 +219,11 @@ export async function regenerateDailyReportHandler(req: AuthRequest, res: Respon
     if (!requirePremium(res)) return;
     const report = await regenerateDailyReport(req.user!.userId);
     res.json(report);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof EmailVerificationRequiredError) {
+      res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
     console.error('Daily report regenerate error:');
     res.status(500).json({
       generatedAt: new Date().toISOString(),
@@ -237,11 +245,19 @@ export async function explainBriefingHandler(req: AuthRequest, res: Response): P
       return;
     }
     const { title, body } = req.body;
-    if (!title || !body) {
-      res.status(400).json({ error: 'title and body are required' });
+    if (!title || typeof title !== 'string' || !body || typeof body !== 'string') {
+      res.status(400).json({ error: 'title and body are required strings' });
       return;
     }
-    const result = await explainBriefingSection(title, body, req.user.userId);
+    if (title.length > 100) {
+      res.status(400).json({ error: 'title must be 100 characters or fewer' });
+      return;
+    }
+    if (body.length > 1000) {
+      res.status(400).json({ error: 'body must be 1000 characters or fewer' });
+      return;
+    }
+    const result = await explainBriefingSection(title.slice(0, 100), body.slice(0, 1000), req.user.userId);
     res.json(result);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {

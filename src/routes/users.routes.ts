@@ -27,8 +27,8 @@ router.get('/:userId/portfolio', optionalAuth, getUserPortfolioHandler); // Resp
 router.get('/:userId/chart', optionalAuth, getUserChartHandler);
 router.get('/:userId/profile', optionalAuth, getProfileHandler); // Respects profilePublic
 router.get('/:userId/is-following', optionalAuth, isFollowingHandler);
-router.get('/:userId/followers', getFollowersHandler);
-router.get('/:userId/following', getFollowingHandler);
+router.get('/:userId/followers', optionalAuth, getFollowersHandler);
+router.get('/:userId/following', optionalAuth, getFollowingHandler);
 router.get('/:userId/settings', requireAuth, getUserSettingsHandler); // Owner only
 router.get('/:userId/intelligence', optionalAuth, getUserIntelligenceHandler);
 

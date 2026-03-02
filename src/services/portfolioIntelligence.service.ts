@@ -409,6 +409,7 @@ async function computeHeroStats(
   holdings: HoldingWithQuote[],
   contributions: HoldingContribution[],
   window: IntelligenceWindow,
+  userId: string,
   candleData?: Map<string, HistoricalCandles> | null
 ): Promise<HeroStats> {
   const periodLabel = window === '1d' ? 'today' : window === '5d' ? 'this week' : 'this month';
@@ -604,7 +605,7 @@ async function computeHeroStats(
     }
 
     const lookbackDays = window === '1m' ? 30 : 10;
-    const allSnaps = await getRecentHoldingSnapshots(lookbackDays);
+    const allSnaps = await getRecentHoldingSnapshots(userId, lookbackDays);
     const holdingSnaps = allSnaps.filter(s => heldTickers.has(s.ticker));
 
     // Group snapshots by date -> ticker -> dayPLPercent
@@ -782,7 +783,7 @@ async function computeIntelligence(
   const explanation = generateExplanation(contributions, window);
 
   // Compute hero stats for all windows
-  const heroStats = await computeHeroStats(holdings, contributions, window, candleData);
+  const heroStats = await computeHeroStats(holdings, contributions, window, userId, candleData);
 
   const hasContributions = contributors.length > 0 || detractors.length > 0;
   const isIncomplete = window !== '1d' && !hasContributions;

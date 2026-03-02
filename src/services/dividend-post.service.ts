@@ -13,7 +13,7 @@ import { isDripEnabled, reinvestDividend } from './drip.service';
  * Post dividends for all events with payDate on the given date.
  * For each event, finds users holding that ticker and credits them.
  */
-export async function postDividendsForDate(date: Date = new Date()): Promise<{ posted: number; skipped: number }> {
+export async function postDividendsForDate(date: Date = new Date(), userId?: string): Promise<{ posted: number; skipped: number }> {
   // Normalize to start/end of day
   const dayStart = new Date(date);
   dayStart.setHours(0, 0, 0, 0);
@@ -34,9 +34,9 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
   let skipped = 0;
 
   for (const event of events) {
-    // Find all holdings of this ticker (across all users)
+    // Find holdings of this ticker (scoped to userId if provided, otherwise all users)
     const holdings = await prisma.holding.findMany({
-      where: { ticker: event.ticker },
+      where: { ticker: event.ticker, ...(userId ? { userId } : {}) },
     });
 
     for (const holding of holdings) {
@@ -132,7 +132,7 @@ export async function postDividendsForDate(date: Date = new Date()): Promise<{ p
  * Iterates each unique past payDate and calls postDividendsForDate.
  * Idempotent â€” safe to run multiple times.
  */
-export async function backfillMissedDividends(): Promise<{ totalPosted: number; totalSkipped: number; datesProcessed: number }> {
+export async function backfillMissedDividends(userId?: string): Promise<{ totalPosted: number; totalSkipped: number; datesProcessed: number }> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -151,7 +151,7 @@ export async function backfillMissedDividends(): Promise<{ totalPosted: number; 
   let totalSkipped = 0;
 
   for (const { payDate } of pastEvents) {
-    const { posted, skipped } = await postDividendsForDate(payDate);
+    const { posted, skipped } = await postDividendsForDate(payDate, userId);
     totalPosted += posted;
     totalSkipped += skipped;
   }

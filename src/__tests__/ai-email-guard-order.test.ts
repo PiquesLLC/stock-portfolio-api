@@ -6,13 +6,12 @@ const orderState = {
   planCalled: false,
 };
 
-vi.mock('../middleware/rateLimiter', () => {
-  const passthrough = (req: any, res: any, next: any) => next();
-  return {
-    heavyReadLimiter: passthrough,
-    mutationLimiter: passthrough,
-    waitlistJoinLimiter: passthrough,
-  };
+vi.mock('../middleware/rateLimiter', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const passthrough = (_req: any, _res: any, next: any) => next();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? passthrough : v]),
+  );
 });
 
 // requireAuth now embeds the email verification gate — simulate unverified user

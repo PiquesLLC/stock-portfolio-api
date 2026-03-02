@@ -108,11 +108,11 @@ export async function getReferralStats(userId: string) {
 /**
  * Validate a referral code (check if user exists).
  */
-export async function validateReferralCode(code: string): Promise<{ valid: boolean; displayName?: string }> {
+export async function validateReferralCode(code: string): Promise<{ valid: boolean }> {
   const user = await prisma.user.findUnique({
     where: { username: code },
-    select: { displayName: true },
+    select: { id: true },
   });
   if (!user) return { valid: false };
-  return { valid: true, displayName: user.displayName };
+  return { valid: true };
 }

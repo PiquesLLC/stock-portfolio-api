@@ -13,6 +13,6 @@ router.post('/subscribe', mutationLimiter, requireAuth, subscribeHandler);
 router.delete('/subscribe', mutationLimiter, requireAuth, unsubscribeHandler);
 
 // Test endpoint — send a test push to yourself
-router.post('/test', requireAuth, testPushHandler);
+router.post('/test', mutationLimiter, requireAuth, testPushHandler);
 
 export default router;

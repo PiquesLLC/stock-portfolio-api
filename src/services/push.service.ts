@@ -33,11 +33,22 @@ interface SubscriptionInput {
  * If the endpoint already exists for another user (shared device),
  * it rebinds to the current user.
  */
+const MAX_SUBSCRIPTIONS_PER_USER = 10;
+
 export async function saveSubscription(
   userId: string,
   subscription: SubscriptionInput,
   userAgent?: string,
 ): Promise<void> {
+  // Check per-user cap (only for new endpoints, not upserts)
+  const existing = await prisma.pushSubscription.findUnique({ where: { endpoint: subscription.endpoint } });
+  if (!existing) {
+    const count = await prisma.pushSubscription.count({ where: { userId } });
+    if (count >= MAX_SUBSCRIPTIONS_PER_USER) {
+      throw new Error('Maximum push subscriptions reached');
+    }
+  }
+
   await prisma.pushSubscription.upsert({
     where: { endpoint: subscription.endpoint },
     update: {

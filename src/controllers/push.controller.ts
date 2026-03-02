@@ -33,6 +33,19 @@ export async function subscribeHandler(req: AuthRequest, res: Response): Promise
     return;
   }
 
+  // Validate endpoint is a legitimate push service URL (SSRF prevention)
+  try {
+    const endpointUrl = new URL(subscription.endpoint);
+    const PUSH_DOMAINS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', 'push.services.mozilla.com'];
+    if (endpointUrl.protocol !== 'https:' || !PUSH_DOMAINS.some(d => endpointUrl.hostname.endsWith(d))) {
+      res.status(400).json({ error: 'Invalid push endpoint domain' });
+      return;
+    }
+  } catch {
+    res.status(400).json({ error: 'Invalid push endpoint URL' });
+    return;
+  }
+
   if (typeof subscription.keys.p256dh !== 'string' || subscription.keys.p256dh.length > MAX_KEY_LENGTH) {
     res.status(400).json({ error: `p256dh key must be a string under ${MAX_KEY_LENGTH} chars` });
     return;
