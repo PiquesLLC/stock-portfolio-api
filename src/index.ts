@@ -147,6 +147,39 @@ const server = app.listen(config.port, async () => {
   // One-time cleanup of incorrectly migrated holdings
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));
 
+  // ONE-TIME DIAGNOSTIC: Compare production Piques holdings vs expected — remove after checking
+  (async () => {
+    const userId = '237198da-612e-411c-9ef8-f267c887a9f1';
+    const holdings = await prisma.holding.findMany({ where: { userId }, select: { ticker: true, shares: true, averageCost: true }, orderBy: { ticker: 'asc' } });
+    const settings = await prisma.userSettings.findUnique({ where: { userId }, select: { cashBalance: true, marginDebt: true } });
+    console.log(`[DIAG] Piques holdings (${holdings.length}):`);
+    holdings.forEach(h => console.log(`[DIAG]   ${h.ticker.padEnd(6)} shares=${h.shares} avgCost=${h.averageCost}`));
+    console.log(`[DIAG] Settings: cash=${settings?.cashBalance} margin=${settings?.marginDebt}`);
+
+    // Expected from local jppiques (the correct account):
+    const expected: Record<string, { shares: number; avgCost: number }> = {
+      AMZN: { shares: 150, avgCost: 234.05 }, ASML: { shares: 15, avgCost: 1069.38 },
+      AXP: { shares: 75.169, avgCost: 373.62 }, BABA: { shares: 60, avgCost: 179.44 },
+      CAT: { shares: 20, avgCost: 692.78 }, CSX: { shares: 250, avgCost: 41.02 },
+      EEM: { shares: 300, avgCost: 60.13 }, FEZ: { shares: 150, avgCost: 67.9 },
+      GOOGL: { shares: 200, avgCost: 192.39 }, LMT: { shares: 30, avgCost: 503.01 },
+      MLM: { shares: 20, avgCost: 700 }, MSFT: { shares: 28, avgCost: 412.12 },
+      PWR: { shares: 20, avgCost: 530.48 }, RDDT: { shares: 83, avgCost: 199.49 },
+      SPY: { shares: 285.211295, avgCost: 542.11 }, TSM: { shares: 70, avgCost: 186.44 },
+      VRT: { shares: 60, avgCost: 188.58 }, WMT: { shares: 282.19, avgCost: 98.78 },
+    };
+    const prodTickers = new Set(holdings.map(h => h.ticker));
+    const expectedTickers = new Set(Object.keys(expected));
+    for (const t of expectedTickers) { if (!prodTickers.has(t)) console.log(`[DIAG] MISSING: ${t}`); }
+    for (const t of prodTickers) { if (!expectedTickers.has(t)) console.log(`[DIAG] EXTRA: ${t}`); }
+    for (const h of holdings) {
+      const e = expected[h.ticker];
+      if (e && (h.shares !== e.shares || h.averageCost !== e.avgCost)) {
+        console.log(`[DIAG] MISMATCH ${h.ticker}: prod shares=${h.shares} avgCost=${h.averageCost} vs expected shares=${e.shares} avgCost=${e.avgCost}`);
+      }
+    }
+  })().catch(err => console.error('[DIAG] Failed:', err.message));
+
   // Cache benchmark data on startup and every 6 hours
   ensureBenchmarksCached()
     .then(() => {
