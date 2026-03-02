@@ -29,9 +29,9 @@ export function requirePlan(requiredPlan: PlanTier) {
       let userPlan = normalizePlan(req.user.plan);
       let planExpiresAt = req.user.planExpiresAt ? new Date(req.user.planExpiresAt) : null;
 
-      // Always check DB when JWT plan is insufficient — handles JWT plan lag
-      // (e.g. plan updated in DB but JWT not yet refreshed)
-      if (!req.user.plan || PLAN_LEVEL[userPlan] < PLAN_LEVEL[requiredPlan]) {
+      // Always check DB for paid-tier routes or when JWT plan is insufficient
+      // This catches both upgrade lag AND revocation (refund/cancel) within JWT lifetime
+      if (PLAN_LEVEL[requiredPlan] > 0 || !req.user.plan || PLAN_LEVEL[userPlan] < PLAN_LEVEL[requiredPlan]) {
         const user = await prisma.user.findUnique({
           where: { id: req.user.userId },
           select: { plan: true, planExpiresAt: true },

@@ -62,13 +62,13 @@ export async function unfollowHandler(req: AuthRequest, res: Response): Promise<
   }
 }
 
-// GET /users/:userId/is-following?followerId=X
-export async function isFollowingHandler(req: Request, res: Response): Promise<void> {
+// GET /users/:userId/is-following — uses authenticated user as followerId
+export async function isFollowingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
-    const followerId = req.query.followerId as string;
+    const followerId = req.user?.userId;
     if (!followerId) {
-      res.status(400).json({ error: 'followerId query param is required' });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
     const following = await isFollowing(followerId, userId);
@@ -80,9 +80,24 @@ export async function isFollowingHandler(req: Request, res: Response): Promise<v
 }
 
 // GET /users/:userId/followers
-export async function getFollowersHandler(req: Request, res: Response): Promise<void> {
+export async function getFollowersHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const viewerId = req.user?.userId;
+    const isOwner = viewerId === userId;
+
+    // Privacy check: respect profilePublic for non-owners
+    if (!isOwner) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePublic: true },
+      });
+      if (!targetUser || !targetUser.profilePublic) {
+        res.json([]);
+        return;
+      }
+    }
+
     const followers = await getFollowers(userId);
     res.json(followers);
   } catch (_error) {
@@ -92,9 +107,24 @@ export async function getFollowersHandler(req: Request, res: Response): Promise<
 }
 
 // GET /users/:userId/following
-export async function getFollowingHandler(req: Request, res: Response): Promise<void> {
+export async function getFollowingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { userId } = req.params;
+    const viewerId = req.user?.userId;
+    const isOwner = viewerId === userId;
+
+    // Privacy check: respect profilePublic for non-owners
+    if (!isOwner) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePublic: true },
+      });
+      if (!targetUser || !targetUser.profilePublic) {
+        res.json([]);
+        return;
+      }
+    }
+
     const following = await getFollowing(userId);
     res.json(following);
   } catch (_error) {
@@ -315,7 +345,13 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
 
     // Build update data for User model
     const userData: Record<string, unknown> = {};
-    if (displayName !== undefined) userData.displayName = displayName;
+    if (displayName !== undefined) {
+      if (typeof displayName !== 'string' || displayName.trim().length === 0 || displayName.length > 50) {
+        res.status(400).json({ error: 'displayName must be a string, max 50 chars' });
+        return;
+      }
+      userData.displayName = displayName.trim();
+    }
     if (profilePublic !== undefined) userData.profilePublic = profilePublic;
     if (region !== undefined) userData.region = region;
     if (showRegion !== undefined) userData.showRegion = showRegion;

@@ -84,9 +84,8 @@ export async function resolveAccessLevel(creatorUserId: string, viewerId?: strin
         status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
         OR: [
           { trialEnd: { gt: now } },
-          // Null period end can occur briefly for a just-created Stripe subscription;
-          // allow access until Stripe writes the first billing-cycle boundary.
-          { currentPeriodEnd: null },
+          // Null period end: grace period for just-created subscriptions (24h max)
+          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
           { currentPeriodEnd: { gt: now } },
         ],
       },
@@ -329,15 +328,22 @@ export async function getLockedContent(
       }));
     }
     case 'tradeHistory': {
-      const tx = await prisma.transaction.findMany({
+      const trades = await prisma.portfolioTrade.findMany({
         where: {
           userId: creatorUserId,
           date: { lte: tradeDelayCutoff },
         },
         orderBy: { date: 'desc' },
         take: 200,
+        select: {
+          ticker: true,
+          type: true,
+          date: true,
+          shares: hideShareCount ? false : true,
+          price: true,
+        },
       });
-      return tx;
+      return trades;
     }
     case 'watchlists': {
       const watchlists = await prisma.watchlist.findMany({
@@ -518,12 +524,26 @@ export async function reportCreator(
     throw new Error('Creator not found');
   }
 
+  // Prevent duplicate reports from same user within 24h
+  const recentReport = await prisma.creatorReport.findFirst({
+    where: {
+      reporterUserId,
+      creatorUserId,
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+  });
+  if (recentReport) {
+    throw new Error('You have already reported this creator recently');
+  }
+
+  const trimmedDesc = description?.trim().slice(0, 2000) || null;
+
   await prisma.creatorReport.create({
     data: {
       reporterUserId,
       creatorUserId,
       reason,
-      description: description?.trim() || null,
+      description: trimmedDesc,
       status: 'open',
     },
   });
@@ -680,10 +700,12 @@ export async function discoverCreators(params: {
   };
 
   // All sorts use in-memory approach since we're joining User + Creator + LeaderboardCache
-  // and sorting on derived fields (returnPct, subscriberCount, pricingCents)
+  // and sorting on derived fields (returnPct, subscriberCount, pricingCents).
+  // Cap at 500 to prevent unbounded memory usage.
   const allUsers = await prisma.user.findMany({
     where: where as any,
     include: includeRelations,
+    take: 500,
   });
 
   // Collect creator userIds for subscriber counts

@@ -6,7 +6,7 @@ import { getReferralStats, validateReferralCode } from '../services/referral.ser
  */
 export async function getReferralStatsHandler(req: Request, res: Response): Promise<void> {
   try {
-    const userId = (req as any).userId;
+    const userId = (req as any).user?.userId;
     if (!userId) {
       res.status(401).json({ error: 'Authentication required' });
       return;

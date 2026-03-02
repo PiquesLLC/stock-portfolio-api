@@ -248,7 +248,7 @@ export async function getRealizedProjections(
 
   // Get dividends in the period
   const dividendStartDate = startDate || (allSnapshots.length > 0 ? new Date(allSnapshots[0].timestamp) : new Date());
-  const totalDividends = await getTotalDividendsBetween(dividendStartDate, new Date());
+  const totalDividends = await getTotalDividendsBetween(userId, dividendStartDate, new Date());
 
   // Calculate metrics
   const { metrics: realized, notes } = calculateRealizedMetrics(snapshots, totalDividends);
@@ -323,7 +323,7 @@ export async function getMetrics(userId: string, lookback: LookbackPeriod = '1y'
     : allSnapshots;
 
   const dividendStartDate = startDate || (allSnapshots.length > 0 ? new Date(allSnapshots[0].timestamp) : new Date());
-  const totalDividends = await getTotalDividendsBetween(dividendStartDate, new Date());
+  const totalDividends = await getTotalDividendsBetween(userId, dividendStartDate, new Date());
 
   const { metrics, notes } = calculateRealizedMetrics(snapshots, totalDividends);
 

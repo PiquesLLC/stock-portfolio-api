@@ -2,7 +2,6 @@ import { Router } from 'express';
 import {
   getAnalystEventsHandler,
   getUnreadAnalystCountHandler,
-  markAnalystEventReadHandler,
   markAllAnalystEventsReadHandler,
   getAnalystSnapshotHandler,
 } from '../controllers/analyst.controller';
@@ -16,7 +15,8 @@ router.get('/events', requireAuth, getAnalystEventsHandler);
 router.get('/events/unread-count', requireAuth, getUnreadAnalystCountHandler);
 
 // Mutations — require auth + rate limiting
-router.post('/events/:id/read', mutationLimiter, requireAuth, markAnalystEventReadHandler);
+// Single-event read endpoint removed — per-user timestamp approach makes it a no-op.
+// Use POST /events/read-all to mark all events read for the current user.
 router.post('/events/read-all', mutationLimiter, requireAuth, markAllAnalystEventsReadHandler);
 
 // Snapshots

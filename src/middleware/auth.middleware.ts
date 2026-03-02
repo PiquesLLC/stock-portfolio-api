@@ -4,7 +4,9 @@ import { AuthRequest, AuthErrorCode } from '../types/auth';
 import { verifyTokenDetailed } from '../services/auth.service';
 
 function isCapacitorRequest(req: Request): boolean {
-  return req.headers['x-capacitor'] === 'true';
+  // Use Origin header (not forgeable x-capacitor) to detect Capacitor native app
+  const origin = req.headers.origin;
+  return origin === 'capacitor://localhost';
 }
 
 function getCookieOptions(req: Request) {
@@ -100,10 +102,11 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
       next(err);
       return;
     }
-    // Gate: block explicitly unverified emails (exempt _system user)
+    // Gate: block explicitly unverified emails (exempt system user by ID)
     // Use === false so tokens missing the claim (old sessions) pass through until refresh
     // Controlled by EMAIL_VERIFICATION_ENABLED env var (default: off until Resend is active)
-    if (config.emailVerificationEnabled && req.user && req.user.username !== '_system' && req.user.emailVerified === false) {
+    const SYSTEM_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
+    if (config.emailVerificationEnabled && req.user && req.user.userId !== SYSTEM_USER_ID && req.user.emailVerified === false) {
       res.status(403).json({ error: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' as AuthErrorCode });
       return;
     }
@@ -155,16 +158,17 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
  */
 export function requireOwnership(userIdParam: string = 'userId') {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    const resourceUserId = req.params[userIdParam] || req.query.userId || req.body?.userId;
+    // Only check route param — never fall back to client-controlled query/body
+    const resourceUserId = req.params[userIdParam];
 
     if (!req.user) {
       res.status(401).json({ error: 'Authorization required', code: 'NO_TOKEN' as AuthErrorCode });
       return;
     }
 
-    // If no userId specified, allow (controller will use req.user.userId)
+    // Fail closed if userId param is missing
     if (!resourceUserId) {
-      next();
+      res.status(400).json({ error: 'Missing userId parameter' });
       return;
     }
 

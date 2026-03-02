@@ -1,8 +1,8 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../types/auth';
 import {
-  getSettings,
+  getTrackingSettings,
   setBaseline,
   setBrokerLifetime,
   clearBrokerLifetime,
@@ -120,8 +120,9 @@ export async function setBaselineHandler(req: AuthRequest, res: Response): Promi
   }
 }
 
-export async function setBrokerLifetimeHandler(req: Request, res: Response): Promise<void> {
+export async function setBrokerLifetimeHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const { deposits, withdrawals, currentValue } = req.body;
 
     if (typeof deposits !== 'number' || deposits < 0) {
@@ -139,7 +140,7 @@ export async function setBrokerLifetimeHandler(req: Request, res: Response): Pro
       return;
     }
 
-    const settings = await setBrokerLifetime({
+    const settings = await setBrokerLifetime(userId, {
       deposits,
       withdrawals: withdrawals ?? 0,
       currentValue,
@@ -158,9 +159,10 @@ export async function setBrokerLifetimeHandler(req: Request, res: Response): Pro
   }
 }
 
-export async function clearBrokerLifetimeHandler(req: Request, res: Response): Promise<void> {
+export async function clearBrokerLifetimeHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    await clearBrokerLifetime();
+    const userId = req.user!.userId;
+    await clearBrokerLifetime(userId);
     res.status(204).send();
   } catch (_error) {
     console.error('Error clearing broker lifetime:');
@@ -168,12 +170,13 @@ export async function clearBrokerLifetimeHandler(req: Request, res: Response): P
   }
 }
 
-export async function getYtdHandler(req: Request, res: Response): Promise<void> {
+export async function getYtdHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const settings = await getSettings();
+    const userId = req.user!.userId;
+    const settings = await getTrackingSettings(userId);
     res.json({
-      ytdStartEquity: settings.ytdStartEquity ?? null,
-      ytdNetContributions: settings.ytdNetContributions ?? null,
+      ytdStartEquity: settings?.ytdStartEquity ?? null,
+      ytdNetContributions: settings?.ytdNetContributions ?? null,
     });
   } catch (_error) {
     console.error('Error fetching YTD settings:');
@@ -181,8 +184,9 @@ export async function getYtdHandler(req: Request, res: Response): Promise<void> 
   }
 }
 
-export async function setYtdHandler(req: Request, res: Response): Promise<void> {
+export async function setYtdHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const { ytdStartEquity, netContributionsYTD } = req.body;
 
     if (typeof ytdStartEquity !== 'number' || ytdStartEquity <= 0) {
@@ -195,7 +199,7 @@ export async function setYtdHandler(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const settings = await setYtdData({ ytdStartEquity, netContributionsYTD });
+    const settings = await setYtdData(userId, { ytdStartEquity, netContributionsYTD });
     res.json({
       message: 'YTD data saved',
       ytdStartEquity: settings.ytdStartEquity,
@@ -207,9 +211,10 @@ export async function setYtdHandler(req: Request, res: Response): Promise<void> 
   }
 }
 
-export async function clearYtdHandler(req: Request, res: Response): Promise<void> {
+export async function clearYtdHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    await clearYtdData();
+    const userId = req.user!.userId;
+    await clearYtdData(userId);
     res.status(204).send();
   } catch (_error) {
     console.error('Error clearing YTD data:');
@@ -228,9 +233,10 @@ export async function getSummaryHandler(req: AuthRequest, res: Response): Promis
   }
 }
 
-export async function activateTrackingHandler(req: Request, res: Response): Promise<void> {
+export async function activateTrackingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const settings = await activateTracking();
+    const userId = req.user!.userId;
+    const settings = await activateTracking(userId);
     res.json({
       message: 'Tracking activated',
       trackingStartDate: settings.trackingStartDate,
@@ -241,9 +247,10 @@ export async function activateTrackingHandler(req: Request, res: Response): Prom
   }
 }
 
-export async function restartTrackingHandler(req: Request, res: Response): Promise<void> {
+export async function restartTrackingHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const settings = await restartTracking();
+    const userId = req.user!.userId;
+    const settings = await restartTracking(userId);
     res.json({
       message: 'Tracking restarted',
       trackingStartDate: settings.trackingStartDate,
@@ -258,7 +265,7 @@ export async function cleanupSnapshotsHandler(req: AuthRequest, res: Response): 
   try {
     const userId = req.user!.userId;
     const countBefore = await getSnapshotCount(userId);
-    const deletedCount = await cleanupDuplicateSnapshots();
+    const deletedCount = await cleanupDuplicateSnapshots(userId);
     const countAfter = await getSnapshotCount(userId);
 
     res.json({
@@ -299,4 +306,3 @@ export async function getCashInterestAccrualHandler(req: AuthRequest, res: Respo
     res.status(500).json({ error: 'Failed to calculate cash interest accrual' });
   }
 }
-

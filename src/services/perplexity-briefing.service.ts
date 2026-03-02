@@ -188,7 +188,8 @@ Writing rules (non-negotiable):
 
 export async function explainBriefingSection(title: string, body: string, userId: string): Promise<BriefingExplainResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = `briefing-explain-${title.toLowerCase().replace(/\s+/g, '-').slice(0, 50)}`;
+  // Include userId in cache key to prevent cross-user data leakage
+  const cacheKey = `briefing-explain-${userId}-${title.toLowerCase().replace(/\s+/g, '-').slice(0, 50)}`;
   const cached = explainCache.get<BriefingExplainResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 

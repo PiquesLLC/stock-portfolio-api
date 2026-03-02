@@ -47,9 +47,10 @@ function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: 
   return false;
 }
 
-// Detect Capacitor requests (cross-origin native app) via custom header
+// Detect Capacitor requests via Origin header (not forgeable x-capacitor)
 function isCapacitorRequest(req: Request): boolean {
-  return req.headers['x-capacitor'] === 'true';
+  const origin = req.headers.origin;
+  return origin === 'capacitor://localhost';
 }
 
 export function getCookieOptions(req: Request) {
@@ -213,20 +214,10 @@ export async function setPasswordHandler(req: AuthRequest, res: Response): Promi
  * GET /auth/has-password/:username
  */
 export async function hasPasswordHandler(req: Request, res: Response): Promise<void> {
-  try {
-    const { username } = req.params;
-
-    if (!username) {
-      res.status(400).json({ error: 'Username is required' });
-      return;
-    }
-
-    const has = await hasPassword(username);
-    res.json({ hasPassword: has });
-  } catch (_error) {
-    console.error('Has password error:');
-    res.json({ hasPassword: true });
-  }
+  // Always return true to prevent auth-type enumeration
+  // The UI only needs this for UX (show password field or not),
+  // but this shouldn't be exposed to unauthenticated callers
+  res.json({ hasPassword: true });
 }
 
 /**
@@ -437,7 +428,7 @@ export async function testGetVerificationCodeHandler(req: Request, res: Response
   const configuredKey = process.env.TEST_HELPER_KEY;
   const providedKey = req.headers['x-test-helper-key'];
   const provided = Array.isArray(providedKey) ? providedKey[0] : providedKey;
-  if (configuredKey && provided !== configuredKey) {
+  if (!configuredKey || provided !== configuredKey) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
@@ -572,7 +563,14 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.alert.deleteMany({ where: { userId: user.id } });
       await tx.priceAlertEvent.deleteMany({ where: { priceAlert: { userId: user.id } } });
       await tx.priceAlert.deleteMany({ where: { userId: user.id } });
-      // Portfolio & holdings
+      // Portfolio & holdings (HoldingSnapshots before PortfolioSnapshots)
+      const snapshotIds = (await tx.portfolioSnapshot.findMany({
+        where: { userId: user.id },
+        select: { id: true },
+      })).map(s => s.id);
+      if (snapshotIds.length > 0) {
+        await tx.holdingSnapshot.deleteMany({ where: { snapshotId: { in: snapshotIds } } });
+      }
       await tx.holding.deleteMany({ where: { userId: user.id } });
       await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
       await tx.portfolioCompositionChange.deleteMany({ where: { userId: user.id } });

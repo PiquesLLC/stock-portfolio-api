@@ -12,6 +12,18 @@ import {
   PriceAlertCondition,
 } from '../services/priceAlert.service';
 import { PlanLimitError } from '../utils/plan-limit.error';
+import { z } from 'zod';
+
+const createPriceAlertSchema = z.object({
+  ticker: z.string().trim().min(1).max(10).transform(s => s.toUpperCase()),
+  condition: z.enum(['above', 'below', 'pct_up', 'pct_down']),
+  targetPrice: z.number().positive().optional(),
+  percentChange: z.number().positive().max(1000).optional(),
+  referencePrice: z.number().positive().optional(),
+  referencePriceType: z.enum(['current', 'open', 'avgCost']).optional(),
+  repeatAlert: z.boolean().optional(),
+  expiresAt: z.string().datetime().optional(),
+});
 
 // GET /price-alerts?ticker=X
 export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -44,29 +56,15 @@ export async function getPriceAlertHandler(req: AuthRequest, res: Response): Pro
 // POST /price-alerts
 export async function createPriceAlertHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { ticker, condition, targetPrice, percentChange, referencePrice, referencePriceType, repeatAlert, expiresAt } = req.body;
-
-    if (!ticker || !condition) {
-      res.status(400).json({ error: 'ticker and condition are required' });
-      return;
-    }
-
-    const validConditions: PriceAlertCondition[] = ['above', 'below', 'pct_up', 'pct_down'];
-    if (!validConditions.includes(condition)) {
-      res.status(400).json({ error: `condition must be one of: ${validConditions.join(', ')}` });
+    const parsed = createPriceAlertSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues.map((e) => e.message).join(', ') });
       return;
     }
 
     // Always use authenticated user's ID — never accept from body
     const alert = await createPriceAlert({
-      ticker,
-      condition,
-      targetPrice,
-      percentChange,
-      referencePrice,
-      referencePriceType,
-      repeatAlert,
-      expiresAt,
+      ...parsed.data,
       userId: req.user!.userId,
     });
 
@@ -125,7 +123,7 @@ export async function deletePriceAlertHandler(req: AuthRequest, res: Response): 
 // GET /price-alerts/events
 export async function getPriceAlertEventsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 200);
     const events = await getPriceAlertEvents(req.user!.userId, limit);
     res.json(events);
   } catch (_error) {

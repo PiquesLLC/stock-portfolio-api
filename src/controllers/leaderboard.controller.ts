@@ -21,7 +21,12 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
     }
 
     const result = await getLeaderboard(window as LeaderboardWindow, region as LeaderboardRegion);
-    res.json(result);
+    // Strip sensitive fields from public response
+    const sanitizedEntries = result.entries.map(({ flagReason, ...entry }) => ({
+      ...entry,
+      flagReason: entry.flagged ? 'Under review' : null,
+    }));
+    res.json({ ...result, entries: sanitizedEntries });
   } catch (_error) {
     console.error('Error fetching leaderboard:');
     res.status(500).json({ error: 'Failed to fetch leaderboard' });

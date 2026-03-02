@@ -27,9 +27,10 @@ export interface OAuthUser {
   planExpiresAt: Date | null;
 }
 
-interface OAuthResult {
+export interface OAuthResult {
   user: OAuthUser;
   isNewUser: boolean;
+  pendingLink?: { providerIdField: string; providerId: string; avatarUrl?: string };
 }
 
 // ─── Google Access Token Verification ────────────────────────────────────────
@@ -109,7 +110,13 @@ export async function generateUsername(name?: string, email?: string): Promise<s
     candidate = `${base.slice(0, 14)}_${Date.now().toString(36).slice(-5)}`;
     const retry = await prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
     if (retry) {
-      candidate = `user_${Date.now().toString(36)}`;
+      // Use crypto random suffix to guarantee uniqueness
+      const { randomBytes } = await import('crypto');
+      candidate = `user_${randomBytes(4).toString('hex')}`;
+      const last = await prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
+      if (last) {
+        candidate = `user_${randomBytes(6).toString('hex')}`;
+      }
     }
   }
   return candidate;
@@ -157,16 +164,16 @@ export async function findOrCreateOAuthUser(
     });
 
     if (existingByEmail && existingByEmail.emailVerified) {
-      // Link the OAuth provider to the existing account
-      await prisma.user.update({
-        where: { id: existingByEmail.id },
-        data: {
-          [providerIdField]: profile.providerId,
-          emailVerified: true, // Provider verified
+      // Return pending link — only persist AFTER MFA check passes
+      return {
+        user: existingByEmail,
+        isNewUser: false,
+        pendingLink: {
+          providerIdField,
+          providerId: profile.providerId,
           ...(provider === 'google' && profile.picture ? { avatarUrl: profile.picture } : {}),
         },
-      });
-      return { user: existingByEmail, isNewUser: false };
+      };
     }
   }
 
@@ -265,6 +272,22 @@ export async function findOrCreateOAuthUser(
 
     throw err;
   }
+}
+
+// ─── Commit Pending OAuth Link ──────────────────────────────────────────────
+
+export async function commitOAuthLink(
+  userId: string,
+  pendingLink: { providerIdField: string; providerId: string; avatarUrl?: string }
+): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      [pendingLink.providerIdField]: pendingLink.providerId,
+      emailVerified: true,
+      ...(pendingLink.avatarUrl ? { avatarUrl: pendingLink.avatarUrl } : {}),
+    },
+  });
 }
 
 // ─── Token Issuance (shared helper) ─────────────────────────────────────────

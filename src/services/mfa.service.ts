@@ -81,7 +81,14 @@ export async function getMaskedEmail(userId: string): Promise<string | null> {
 
 // ─── MFA Challenge ──────────────────────────────────────
 
-export async function createMfaChallenge(userId: string): Promise<string> {
+// In-memory store for pending OAuth link data attached to MFA challenges.
+// Cleaned up when challenge is consumed or expires.
+const pendingOAuthLinks = new Map<string, { providerIdField: string; providerId: string; avatarUrl?: string }>();
+
+export async function createMfaChallenge(
+  userId: string,
+  oauthPendingLink?: { providerIdField: string; providerId: string; avatarUrl?: string },
+): Promise<string> {
   const token = crypto.randomBytes(64).toString('hex');
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS);
 
@@ -89,15 +96,21 @@ export async function createMfaChallenge(userId: string): Promise<string> {
     data: { userId, token, expiresAt },
   });
 
+  if (oauthPendingLink) {
+    pendingOAuthLinks.set(token, oauthPendingLink);
+  }
+
   return token;
 }
 
 /**
- * Atomically consume a challenge token. Returns userId on success, null if
- * invalid/expired/already-used. The WHERE clause ensures only one concurrent
- * request can mark it used (updateMany returns count=0 for losers).
+ * Atomically consume a challenge token. Returns userId and any pending OAuth
+ * link on success, null if invalid/expired/already-used.
  */
-export async function consumeMfaChallenge(token: string): Promise<string | null> {
+export async function consumeMfaChallenge(token: string): Promise<{
+  userId: string;
+  pendingOAuthLink?: { providerIdField: string; providerId: string; avatarUrl?: string };
+} | null> {
   // Look up the challenge first to get the userId
   const challenge = await prisma.mfaChallenge.findUnique({
     where: { token },
@@ -117,7 +130,10 @@ export async function consumeMfaChallenge(token: string): Promise<string | null>
   // If count is 0, another request won the race or token expired
   if (result.count === 0) return null;
 
-  return challenge.userId;
+  const pendingLink = pendingOAuthLinks.get(token);
+  pendingOAuthLinks.delete(token);
+
+  return { userId: challenge.userId, pendingOAuthLink: pendingLink };
 }
 
 /**

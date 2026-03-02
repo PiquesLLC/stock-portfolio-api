@@ -1,37 +1,30 @@
-﻿import prisma from '../utils/prisma';
-import { Settings, BaselineInput, BrokerLifetimeInput, YtdInput, PerformanceSummary } from '../types';
+import prisma from '../utils/prisma';
+import { BaselineInput, BrokerLifetimeInput, YtdInput, PerformanceSummary } from '../types';
 import { getPortfolio } from './portfolio.service';
 import { getSnapshotsAfter } from './snapshot.service';
 import { getTransactions } from './transaction.service';
 import { calculateTWR, SnapshotPoint, CashflowEvent } from '../utils/finance-math';
 
-
-
-export async function getSettings(): Promise<Settings> {
-  let settings = await prisma.settings.findUnique({
-    where: { id: 'default' },
+/**
+ * Get per-user tracking settings.
+ * Returns the UserSettings row for this user (or defaults if none exists).
+ */
+export async function getTrackingSettings(userId: string) {
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
   });
-
-  if (!settings) {
-    settings = await prisma.settings.create({
-      data: { id: 'default', cashBalance: 0 },
-    });
-  }
-
-  return settings as Settings;
+  return settings;
 }
 
-export async function setBaseline(userId: string, input: BaselineInput): Promise<Settings> {
+export async function setBaseline(userId: string, input: BaselineInput) {
   const portfolio = await getPortfolio(userId);
   const now = new Date();
 
-  // Set baseline based on current portfolio ASSETS (not net equity)
-  // This ensures margin debt changes don't affect historical performance tracking
   const baselineTotalValue = portfolio.totalAssets;
   const baselineCashBalance = portfolio.cashBalance;
 
-  const settings = await prisma.settings.upsert({
-    where: { id: 'default' },
+  const settings = await prisma.userSettings.upsert({
+    where: { userId },
     update: {
       trackingStartDate: now,
       baselineTotalValue,
@@ -39,7 +32,7 @@ export async function setBaseline(userId: string, input: BaselineInput): Promise
       baselineType: input.type,
     },
     create: {
-      id: 'default',
+      userId,
       cashBalance: portfolio.cashBalance,
       trackingStartDate: now,
       baselineTotalValue,
@@ -48,12 +41,12 @@ export async function setBaseline(userId: string, input: BaselineInput): Promise
     },
   });
 
-  return settings as Settings;
+  return settings;
 }
 
-export async function setBrokerLifetime(input: BrokerLifetimeInput): Promise<Settings> {
-  const settings = await prisma.settings.upsert({
-    where: { id: 'default' },
+export async function setBrokerLifetime(userId: string, input: BrokerLifetimeInput) {
+  const settings = await prisma.userSettings.upsert({
+    where: { userId },
     update: {
       brokerLifetimeDeposits: input.deposits,
       brokerLifetimeWithdrawals: input.withdrawals,
@@ -61,7 +54,7 @@ export async function setBrokerLifetime(input: BrokerLifetimeInput): Promise<Set
       brokerLifetimeAsOf: new Date(),
     },
     create: {
-      id: 'default',
+      userId,
       cashBalance: 0,
       brokerLifetimeDeposits: input.deposits,
       brokerLifetimeWithdrawals: input.withdrawals,
@@ -70,12 +63,12 @@ export async function setBrokerLifetime(input: BrokerLifetimeInput): Promise<Set
     },
   });
 
-  return settings as Settings;
+  return settings;
 }
 
-export async function clearBrokerLifetime(): Promise<Settings> {
-  const settings = await prisma.settings.update({
-    where: { id: 'default' },
+export async function clearBrokerLifetime(userId: string) {
+  const settings = await prisma.userSettings.update({
+    where: { userId },
     data: {
       brokerLifetimeDeposits: null,
       brokerLifetimeWithdrawals: null,
@@ -84,57 +77,57 @@ export async function clearBrokerLifetime(): Promise<Settings> {
     },
   });
 
-  return settings as Settings;
+  return settings;
 }
 
-export async function setYtdData(input: YtdInput): Promise<Settings> {
-  const settings = await prisma.settings.upsert({
-    where: { id: 'default' },
+export async function setYtdData(userId: string, input: YtdInput) {
+  const settings = await prisma.userSettings.upsert({
+    where: { userId },
     update: {
       ytdStartEquity: input.ytdStartEquity,
       ytdNetContributions: input.netContributionsYTD ?? 0,
     },
     create: {
-      id: 'default',
+      userId,
       cashBalance: 0,
       ytdStartEquity: input.ytdStartEquity,
       ytdNetContributions: input.netContributionsYTD ?? 0,
     },
   });
-  return settings as Settings;
+  return settings;
 }
 
-export async function clearYtdData(): Promise<Settings> {
-  const settings = await prisma.settings.update({
-    where: { id: 'default' },
+export async function clearYtdData(userId: string) {
+  const settings = await prisma.userSettings.update({
+    where: { userId },
     data: {
       ytdStartEquity: null,
       ytdNetContributions: null,
     },
   });
-  return settings as Settings;
+  return settings;
 }
 
-export async function activateTracking(): Promise<Settings> {
+export async function activateTracking(userId: string) {
   const now = new Date();
-  const settings = await prisma.settings.upsert({
-    where: { id: 'default' },
+  const settings = await prisma.userSettings.upsert({
+    where: { userId },
     update: {
       trackingStartDate: now,
     },
     create: {
-      id: 'default',
+      userId,
       cashBalance: 0,
       trackingStartDate: now,
     },
   });
-  return settings as Settings;
+  return settings;
 }
 
-export async function restartTracking(): Promise<Settings> {
+export async function restartTracking(userId: string) {
   const now = new Date();
-  const settings = await prisma.settings.upsert({
-    where: { id: 'default' },
+  const settings = await prisma.userSettings.upsert({
+    where: { userId },
     update: {
       trackingStartDate: now,
       baselineTotalValue: null,
@@ -142,24 +135,24 @@ export async function restartTracking(): Promise<Settings> {
       baselineType: null,
     },
     create: {
-      id: 'default',
+      userId,
       cashBalance: 0,
       trackingStartDate: now,
     },
   });
-  return settings as Settings;
+  return settings;
 }
 
 export async function getPerformanceSummary(userId: string): Promise<PerformanceSummary> {
   const [settings, portfolio] = await Promise.all([
-    getSettings(),
+    getTrackingSettings(userId),
     getPortfolio(userId),
   ]);
 
   // Calculate holdings P/L (unrealized)
   const holdingsPL = {
     totalCost: portfolio.totalCost,
-    currentValue: portfolio.holdingsValue, // Just holdings market value
+    currentValue: portfolio.holdingsValue,
     unrealizedPL: portfolio.totalPL,
     unrealizedPLPercent: portfolio.totalPLPercent,
   };
@@ -167,36 +160,29 @@ export async function getPerformanceSummary(userId: string): Promise<Performance
   // Calculate since tracking start (uses totalAssets - NO marginDebt)
   let sinceTracking: PerformanceSummary['sinceTracking'];
 
-  if (settings.trackingStartDate && settings.baselineTotalValue !== null) {
-    // Get snapshots since tracking start
+  if (settings?.trackingStartDate && settings.baselineTotalValue != null) {
     const snapshots = await getSnapshotsAfter(userId, settings.trackingStartDate);
 
     const startingValue = settings.baselineTotalValue;
-    // Use totalAssets (not netEquity) so margin debt changes don't affect performance
     const currentValue = portfolio.totalAssets;
     const absoluteReturn = currentValue - startingValue;
     const percentReturn = startingValue > 0 ? (absoluteReturn / startingValue) * 100 : 0;
 
-    // Fetch transactions and calculate TWR
     const transactions = await getTransactions(userId, settings.trackingStartDate);
 
-    // Convert snapshots to SnapshotPoint format for TWR calculation
     const snapshotPoints: SnapshotPoint[] = [
-      // Include starting point
       { date: settings.trackingStartDate, value: startingValue },
       ...snapshots.map(s => ({
         date: new Date(s.timestamp),
-        value: s.totalValue, // totalValue = totalAssets in snapshots
+        value: s.totalValue,
       })),
     ];
 
-    // Convert transactions to cashflow format
     const cashflows: CashflowEvent[] = transactions.map(t => ({
       date: new Date(t.date),
       amount: t.type === 'deposit' ? t.amount : -t.amount,
     }));
 
-    // Calculate TWR (returns as decimal, e.g., 0.15 for 15%)
     const twrDecimal = calculateTWR(snapshotPoints, cashflows);
     const twrPercent = twrDecimal !== null ? twrDecimal * 100 : null;
 
@@ -216,7 +202,7 @@ export async function getPerformanceSummary(userId: string): Promise<Performance
       hasBaseline: false,
       startDate: null,
       startingValue: null,
-      currentValue: portfolio.totalAssets, // Use assets for consistency
+      currentValue: portfolio.totalAssets,
       absoluteReturn: null,
       percentReturn: null,
       twrPercent: null,
@@ -228,7 +214,7 @@ export async function getPerformanceSummary(userId: string): Promise<Performance
   // Broker lifetime (optional)
   let brokerLifetime: PerformanceSummary['brokerLifetime'] = null;
 
-  if (settings.brokerLifetimeDeposits !== null && settings.brokerLifetimeValue !== null) {
+  if (settings?.brokerLifetimeDeposits != null && settings?.brokerLifetimeValue != null) {
     const deposits = settings.brokerLifetimeDeposits;
     const withdrawals = settings.brokerLifetimeWithdrawals ?? 0;
     const currentValue = settings.brokerLifetimeValue;
@@ -254,4 +240,3 @@ export async function getPerformanceSummary(userId: string): Promise<Performance
     brokerLifetime,
   };
 }
-

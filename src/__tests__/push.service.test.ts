@@ -32,6 +32,9 @@ describe('push.service', () => {
 
   describe('saveSubscription', () => {
     it('should upsert subscription by endpoint', async () => {
+      // New endpoint — findUnique returns null, count returns 0 (under cap)
+      prismaMock.pushSubscription.findUnique.mockResolvedValue(null);
+      prismaMock.pushSubscription.count.mockResolvedValue(0);
       prismaMock.pushSubscription.upsert.mockResolvedValue({ id: 'sub-1' });
 
       await saveSubscription('user-1', {
@@ -58,6 +61,8 @@ describe('push.service', () => {
     });
 
     it('should rebind endpoint to new user on shared device', async () => {
+      // Existing endpoint — findUnique returns existing record, no count check needed
+      prismaMock.pushSubscription.findUnique.mockResolvedValue({ id: 'sub-1', userId: 'user-A' });
       prismaMock.pushSubscription.upsert.mockResolvedValue({ id: 'sub-1' });
 
       // User B subscribes on same endpoint as user A
@@ -72,6 +77,20 @@ describe('push.service', () => {
           update: expect.objectContaining({ userId: 'user-B' }),
         }),
       );
+    });
+
+    it('should reject when user exceeds subscription cap', async () => {
+      prismaMock.pushSubscription.findUnique.mockResolvedValue(null);
+      prismaMock.pushSubscription.count.mockResolvedValue(10);
+
+      await expect(
+        saveSubscription('user-1', {
+          endpoint: 'https://push.example.com/new',
+          keys: { p256dh: 'key', auth: 'auth' },
+        }),
+      ).rejects.toThrow('Maximum push subscriptions reached');
+
+      expect(prismaMock.pushSubscription.upsert).not.toHaveBeenCalled();
     });
   });
 

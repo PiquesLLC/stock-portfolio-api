@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens, OAuthProfile } from '../services/oauth.service';
+import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens, commitOAuthLink, OAuthProfile } from '../services/oauth.service';
 import { config } from '../config';
 import { getCookieOptions } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
@@ -81,7 +81,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     // Waitlist gate: check BEFORE creating any user record
     if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
 
-    const { user, isNewUser } = await findOrCreateOAuthUser(
+    const { user, isNewUser, pendingLink } = await findOrCreateOAuthUser(
       'google',
       profile,
       undefined,
@@ -90,11 +90,12 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
 
     if (isNewUser) markWaitlistConverted(profile.email);
 
-    // Check if existing user has MFA enabled — before issuing tokens
+    // Check if existing user has MFA enabled — before issuing tokens or linking
     if (!isNewUser) {
       const mfaEnabled = await hasMfaEnabled(user.id);
       if (mfaEnabled) {
-        const challengeToken = await createMfaChallenge(user.id);
+        // Pass pendingLink to challenge — will be committed after MFA verification
+        const challengeToken = await createMfaChallenge(user.id, pendingLink);
         const methods = await getEnabledMethods(user.id);
         const maskedEmail = await getMaskedEmail(user.id);
         trackOAuthMfa('google');
@@ -106,6 +107,11 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
         });
         return;
       }
+    }
+
+    // MFA not enabled — safe to commit the provider link
+    if (pendingLink) {
+      await commitOAuthLink(user.id, pendingLink);
     }
 
     const loginResponse = await issueTokens(user);
@@ -148,7 +154,7 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     // Waitlist gate: check BEFORE creating any user record
     if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
 
-    const { user, isNewUser } = await findOrCreateOAuthUser(
+    const { user, isNewUser, pendingLink } = await findOrCreateOAuthUser(
       'apple',
       profile,
       appleUser, // { firstName, lastName } — only on first auth
@@ -157,11 +163,12 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
 
     if (isNewUser) markWaitlistConverted(profile.email);
 
-    // Check if existing user has MFA enabled — before issuing tokens
+    // Check if existing user has MFA enabled — before issuing tokens or linking
     if (!isNewUser) {
       const mfaEnabled = await hasMfaEnabled(user.id);
       if (mfaEnabled) {
-        const challengeToken = await createMfaChallenge(user.id);
+        // Pass pendingLink to challenge — will be committed after MFA verification
+        const challengeToken = await createMfaChallenge(user.id, pendingLink);
         const methods = await getEnabledMethods(user.id);
         const maskedEmail = await getMaskedEmail(user.id);
         trackOAuthMfa('apple');
@@ -173,6 +180,11 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
         });
         return;
       }
+    }
+
+    // MFA not enabled — safe to commit the provider link
+    if (pendingLink) {
+      await commitOAuthLink(user.id, pendingLink);
     }
 
     const loginResponse = await issueTokens(user);

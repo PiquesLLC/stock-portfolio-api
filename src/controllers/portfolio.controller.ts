@@ -61,7 +61,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
           return;
         }
         if (!targetUser.profilePublic) {
-          res.status(403).json({ error: 'This profile is private' });
+          res.status(404).json({ error: 'Not found' });
           return;
         }
       }
@@ -232,16 +232,7 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     }
     const { cashBalance } = parsed.data;
 
-    // Update user-specific cash if authenticated
-    const authUserId = req.user?.userId;
-    if (authUserId) {
-      await prisma.userSettings.upsert({
-        where: { userId: authUserId },
-        update: { cashBalance },
-        create: { userId: authUserId, cashBalance, marginDebt: 0 },
-      });
-    }
-
+    // Single atomic write to UserSettings
     const settings = await updateCashBalance(req.user!.userId, cashBalance);
     res.json({ cashBalance: settings.cashBalance });
   } catch (_error) {
@@ -658,7 +649,7 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
           return;
         }
         if (!targetUser.profilePublic) {
-          res.status(403).json({ error: 'This profile is private' });
+          res.status(404).json({ error: 'Not found' });
           return;
         }
       }
@@ -1343,9 +1334,13 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
       return;
     }
 
-    const excludedRows: Set<number> = new Set(
-      JSON.parse(req.body.excludedRows || '[]')
-    );
+    let excludedRows: Set<number>;
+    try {
+      excludedRows = new Set(JSON.parse(req.body.excludedRows || '[]'));
+    } catch {
+      res.status(400).json({ error: 'Invalid excludedRows JSON' });
+      return;
+    }
     const sourceBroker = normalizeSourceBroker(req.body.sourceBroker);
 
     // Parse CSV — strip BOM + preamble lines (e.g. Schwab account info)
@@ -1415,12 +1410,8 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
     const isSnapshotImport = !mappings.action && !mappings.totalAmount;
 
     if (isSnapshotImport) {
-      const excludedRowSet = new Set(
-        JSON.parse(req.body.excludedRows || '[]')
-      );
-
       data.forEach((row, idx) => {
-        if (excludedRowSet.has(idx)) {
+        if (excludedRows.has(idx)) {
           incSkip('excluded_by_user');
           return;
         }
@@ -1724,6 +1715,24 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       res.status(400).json({ error: 'mode must be replace, merge, or incremental' });
       return;
     }
+
+    // Cap array sizes to prevent memory/DB exhaustion
+    const MAX_HOLDINGS = 500;
+    const MAX_TRADES = 5000;
+    const MAX_LEDGER_EVENTS = 5000;
+    if (Array.isArray(holdings) && holdings.length > MAX_HOLDINGS) {
+      res.status(400).json({ error: `holdings array exceeds maximum of ${MAX_HOLDINGS}` });
+      return;
+    }
+    if (Array.isArray(trades) && trades.length > MAX_TRADES) {
+      res.status(400).json({ error: `trades array exceeds maximum of ${MAX_TRADES}` });
+      return;
+    }
+    if (Array.isArray(ledgerEvents) && ledgerEvents.length > MAX_LEDGER_EVENTS) {
+      res.status(400).json({ error: `ledgerEvents array exceeds maximum of ${MAX_LEDGER_EVENTS}` });
+      return;
+    }
+
     // Validate: need either holdings or trades (or both)
     const hasHoldings = Array.isArray(holdings) && holdings.length > 0;
     const hasTradesToProcess = Array.isArray(trades) && trades.length > 0;

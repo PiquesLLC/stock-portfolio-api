@@ -59,6 +59,16 @@ async function resolvePlanFromSubscription(
 }
 
 export async function createCheckoutSession(userId: string, priceId: string): Promise<string> {
+  // Validate priceId against configured price IDs
+  const ALLOWED_PRICE_IDS = new Set([
+    config.stripeProMonthlyPriceId, config.stripeProYearlyPriceId,
+    config.stripePremiumMonthlyPriceId, config.stripePremiumYearlyPriceId,
+    config.stripeEliteMonthlyPriceId, config.stripeEliteYearlyPriceId,
+  ].filter(Boolean));
+  if (!ALLOWED_PRICE_IDS.has(priceId)) {
+    throw new Error('Invalid price ID');
+  }
+
   const stripe = getStripeClient();
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -70,15 +80,24 @@ export async function createCheckoutSession(userId: string, priceId: string): Pr
 
   let customerId = user.stripeCustomerId;
   if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email ?? undefined,
-      metadata: { userId: user.id },
-    });
-    customerId = customer.id;
-    await prisma.user.update({
+    // Re-read to guard against concurrent checkout race (double customer creation)
+    const freshUser = await prisma.user.findUnique({
       where: { id: user.id },
-      data: { stripeCustomerId: customerId },
+      select: { stripeCustomerId: true },
     });
+    if (freshUser?.stripeCustomerId) {
+      customerId = freshUser.stripeCustomerId;
+    } else {
+      const customer = await stripe.customers.create({
+        email: user.email ?? undefined,
+        metadata: { userId: user.id },
+      });
+      customerId = customer.id;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
   }
 
   const session = await stripe.checkout.sessions.create({

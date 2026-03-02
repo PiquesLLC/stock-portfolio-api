@@ -14,7 +14,7 @@ export async function getMilestoneEventsHandler(req: AuthRequest, res: Response)
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 200);
     const events = await getMilestoneEvents(req.user.userId, limit);
     res.json(events);
   } catch (_error) {

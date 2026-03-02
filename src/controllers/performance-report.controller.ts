@@ -52,7 +52,7 @@ export async function emailPerformanceReportHandler(req: AuthRequest, res: Respo
 
     await sendPerformanceReport(user.email, html, period);
 
-    res.json({ sent: true, to: user.email });
+    res.json({ sent: true });
   } catch (err) {
     console.error('[PerformanceReport] Email error:', err);
     res.status(500).json({ error: 'Failed to email report' });

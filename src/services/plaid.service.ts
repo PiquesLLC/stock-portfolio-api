@@ -189,8 +189,9 @@ export async function disconnectPlaidItem(plaidItemId: string, userId: string): 
     }
   }
 
-  await prisma.plaidItem.update({
-    where: { id: plaidItemId },
+  // Use updateMany with userId filter for defense-in-depth (ownership already checked above)
+  await prisma.plaidItem.updateMany({
+    where: { id: plaidItemId, userId },
     data: { status: 'revoked' },
   });
 

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { getPortfolioIntelligence, IntelligenceWindow, PortfolioIntelligenceResponse } from '../services/portfolioIntelligence.service';
+import prisma from '../utils/prisma';
 
 const VALID_WINDOWS: IntelligenceWindow[] = ['1d', '5d', '1m'];
 const INTELLIGENCE_TIMEOUT_MS = 12_000;
@@ -66,6 +67,30 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
 
 export async function getUserIntelligenceHandler(req: AuthRequest, res: Response): Promise<void> {
   const { userId } = req.params;
+  const viewerId = req.user?.userId;
+  const isOwner = viewerId === userId;
+
+  // Privacy check: verify user exists and profile is public (or viewer is owner)
+  if (!isOwner) {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profilePublic: true, holdingsVisibility: true },
+    });
+    if (!targetUser) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (!targetUser.profilePublic) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const vis = targetUser.holdingsVisibility ?? 'all';
+    if (vis === 'hidden') {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+  }
+
   const windowParam = req.query.window as string | undefined;
   let window: IntelligenceWindow = '1d';
 

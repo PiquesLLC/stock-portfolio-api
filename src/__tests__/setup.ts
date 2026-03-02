@@ -33,7 +33,7 @@ vi.mock('../utils/prisma', () => {
     portfolioTrade: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     ledgerEvent: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     holdingSnapshot: { deleteMany: vi.fn() },
-    portfolioSnapshot: { findMany: vi.fn(), deleteMany: vi.fn() },
+    portfolioSnapshot: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     portfolioCompositionChange: { create: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() },
     activityEvent: { findMany: vi.fn(), deleteMany: vi.fn() },
     follow: { deleteMany: vi.fn() },
@@ -52,7 +52,7 @@ vi.mock('../utils/prisma', () => {
     consentRecord: { create: vi.fn(), deleteMany: vi.fn() },
     emailOtpCode: { create: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
     // Plaid
-    plaidItem: { findMany: vi.fn(), deleteMany: vi.fn() },
+    plaidItem: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     plaidAccount: { deleteMany: vi.fn() },
     // Alerts (price)
     priceAlert: { deleteMany: vi.fn() },
@@ -71,6 +71,8 @@ vi.mock('../utils/prisma', () => {
     pushSubscription: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      count: vi.fn(),
       upsert: vi.fn(),
       create: vi.fn(),
       delete: vi.fn(),

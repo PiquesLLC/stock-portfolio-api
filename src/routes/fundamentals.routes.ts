@@ -9,7 +9,7 @@ import {
   getEarningsBatchHandler,
 } from '../controllers/fundamentals.controller';
 
-import { mutationLimiter } from '../middleware/rateLimiter';
+import { mutationLimiter, heavyReadLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -19,7 +19,7 @@ router.get('/economic/international', getInternationalEconomicHandler);
 router.get('/economic/portfolio-impact', requireAuth, getPortfolioMacroImpactHandler);
 router.get('/status', getAVStatusHandler);
 router.post('/earnings/batch', mutationLimiter, requireAuth, getEarningsBatchHandler);
-router.get('/:ticker', getFundamentalsHandler);
-router.get('/:ticker/earnings', getEarningsHandler);
+router.get('/:ticker', heavyReadLimiter, getFundamentalsHandler);
+router.get('/:ticker/earnings', heavyReadLimiter, getEarningsHandler);
 
 export default router;

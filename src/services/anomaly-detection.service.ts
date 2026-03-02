@@ -377,7 +377,9 @@ export async function detectDividendChanges(userId: string): Promise<void> {
     if (!stillHeld) continue;
 
     const changeAmount = latest.amountPerShare - compareEvent.amountPerShare;
-    const changePct = (changeAmount / compareEvent.amountPerShare) * 100;
+    const changePct = compareEvent.amountPerShare > 0
+      ? (changeAmount / compareEvent.amountPerShare) * 100
+      : 0;
     const direction = changeAmount > 0 ? 'raised' : 'cut';
     const comparisonLabel = compareEvent === events[1] ? 'previous payout' : 'year-ago payout';
 

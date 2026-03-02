@@ -23,7 +23,7 @@ router.put('/', mutationLimiter, requireAuth, updateSettingsHandler);
 router.post('/baseline', mutationLimiter, requireAuth, setBaselineHandler);
 router.post('/broker-lifetime', mutationLimiter, requireAuth, setBrokerLifetimeHandler);
 router.delete('/broker-lifetime', mutationLimiter, requireAuth, clearBrokerLifetimeHandler);
-router.get('/ytd', optionalAuth, getYtdHandler);
+router.get('/ytd', requireAuth, getYtdHandler);
 router.post('/ytd', mutationLimiter, requireAuth, setYtdHandler);
 router.delete('/ytd', mutationLimiter, requireAuth, clearYtdHandler);
 router.post('/cleanup-snapshots', mutationLimiter, requireAuth, cleanupSnapshotsHandler);

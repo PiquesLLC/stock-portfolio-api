@@ -3,26 +3,13 @@ import request from 'supertest';
 import { generateTestToken, testUser } from './helpers';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
-// Mock rate limiters
-vi.mock('../middleware/rateLimiter', async () => {
-  const actual = await vi.importActual<typeof import('../middleware/rateLimiter')>('../middleware/rateLimiter');
+// Mock rate limiters — auto-passthrough for all exports
+vi.mock('../middleware/rateLimiter', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
   const passthrough = (_req: any, _res: any, next: any) => next();
-  return {
-    ...actual,
-    loginLimiter: passthrough,
-    signupLimiter: passthrough,
-    generalLimiter: passthrough,
-    mutationLimiter: passthrough,
-    chartLimiter: passthrough,
-    importLimiter: passthrough,
-    mfaVerifyLimiter: passthrough,
-    mfaSendLimiter: passthrough,
-    setPasswordLimiter: passthrough,
-    heavyReadLimiter: passthrough,
-    apiLimiter: passthrough,
-    oauthLimiter: passthrough,
-    waitlistJoinLimiter: passthrough,
-  };
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? passthrough : v]),
+  );
 });
 
 vi.mock('../middleware/email-verification.middleware', () => ({

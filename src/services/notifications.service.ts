@@ -77,6 +77,7 @@ export async function getNotificationStatus(userId: string): Promise<{
 export async function sendEarningsAlerts(windowDays = 7): Promise<{ sent: number; skipped: number; failed: number }> {
   const holdings = await prisma.holding.findMany({
     select: { userId: true, ticker: true },
+    take: 50000, // Safety cap to prevent memory exhaustion
   });
 
   const byUser = new Map<string, string[]>();

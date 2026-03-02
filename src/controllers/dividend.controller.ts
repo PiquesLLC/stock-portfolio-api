@@ -90,9 +90,16 @@ export async function removeEvent(req: AuthRequest, res: Response): Promise<void
     await deleteDividendEvent(req.params.id);
     res.status(204).send();
   } catch (error: unknown) {
-    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2025') {
-      res.status(404).json({ error: 'Dividend event not found' });
-      return;
+    if (error instanceof Error && 'code' in error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'P2025') {
+        res.status(404).json({ error: 'Dividend event not found' });
+        return;
+      }
+      if (code === 'HAS_CREDITS') {
+        res.status(409).json({ error: 'Cannot delete dividend event with posted credits' });
+        return;
+      }
     }
     console.error('Error removing dividend event:');
     res.status(500).json({ error: 'Failed to remove dividend event' });
@@ -129,16 +136,17 @@ export async function getSummaryHandler(req: AuthRequest, res: Response): Promis
 
 export async function syncHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user!.userId;
     const { ticker } = req.body;
     if (ticker) {
       const count = await syncDividendEventsForTicker(ticker);
-      const posted = await postDividendsForDate();
-      const backfilled = await backfillMissedDividends();
+      const posted = await postDividendsForDate(new Date(), userId);
+      const backfilled = await backfillMissedDividends(userId);
       res.json({ ticker, eventsUpserted: count, posted: posted.posted, backfilled: backfilled.totalPosted });
     } else {
-      const result = await syncAllHeldTickers();
-      const posted = await postDividendsForDate();
-      const backfilled = await backfillMissedDividends();
+      const result = await syncAllHeldTickers(userId);
+      const posted = await postDividendsForDate(new Date(), userId);
+      const backfilled = await backfillMissedDividends(userId);
       res.json({ ...result, posted: posted.posted, backfilled: backfilled.totalPosted });
     }
   } catch (_error) {
@@ -149,7 +157,7 @@ export async function syncHandler(req: AuthRequest, res: Response): Promise<void
 
 export async function backfillHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const result = await backfillMissedDividends();
+    const result = await backfillMissedDividends(req.user!.userId);
     res.json(result);
   } catch (_error) {
     console.error('Error backfilling dividends:');
@@ -176,7 +184,7 @@ export async function getReinvestmentsHandler(req: AuthRequest, res: Response): 
 export async function getTimelineHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const timeline = await getDividendTimeline(id);
+    const timeline = await getDividendTimeline(id, req.user!.userId);
     res.json(timeline);
   } catch (error: unknown) {
     if (error instanceof Error && error.message === 'Dividend credit not found') {

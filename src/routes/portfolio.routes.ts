@@ -28,7 +28,7 @@ import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 import multer from 'multer';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 const uploadMapped = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 router.get('/', optionalAuth, getPortfolioHandler);
@@ -43,7 +43,7 @@ router.get('/projections', requireAuth, getProjectionsHandler);
 router.get('/projections/current-pace', requireAuth, getCurrentPaceHandler);
 router.get('/metrics', requireAuth, getMetricsHandler);
 router.get('/summary', requireAuth, getSummaryHandler);
-router.get('/etf-overlap', requireAuth, getEtfOverlapHandler);
+router.get('/etf-overlap', heavyReadLimiter, requireAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, requireAuth, getPerformanceHandler);
 router.get('/report', heavyReadLimiter, requireAuth, getPerformanceReportHandler);
 router.post('/report/email', mutationLimiter, requireAuth, emailPerformanceReportHandler);

@@ -27,6 +27,7 @@ export async function getTransactions(userId: string, since?: Date) {
       ...(since ? { date: { gte: since } } : {}),
     },
     orderBy: { date: 'desc' },
+    take: 10000,
   });
 }
 

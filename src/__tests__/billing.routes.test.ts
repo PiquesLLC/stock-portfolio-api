@@ -15,24 +15,12 @@ const {
   constructEventMock: vi.fn(),
 }));
 
-vi.mock('../middleware/rateLimiter', () => {
-  const passthrough = (req: any, _res: any, next: any) => next();
-  return {
-    loginLimiter: passthrough,
-    setPasswordLimiter: passthrough,
-    signupLimiter: passthrough,
-    mutationLimiter: passthrough,
-    heavyReadLimiter: passthrough,
-    apiLimiter: passthrough,
-    enumerationLimiter: passthrough,
-    mfaVerifyLimiter: passthrough,
-    mfaSendLimiter: passthrough,
-    oauthLimiter: passthrough,
-    webhookLimiter: passthrough,
-    billingMutationLimiter: passthrough,
-    billingWebhookLimiter: passthrough,
-    waitlistJoinLimiter: passthrough,
-  };
+vi.mock('../middleware/rateLimiter', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const passthrough = (_req: any, _res: any, next: any) => next();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [k, typeof v === 'function' ? passthrough : v]),
+  );
 });
 
 vi.mock('../middleware/auth.middleware', () => {

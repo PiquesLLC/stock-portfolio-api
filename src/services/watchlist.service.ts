@@ -297,6 +297,8 @@ async function ensureWatchlistOwned(watchlistId: string, userId: string) {
   return watchlist ?? null;
 }
 
+const MAX_HOLDINGS_PER_WATCHLIST = 200;
+
 export async function addWatchlistHolding(
   watchlistId: string,
   userId: string,
@@ -316,6 +318,12 @@ export async function addWatchlistHolding(
       where: { id: existing.id },
       data: { shares: input.shares, averageCost: input.averageCost },
     });
+  }
+
+  // Cap holdings per watchlist to prevent API rate limit exhaustion
+  const count = await prisma.watchlistHolding.count({ where: { watchlistId } });
+  if (count >= MAX_HOLDINGS_PER_WATCHLIST) {
+    throw new Error(`Watchlist limited to ${MAX_HOLDINGS_PER_WATCHLIST} holdings`);
   }
 
   return prisma.watchlistHolding.create({

@@ -90,6 +90,10 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       holdings: { some: { shares: { gt: 0 } } },
       ...(regionFilter ? { region: regionFilter, showRegion: true } : {}),
     },
+    select: {
+      id: true, username: true, displayName: true,
+      region: true, trackingStartAt: true, avatarUrl: true,
+    },
   });
 
   const windowStart = getWindowStartDate(window);
@@ -164,7 +168,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         verified: true, basis: 'none', sinceStart, isNew,
         flagged: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
-        startDateUsed: null, endDateUsed: null, currentAssets: null,
+        startDateUsed: null, endDateUsed: null,
       });
       continue;
     }
@@ -213,7 +217,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         verified: true, basis: 'none', sinceStart, isNew,
         flagged: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
-        startDateUsed: null, endDateUsed: null, currentAssets: null,
+        startDateUsed: null, endDateUsed: null,
       });
       continue;
     }
@@ -307,7 +311,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       snapshotCount,
       startDateUsed: windowStartISO,
       endDateUsed: new Date().toISOString(),
-      currentAssets: liveValue,
+      // currentAssets intentionally omitted — exact portfolio values are private
     });
   }
 
