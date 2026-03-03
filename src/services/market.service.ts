@@ -241,7 +241,7 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
   return [];
 }
 
-const yahooQuoteCache = new NodeCache({ stdTTL: 10 }); // 10s cache for live Yahoo quotes
+const yahooQuoteCache = new NodeCache({ stdTTL: 30 }); // 30s cache — aligned with Finnhub/Polygon to prevent after-hours oscillation
 
 // Hardcoded ETF reference data for common ETFs where Finnhub free tier returns nulls.
 // Values are approximate as of early 2026 — better than showing nothing.
