@@ -162,8 +162,11 @@ export async function getWatchlistDetail(id: string, userId: string) {
   const holdings: WatchlistHoldingView[] = watchlist.holdings.map(h => {
     const upperTicker = h.ticker.toUpperCase();
     const quote = quotes.get(upperTicker);
-    const currentPrice = quote?.currentPrice ?? 0;
-    const previousClose = quote?.previousClose ?? currentPrice;
+    // During extended hours, use extendedPrice if available (premarket/after-hours price)
+    const currentPrice = (quote?.extendedPrice && quote.extendedPrice > 0)
+      ? quote.extendedPrice
+      : (quote?.currentPrice ?? 0);
+    const previousClose = quote?.previousClose ?? (quote?.currentPrice ?? currentPrice);
     const hasValidPrice = currentPrice > 0;
     const perf = perfMap.get(upperTicker) ?? { weekChangePercent: 0, monthChangePercent: 0, yearChangePercent: 0 };
 
