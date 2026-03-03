@@ -279,24 +279,42 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
       points = await reconstructPortfolioHistory(holdings, 0, periodDays, 0);
     }
 
-    // Append live value so the chart line always reaches "now"
-    if (points.length > 0 && (period === '1D' || period === '1W')) {
-      const lastPt = points[points.length - 1];
-      if (now - lastPt.time > 10_000) {
-        const tickers = holdings.map(h => h.ticker);
-        const { quotes } = await fetchPrices(tickers);
-        let liveValue = 0;
-        for (const h of holdings) {
-          const q = quotes.get(h.ticker.toUpperCase());
-          liveValue += h.shares * (q?.currentPrice ?? 0);
-        }
-        if (liveValue > 0) {
-          points.push({ time: now, value: liveValue });
-        }
+    // Fetch live quotes for offset normalization + live point append
+    const tickers = holdings.map(h => h.ticker.toUpperCase());
+    const { quotes } = await fetchPrices(tickers);
+    let liveValue = 0;
+    let previousCloseValue = 0;
+    for (const h of holdings) {
+      const q = quotes.get(h.ticker.toUpperCase());
+      liveValue += h.shares * (q?.currentPrice ?? 0);
+      previousCloseValue += h.shares * (q?.previousClose ?? q?.currentPrice ?? 0);
+    }
+
+    // Normalize candle-based chart points to match live portfolio value.
+    // Candle prices (Yahoo) can differ from live quotes (Finnhub),
+    // and some tickers may lack candle data entirely. Adding a constant offset
+    // keeps the chart shape intact while aligning with the actual portfolio value.
+    if (points.length > 0 && liveValue > 0) {
+      const lastCandleVal = points[points.length - 1].value;
+      const offset = liveValue - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
       }
     }
 
-    const periodStartValue = points.length > 0 ? points[0].value : 0;
+    // Append live value so the chart line always reaches "now"
+    if (points.length > 0 && (period === '1D' || period === '1W')) {
+      const lastPt = points[points.length - 1];
+      if (now - lastPt.time > 10_000 && liveValue > 0) {
+        points.push({ time: now, value: liveValue });
+      }
+    }
+
+    // For 1D, use previousCloseValue so chart change matches summary dayChange.
+    // For other periods, use the first data point.
+    const periodStartValue = period === '1D'
+      ? (previousCloseValue || (points.length > 0 ? points[0].value : 0))
+      : (points.length > 0 ? points[0].value : 0);
     res.json({ points, periodStartValue, period });
   } catch (_error) {
     console.error('Watchlist chart error:');
