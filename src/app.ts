@@ -55,6 +55,8 @@ app.use(helmet({
     maxAge: 31536000,
     includeSubDomains: true,
   },
+  // Allow popups (Apple/Google Sign-In) to communicate back via window.opener
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
 }));
 
 // CORS configuration - locked down to specific origins
