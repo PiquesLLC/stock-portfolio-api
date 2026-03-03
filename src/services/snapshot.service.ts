@@ -533,8 +533,8 @@ export async function reconstructPortfolioHistoryHiRes(
     if (cached) return cached;
 
     // Polygon.io primary â€” map Yahoo params to Polygon params
-    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
-    const rangeDays = rangeDaysMap[yahooRange] || 35;
+    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 30, '3mo': 95, '6mo': 185 };
+    const rangeDays = rangeDaysMap[yahooRange] || 30;
     const today = new Date().toISOString().split('T')[0];
     const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
 
@@ -1914,8 +1914,8 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
   const trades = [...tradeHistory].sort((a, b) => a.date.getTime() - b.date.getTime());
 
   // Only fetch candles for tickers held during the hi-res window
-  const rangeDaysMapFilter: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
-  const windowDays = rangeDaysMapFilter[yahooRange] || 35;
+  const rangeDaysMapFilter: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 30, '3mo': 95, '6mo': 185 };
+  const windowDays = rangeDaysMapFilter[yahooRange] || 30;
   const windowCutoff = Date.now() - windowDays * 86400000;
   const allTickers = new Set<string>();
 
@@ -1947,8 +1947,8 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
     const cached = hiresCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
     if (cached) return cached;
 
-    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 35, '3mo': 95, '6mo': 185 };
-    const rangeDays = rangeDaysMap[yahooRange] || 35;
+    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 30, '3mo': 95, '6mo': 185 };
+    const rangeDays = rangeDaysMap[yahooRange] || 30;
     const today = new Date().toISOString().split('T')[0];
     const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
 
