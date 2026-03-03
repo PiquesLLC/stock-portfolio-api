@@ -159,7 +159,7 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
 
   // Polygon.io primary — proper resolution per period
   const today = new Date().toISOString().split('T')[0];
-  const rangeDays = period === '1W' ? 7 : period === '1M' ? 35 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
+  const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
   const fromDate = period === 'YTD' ? `${new Date().getFullYear()}-01-01` : new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
   const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
 
