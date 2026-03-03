@@ -574,15 +574,18 @@ async function handleStreamCompletion(
   const inputTokens = usage?.total_input_tokens ?? usage?.input_tokens ?? null;
   const outputTokens = usage?.total_output_tokens ?? usage?.output_tokens ?? null;
 
+  // If no usable output was produced, mark as failed instead of completed
+  const hasUsableOutput = !!(resultJson || (resultText && resultText.trim().length > 0));
   await prisma.deepResearchJob.update({
     where: { id: jobId },
     data: {
-      status: 'completed',
+      status: hasUsableOutput ? 'completed' : 'failed',
       geminiInteractionId: interactionId || undefined,
       resultJson,
       resultText: resultText || null,
       rawResultPayload: JSON.stringify(data),
-      parseError,
+      parseError: hasUsableOutput ? parseError : (parseError || 'No usable output from Gemini API'),
+      errorMessage: hasUsableOutput ? undefined : 'Deep research produced no results — the API may have returned an empty response',
       inputTokens,
       outputTokens,
       costUsdEstimate: estimateCost(inputTokens, outputTokens, undefined),
@@ -1111,14 +1114,17 @@ export async function pollActiveResearchJobs(): Promise<void> {
           resultText = outputText; // Store raw text as fallback
         }
 
+        // If no usable output was produced, mark as failed instead of completed
+        const hasOutput = !!(resultJson || (outputText && outputText.trim().length > 0));
         await prisma.deepResearchJob.update({
           where: { id: job.id },
           data: {
-            status: 'completed',
+            status: hasOutput ? 'completed' : 'failed',
             resultJson,
             resultText: resultText || (resultJson ? null : outputText),
             rawResultPayload: rawPayload,
-            parseError,
+            parseError: hasOutput ? parseError : (parseError || 'No usable output from Gemini API'),
+            errorMessage: hasOutput ? undefined : 'Deep research produced no results — the API may have returned an empty response',
             inputTokens: result.usage?.input_tokens ?? null,
             outputTokens: result.usage?.output_tokens ?? null,
             searchCalls: null, // Interactions API doesn't expose search count

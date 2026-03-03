@@ -176,9 +176,9 @@ const clientDir = path.join(__dirname, '..', 'client');
 if (fs.existsSync(clientDir)) {
   // Hashed assets (Vite fingerprints filenames) — cache aggressively
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
-  // All other static files — short cache with revalidation
-  app.use(express.static(clientDir, { maxAge: '1h', etag: true }));
-  // SPA fallback: serve index.html for any non-API route — NEVER cache
+  // Other static files (favicon, icons) — short cache, but NEVER serve index.html from here
+  app.use(express.static(clientDir, { maxAge: '1h', etag: true, index: false }));
+  // SPA fallback: ALL HTML requests (including /) get index.html with no-cache
   app.get('*', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
