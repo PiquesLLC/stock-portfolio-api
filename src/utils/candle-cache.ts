@@ -6,11 +6,11 @@
  * - Tracks fetch progress across tickers
  * - Fetches only N tickers per request (gradual fill)
  * - Returns what's available + status info
- * - Works with the rate-limited Finnhub queue
+ * - Uses Polygon.io primary, Yahoo Finance fallback
  */
 
 import NodeCache from 'node-cache';
-import { finnhubQueue } from './finnhub-queue';
+import { fetchPolygonAggs, yahooGet } from './yahoo-http';
 
 // Historical candle data interface
 export interface HistoricalCandles {
@@ -21,17 +21,6 @@ export interface HistoricalCandles {
   fetchedAt: number;
   partial: boolean;
   daysAvailable: number;
-}
-
-// Finnhub candle response
-interface CandleResponse {
-  c: number[];  // Close prices
-  h: number[];  // High prices
-  l: number[];  // Low prices
-  o: number[];  // Open prices
-  t: number[];  // Timestamps (Unix)
-  v: number[];  // Volumes
-  s: string;    // Status: 'ok' or 'no_data'
 }
 
 // Candle fetch result
@@ -109,80 +98,86 @@ async function fetchSingleTickerCandles(ticker: string, tradingDays: number): Pr
   }
 
   try {
-    // Calculate date range
-    // Add buffer for weekends/holidays: tradingDays * 1.5
+    // Calculate date range — add buffer for weekends/holidays
     const calendarDays = Math.ceil(tradingDays * 1.5);
-    const toDate = Math.floor(now / 1000);
-    const fromDate = toDate - (calendarDays * 24 * 60 * 60);
+    const toDateStr = new Date().toISOString().split('T')[0];
+    const fromDateStr = new Date(now - calendarDays * 86400000).toISOString().split('T')[0];
 
-    console.log(`[CandleCache] Fetching ${upperTicker} (${tradingDays} trading days)`);
+    console.log(`[CandleCache] Fetching ${upperTicker} via Polygon (${tradingDays} trading days)`);
 
-    const data = await finnhubQueue.request<CandleResponse>('/stock/candle', {
-      symbol: upperTicker,
-      resolution: 'D',
-      from: fromDate,
-      to: toDate,
-    });
+    // Polygon.io primary
+    const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDateStr, toDateStr);
+    if (pg && pg.closes.length >= 2) {
+      const returns: number[] = [];
+      for (let i = 1; i < pg.closes.length; i++) {
+        if (pg.closes[i - 1] > 0) {
+          returns.push((pg.closes[i] - pg.closes[i - 1]) / pg.closes[i - 1]);
+        }
+      }
 
-    if (data.s !== 'ok' || !data.c || data.c.length === 0) {
-      console.warn(`[CandleCache] No data for ${upperTicker}`);
-      failedTickers.set(upperTicker, { time: now, reason: 'NO_DATA' });
-      return {
+      const result: HistoricalCandles = {
         ticker: upperTicker,
-        closes: [],
-        dates: [],
-        returns: [],
+        closes: pg.closes,
+        dates: pg.timestamps.map(t => new Date(t * 1000)),
+        returns,
         fetchedAt: now,
-        partial: true,
-        daysAvailable: 0,
+        partial: false,
+        daysAvailable: pg.closes.length,
       };
+
+      candleCache.set(cacheKey, result);
+      failedTickers.delete(upperTicker);
+      console.log(`[CandleCache] Cached ${upperTicker} with ${pg.closes.length} days (Polygon)`);
+      return result;
     }
 
-    // Calculate daily returns
-    const returns: number[] = [];
-    for (let i = 1; i < data.c.length; i++) {
-      if (data.c[i - 1] > 0) {
-        returns.push((data.c[i] - data.c[i - 1]) / data.c[i - 1]);
+    // Yahoo Finance fallback
+    console.log(`[CandleCache] Polygon no data for ${upperTicker}, trying Yahoo`);
+    const toTs = Math.floor(now / 1000);
+    const fromTs = toTs - calendarDays * 86400;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${upperTicker}?period1=${fromTs}&period2=${toTs}&interval=1d`;
+    const resp = await yahooGet(url);
+    const yResult = resp.data?.chart?.result?.[0];
+    if (yResult?.timestamp && yResult?.indicators?.quote?.[0]) {
+      const q = yResult.indicators.quote[0];
+      const closes: number[] = [];
+      const dates: Date[] = [];
+      for (let i = 0; i < yResult.timestamp.length; i++) {
+        if (q.close[i] != null) {
+          closes.push(q.close[i]);
+          dates.push(new Date(yResult.timestamp[i] * 1000));
+        }
+      }
+      if (closes.length >= 2) {
+        const returns: number[] = [];
+        for (let i = 1; i < closes.length; i++) {
+          if (closes[i - 1] > 0) returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+        }
+        const result: HistoricalCandles = {
+          ticker: upperTicker, closes, dates, returns,
+          fetchedAt: now, partial: false, daysAvailable: closes.length,
+        };
+        candleCache.set(cacheKey, result);
+        failedTickers.delete(upperTicker);
+        console.log(`[CandleCache] Cached ${upperTicker} with ${closes.length} days (Yahoo)`);
+        return result;
       }
     }
 
-    const result: HistoricalCandles = {
-      ticker: upperTicker,
-      closes: data.c,
-      dates: data.t.map(t => new Date(t * 1000)),
-      returns,
-      fetchedAt: now,
-      partial: false,
-      daysAvailable: data.c.length,
+    // No data from either source
+    console.warn(`[CandleCache] No data for ${upperTicker} from Polygon or Yahoo`);
+    failedTickers.set(upperTicker, { time: now, reason: 'NO_DATA' });
+    return {
+      ticker: upperTicker, closes: [], dates: [], returns: [],
+      fetchedAt: now, partial: true, daysAvailable: 0,
     };
-
-    // Cache for 24 hours
-    candleCache.set(cacheKey, result);
-
-    // Clear from failed list
-    failedTickers.delete(upperTicker);
-
-    console.log(`[CandleCache] Cached ${upperTicker} with ${data.c.length} days`);
-
-    return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    const isPlanLimit = errorMessage.includes('ACCESS_DENIED') || errorMessage.includes('paid plan');
-
-    console.warn(`[CandleCache] Failed to fetch ${upperTicker}: ${isPlanLimit ? 'Plan limitation' : errorMessage}`);
-    failedTickers.set(upperTicker, {
-      time: now,
-      reason: isPlanLimit ? 'PLAN_LIMIT' : 'ERROR',
-    });
-
+    console.warn(`[CandleCache] Failed to fetch ${upperTicker}: ${errorMessage}`);
+    failedTickers.set(upperTicker, { time: now, reason: 'ERROR' });
     return {
-      ticker: upperTicker,
-      closes: [],
-      dates: [],
-      returns: [],
-      fetchedAt: now,
-      partial: true,
-      daysAvailable: 0,
+      ticker: upperTicker, closes: [], dates: [], returns: [],
+      fetchedAt: now, partial: true, daysAvailable: 0,
     };
   }
 }
@@ -264,7 +259,7 @@ export async function getMultipleCandlesGradual(
   if (tickersPending.length === 0 && tickersFailed.length === 0) {
     message = 'All historical data cached';
   } else if (planLimitCount > 0 && planLimitCount === tickersFailed.length) {
-    message = 'Historical candles require Finnhub paid plan. Using alternative analysis.';
+    message = 'Historical candle data temporarily unavailable. Using alternative analysis.';
   } else if (tickersPending.length > 0) {
     message = `Caching historical data: ${tickersWithData.length}/${total} tickers ready. Refresh to continue.`;
   } else if (tickersFailed.length > 0) {
@@ -290,7 +285,7 @@ export async function getMultipleCandlesGradual(
 export function getCacheStats(): {
   cachedTickers: number;
   failedTickers: number;
-  queueStats: { queueLength: number; isProcessing: boolean; rateLimitedUntil: number; consecutiveErrors: number };
+  provider: string;
 } {
   const keys = candleCache.keys();
   const candleKeys = keys.filter(k => k.startsWith('candles:'));
@@ -298,7 +293,7 @@ export function getCacheStats(): {
   return {
     cachedTickers: candleKeys.length,
     failedTickers: failedTickers.size,
-    queueStats: finnhubQueue.getStats(),
+    provider: 'polygon',
   };
 }
 
@@ -314,8 +309,6 @@ export function clearCandleCache(): void {
 // ============================================================================
 // BENCHMARK CANDLE CACHING
 // ============================================================================
-
-import { yahooGet, fetchPolygonAggs } from './yahoo-http';
 
 const BENCHMARK_TICKERS = ['SPY', 'QQQ', 'DIA'];
 const benchmarkCache = new NodeCache({ stdTTL: 86400 }); // 24h
