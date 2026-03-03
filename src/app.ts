@@ -38,7 +38,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com", "https://static.cloudflareinsights.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com", "https://static.cloudflareinsights.com", "https://accounts.google.com", "https://appleid.cdn-apple.com"],
+      // NOTE: The UI's index.html also has a CSP <meta> tag. Both must be kept in sync.
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com"],
