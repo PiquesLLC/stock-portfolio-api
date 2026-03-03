@@ -262,7 +262,7 @@ export interface HistoricalCandles {
 }
 
 /**
- * Fetch historical daily candles from Finnhub with 24-hour caching
+ * Fetch historical daily candles via Polygon.io with 24-hour caching
  * @param ticker - Stock ticker symbol
  * @param years - Number of years of history (1 or 3)
  */
@@ -278,36 +278,14 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
 
   const now = Date.now();
 
-  // Check rate limit
-  if (now < rateLimitedUntil) {
-    return {
-      ticker: upperTicker,
-      closes: [],
-      dates: [],
-      returns: [],
-      fetchedAt: now,
-      partial: true,
-    };
-  }
-
   try {
-    const toDate = Math.floor(now / 1000);
-    const fromDate = toDate - (years * 365 * 24 * 60 * 60);
+    const toDateStr = new Date().toISOString().split('T')[0];
+    const fromDateStr = new Date(now - years * 365 * 86400000).toISOString().split('T')[0];
 
-    const response = await axios.get<CandleData>(`${FINNHUB_BASE_URL}/stock/candle`, {
-      params: {
-        symbol: upperTicker,
-        resolution: 'D',  // Daily
-        from: fromDate,
-        to: toDate,
-        token: config.finnhubApiKey,
-      },
-      timeout: 10000,
-    });
+    const { fetchPolygonAggs } = await import('./yahoo-http');
+    const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDateStr, toDateStr);
 
-    const data = response.data;
-
-    if (data.s !== 'ok' || !data.c || data.c.length === 0) {
+    if (!pg || pg.closes.length === 0) {
       console.warn(`No candle data for ${upperTicker}`);
       return {
         ticker: upperTicker,
@@ -319,20 +297,18 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
       };
     }
 
-    markFinnhubSuccess();
-
     // Calculate daily returns
     const returns: number[] = [];
-    for (let i = 1; i < data.c.length; i++) {
-      if (data.c[i - 1] > 0) {
-        returns.push((data.c[i] - data.c[i - 1]) / data.c[i - 1]);
+    for (let i = 1; i < pg.closes.length; i++) {
+      if (pg.closes[i - 1] > 0) {
+        returns.push((pg.closes[i] - pg.closes[i - 1]) / pg.closes[i - 1]);
       }
     }
 
     const result: HistoricalCandles = {
       ticker: upperTicker,
-      closes: data.c,
-      dates: data.t.map(t => new Date(t * 1000)),
+      closes: pg.closes,
+      dates: pg.timestamps.map(t => new Date(t * 1000)),
       returns,
       fetchedAt: now,
       partial: false,
@@ -343,9 +319,6 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
 
     return result;
   } catch (error) {
-    if (error instanceof AxiosError && error.response?.status === 429) {
-      rateLimitedUntil = now + 60000;
-    }
     console.error(`Failed to fetch candles for ${upperTicker}:`, error instanceof Error ? error.message : String(error));
 
     return {
@@ -754,11 +727,11 @@ export function isAdvPending(ticker: string): boolean {
 
 /**
  * Queue ADV fetches for tickers (non-blocking, runs in background)
- * Uses finnhub-queue for rate limiting
+ * Uses Polygon.io for volume data (Finnhub free tier blocks /stock/candle)
  * Only fetches for US tickers (no dots in symbol) to avoid wasting API calls
  */
 export async function queueAdvFetches(tickers: string[]): Promise<void> {
-  const { finnhubQueue } = await import('./finnhub-queue');
+  const { fetchPolygonAggs } = await import('./yahoo-http');
 
   for (const ticker of tickers) {
     const upperTicker = ticker.toUpperCase();
@@ -777,20 +750,14 @@ export async function queueAdvFetches(tickers: string[]): Promise<void> {
     // Fire and forget - don't await
     (async () => {
       try {
-        const now = Date.now();
-        const toDate = Math.floor(now / 1000);
-        const fromDate = toDate - (45 * 24 * 60 * 60); // ~45 days for 30 trading days
+        const toDate = new Date().toISOString().split('T')[0];
+        const fromDate = new Date(Date.now() - 45 * 86400000).toISOString().split('T')[0];
 
-        const data = await finnhubQueue.request<CandleData>('/stock/candle', {
-          symbol: upperTicker,
-          resolution: 'D',
-          from: fromDate,
-          to: toDate,
-        });
+        const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDate, toDate);
 
-        if (data.s === 'ok' && data.v && data.v.length > 0) {
+        if (pg && pg.volumes && pg.volumes.length > 0) {
           // Calculate 30-day average volume (or whatever we have)
-          const volumes = data.v.slice(-30);
+          const volumes = pg.volumes.slice(-30);
           const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
           setCachedAdv(upperTicker, avgVolume);
           console.log(`[ADV] Cached ${upperTicker}: ${Math.round(avgVolume).toLocaleString()}`);
@@ -801,11 +768,8 @@ export async function queueAdvFetches(tickers: string[]): Promise<void> {
       } catch (error) {
         // Mark as failed, don't retry for 24h
         advFailedCache.set(`adv-fail:${upperTicker}`, true);
-        // Only log non-403 errors (403 is expected for free tier)
         const msg = error instanceof Error ? error.message : 'unknown';
-        if (!msg.includes('ACCESS_DENIED')) {
-          console.log(`[ADV] Failed for ${upperTicker}: ${msg}`);
-        }
+        console.log(`[ADV] Failed for ${upperTicker}: ${msg}`);
       } finally {
         advFetchQueue.delete(upperTicker);
       }
