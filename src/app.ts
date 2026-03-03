@@ -174,9 +174,15 @@ app.use('/', routes);
 // In production, serve the UI static files from client/ directory
 const clientDir = path.join(__dirname, '..', 'client');
 if (fs.existsSync(clientDir)) {
-  app.use(express.static(clientDir));
-  // SPA fallback: serve index.html for any non-API route
+  // Hashed assets (Vite fingerprints filenames) — cache aggressively
+  app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
+  // All other static files — short cache with revalidation
+  app.use(express.static(clientDir, { maxAge: '1h', etag: true }));
+  // SPA fallback: serve index.html for any non-API route — NEVER cache
   app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(clientDir, 'index.html'));
   });
 } else {
