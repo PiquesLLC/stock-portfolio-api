@@ -1,0 +1,6 @@
+[variables]
+NODE_VERSION = "22"
+
+[phases.setup]
+aptPkgs = []
+nixPkgs = ["nodejs_22", "npm-9_x", "openssl"]
