@@ -11,3 +11,11 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+.npm-cache/
+.claude/
+.github/
+audit-artifacts/
+docs/
+src/generated/
+*.test.ts
+vitest.config.ts
