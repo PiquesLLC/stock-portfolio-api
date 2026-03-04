@@ -671,6 +671,7 @@ export async function createStripeConnectOnboardingLink(userId: string): Promise
       type: 'express',
       email: creator.user.email ?? undefined,
       capabilities: {
+        card_payments: { requested: true },
         transfers: { requested: true },
       },
       business_type: 'individual',
