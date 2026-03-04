@@ -4,7 +4,7 @@
  * Idempotent â€” safe to run multiple times per day.
  */
 
-import { Prisma } from '../generated/prisma/client';
+import { Prisma } from '@prisma/client';
 import prisma from '../utils/prisma';
 import { isDripEnabled, reinvestDividend } from './drip.service';
 
