@@ -259,9 +259,14 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         });
         if (!refundedUser) return;
 
-        // Only cancel if the refunded subscription matches the user's current subscription
-        // (prevents cancelling a new subscription when an old charge is refunded)
-        if (refundedSubscriptionId && refundedUser.stripeSubscriptionId !== refundedSubscriptionId) {
+        // Only cancel if the refunded subscription matches the user's current subscription.
+        // Fail closed: if we can't resolve the subscription ID, skip downgrade to avoid
+        // accidentally cancelling a newer subscription from an ambiguous refund payload.
+        if (!refundedSubscriptionId) {
+          console.warn(`[Billing] Refund for customer ${stripeCustomerId} has no resolvable subscription ID — skipping downgrade`);
+          return;
+        }
+        if (refundedUser.stripeSubscriptionId !== refundedSubscriptionId) {
           console.log(`[Billing] Refund for subscription ${refundedSubscriptionId} does not match current ${refundedUser.stripeSubscriptionId} — skipping`);
           return;
         }
