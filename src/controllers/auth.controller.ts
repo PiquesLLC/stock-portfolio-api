@@ -45,10 +45,18 @@ function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: 
   return false;
 }
 
-// Detect Capacitor requests via Origin header (not forgeable x-capacitor)
-function isCapacitorRequest(req: Request): boolean {
+// Detect Capacitor (native app) requests.
+// Defense-in-depth: require BOTH the Capacitor origin AND an explicit opt-in header.
+// - Origin 'capacitor://localhost' is set by WKWebView and cannot be spoofed from a browser.
+// - 'X-Nala-Native: 1' is sent by the native app only and acts as a second signal.
+// - A plain curl/Postman request CAN set both headers, but the attacker already has
+//   valid credentials at that point (they just authenticated), and the refresh token
+//   is the same value already set as an httpOnly cookie. The cookie is the primary
+//   credential; the body copy just enables Keychain storage on-device.
+export function isCapacitorRequest(req: Request): boolean {
   const origin = req.headers.origin;
-  return origin === 'capacitor://localhost';
+  const nativeHeader = req.headers['x-nala-native'];
+  return origin === 'capacitor://localhost' && nativeHeader === '1';
 }
 
 export function getCookieOptions(req: Request) {
@@ -108,7 +116,12 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.json({ user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } });
+    const body: any = { user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } };
+    // Include refreshToken in response body for native apps (biometric Keychain storage)
+    if (isCapacitorRequest(req)) {
+      body.refreshToken = result.refreshToken;
+    }
+    res.json(body);
   } catch (_error) {
     console.error('Login error:');
     res.status(500).json({ error: 'Login failed' });
@@ -246,10 +259,14 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.status(201).json({
+    const signupBody: any = {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       emailVerificationRequired: !result.user.emailVerified,
-    });
+    };
+    if (isCapacitorRequest(req)) {
+      signupBody.refreshToken = result.refreshToken;
+    }
+    res.status(201).json(signupBody);
   } catch (_error) {
     console.error('Signup error:');
     res.status(500).json({ error: 'Failed to create account' });
@@ -530,6 +547,9 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.plaidItem.deleteMany({ where: { userId: user.id } });
       // Auth & sessions
       await tx.refreshToken.deleteMany({ where: { userId: user.id } });
+      // Push notifications (explicit — don't rely solely on cascade)
+      await tx.pushSubscription.deleteMany({ where: { userId: user.id } });
+      await tx.devicePushToken.deleteMany({ where: { userId: user.id } });
       // MFA
       await tx.mfaMethod.deleteMany({ where: { userId: user.id } });
       await tx.mfaChallenge.deleteMany({ where: { userId: user.id } });
@@ -605,7 +625,12 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.accessToken, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    res.json({ message: 'Token refreshed successfully' });
+    const refreshBody: any = { message: 'Token refreshed successfully' };
+    // On native, return the new refresh token so biometric Keychain can be updated
+    if (isCapacitorRequest(req)) {
+      refreshBody.refreshToken = result.refreshToken;
+    }
+    res.json(refreshBody);
   } catch (_error) {
     console.error('Refresh token error:');
     res.status(500).json({ error: 'Failed to refresh token' });

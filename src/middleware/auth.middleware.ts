@@ -2,12 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { AuthRequest, AuthErrorCode } from '../types/auth';
 import { verifyTokenDetailed } from '../services/auth.service';
-
-function isCapacitorRequest(req: Request): boolean {
-  // Use Origin header (not forgeable x-capacitor) to detect Capacitor native app
-  const origin = req.headers.origin;
-  return origin === 'capacitor://localhost';
-}
+import { isCapacitorRequest } from '../controllers/auth.controller';
 
 function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);

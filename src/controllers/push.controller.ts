@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
-import { saveSubscription, removeSubscription, sendPushToUser, getSubscriptionCount } from '../services/push.service';
+import { saveSubscription, removeSubscription, sendPushToUser, getSubscriptionCount, saveDeviceToken, removeDeviceToken } from '../services/push.service';
 
 const MAX_ENDPOINT_LENGTH = 2048;
 const MAX_KEY_LENGTH = 512;
@@ -139,5 +139,63 @@ export async function testPushHandler(req: AuthRequest, res: Response): Promise<
   } catch (err) {
     console.error('[Push] Test push error:', err);
     res.status(500).json({ error: 'Failed to send test push' });
+  }
+}
+
+/**
+ * POST /push/device — Register a native device push token.
+ */
+export async function registerDeviceHandler(req: AuthRequest, res: Response): Promise<void> {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  const { token, platform } = req.body;
+
+  if (!token || typeof token !== 'string' || token.length > 512) {
+    res.status(400).json({ error: 'Invalid device token' });
+    return;
+  }
+
+  if (!platform || !['ios', 'android'].includes(platform)) {
+    res.status(400).json({ error: 'platform must be "ios" or "android"' });
+    return;
+  }
+
+  try {
+    await saveDeviceToken(req.user.userId, token, platform);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Push] Register device error:', err);
+    res.status(500).json({ error: 'Failed to register device token' });
+  }
+}
+
+/**
+ * DELETE /push/device — Unregister a native device push token.
+ */
+export async function unregisterDeviceHandler(req: AuthRequest, res: Response): Promise<void> {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') {
+    res.status(400).json({ error: 'Missing token' });
+    return;
+  }
+
+  try {
+    const removed = await removeDeviceToken(req.user.userId, token);
+    if (!removed) {
+      res.status(404).json({ error: 'Device token not found' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Push] Unregister device error:', err);
+    res.status(500).json({ error: 'Failed to unregister device token' });
   }
 }
