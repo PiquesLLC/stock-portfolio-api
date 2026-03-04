@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../src/generated/prisma/client';
 
 const prisma = new PrismaClient();
 const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
