@@ -5,6 +5,9 @@ node_modules/
 dist/
 client/
 
+# Prisma v7 generated client
+src/generated/
+
 # Environment files (keep .env.example)
 .env
 .env.local
