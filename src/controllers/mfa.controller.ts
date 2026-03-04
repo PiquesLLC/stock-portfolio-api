@@ -8,7 +8,7 @@ import {
   generateBackupCodes, verifyBackupCode, peekMfaChallenge, consumeMfaChallenge,
 } from '../services/mfa.service';
 import { generateAccessToken, generateRefreshToken } from '../services/auth.service';
-import { getCookieOptions } from './auth.controller';
+import { getCookieOptions, isCapacitorRequest } from './auth.controller';
 import { config } from '../config';
 import prisma from '../utils/prisma';
 import { commitOAuthLink } from '../services/oauth.service';
@@ -93,7 +93,12 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', token, accessOptions);
     res.cookie('refreshToken', refreshToken, refreshOptions);
-    res.json({ user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin } });
+    const mfaBody: any = { user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin } };
+    // Include refreshToken in response body for native apps (biometric Keychain storage)
+    if (isCapacitorRequest(req)) {
+      mfaBody.refreshToken = refreshToken;
+    }
+    res.json(mfaBody);
   } catch (_error) {
     console.error('MFA verify error:');
     res.status(500).json({ error: 'Verification failed' });

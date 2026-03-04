@@ -28,6 +28,7 @@ import creatorRoutes from './creator.routes';
 import referralRoutes from './referral.routes';
 import waitlistRoutes from './waitlist.routes';
 import pushRoutes from './push.routes';
+import appleIapRoutes from './apple-iap.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -63,5 +64,6 @@ router.use('/plaid', plaidRoutes);
 if (config.billingEnabled) {
   router.use('/billing', billingRoutes);
 }
+router.use('/billing', appleIapRoutes);
 
 export default router;

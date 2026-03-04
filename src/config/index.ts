@@ -134,6 +134,17 @@ export const config = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
   vapidSubject: process.env.VAPID_SUBJECT || 'mailto:contact@nalaai.com',
 
+  // APNs Native Push (iOS)
+  apnsKeyId: process.env.APNS_KEY_ID || process.env.APPLE_KEY_ID || '',
+  apnsTeamId: process.env.APNS_TEAM_ID || process.env.APPLE_TEAM_ID || '',
+  apnsPrivateKey: (process.env.APNS_PRIVATE_KEY || process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+  apnsBundleId: process.env.APNS_BUNDLE_ID || 'com.nala.portfolio',
+
+  // Apple IAP
+  appleIapEnabled: process.env.APPLE_IAP_ENABLED === 'true',
+  appleBundleId: process.env.APPLE_BUNDLE_ID || 'com.nala.portfolio',
+  appleIapSharedSecret: process.env.APPLE_IAP_SHARED_SECRET || '',
+
   // OAuth
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   appleClientId: process.env.APPLE_CLIENT_ID || '',

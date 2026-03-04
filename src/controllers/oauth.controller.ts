@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens, commitOAuthLink, OAuthProfile } from '../services/oauth.service';
 import { config } from '../config';
-import { getCookieOptions } from './auth.controller';
+import { getCookieOptions, isCapacitorRequest } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
 import { googleCallbackSchema, appleCallbackSchema } from '../validators/oauth.validators';
 import { trackOAuthSuccess, trackOAuthFail, trackOAuthMfa } from '../utils/auth-metrics';
@@ -122,7 +122,11 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    res.json({ user: { ...loginResponse.user, isWaitlistAdmin: isAdmin }, isNewUser });
+    const googleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAdmin }, isNewUser };
+    if (isCapacitorRequest(req)) {
+      googleBody.refreshToken = loginResponse.refreshToken;
+    }
+    res.json(googleBody);
   } catch (error: unknown) {
     trackOAuthFail('google');
     console.error('Google OAuth error:', error instanceof Error ? error.message : error);
@@ -195,7 +199,11 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAppleAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    res.json({ user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin }, isNewUser });
+    const appleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin }, isNewUser };
+    if (isCapacitorRequest(req)) {
+      appleBody.refreshToken = loginResponse.refreshToken;
+    }
+    res.json(appleBody);
   } catch (error: unknown) {
     trackOAuthFail('apple');
     console.error('Apple OAuth error:', error instanceof Error ? error.message : error);
