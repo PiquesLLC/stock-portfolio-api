@@ -22,7 +22,7 @@
         "seed": "npx ts-node prisma/seed.ts"
     },
     "engines": {
-        "node": ">=24"
+        "node": ">=20.19"
     },
     "jest": {
         "roots": [
