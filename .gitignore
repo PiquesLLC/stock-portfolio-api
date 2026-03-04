@@ -43,3 +43,6 @@ tmp-*.ts
 # Generated assets
 share-card-redesign-preview*.png
 logo-b64.txt
+
+# Prisma v7 generated client (rebuilt via prisma generate)
+src/generated/
