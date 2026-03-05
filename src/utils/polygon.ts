@@ -428,13 +428,7 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
           }
 
           const { price, timestamp } = getBestPrice(snapshot);
-          // During CLOSED (8PM-4AM), Polygon's prevDay.c = the day BEFORE the
-          // last session (e.g., March 3 at 1AM on March 5). Use day.c instead —
-          // it's the most recent session's close (March 4), which is the correct
-          // baseline so dayChange ≈ 0 overnight (matching Robinhood).
-          const prevClose = session === 'CLOSED' && snapshot.day?.c > 0
-            ? snapshot.day.c
-            : (snapshot.prevDay?.c || price);
+          const prevClose = snapshot.prevDay?.c || price;
 
           // CRITICAL: Never use 0 as a valid price
           if (price <= 0) {
