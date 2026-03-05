@@ -140,7 +140,7 @@ export async function getBehaviorInsights(userId: string): Promise<BehaviorInsig
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
-    ], { timeout: 60000 });
+    ], { timeout: 60000, feature: 'behavior-insights', userId });
 
     if (!resp || !resp.content) {
       return buildFallback();

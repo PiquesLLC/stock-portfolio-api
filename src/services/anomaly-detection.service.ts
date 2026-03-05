@@ -87,7 +87,7 @@ async function checkCooldown(userId: string, ticker: string, type: string, coold
   return recent != null; // true = on cooldown, skip
 }
 
-async function getPerplexityAnalysis(ticker: string, context: string): Promise<{ analysis: string; citations: string[] } | null> {
+async function getPerplexityAnalysis(ticker: string, context: string, userId?: string): Promise<{ analysis: string; citations: string[] } | null> {
   const cacheKey = `analysis:${ticker}:${formatDate(new Date())}`;
   const cached = analysisCache.get<{ analysis: string; citations: string[] }>(cacheKey);
   if (cached) return cached;
@@ -102,7 +102,7 @@ async function getPerplexityAnalysis(ticker: string, context: string): Promise<{
         role: 'user',
         content: context,
       },
-    ], { timeout: 30000 });
+    ], { timeout: 30000, feature: 'anomaly-analysis', userId, ticker });
 
     if (!resp?.content) return null;
 
@@ -278,7 +278,7 @@ export async function detectAnomalies(userId: string): Promise<void> {
         ? `Stock ${c.ticker} is ${q && q.changePercent > 0 ? 'up' : 'down'} ${c.value.toFixed(1)}% today. What news, events, or market conditions are driving this move?`
         : `Stock ${c.ticker} is trading at ${c.value.toFixed(1)}x its average daily volume today. What news or events are causing this unusual trading activity?`;
 
-      const result = await getPerplexityAnalysis(c.ticker, context);
+      const result = await getPerplexityAnalysis(c.ticker, context, userId);
       if (result) {
         analysis = result.analysis;
         citations = result.citations.length > 0 ? JSON.stringify(result.citations) : null;

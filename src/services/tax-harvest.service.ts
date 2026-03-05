@@ -165,6 +165,7 @@ export async function getTaxHarvestSuggestions(userId: string): Promise<TaxHarve
           { role: 'system', content: 'You are a tax planning advisor. Provide brief, practical tax-loss harvesting recommendations. Focus on wash sale rules, sector diversification impact, and whether now is a good time to harvest each position. Respond in 2-3 concise paragraphs.' },
           { role: 'user', content: `Analyze these unrealized losses for tax-loss harvesting opportunities:\n\n${candidateSummary}\n\nTotal unrealized gains: $${totalUnrealizedGain.toFixed(0)}\nTotal unrealized losses: $${totalUnrealizedLoss.toFixed(0)}\nNet: $${(totalUnrealizedGain - totalUnrealizedLoss).toFixed(0)}` },
         ],
+        { feature: 'tax-harvest', userId },
       );
 
       if (result) {

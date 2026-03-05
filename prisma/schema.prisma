@@ -1059,3 +1059,19 @@ model Referral {
   @@index([status])
   @@index([createdAt])
 }
+
+// ─── API Usage Tracking ──────────────────────────────────────────────
+
+model ApiUsageLog {
+  id              String   @id @default(uuid())
+  provider        String   // "perplexity" | "gemini"
+  model           String   // "sonar-pro"
+  feature         String   // "stock-qa" | "ai-events" | etc.
+  inputTokens     Int      @default(0)
+  outputTokens    Int      @default(0)
+  costUsdEstimate Float    @default(0)
+  userId          String?
+  ticker          String?
+  durationMs      Int      @default(0)
+  createdAt       DateTime @default(now())
+}

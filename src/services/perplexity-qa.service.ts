@@ -42,7 +42,7 @@ export async function askStockQuestion(
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `Stock: ${upperTicker}\n\nQuestion: ${question}` },
-    ], { timeout: 30000 });
+    ], { timeout: 30000, feature: 'stock-qa', userId, ticker: upperTicker });
 
     if (!resp || !resp.content) {
       return {
