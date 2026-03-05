@@ -6,10 +6,28 @@ export interface PerplexityMessage {
   content: string;
 }
 
+export interface PerplexityUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsdEstimate: number;
+}
+
 export interface PerplexityResponse {
   content: string;
   citations: string[];
+  usage?: PerplexityUsage;
 }
+
+export interface PerplexityCallOptions {
+  timeout?: number;
+  feature?: string;
+  userId?: string;
+  ticker?: string;
+}
+
+// sonar-pro pricing: $3/M input, $15/M output, $5/1K searches
+const INPUT_COST_PER_TOKEN = 3 / 1_000_000;
+const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
 
 /**
  * Call the Perplexity sonar-pro model.
@@ -17,9 +35,11 @@ export interface PerplexityResponse {
  */
 export async function callPerplexity(
   messages: PerplexityMessage[],
-  options?: { timeout?: number }
+  options?: PerplexityCallOptions
 ): Promise<PerplexityResponse | null> {
   if (!config.perplexityApiKey) return null;
+
+  const startMs = Date.now();
 
   const resp = await axios.post(
     'https://api.perplexity.ai/chat/completions',
@@ -36,9 +56,54 @@ export async function callPerplexity(
     }
   );
 
+  const durationMs = Date.now() - startMs;
   const content = resp.data?.choices?.[0]?.message?.content || '';
   const citations: string[] = resp.data?.citations || [];
-  return { content, citations };
+
+  // Extract token usage from API response
+  const inputTokens = resp.data?.usage?.prompt_tokens ?? 0;
+  const outputTokens = resp.data?.usage?.completion_tokens ?? 0;
+  const costUsdEstimate = inputTokens * INPUT_COST_PER_TOKEN + outputTokens * OUTPUT_COST_PER_TOKEN;
+
+  const usage: PerplexityUsage = { inputTokens, outputTokens, costUsdEstimate };
+
+  // Fire-and-forget DB logging (don't block the response)
+  if (options?.feature) {
+    logApiUsage({
+      provider: 'perplexity',
+      model: 'sonar-pro',
+      feature: options.feature,
+      inputTokens,
+      outputTokens,
+      costUsdEstimate,
+      userId: options.userId,
+      ticker: options.ticker,
+      durationMs,
+    }).catch(err => {
+      console.error('[ApiUsageLog] Failed to log:', err.message);
+    });
+  }
+
+  return { content, citations, usage };
+}
+
+/**
+ * Fire-and-forget insert to ApiUsageLog.
+ */
+async function logApiUsage(data: {
+  provider: string;
+  model: string;
+  feature: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsdEstimate: number;
+  userId?: string;
+  ticker?: string;
+  durationMs: number;
+}): Promise<void> {
+  // Dynamic import to avoid circular dependency (prisma → generated → ...)
+  const prisma = (await import('./prisma')).default;
+  await prisma.apiUsageLog.create({ data });
 }
 
 /**

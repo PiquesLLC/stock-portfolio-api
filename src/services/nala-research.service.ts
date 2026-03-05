@@ -375,7 +375,7 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserMessage(question, persona) },
-    ], { timeout: 60000 });
+    ], { timeout: 60000, feature: 'nala-research', userId });
 
     if (!resp || !resp.content) {
       console.warn('[Nala AI] Empty Perplexity response');

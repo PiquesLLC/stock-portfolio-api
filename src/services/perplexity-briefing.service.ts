@@ -124,7 +124,7 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
-    ], { timeout: 60000 });
+    ], { timeout: 60000, feature: 'portfolio-briefing', userId });
 
     if (!resp || !resp.content) {
       return buildFallback();
@@ -196,7 +196,7 @@ export async function explainBriefingSection(title: string, body: string, userId
   const resp = await callPerplexity([
     { role: 'system', content: EXPLAIN_SYSTEM_PROMPT },
     { role: 'user', content: `Briefing section: "${title}"\n\nSummary: ${body}\n\nPlease provide the full detailed context and explanation.` },
-  ], { timeout: 30000 });
+  ], { timeout: 30000, feature: 'briefing-explain', userId });
 
   if (!resp || !resp.content) {
     return { explanation: 'Unable to load detailed explanation at this time.', citations: [], cached: false };

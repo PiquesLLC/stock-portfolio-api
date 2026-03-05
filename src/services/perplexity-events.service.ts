@@ -70,7 +70,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
-    ]);
+    ], { feature: 'ai-events', userId, ticker: upper });
 
     if (!resp || !resp.content) {
       console.warn(`[Perplexity] Empty response for ${upper}`);

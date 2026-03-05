@@ -496,7 +496,7 @@ Return JSON in this exact format:
 
 Use the most recent data available. For foreign stocks, use their US ADR ticker if one exists (e.g., TSM for Taiwan Semiconductor, BABA for Alibaba). If no US ticker exists, use the local exchange ticker.`,
       },
-    ], { timeout: 30000 });
+    ], { timeout: 30000, feature: 'etf-holdings', ticker });
 
     if (!resp?.content) return null;
 
