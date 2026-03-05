@@ -12,6 +12,7 @@ import {
   explainBriefingHandler,
   getEarningsSummaryHandler,
 } from '../controllers/insights.controller';
+import { getEarningsPreviewHandler } from '../controllers/earnings-preview.controller';
 import {
   getAnomaliesHandler,
   getUnreadAnomalyCountHandler,
@@ -35,6 +36,7 @@ router.get('/behavior', heavyReadLimiter, requireAuth, requirePlan('premium'), g
 router.get('/daily-report', heavyReadLimiter, requireAuth, requirePlan('premium'), getDailyReportHandler);
 router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
+router.get('/earnings-preview', heavyReadLimiter, requireAuth, requirePlan('elite'), getEarningsPreviewHandler);
 
 // Tax-Loss Harvesting
 router.get('/tax-harvest', heavyReadLimiter, requireAuth, requirePlan('premium'), getTaxHarvestHandler);
