@@ -354,44 +354,41 @@ async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number;
   }
 }
 
-// Using Finnhub for real-time market data
-// Free tier: 60 API calls/minute
-
 export async function fetchPrice(ticker: string): Promise<Quote> {
   try {
-    return await getQuote(ticker);
+    return await getPolygonQuote(ticker);
   } catch {
-    return getPolygonQuote(ticker);
+    return getQuote(ticker);
   }
 }
 
 export async function fetchPrices(tickers: string[], options?: { preferPolygon?: boolean }): Promise<QuotesResult> {
+  // Polygon is always primary — paid plan provides batch snapshots with
+  // lastTrade.p (extended hours), prevDay.c (correct previousClose), and
+  // no rate limit issues. Finnhub free tier (60 calls/min) is only used
+  // as fallback for tickers Polygon misses.
   let result: QuotesResult;
 
-  if (options?.preferPolygon) {
-    // Polygon primary (for background tasks — saves Finnhub quota)
-    try {
-      const polygonResult = await getPolygonQuotes(tickers);
-      result = { ...polygonResult };
-    } catch {
-      result = await getQuotes(tickers);
-    }
-  } else {
-    // Finnhub primary (real-time), Polygon fallback (15-min delay)
+  try {
+    const polygonResult = await getPolygonQuotes(tickers);
+    result = { ...polygonResult };
+  } catch {
+    // Polygon completely failed — fall back to Finnhub
     result = await getQuotes(tickers);
-
-    if (result.failedTickers.length > 0) {
-      try {
-        const polygonResult = await getPolygonQuotes(result.failedTickers);
-        for (const [ticker, quote] of polygonResult.quotes) {
-          result.quotes.set(ticker, quote);
-          result.failedTickers = result.failedTickers.filter(t => t !== ticker);
-        }
-      } catch { /* Polygon also failed, continue to Yahoo */ }
-    }
   }
 
-  // Yahoo Finance fallback for any remaining failures
+  // Finnhub fallback for any tickers Polygon missed
+  if (result.failedTickers.length > 0) {
+    try {
+      const finnhubResult = await getQuotes(result.failedTickers);
+      for (const [ticker, quote] of finnhubResult.quotes) {
+        result.quotes.set(ticker, quote);
+        result.failedTickers = result.failedTickers.filter(t => t !== ticker);
+      }
+    } catch { /* Finnhub also failed */ }
+  }
+
+  // Yahoo Finance last-resort fallback for any remaining failures
   if (result.failedTickers.length > 0) {
     const yahooFallbacks = await Promise.all(
       result.failedTickers.map(async (ticker) => {
@@ -409,37 +406,12 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     }
   }
 
-  // During extended hours, enrich quotes with Yahoo's real-time extended prices
-  // Only correct previousClose during PRE/POST — during CLOSED, Yahoo returns
-  // the prior day's chart so chartPreviousClose is TWO days ago (wrong)
+  // Set per-ticker session info
   const session = getMarketSession();
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
-    const enrichPromises = Array.from(result.quotes.entries()).map(async ([ticker, quote]) => {
+    for (const [ticker, quote] of result.quotes.entries()) {
       quote.session = getMarketSessionForTicker(ticker);
-      const qSession = quote.session;
-      if (qSession === 'PRE' || qSession === 'POST' || qSession === 'CLOSED') {
-        try {
-          const yahoo = await fetchYahooExtendedPrice(ticker);
-          if (yahoo) {
-            // Only override previousClose during PRE/POST when Finnhub's pc is stale
-            // During CLOSED, Finnhub pc = last session close which is correct
-            if ((qSession === 'PRE' || qSession === 'POST') && yahoo.previousClose > 0) {
-              quote.previousClose = yahoo.previousClose;
-            }
-            // Set extended price if it differs from the regular close
-            if (Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
-              quote.regularClose = quote.currentPrice;
-              quote.extendedPrice = yahoo.price;
-              quote.extendedChange = yahoo.price - quote.previousClose;
-              quote.extendedChangePercent = quote.previousClose > 0
-                ? ((yahoo.price - quote.previousClose) / quote.previousClose) * 100
-                : 0;
-            }
-          }
-        } catch { /* ignore individual failures */ }
-      }
-    });
-    await Promise.all(enrichPromises);
+    }
   }
 
   return result;
@@ -447,34 +419,24 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
 
 export async function fetchQuote(ticker: string): Promise<Quote> {
   let quote: Quote;
+
+  // Polygon primary — paid plan, handles extended hours natively via lastTrade
   try {
-    quote = await getQuote(ticker);
-  } catch {
     quote = await getPolygonQuote(ticker);
+  } catch {
+    // Polygon failed — fall back to Finnhub
+    try {
+      quote = await getQuote(ticker);
+    } catch {
+      // Both failed — try Yahoo as last resort
+      const yahooQuote = await fetchYahooQuote(ticker);
+      if (!yahooQuote) throw new Error(`No quote available for ${ticker}`);
+      quote = yahooQuote;
+    }
   }
 
   // Override session with per-ticker market hours (international/commodity aware)
   quote.session = getMarketSessionForTicker(ticker);
-
-  // During extended hours, supplement with Yahoo's real-time extended price
-  // Only correct previousClose during PRE/POST — during CLOSED, Finnhub pc is correct
-  const session = quote.session;
-  if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
-    const yahoo = await fetchYahooExtendedPrice(ticker.toUpperCase());
-    if (yahoo) {
-      if ((session === 'PRE' || session === 'POST') && yahoo.previousClose > 0) {
-        quote.previousClose = yahoo.previousClose;
-      }
-      if (Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
-        quote.regularClose = quote.currentPrice;
-        quote.extendedPrice = yahoo.price;
-        quote.extendedChange = yahoo.price - quote.previousClose;
-        quote.extendedChangePercent = quote.previousClose > 0
-          ? ((yahoo.price - quote.previousClose) / quote.previousClose) * 100
-          : 0;
-      }
-    }
-  }
 
   return quote;
 }
