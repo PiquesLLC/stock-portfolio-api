@@ -8,7 +8,14 @@ import { PlanLimitError } from '../utils/plan-limit.error';
 
 
 
-export async function getHoldings(userId: string): Promise<Holding[]> {
+export async function getHoldings(userId: string, portfolioId?: string): Promise<Holding[]> {
+  if (portfolioId) {
+    return prisma.holding.findMany({
+      where: { portfolioId },
+      orderBy: { ticker: 'asc' },
+    });
+  }
+  // Aggregate: all holdings for this user across all portfolios
   return prisma.holding.findMany({
     where: { userId },
     orderBy: { ticker: 'asc' },
@@ -19,6 +26,7 @@ export async function upsertHolding(
   input: HoldingInput,
   userId: string,
   mode: 'replace' | 'add' = 'replace',
+  portfolioId?: string,
 ): Promise<Holding> {
   if (!Number.isFinite(input.shares) || input.shares <= 0) {
     throw new Error('shares must be a positive number');
@@ -29,8 +37,17 @@ export async function upsertHolding(
   const ticker = input.ticker.toUpperCase();
   const uid = userId;
 
+  // Resolve portfolioId to user's default if not specified
+  let resolvedPortfolioId = portfolioId;
+  if (!resolvedPortfolioId) {
+    // Dynamic import to avoid circular dependency
+    const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
+    const defaultPortfolio = await getOrCreateDefaultPortfolio(uid);
+    resolvedPortfolioId = defaultPortfolio.id;
+  }
+
   const existing = await prisma.holding.findFirst({
-    where: { ticker, userId: uid },
+    where: { ticker, portfolioId: resolvedPortfolioId },
   });
 
   if (existing) {
@@ -79,16 +96,29 @@ export async function upsertHolding(
         shares: input.shares,
         averageCost: input.averageCost,
         userId: uid,
+        portfolioId: resolvedPortfolioId,
       },
     });
   });
 }
 
-export async function deleteHolding(ticker: string, userId: string): Promise<void> {
+export async function deleteHolding(ticker: string, userId: string, portfolioId?: string): Promise<void> {
   const normalizedTicker = ticker.toUpperCase();
-  const existing = await prisma.holding.findFirst({
-    where: { ticker: normalizedTicker, userId },
-  });
+
+  let existing;
+  if (portfolioId) {
+    existing = await prisma.holding.findFirst({
+      where: { ticker: normalizedTicker, portfolioId },
+    });
+  } else {
+    // Resolve to default portfolio
+    const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
+    const defaultPortfolio = await getOrCreateDefaultPortfolio(userId);
+    existing = await prisma.holding.findFirst({
+      where: { ticker: normalizedTicker, portfolioId: defaultPortfolio.id },
+    });
+  }
+
   if (existing) {
     await prisma.$transaction(async (tx) => {
       // Cascade cleanup: lots, trades, and dividend records tied to this ticker
@@ -101,9 +131,41 @@ export async function deleteHolding(ticker: string, userId: string): Promise<voi
   }
 }
 
-export async function getSettings(userId: string): Promise<Settings> {
-  // Read from per-user UserSettings table
+export async function getSettings(userId: string, portfolioId?: string): Promise<Settings> {
+  // Read non-portfolio fields from UserSettings
   const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+
+  if (portfolioId) {
+    // Scoped: read cash/margin from the specific Portfolio record
+    const portfolio = await prisma.portfolio.findFirst({ where: { id: portfolioId, userId } });
+    if (portfolio) {
+      return {
+        id: 'default',
+        cashBalance: portfolio.cashBalance,
+        marginDebt: portfolio.marginDebt,
+        cashInterestRate: userSettings?.cashInterestRate ?? 0,
+      } as Settings;
+    }
+  }
+
+  // Aggregate: sum cash/margin across all user portfolios
+  const portfolios = await prisma.portfolio.findMany({
+    where: { userId },
+    select: { cashBalance: true, marginDebt: true },
+  });
+
+  if (portfolios.length > 0) {
+    const totalCash = portfolios.reduce((sum, p) => sum + p.cashBalance, 0);
+    const totalMargin = portfolios.reduce((sum, p) => sum + p.marginDebt, 0);
+    return {
+      id: 'default',
+      cashBalance: totalCash,
+      marginDebt: totalMargin,
+      cashInterestRate: userSettings?.cashInterestRate ?? 0,
+    } as Settings;
+  }
+
+  // Fallback: no portfolios exist (pre-migration), read from UserSettings
   if (userSettings) {
     return {
       id: 'default',
@@ -132,19 +194,32 @@ export async function getSettings(userId: string): Promise<Settings> {
   }
 }
 
-export async function updateCashBalance(userId: string, cashBalance: number): Promise<Settings> {
-  const result = await prisma.userSettings.upsert({
+export async function updateCashBalance(userId: string, cashBalance: number, portfolioId?: string): Promise<Settings> {
+  if (portfolioId) {
+    // Update the specific portfolio's cash balance
+    await prisma.portfolio.update({
+      where: { id: portfolioId },
+      data: { cashBalance },
+    });
+  } else {
+    // Update default portfolio's cash balance
+    const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
+    const defaultPortfolio = await getOrCreateDefaultPortfolio(userId);
+    await prisma.portfolio.update({
+      where: { id: defaultPortfolio.id },
+      data: { cashBalance },
+    });
+  }
+
+  // Also keep UserSettings in sync for backward compatibility
+  await prisma.userSettings.upsert({
     where: { userId },
     update: { cashBalance },
     create: { userId, cashBalance, marginDebt: 0 },
   });
 
-  return {
-    id: 'default',
-    cashBalance: result.cashBalance,
-    marginDebt: result.marginDebt ?? 0,
-    cashInterestRate: result.cashInterestRate ?? 0,
-  } as Settings;
+  // Return aggregated settings
+  return getSettings(userId);
 }
 
 export async function updateSettings(userId: string, input: SettingsUpdateInput): Promise<Settings> {
@@ -179,8 +254,9 @@ export async function updateSettings(userId: string, input: SettingsUpdateInput)
   } as Settings;
 }
 
-export async function getPortfolio(userId: string, options?: { preferPolygon?: boolean }): Promise<Portfolio> {
-  const [holdings, settings] = await Promise.all([getHoldings(userId), getSettings(userId)]);
+export async function getPortfolio(userId: string, options?: { preferPolygon?: boolean; portfolioId?: string }): Promise<Portfolio> {
+  const portfolioId = options?.portfolioId;
+  const [holdings, settings] = await Promise.all([getHoldings(userId, portfolioId), getSettings(userId, portfolioId)]);
 
   const marginDebt = settings.marginDebt ?? 0;
   const session = getMarketSession();

@@ -9,6 +9,7 @@ export interface Holding {
   optionStrike?: number | null;
   optionExpiry?: string | null;
   optionType?: string | null;
+  portfolioId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

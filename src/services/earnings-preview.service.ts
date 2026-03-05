@@ -76,7 +76,6 @@ async function getAiPreview(
 
   const userMessage =
     `Feature: earnings-preview\n` +
-    `UserId: ${userId}\n` +
     `Ticker: ${item.ticker}\n` +
     `Report date: ${item.reportDate} (${item.daysUntil} days)\n` +
     `Estimated EPS: ${item.estimatedEPS ?? 'n/a'}\n` +
@@ -97,7 +96,7 @@ async function getAiPreview(
 
   if (!resp || !resp.content) {
     const fallback = { preview: null, citations: [] as string[] };
-    previewCache.set(cacheKey, fallback);
+    previewCache.set(cacheKey, fallback, 300); // 5 min TTL for failures
     return fallback;
   }
 
@@ -114,7 +113,7 @@ async function getAiPreview(
     return payload;
   } catch {
     const fallback = { preview: null, citations: [] as string[] };
-    previewCache.set(cacheKey, fallback);
+    previewCache.set(cacheKey, fallback, 300); // 5 min TTL for failures
     return fallback;
   }
 }
@@ -125,16 +124,23 @@ export async function getEarningsPreviews(userId: string): Promise<EarningsPrevi
   const upcoming = summary.results.filter(item => item.daysUntil >= 0 && item.daysUntil <= UPCOMING_WINDOW_DAYS);
   if (upcoming.length === 0) return { results: [], partial: summary.partial };
 
-  const results = await Promise.allSettled(upcoming.map(async (item) => {
-    const track = await getEarningsTrack(item.ticker);
-    const base = buildBaseItem(item, track);
-    try {
-      const ai = await getAiPreview(base, userId);
-      return { ...base, preview: ai.preview, citations: ai.citations, generatedAt: new Date().toISOString() };
-    } catch {
-      return base;
-    }
-  }));
+  // Process in batches of 3 to limit concurrent Perplexity calls
+  const BATCH_SIZE = 3;
+  const results: PromiseSettledResult<EarningsPreviewItem>[] = [];
+  for (let i = 0; i < upcoming.length; i += BATCH_SIZE) {
+    const batch = upcoming.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(batch.map(async (item) => {
+      const track = await getEarningsTrack(item.ticker);
+      const base = buildBaseItem(item, track);
+      try {
+        const ai = await getAiPreview(base, userId);
+        return { ...base, preview: ai.preview, citations: ai.citations, generatedAt: new Date().toISOString() };
+      } catch {
+        return base;
+      }
+    }));
+    results.push(...batchResults);
+  }
 
   const previews: EarningsPreviewItem[] = [];
   let partial = summary.partial;

@@ -355,6 +355,12 @@ export async function detectDividendChanges(userId: string): Promise<void> {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     if (latest.exDate < sevenDaysAgo) continue;
 
+    // Only alert if the amount actually changed from the immediately previous
+    // payout. This prevents re-alerting every quarter on a stale YoY comparison
+    // (e.g., MLM paid $0.83 three quarters in a row but keeps alerting vs $0.79
+    // from a year ago).
+    if (latest.amountPerShare === events[1].amountPerShare) continue;
+
     // Try YoY same-quarter comparison first: find a dividend ~12 months ago (9-15 month window)
     let compareEvent = events.find(e => {
       const monthsAgo = (latest.exDate.getTime() - e.exDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44);

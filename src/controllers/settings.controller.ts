@@ -84,6 +84,22 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       },
     });
 
+    // Also update the default Portfolio record (multi-portfolio reads from Portfolio table)
+    if (roundedCash !== undefined || roundedMargin !== undefined) {
+      const defaultPortfolio = await prisma.portfolio.findFirst({
+        where: { userId, isDefault: true },
+      });
+      if (defaultPortfolio) {
+        const portfolioUpdate: Record<string, number> = {};
+        if (roundedCash !== undefined) portfolioUpdate.cashBalance = roundedCash;
+        if (roundedMargin !== undefined) portfolioUpdate.marginDebt = roundedMargin;
+        await prisma.portfolio.update({
+          where: { id: defaultPortfolio.id },
+          data: portfolioUpdate,
+        });
+      }
+    }
+
     res.json({
       cashBalance: Math.round(userSettings.cashBalance * 100) / 100,
       marginDebt: Math.round((userSettings.marginDebt ?? 0) * 100) / 100,
