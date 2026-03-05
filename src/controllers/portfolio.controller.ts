@@ -468,10 +468,14 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
         }
       }
 
-      const periodStartValue = latestChange
-        ? (points.length > 0 ? points[0].value : liveValue)
-        : (previousCloseValue || (points.length > 0 ? points[0].value : liveValue));
+      // previousCloseValue (from live quotes) is always the most accurate baseline.
+      // Only fall back to points[0] when previousCloseValue is missing/invalid
+      // (e.g., brand new portfolio with no dayChange data).
+      const periodStartValue = (previousCloseValue && Number.isFinite(previousCloseValue) && previousCloseValue > 0)
+        ? previousCloseValue
+        : (points.length > 0 ? points[0].value : liveValue);
 
+      console.log(`[Chart] 1D: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
       const response: Record<string, unknown> = { points, periodStartValue, period: '1D', source };
       if (includeDebug) {
         response.rebaselineApplied = rebaselineApplied;
