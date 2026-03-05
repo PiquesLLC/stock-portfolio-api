@@ -16,7 +16,7 @@ export async function getEarningsPreviewHandler(req: AuthRequest, res: Response)
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('[Earnings Preview] Error');
+    console.error('[Earnings Preview] Error:', error);
     res.status(500).json({
       results: [],
       partial: true,
