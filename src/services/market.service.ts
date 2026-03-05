@@ -489,15 +489,10 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
       session,
     };
 
-    // Add extended hours if price differs
-    if (session !== 'REG' && Math.abs(lastPrice - currentPrice) > 0.005) {
-      quote.regularClose = currentPrice;
-      quote.extendedPrice = lastPrice;
-      quote.extendedChange = lastPrice - currentPrice;
-      quote.extendedChangePercent = currentPrice !== 0
-        ? ((lastPrice - currentPrice) / currentPrice) * 100
-        : 0;
-    }
+    // Yahoo is a last-resort fallback behind Polygon. Don't set regularClose
+    // here — it causes a bogus afterHoursChange split in the portfolio.
+    // Polygon handles extended hours natively via lastTrade.p without needing
+    // a regularClose/extendedPrice split.
 
     return quote;
   } catch {
