@@ -271,6 +271,9 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
           select: {
             dripEnabled: true,
             ytdBaselineValue: true,
+            cashInterestRate: true,
+            marginDebt: true,
+            annualSalary: true,
           },
         },
       },
@@ -291,6 +294,9 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       holdingsVisibility: user.holdingsVisibility,
       dripEnabled: user.settings?.dripEnabled ?? false,
       ytdBaselineValue: user.settings?.ytdBaselineValue ?? null,
+      cashInterestRate: user.settings?.cashInterestRate ?? null,
+      marginDebt: user.settings?.marginDebt ?? null,
+      annualSalary: user.settings?.annualSalary ?? null,
       createdAt: user.createdAt.toISOString(),
     });
   } catch (_error) {
@@ -321,6 +327,9 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       dripEnabled,
       bio,
       ytdBaselineValue,
+      cashInterestRate,
+      marginDebt,
+      annualSalary,
     } = req.body;
 
     // Validate inputs
@@ -339,6 +348,27 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (ytdBaselineValue !== undefined && ytdBaselineValue !== null) {
       if (typeof ytdBaselineValue !== 'number' || !Number.isFinite(ytdBaselineValue) || ytdBaselineValue <= 0) {
         res.status(400).json({ error: 'ytdBaselineValue must be a positive number or null' });
+        return;
+      }
+    }
+
+    if (cashInterestRate !== undefined && cashInterestRate !== null) {
+      if (typeof cashInterestRate !== 'number' || !Number.isFinite(cashInterestRate) || cashInterestRate < 0 || cashInterestRate > 20) {
+        res.status(400).json({ error: 'cashInterestRate must be a number between 0 and 20, or null' });
+        return;
+      }
+    }
+
+    if (marginDebt !== undefined && marginDebt !== null) {
+      if (typeof marginDebt !== 'number' || !Number.isFinite(marginDebt) || marginDebt < 0) {
+        res.status(400).json({ error: 'marginDebt must be a non-negative number or null' });
+        return;
+      }
+    }
+
+    if (annualSalary !== undefined && annualSalary !== null) {
+      if (typeof annualSalary !== 'number' || !Number.isFinite(annualSalary) || annualSalary < 0) {
+        res.status(400).json({ error: 'annualSalary must be a non-negative number or null' });
         return;
       }
     }
@@ -374,13 +404,16 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       },
     });
 
-    // Update UserSettings if dripEnabled or ytdBaselineValue is provided
+    // Update UserSettings if dripEnabled, ytdBaselineValue, cashInterestRate, marginDebt, or annualSalary is provided
     let dripEnabledResult = false;
     let ytdBaselineResult: number | null = null;
-    const hasSettingsUpdate = dripEnabled !== undefined || ytdBaselineValue !== undefined;
+    let cashInterestRateResult: number | null = null;
+    let marginDebtResult: number | null = null;
+    let annualSalaryResult: number | null = null;
+    const hasSettingsUpdate = dripEnabled !== undefined || ytdBaselineValue !== undefined || cashInterestRate !== undefined || marginDebt !== undefined || annualSalary !== undefined;
     if (hasSettingsUpdate) {
-      const settingsUpdate: { dripEnabled?: boolean; ytdBaselineValue?: number | null } = {};
-      const settingsCreate: { userId: string; dripEnabled?: boolean; ytdBaselineValue?: number | null } = { userId };
+      const settingsUpdate: { dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null } = {};
+      const settingsCreate: { userId: string; dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null } = { userId };
       if (dripEnabled !== undefined) {
         settingsUpdate.dripEnabled = dripEnabled;
         settingsCreate.dripEnabled = dripEnabled;
@@ -389,27 +422,50 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
         settingsUpdate.ytdBaselineValue = ytdBaselineValue;
         settingsCreate.ytdBaselineValue = ytdBaselineValue;
       }
+      if (cashInterestRate !== undefined) {
+        const rateVal = cashInterestRate == null ? 0 : Math.round(cashInterestRate * 100) / 100;
+        settingsUpdate.cashInterestRate = rateVal;
+        settingsCreate.cashInterestRate = rateVal;
+      }
+      if (marginDebt !== undefined) {
+        const debtVal = marginDebt == null ? 0 : Math.round(marginDebt * 100) / 100;
+        settingsUpdate.marginDebt = debtVal;
+        settingsCreate.marginDebt = debtVal;
+      }
+      if (annualSalary !== undefined) {
+        settingsUpdate.annualSalary = annualSalary;
+        settingsCreate.annualSalary = annualSalary;
+      }
       const userSettings = await prisma.userSettings.upsert({
         where: { userId },
         update: settingsUpdate,
         create: settingsCreate,
-        select: { dripEnabled: true, ytdBaselineValue: true },
+        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true },
       });
       dripEnabledResult = userSettings.dripEnabled;
       ytdBaselineResult = userSettings.ytdBaselineValue;
+      cashInterestRateResult = userSettings.cashInterestRate ?? null;
+      marginDebtResult = userSettings.marginDebt ?? null;
+      annualSalaryResult = userSettings.annualSalary ?? null;
     } else {
       const existing = await prisma.userSettings.findUnique({
         where: { userId },
-        select: { dripEnabled: true, ytdBaselineValue: true },
+        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true },
       });
       dripEnabledResult = existing?.dripEnabled ?? false;
       ytdBaselineResult = existing?.ytdBaselineValue ?? null;
+      cashInterestRateResult = existing?.cashInterestRate ?? null;
+      marginDebtResult = existing?.marginDebt ?? null;
+      annualSalaryResult = existing?.annualSalary ?? null;
     }
 
     res.json({
       ...user,
       dripEnabled: dripEnabledResult,
       ytdBaselineValue: ytdBaselineResult,
+      cashInterestRate: cashInterestRateResult,
+      marginDebt: marginDebtResult,
+      annualSalary: annualSalaryResult,
     });
   } catch (_error) {
     console.error('Error updating user settings:');

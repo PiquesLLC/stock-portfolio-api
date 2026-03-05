@@ -83,8 +83,9 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       ).catch(() => console.error('User snapshot error'));
     } else {
       // Default portfolio â€” the main portfolio data (all users see this)
+      const portfolioId = req.query.portfolioId as string | undefined;
       await createSnapshotIfNeeded(req.user!.userId);
-      portfolio = await getPortfolio(req.user!.userId);
+      portfolio = await getPortfolio(req.user!.userId, { portfolioId });
     }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
@@ -94,8 +95,8 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       ...portfolio,
       paceProjection,
     });
-  } catch (_error) {
-    console.error('Error fetching portfolio:');
+  } catch (error) {
+    console.error('Error fetching portfolio:', error);
     res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
 }
@@ -108,13 +109,14 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       return;
     }
     const { ticker, shares, averageCost, skipTransaction } = parsed.data;
+    const portfolioId = req.query.portfolioId as string | undefined;
 
     // Check if this is an update vs new add
     // Always use system/default portfolio â€” auth is for access control only
-    const existingHoldings = await getHoldings(req.user!.userId);
+    const existingHoldings = await getHoldings(req.user!.userId, portfolioId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
-    const holding = await upsertHolding({ ticker, shares, averageCost }, req.user!.userId);
+    const holding = await upsertHolding({ ticker, shares, averageCost }, req.user!.userId, 'replace', portfolioId);
     try {
       await recordCompositionChange(req.user!.userId, 'holding_update');
       await resetSnapshotsForCompositionChange(req.user!.userId);
@@ -180,14 +182,15 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
     const ticker = parsedParams.data.ticker.toUpperCase();
     const skipTransaction = parsedQuery.data.skipTransaction === 'true';
+    const portfolioId = req.query.portfolioId as string | undefined;
 
     // Get the holding before deletion to know the cost basis
     // Always use system/default portfolio â€” auth is for access control only
-    const existingHoldings = await getHoldings(req.user!.userId);
+    const existingHoldings = await getHoldings(req.user!.userId, portfolioId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
-    await deleteHolding(ticker, req.user!.userId);
+    await deleteHolding(ticker, req.user!.userId, portfolioId);
     try {
       await recordCompositionChange(req.user!.userId, 'holding_remove');
       await resetSnapshotsForCompositionChange(req.user!.userId);
@@ -231,9 +234,10 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
       return;
     }
     const { cashBalance } = parsed.data;
+    const portfolioId = req.query.portfolioId as string | undefined;
 
-    // Single atomic write to UserSettings
-    const settings = await updateCashBalance(req.user!.userId, cashBalance);
+    // Single atomic write to UserSettings (or Portfolio if scoped)
+    const settings = await updateCashBalance(req.user!.userId, cashBalance, portfolioId);
     res.json({ cashBalance: settings.cashBalance });
   } catch (_error) {
     console.error('Error updating cash balance:');
@@ -340,7 +344,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const portfolio = await getPortfolio(req.user.userId);
+    const chartPortfolioId = req.query.portfolioId as string | undefined;
+    const portfolio = await getPortfolio(req.user.userId, { portfolioId: chartPortfolioId });
 
     const includeDebug = String(req.query.debug) === '1';
 
@@ -348,7 +353,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const previousCloseValue = liveValue - portfolio.dayChange;
-      const holdings = await getHoldings(req.user.userId);
+      const holdings = await getHoldings(req.user.userId, chartPortfolioId);
       let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
@@ -1164,6 +1169,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
     const robinhoodResult = parseRobinhoodTransactionCsv(data);
     if (robinhoodResult) {
       const parseDurationMs = Date.now() - parseStart;
+      const partialHistory = robinhoodResult.warnings.some(w => w.message.includes('sell without open position'));
       res.json({
         reviewRequired: true,
         editableFields: ['ticker', 'shares', 'averageCost'],
@@ -1174,7 +1180,10 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         totalRows: data.length,
         validRows: robinhoodResult.parsed.length,
         skippedRows: data.length - robinhoodResult.parsed.length,
-        warning: `Detected Robinhood transaction history — aggregated ${data.length} transactions into ${robinhoodResult.parsed.length} current positions`,
+        partialHistory,
+        warning: partialHistory
+          ? `Detected Robinhood transaction history — this appears to be a partial export (sells found without prior buys). Use "Update" mode to apply these trades to your existing portfolio.`
+          : `Detected Robinhood transaction history — aggregated ${data.length} transactions into ${robinhoodResult.parsed.length} current positions`,
         telemetry: {
           rowsParsed: data.length,
           rowsSkipped: data.length - robinhoodResult.trades.length,
@@ -1190,6 +1199,7 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
     const schwabResult = parseSchwabTransactionCsv(data);
     if (schwabResult) {
       const parseDurationMs = Date.now() - parseStart;
+      const partialHistory = schwabResult.warnings.some(w => w.message.includes('sell without open position'));
       res.json({
         reviewRequired: true,
         editableFields: ['ticker', 'shares', 'averageCost'],
@@ -1200,7 +1210,10 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
         totalRows: data.length,
         validRows: schwabResult.parsed.length,
         skippedRows: data.length - schwabResult.parsed.length,
-        warning: `Detected Schwab transaction history — aggregated ${data.length} transactions into ${schwabResult.parsed.length} current positions`,
+        partialHistory,
+        warning: partialHistory
+          ? `Detected Schwab transaction history — this appears to be a partial export (sells found without prior buys). Use "Update" mode to apply these trades to your existing portfolio.`
+          : `Detected Schwab transaction history — aggregated ${data.length} transactions into ${schwabResult.parsed.length} current positions`,
         telemetry: {
           rowsParsed: data.length,
           rowsSkipped: data.length - schwabResult.trades.length,
@@ -1706,13 +1719,32 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
   try {
     const { holdings, mode, trades, ledgerEvents, marginDebt } = req.body as {
       holdings?: any[];
-      mode?: 'replace' | 'merge' | 'incremental';
+      mode?: 'replace' | 'merge' | 'incremental' | 'history';
       trades?: any[];
       ledgerEvents?: any[];
       marginDebt?: number;
     };
-    if (mode !== 'replace' && mode !== 'merge' && mode !== 'incremental') {
-      res.status(400).json({ error: 'mode must be replace, merge, or incremental' });
+    // Resolve portfolioId — default to user's default portfolio
+    const rawPortfolioId = req.query.portfolioId as string | undefined;
+    let importPortfolioId: string | undefined;
+    if (rawPortfolioId) {
+      // Verify ownership
+      const targetPortfolio = await prisma.portfolio.findFirst({
+        where: { id: rawPortfolioId, userId: req.user!.userId },
+      });
+      if (!targetPortfolio) {
+        res.status(404).json({ error: 'Portfolio not found' });
+        return;
+      }
+      importPortfolioId = rawPortfolioId;
+    } else {
+      const { getOrCreateDefaultPortfolio } = await import('../services/portfolio-management.service');
+      const defaultP = await getOrCreateDefaultPortfolio(req.user!.userId);
+      importPortfolioId = defaultP.id;
+    }
+
+    if (mode !== 'replace' && mode !== 'merge' && mode !== 'incremental' && mode !== 'history') {
+      res.status(400).json({ error: 'mode must be replace, merge, incremental, or history' });
       return;
     }
 
@@ -1742,7 +1774,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     }
 
     const existingHoldings = await prisma.holding.findMany({
-      where: { userId: req.user!.userId },
+      where: { portfolioId: importPortfolioId },
       select: { ticker: true, shares: true, averageCost: true },
     });
     const existingSet = new Set(existingHoldings.map(h => h.ticker.toUpperCase()));
@@ -1895,33 +1927,35 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
       }
 
-      // 4. Strict oversell check — hard 400, no DB writes, no clamping
+      // 4. Oversell check — skip trades that would oversell (partial history)
       const simPositions = new Map(
         [...existingMap.entries()].map(([ticker, pos]) => [ticker, { shares: pos.shares, averageCost: pos.averageCost }])
       );
       const sortedForValidation = [...tradeRecords].sort((a, b) => a.date.getTime() - b.date.getTime());
-      const oversellErrors: string[] = [];
+      const skippedOversells: string[] = [];
+      const skippedTradeIndices = new Set<number>();
 
-      for (const t of sortedForValidation) {
+      for (let i = 0; i < sortedForValidation.length; i++) {
+        const t = sortedForValidation[i];
         const pos = simPositions.get(t.ticker) || { shares: 0, averageCost: 0 };
         if (t.type === 'buy') {
           pos.shares += t.shares;
         } else if (t.type === 'sell') {
           if (t.shares > pos.shares + 0.001) {
-            oversellErrors.push(`Cannot sell ${t.shares} shares of ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+            skippedOversells.push(`Skipped sell of ${t.shares} ${t.ticker} (only ${pos.shares.toFixed(4)} held)`);
+            skippedTradeIndices.add(i);
+            continue;
           }
           pos.shares -= t.shares;
         }
         simPositions.set(t.ticker, pos);
       }
 
-      if (oversellErrors.length > 0) {
-        res.status(400).json({
-          error: 'OVERSELL_DETECTED',
-          message: `Oversell detected: ${oversellErrors[0]}${oversellErrors.length > 1 ? ` (+${oversellErrors.length - 1} more)` : ''}`,
-          details: oversellErrors,
-        });
-        return;
+      if (skippedOversells.length > 0) {
+        console.log(`[Import] Incremental: skipped ${skippedOversells.length} oversell trades: ${skippedOversells.join('; ')}`);
+        // Remove skipped trades from tradeRecords
+        const kept = sortedForValidation.filter((_, i) => !skippedTradeIndices.has(i));
+        tradeRecords.splice(0, tradeRecords.length, ...kept);
       }
 
       // If all trades were duplicates, nothing to do
@@ -1929,6 +1963,61 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         res.json({ added: 0, updated: 0, removed: 0, skippedDuplicates });
         return;
       }
+    }
+
+    // --- History mode: save trade/ledger records only, don't modify holdings ---
+    if (mode === 'history') {
+      // Dedup trades against existing records
+      let historySkipped = 0;
+      if (tradeRecords.length > 0) {
+        const existingTrades = await prisma.portfolioTrade.findMany({
+          where: { userId: req.user!.userId },
+          select: { date: true, ticker: true, type: true, shares: true, price: true, sourceBroker: true },
+        });
+        const existingFingerprints = new Set(
+          existingTrades.map(t => `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`)
+        );
+        const dedupedTrades = tradeRecords.filter(t => {
+          const fp = `${t.date.toISOString().slice(0, 10)}|${t.ticker}|${t.type}|${t.shares}|${t.price}|${t.sourceBroker ?? ''}`;
+          return !existingFingerprints.has(fp);
+        });
+        historySkipped = tradeRecords.length - dedupedTrades.length;
+        tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
+      }
+      // Dedup ledger events
+      if (ledgerRecords.length > 0) {
+        const existingLedger = await prisma.ledgerEvent.findMany({
+          where: { userId: req.user!.userId },
+          select: { effectiveDate: true, eventType: true, ticker: true, amount: true, sourceBroker: true },
+        });
+        const ledgerFingerprints = new Set(
+          existingLedger.map(e => `${e.effectiveDate.toISOString().slice(0, 10)}|${e.eventType}|${e.ticker ?? ''}|${e.amount}|${e.sourceBroker ?? ''}`)
+        );
+        const dedupedLedger = ledgerRecords.filter(e => {
+          const fp = `${e.effectiveDate.toISOString().slice(0, 10)}|${e.eventType}|${e.ticker ?? ''}|${e.amount}|${e.sourceBroker ?? ''}`;
+          return !ledgerFingerprints.has(fp);
+        });
+        ledgerRecords.splice(0, ledgerRecords.length, ...dedupedLedger);
+      }
+
+      await prisma.$transaction(async (tx) => {
+        if (tradeRecords.length > 0) {
+          await tx.portfolioTrade.createMany({ data: tradeRecords });
+        }
+        if (ledgerRecords.length > 0) {
+          await tx.ledgerEvent.createMany({ data: ledgerRecords });
+        }
+      });
+
+      res.json({
+        added: 0,
+        updated: 0,
+        removed: 0,
+        tradesRecorded: tradeRecords.length,
+        ledgerEventsRecorded: ledgerRecords.length,
+        skippedDuplicates: historySkipped,
+      });
+      return;
     }
 
     // --- Replace mode dedup: skip re-inserting identical trades ---
@@ -1954,8 +2043,8 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
 
     await prisma.$transaction(async (tx) => {
       if (mode === 'replace') {
-        // Delete all holdings — will be re-created below
-        await tx.holding.deleteMany({ where: { userId: req.user!.userId } });
+        // Delete all holdings in this portfolio — will be re-created below
+        await tx.holding.deleteMany({ where: { portfolioId: importPortfolioId } });
       }
 
       // Determine import strategy
@@ -1991,7 +2080,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         for (const [ticker, pos] of positionMap) {
           const averageCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
           await tx.holding.create({
-            data: { userId: req.user!.userId, ticker, shares: pos.shares, averageCost },
+            data: { userId: req.user!.userId, ticker, shares: pos.shares, averageCost, portfolioId: importPortfolioId },
           });
           added++;
         }
@@ -2060,18 +2149,21 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           const hadHolding = existingSet.has(ticker);
           if (shares < 0.001) {
             if (hadHolding) {
-              await tx.holding.deleteMany({ where: { userId: req.user!.userId, ticker } });
+              await tx.holding.deleteMany({ where: { portfolioId: importPortfolioId, ticker } });
               removed++;
             }
           } else if (hadHolding) {
-            await tx.holding.update({
-              where: { userId_ticker: { userId: req.user!.userId, ticker } },
-              data: { shares, averageCost },
-            });
+            const existingRow = await tx.holding.findFirst({ where: { portfolioId: importPortfolioId, ticker } });
+            if (existingRow) {
+              await tx.holding.update({
+                where: { id: existingRow.id },
+                data: { shares, averageCost },
+              });
+            }
             updated++;
           } else {
             await tx.holding.create({
-              data: { userId: req.user!.userId, ticker, shares, averageCost },
+              data: { userId: req.user!.userId, ticker, shares, averageCost, portfolioId: importPortfolioId },
             });
             added++;
           }
@@ -2080,16 +2172,23 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       } else {
         // Replace or Merge with position data: upsert from pre-calculated positions
         for (const h of normalized) {
-          await tx.holding.upsert({
-            where: { userId_ticker: { userId: req.user!.userId, ticker: h.ticker } },
-            update: { shares: h.shares, averageCost: h.averageCost },
-            create: {
-              userId: req.user!.userId,
-              ticker: h.ticker,
-              shares: h.shares,
-              averageCost: h.averageCost,
-            },
-          });
+          const existingRow = await tx.holding.findFirst({ where: { portfolioId: importPortfolioId, ticker: h.ticker } });
+          if (existingRow) {
+            await tx.holding.update({
+              where: { id: existingRow.id },
+              data: { shares: h.shares, averageCost: h.averageCost },
+            });
+          } else {
+            await tx.holding.create({
+              data: {
+                userId: req.user!.userId,
+                ticker: h.ticker,
+                shares: h.shares,
+                averageCost: h.averageCost,
+                portfolioId: importPortfolioId,
+              },
+            });
+          }
         }
       }
 
@@ -2147,7 +2246,33 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    // Delete everything: holdings, trades, ledger events, snapshots (+ child holding snapshots)
+    const portfolioId = req.query.portfolioId as string | undefined;
+
+    if (portfolioId) {
+      // Scoped clear: only holdings for this portfolio + reset its cash
+      const portfolio = await prisma.portfolio.findFirst({
+        where: { id: portfolioId, userId: req.user!.userId },
+      });
+      if (!portfolio) {
+        res.status(404).json({ error: 'Portfolio not found' });
+        return;
+      }
+      const deleted = await prisma.holding.deleteMany({ where: { portfolioId } });
+      await prisma.portfolio.update({
+        where: { id: portfolioId },
+        data: { cashBalance: 0, marginDebt: 0 },
+      });
+      try {
+        await recordCompositionChange(req.user!.userId, 'portfolio_clear');
+        await resetSnapshotsForCompositionChange(req.user!.userId);
+      } catch (_err) {
+        console.warn('[Snapshot] Reset failed after clear portfolio:');
+      }
+      res.json({ cleared: true, holdingsRemoved: deleted.count, tradesRemoved: 0, ledgerEventsRemoved: 0 });
+      return;
+    }
+
+    // Full clear: delete everything across all portfolios
     const userSnapshots = await prisma.portfolioSnapshot.findMany({
       where: { userId: req.user!.userId }, select: { id: true },
     });
@@ -2163,6 +2288,11 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       where: { userId: req.user!.userId },
       update: { cashBalance: 0, marginDebt: 0 },
       create: { userId: req.user!.userId, cashBalance: 0, marginDebt: 0 },
+    });
+    // Reset all portfolio cash/margin too
+    await prisma.portfolio.updateMany({
+      where: { userId: req.user!.userId },
+      data: { cashBalance: 0, marginDebt: 0 },
     });
     try {
       await recordCompositionChange(req.user!.userId, 'portfolio_clear');
@@ -2243,14 +2373,15 @@ const SAMPLE_HOLDINGS = [
 
 export async function seedSamplePortfolio(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const existing = await getHoldings(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const existing = await getHoldings(req.user!.userId, portfolioId);
     if (existing.length > 0) {
       res.status(409).json({ error: 'Portfolio already has holdings. Clear first to re-seed.' });
       return;
     }
 
     for (const h of SAMPLE_HOLDINGS) {
-      await upsertHolding(h, req.user!.userId);
+      await upsertHolding(h, req.user!.userId, 'replace', portfolioId);
     }
 
     await setBaseline(req.user!.userId, { type: 'existing_portfolio' });

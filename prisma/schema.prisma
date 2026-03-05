@@ -7,23 +7,44 @@ datasource db {
   provider = "sqlite"
 }
 
+model Portfolio {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  type        String    @default("general")
+  isDefault   Boolean   @default(false)
+  cashBalance Float     @default(0)
+  marginDebt  Float     @default(0)
+  dripEnabled Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  holdings    Holding[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
 model Holding {
-  id               String   @id @default(uuid())
+  id               String     @id @default(uuid())
   ticker           String
   shares           Float
   averageCost      Float
-  source           String?  @default("manual")
-  holdingType      String   @default("equity") // "equity" | "option"
-  optionUnderlying String?  // e.g., "AAPL"
-  optionStrike     Float?   // e.g., 230.00
-  optionExpiry     String?  // e.g., "2026-03-20"
-  optionType       String?  // "call" | "put"
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  source           String?    @default("manual")
+  holdingType      String     @default("equity") // "equity" | "option"
+  optionUnderlying String?    // e.g., "AAPL"
+  optionStrike     Float?     // e.g., 230.00
+  optionExpiry     String?    // e.g., "2026-03-20"
+  optionType       String?    // "call" | "put"
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
   userId           String?
-  user             User?    @relation(fields: [userId], references: [id])
+  user             User?      @relation(fields: [userId], references: [id])
+  portfolioId      String?
+  portfolio        Portfolio?  @relation(fields: [portfolioId], references: [id])
 
-  @@unique([userId, ticker])
+  @@unique([portfolioId, ticker])
+  @@index([userId])
 }
 
 model PortfolioSnapshot {
@@ -79,6 +100,7 @@ model User {
   appleId                String?                @unique
   avatarUrl              String?
   holdings               Holding[]
+  portfolios             Portfolio[]
   snapshots              PortfolioSnapshot[]
   settings               UserSettings?
   followers              Follow[]               @relation("following")
@@ -280,6 +302,9 @@ model UserSettings {
 
   // Per-user analyst event read tracking
   analystLastReadAt    DateTime?
+
+  // Annual salary for income coverage calculations
+  annualSalary         Float?
 }
 
 model Settings {

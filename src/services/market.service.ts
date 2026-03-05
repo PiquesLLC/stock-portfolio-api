@@ -317,9 +317,9 @@ const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
  * Fetch extended hours price from Yahoo Finance.
  * Returns { price, marketState } or null if unavailable.
  */
-async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number; marketState: string } | null> {
+async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number; previousClose: number; marketState: string } | null> {
   const cacheKey = `yahoo-quote:${ticker}`;
-  const cached = yahooQuoteCache.get<{ price: number; marketState: string }>(cacheKey);
+  const cached = yahooQuoteCache.get<{ price: number; previousClose: number; marketState: string }>(cacheKey);
   if (cached) return cached;
 
   try {
@@ -343,7 +343,10 @@ async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number;
       }
     }
 
-    const result = { price: lastPrice, marketState: meta.marketState || 'REGULAR' };
+    // Yahoo provides the correct previous close (yesterday's regular session close)
+    const previousClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
+
+    const result = { price: lastPrice, previousClose, marketState: meta.marketState || 'REGULAR' };
     yahooQuoteCache.set(cacheKey, result);
     return result;
   } catch {
@@ -407,6 +410,7 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
   }
 
   // During extended hours, enrich all quotes with Yahoo's real-time extended prices
+  // and always correct previousClose from Yahoo (Finnhub pc ≈ c during pre-market)
   const session = getMarketSession();
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
     const enrichPromises = Array.from(result.quotes.entries()).map(async ([ticker, quote]) => {
@@ -415,13 +419,21 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
       if (qSession === 'PRE' || qSession === 'POST' || qSession === 'CLOSED') {
         try {
           const yahoo = await fetchYahooExtendedPrice(ticker);
-          if (yahoo && Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
-            quote.regularClose = quote.currentPrice;
-            quote.extendedPrice = yahoo.price;
-            quote.extendedChange = yahoo.price - quote.currentPrice;
-            quote.extendedChangePercent = quote.currentPrice !== 0
-              ? ((yahoo.price - quote.currentPrice) / quote.currentPrice) * 100
-              : 0;
+          if (yahoo) {
+            // Always update previousClose from Yahoo — Finnhub's pc equals c
+            // during pre-market, making dayChange ≈ 0 without this correction
+            if (yahoo.previousClose > 0) {
+              quote.previousClose = yahoo.previousClose;
+            }
+            // Set extended price if it differs from the regular close
+            if (Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
+              quote.regularClose = quote.currentPrice;
+              quote.extendedPrice = yahoo.price;
+              quote.extendedChange = yahoo.price - quote.previousClose;
+              quote.extendedChangePercent = quote.previousClose > 0
+                ? ((yahoo.price - quote.previousClose) / quote.previousClose) * 100
+                : 0;
+            }
           }
         } catch { /* ignore individual failures */ }
       }
@@ -444,16 +456,22 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
   quote.session = getMarketSessionForTicker(ticker);
 
   // During extended hours, supplement with Yahoo's real-time extended price
+  // and correct previousClose (Finnhub pc ≈ c during pre-market)
   const session = quote.session;
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
     const yahoo = await fetchYahooExtendedPrice(ticker.toUpperCase());
-    if (yahoo && Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
-      quote.regularClose = quote.currentPrice;
-      quote.extendedPrice = yahoo.price;
-      quote.extendedChange = yahoo.price - quote.currentPrice;
-      quote.extendedChangePercent = quote.currentPrice !== 0
-        ? ((yahoo.price - quote.currentPrice) / quote.currentPrice) * 100
-        : 0;
+    if (yahoo) {
+      if (yahoo.previousClose > 0) {
+        quote.previousClose = yahoo.previousClose;
+      }
+      if (Math.abs(yahoo.price - quote.currentPrice) > 0.005) {
+        quote.regularClose = quote.currentPrice;
+        quote.extendedPrice = yahoo.price;
+        quote.extendedChange = yahoo.price - quote.previousClose;
+        quote.extendedChangePercent = quote.previousClose > 0
+          ? ((yahoo.price - quote.previousClose) / quote.previousClose) * 100
+          : 0;
+      }
     }
   }
 
