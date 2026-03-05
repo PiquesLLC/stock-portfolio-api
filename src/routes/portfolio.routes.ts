@@ -25,6 +25,7 @@ import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
+import { requirePlan } from '../middleware/plan.middleware';
 import multer from 'multer';
 
 const router = Router();
@@ -45,8 +46,8 @@ router.get('/metrics', requireAuth, getMetricsHandler);
 router.get('/summary', requireAuth, getSummaryHandler);
 router.get('/etf-overlap', heavyReadLimiter, requireAuth, getEtfOverlapHandler);
 router.get('/performance', heavyReadLimiter, requireAuth, getPerformanceHandler);
-router.get('/report', heavyReadLimiter, requireAuth, getPerformanceReportHandler);
-router.post('/report/email', mutationLimiter, requireAuth, emailPerformanceReportHandler);
+router.get('/report', heavyReadLimiter, requireAuth, requirePlan('elite'), getPerformanceReportHandler);
+router.post('/report/email', mutationLimiter, requireAuth, requirePlan('elite'), emailPerformanceReportHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
 router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);
 router.post('/import/csv/mapped', mutationLimiter, requireAuth, uploadMapped.single('file'), importMappedCsvHandler);
