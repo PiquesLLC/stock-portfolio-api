@@ -409,8 +409,9 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     }
   }
 
-  // During extended hours, enrich all quotes with Yahoo's real-time extended prices
-  // and always correct previousClose from Yahoo (Finnhub pc ≈ c during pre-market)
+  // During extended hours, enrich quotes with Yahoo's real-time extended prices
+  // Only correct previousClose during PRE/POST — during CLOSED, Yahoo returns
+  // the prior day's chart so chartPreviousClose is TWO days ago (wrong)
   const session = getMarketSession();
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
     const enrichPromises = Array.from(result.quotes.entries()).map(async ([ticker, quote]) => {
@@ -420,9 +421,9 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
         try {
           const yahoo = await fetchYahooExtendedPrice(ticker);
           if (yahoo) {
-            // Always update previousClose from Yahoo — Finnhub's pc equals c
-            // during pre-market, making dayChange ≈ 0 without this correction
-            if (yahoo.previousClose > 0) {
+            // Only override previousClose during PRE/POST when Finnhub's pc is stale
+            // During CLOSED, Finnhub pc = last session close which is correct
+            if ((qSession === 'PRE' || qSession === 'POST') && yahoo.previousClose > 0) {
               quote.previousClose = yahoo.previousClose;
             }
             // Set extended price if it differs from the regular close
@@ -456,12 +457,12 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
   quote.session = getMarketSessionForTicker(ticker);
 
   // During extended hours, supplement with Yahoo's real-time extended price
-  // and correct previousClose (Finnhub pc ≈ c during pre-market)
+  // Only correct previousClose during PRE/POST — during CLOSED, Finnhub pc is correct
   const session = quote.session;
   if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
     const yahoo = await fetchYahooExtendedPrice(ticker.toUpperCase());
     if (yahoo) {
-      if (yahoo.previousClose > 0) {
+      if ((session === 'PRE' || session === 'POST') && yahoo.previousClose > 0) {
         quote.previousClose = yahoo.previousClose;
       }
       if (Math.abs(yahoo.price - quote.currentPrice) > 0.005) {

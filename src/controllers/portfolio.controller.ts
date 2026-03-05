@@ -82,10 +82,14 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         portfolio.netEquity,
       ).catch(() => console.error('User snapshot error'));
     } else {
-      // Default portfolio â€” the main portfolio data (all users see this)
+      // Default portfolio — the main portfolio data (authenticated users only)
+      if (!req.user?.userId) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
       const portfolioId = req.query.portfolioId as string | undefined;
-      await createSnapshotIfNeeded(req.user!.userId);
-      portfolio = await getPortfolio(req.user!.userId, { portfolioId });
+      await createSnapshotIfNeeded(req.user.userId);
+      portfolio = await getPortfolio(req.user.userId, { portfolioId });
     }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
