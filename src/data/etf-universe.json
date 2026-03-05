@@ -1,0 +1,119 @@
+{
+  "generatedAt": "2026-03-04T00:00:00.000Z",
+  "categoryCount": 14,
+  "categories": [
+    {
+      "category": "US Broad Market",
+      "groups": [
+        { "name": "Index", "tickers": ["SPY", "IVV", "VOO", "VTI", "IWB", "ITOT", "SCHB"] },
+        { "name": "Inverse", "tickers": ["SH", "SDS", "SPXU", "PSQ", "DOG", "RWM"] },
+        { "name": "Leverage", "tickers": ["SSO", "UPRO", "QLD", "TQQQ", "UDOW", "SPXL"] },
+        { "name": "Dividend", "tickers": ["VIG", "SCHD", "DVY", "SDY", "DGRO", "NOBL"] }
+      ]
+    },
+    {
+      "category": "US Large Cap",
+      "groups": [
+        { "name": "Growth", "tickers": ["QQQ", "VUG", "IWF", "SCHG", "MGK", "VONG"] },
+        { "name": "Blend", "tickers": ["SPY", "IVV", "VOO", "SPLG", "RSP", "OEF"] },
+        { "name": "Value", "tickers": ["VTV", "IWD", "SCHV", "VONV", "RPV", "VLUE"] }
+      ]
+    },
+    {
+      "category": "US Mid Cap",
+      "groups": [
+        { "name": "Growth", "tickers": ["VO", "IJH", "MDY", "IVOG", "MDYG"] },
+        { "name": "Blend", "tickers": ["VO", "IJH", "MDY", "SCHM", "IVOO"] },
+        { "name": "Value", "tickers": ["VOE", "IJJ", "MDYV", "IVOV", "RFV"] }
+      ]
+    },
+    {
+      "category": "US Small Cap",
+      "groups": [
+        { "name": "Blend", "tickers": ["IWM", "VB", "IJR", "SCHA", "VTWO", "SLY"] },
+        { "name": "Value", "tickers": ["IWN", "VBR", "IJS", "SLYV", "RZV"] },
+        { "name": "Leverage", "tickers": ["TNA", "TZA", "UWM", "URTY"] }
+      ]
+    },
+    {
+      "category": "Technology",
+      "groups": [
+        { "name": "Broad", "tickers": ["XLK", "VGT", "FTEC", "IYW", "IGV", "SKYY"] },
+        { "name": "Semiconductor", "tickers": ["SMH", "SOXX", "PSI", "XSD", "SOXQ"] },
+        { "name": "Leverage", "tickers": ["TECL", "TECS", "SOXL", "SOXS", "USD"] }
+      ]
+    },
+    {
+      "category": "Health Care",
+      "groups": [
+        { "name": "Broad", "tickers": ["XLV", "VHT", "IYH", "FHLC", "IHI", "XHS"] },
+        { "name": "Biotech", "tickers": ["XBI", "IBB", "BBH", "ARKG", "LABU", "LABD"] }
+      ]
+    },
+    {
+      "category": "Energy",
+      "groups": [
+        { "name": "Broad", "tickers": ["XLE", "VDE", "IYE", "FENY", "OIH", "AMLP"] },
+        { "name": "Exploration", "tickers": ["XOP", "FCG", "IEO", "PXE", "GUSH", "DRIP"] }
+      ]
+    },
+    {
+      "category": "Financials",
+      "groups": [
+        { "name": "Broad", "tickers": ["XLF", "VFH", "IYF", "KBE", "KRE", "IAI"] },
+        { "name": "Leverage", "tickers": ["FAS", "FAZ", "DPST", "BNKU"] }
+      ]
+    },
+    {
+      "category": "Other Sectors",
+      "groups": [
+        { "name": "Consumer", "tickers": ["XLY", "XLP", "VCR", "VDC", "WANT", "FDIS"] },
+        { "name": "Industrials", "tickers": ["XLI", "VIS", "IYJ", "FIDU", "ITA", "XAR"] },
+        { "name": "Real Estate", "tickers": ["VNQ", "XLRE", "IYR", "SCHH", "RWR", "MORT"] },
+        { "name": "Utilities", "tickers": ["XLU", "VPU", "IDU", "FUTY"] },
+        { "name": "Communications", "tickers": ["XLC", "VOX", "IYZ", "FCOM"] }
+      ]
+    },
+    {
+      "category": "International",
+      "groups": [
+        { "name": "Developed", "tickers": ["EFA", "VEA", "IEFA", "SPDW", "SCHF", "IXUS"] },
+        { "name": "Emerging", "tickers": ["EEM", "VWO", "IEMG", "SPEM", "SCHE", "EMXC"] },
+        { "name": "Global Ex-US", "tickers": ["VXUS", "IXUS", "ACWX", "CWI"] },
+        { "name": "Country", "tickers": ["FXI", "EWJ", "EWZ", "EWG", "EWU", "INDA", "EWY", "EWT"] }
+      ]
+    },
+    {
+      "category": "Fixed Income",
+      "groups": [
+        { "name": "US Government", "tickers": ["TLT", "IEF", "SHY", "BIL", "GOVT", "VGSH", "VGIT", "VGLT", "ZROZ"] },
+        { "name": "Corporate", "tickers": ["LQD", "HYG", "JNK", "VCSH", "VCIT", "VCLT", "USIG"] },
+        { "name": "Broad Market", "tickers": ["BND", "AGG", "SCHZ", "BNDX", "IAGG"] },
+        { "name": "Sovereign", "tickers": ["EMB", "PCY", "VWOB", "BWX"] }
+      ]
+    },
+    {
+      "category": "Commodity",
+      "groups": [
+        { "name": "Gold & Miners", "tickers": ["GLD", "IAU", "GDX", "GDXJ", "SGOL", "RING"] },
+        { "name": "Silver", "tickers": ["SLV", "SIVR", "SIL", "SILJ"] },
+        { "name": "Energy", "tickers": ["USO", "BNO", "UNG", "UGA", "DBO"] },
+        { "name": "Broad", "tickers": ["DBC", "GSG", "PDBC", "COMT", "DJP"] }
+      ]
+    },
+    {
+      "category": "Crypto",
+      "groups": [
+        { "name": "Bitcoin", "tickers": ["IBIT", "FBTC", "GBTC", "BITO", "ARKB"] },
+        { "name": "Ethereum", "tickers": ["ETHA", "FETH", "ETHE"] }
+      ]
+    },
+    {
+      "category": "Volatility",
+      "groups": [
+        { "name": "Long Vol", "tickers": ["VXX", "UVXY", "VIXY"] },
+        { "name": "Short Vol", "tickers": ["SVXY", "SVOL"] }
+      ]
+    }
+  ]
+}

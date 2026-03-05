@@ -448,6 +448,7 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
 
 // ── Themes Heatmap ──────────────────────────────────────────────
 import { getThemesHeatmapData } from '../services/themes-heatmap.service';
+import { getEtfHeatmapData } from '../services/etf-heatmap.service';
 
 export async function getThemesHeatmapHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -460,6 +461,20 @@ export async function getThemesHeatmapHandler(req: Request, res: Response): Prom
   } catch (_error) {
     console.error('Error fetching themes heatmap:');
     res.status(500).json({ error: 'Failed to fetch themes heatmap' });
+  }
+}
+
+export async function getEtfHeatmapHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const period = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1D';
+    const validPeriods = ['1D', '1W', '1M', '3M', '6M', '1Y'];
+    const data = await getEtfHeatmapData(
+      (validPeriods.includes(period) ? period : '1D') as import('../services/market-heatmap.service').HeatmapPeriod
+    );
+    res.json(data);
+  } catch (_error) {
+    console.error('Error fetching ETF heatmap:');
+    res.status(500).json({ error: 'Failed to fetch ETF heatmap' });
   }
 }
 

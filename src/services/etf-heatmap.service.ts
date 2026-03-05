@@ -1,0 +1,247 @@
+import { fetchPrices, fetchDailyCandles } from './market.service';
+import etfData from '../data/etf-universe.json';
+import type { HeatmapPeriod } from './market-heatmap.service';
+
+// ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
+
+interface HeatmapStock {
+  ticker: string;
+  name: string;
+  price: number;
+  changePercent: number;
+  dayChange: number;
+  marketCapB: number;
+  subSector: string;
+  noTradeData?: boolean;
+}
+
+interface HeatmapSubSector {
+  name: string;
+  stocks: HeatmapStock[];
+  totalMarketCapB: number;
+  avgChangePercent: number;
+}
+
+interface HeatmapSector {
+  name: string;
+  stocks: HeatmapStock[];
+  subSectors: HeatmapSubSector[];
+  totalMarketCapB: number;
+  avgChangePercent: number;
+  gainers: number;
+  losers: number;
+}
+
+interface HeatmapResponse {
+  sectors: HeatmapSector[];
+  period: string;
+  generated: number;
+}
+
+// ── Cache ──────────────────────────────────────────────────────
+
+type QuoteSource = 'regular' | 'extended' | 'prevClose';
+
+let quotesCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+let cacheUpdatedAt: number | null = null;
+let refreshInProgress = false;
+
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const BATCH_SIZE = 80;
+const BATCH_DELAY = 2000; // 2s between batches
+
+const PERIOD_DAYS: Record<HeatmapPeriod, number> = {
+  '1D': 0, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365,
+};
+
+// Cache for non-1D period changes (keyed by period)
+import NodeCache from 'node-cache';
+const periodChangesCache = new NodeCache({ stdTTL: 300 }); // 5 min
+
+// ── Background refresh ─────────────────────────────────────────
+
+function getAllUniqueTickers(): string[] {
+  const set = new Set<string>();
+  for (const cat of etfData.categories) {
+    for (const group of cat.groups) {
+      for (const t of group.tickers) set.add(t);
+    }
+  }
+  return [...set];
+}
+
+async function refreshQuotesBackground(): Promise<void> {
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+
+  try {
+    const allTickers = getAllUniqueTickers();
+    const newCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+
+    for (let i = 0; i < allTickers.length; i += BATCH_SIZE) {
+      const batch = allTickers.slice(i, i + BATCH_SIZE);
+      try {
+        const result = await fetchPrices(batch, { preferPolygon: true });
+        for (const [ticker, quote] of result.quotes) {
+          const hasExtended = quote.extendedChangePercent != null && quote.extendedPrice != null;
+          const price = hasExtended ? quote.extendedPrice! : quote.currentPrice;
+
+          let changePercent: number;
+          if (hasExtended && quote.previousClose > 0) {
+            changePercent = ((quote.extendedPrice! - quote.previousClose) / quote.previousClose) * 100;
+          } else {
+            changePercent = quote.changePercent;
+          }
+
+          const isPrevCloseFallback = !hasExtended
+            && quote.changePercent === 0
+            && quote.change === 0
+            && quote.currentPrice === quote.previousClose
+            && quote.previousClose > 0;
+
+          const source: QuoteSource = hasExtended ? 'extended'
+            : isPrevCloseFallback ? 'prevClose'
+            : 'regular';
+
+          newCache.set(ticker, { changePercent, price, source });
+        }
+      } catch (err) {
+        console.error(`[EtfHeatmap] Batch ${i}-${i + batch.length} failed:`, err);
+      }
+
+      if (i + BATCH_SIZE < allTickers.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY));
+      }
+    }
+
+    if (newCache.size > 0) {
+      quotesCache = newCache;
+      cacheUpdatedAt = Date.now();
+    }
+
+    console.log(`[EtfHeatmap] Refreshed ${newCache.size}/${allTickers.length} quotes`);
+  } finally {
+    refreshInProgress = false;
+  }
+}
+
+// Start background refresh on module load
+refreshQuotesBackground();
+
+// Refresh every 5 minutes
+setInterval(() => {
+  refreshQuotesBackground();
+}, CACHE_TTL);
+
+// ── Historical period changes ─────────────────────────────────
+
+async function fetchEtfPeriodChanges(
+  tickers: string[],
+  days: number,
+): Promise<Map<string, number>> {
+  const changes = new Map<string, number>();
+  const HIST_BATCH = 20;
+
+  for (let i = 0; i < tickers.length; i += HIST_BATCH) {
+    const batch = tickers.slice(i, i + HIST_BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        const candles = await fetchDailyCandles(ticker, days);
+        if (candles.length < 2) return { ticker, change: 0 };
+        const startPrice = candles[0].close;
+        const endPrice = candles[candles.length - 1].close;
+        if (startPrice <= 0) return { ticker, change: 0 };
+        return { ticker, change: Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100 };
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled') changes.set(r.value.ticker, r.value.change);
+    }
+  }
+  return changes;
+}
+
+// ── Public API — returns HeatmapResponse shape ─────────────────
+// Each category = sector, each group = subSector.
+// Individual ETF tickers are the visible tiles (HeatmapStock).
+
+export async function getEtfHeatmapData(period: HeatmapPeriod = '1D'): Promise<HeatmapResponse> {
+  const cacheKey = `etf-${period}`;
+  const cached = periodChangesCache.get<HeatmapResponse>(cacheKey);
+  if (cached) return cached;
+
+  // For non-1D periods, fetch historical changes
+  let periodChangeMap: Map<string, number> | null = null;
+  const days = PERIOD_DAYS[period];
+  if (days > 0) {
+    const allTickers = getAllUniqueTickers();
+    periodChangeMap = await fetchEtfPeriodChanges(allTickers, days);
+  }
+
+  const sectors: HeatmapSector[] = etfData.categories.map(cat => {
+    const subSectors: HeatmapSubSector[] = cat.groups.map(group => {
+      const stocks: HeatmapStock[] = group.tickers.map(t => {
+        const q = quotesCache.get(t);
+        const changePercent = periodChangeMap
+          ? (periodChangeMap.get(t) ?? 0)
+          : (q?.changePercent ?? 0);
+        const stock: HeatmapStock = {
+          ticker: t,
+          name: t,
+          price: q?.price ?? 0,
+          changePercent,
+          dayChange: 0,
+          marketCapB: 1, // equal weight — ETF AUM isn't useful for visualization
+          subSector: group.name,
+        };
+        if (!periodChangeMap && q?.source === 'prevClose') stock.noTradeData = true;
+        return stock;
+      });
+
+      const validChanges = stocks
+        .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)))
+        .map(s => s.changePercent);
+      const avg = validChanges.length > 0
+        ? validChanges.reduce((s, c) => s + c, 0) / validChanges.length
+        : 0;
+
+      return {
+        name: group.name,
+        stocks,
+        totalMarketCapB: group.tickers.length,
+        avgChangePercent: Math.round(avg * 100) / 100,
+      };
+    });
+
+    // Each ETF ticker is its own visible tile at the sector level
+    const stocks: HeatmapStock[] = subSectors.flatMap(sub => sub.stocks);
+
+    const allChanges = stocks
+      .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)))
+      .map(s => s.changePercent);
+    const catAvg = allChanges.length > 0
+      ? allChanges.reduce((s, c) => s + c, 0) / allChanges.length
+      : 0;
+
+    return {
+      name: cat.category,
+      stocks,
+      subSectors,
+      totalMarketCapB: stocks.reduce((s, st) => s + st.marketCapB, 0),
+      avgChangePercent: Math.round(catAvg * 100) / 100,
+      gainers: allChanges.filter(c => c > 0).length,
+      losers: allChanges.filter(c => c < 0).length,
+    };
+  });
+
+  const result: HeatmapResponse = {
+    sectors,
+    period,
+    generated: cacheUpdatedAt ?? Date.now(),
+  };
+
+  // Cache non-1D results for 5 min, 1D for 1 min
+  periodChangesCache.set(cacheKey, result, days > 0 ? 300 : 60);
+
+  return result;
+}
