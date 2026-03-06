@@ -29,6 +29,7 @@ vi.mock('../utils/prisma', () => {
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
+    portfolio: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     holding: { deleteMany: vi.fn(), findMany: vi.fn(), upsert: vi.fn() },
     portfolioTrade: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     ledgerEvent: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
