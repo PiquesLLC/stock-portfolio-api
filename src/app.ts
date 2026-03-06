@@ -8,6 +8,7 @@ import fs from 'fs';
 import routes from './routes';
 import { config } from './config';
 import { apiLimiter } from './middleware/rateLimiter';
+import prisma from './utils/prisma';
 
 // Initialize Sentry before Express app (must be first)
 if (config.sentryDsn) {
@@ -27,6 +28,81 @@ if (config.sentryDsn) {
 }
 
 const app = express();
+const SOCIAL_CRAWLER_RE = /(Twitterbot|facebookexternalhit|Discordbot|TelegramBot|LinkedInBot|Slackbot|WhatsApp)/i;
+const RESERVED_TOP_LEVEL_PATHS = new Set([
+  'auth',
+  'health',
+  'market',
+  'portfolios',
+  'portfolio',
+  'dividends',
+  'settings',
+  'insights',
+  'goals',
+  'intelligence',
+  'leaderboard',
+  'users',
+  'social',
+  'transactions',
+  'alerts',
+  'price-alerts',
+  'analyst',
+  'milestones',
+  'fundamentals',
+  'nala',
+  'watchlists',
+  'stock-follows',
+  'creator',
+  'referral',
+  'waitlist',
+  'notifications',
+  'push',
+  'plaid',
+  'billing',
+  'assets',
+  'privacy',
+  'favicon.ico',
+  'robots.txt',
+  'sitemap.xml',
+]);
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function buildOgMetaTags(input: {
+  title: string;
+  description: string;
+  image: string;
+  url: string;
+  twitterCard: string;
+  twitterSite?: string;
+}): string {
+  const twitterSiteTag = input.twitterSite
+    ? `<meta name="twitter:site" content="${escapeHtmlAttr(input.twitterSite)}">`
+    : '';
+
+  return `<!-- Nala OG Tags -->
+<meta property="og:title" content="${escapeHtmlAttr(input.title)}">
+<meta property="og:description" content="${escapeHtmlAttr(input.description)}">
+<meta property="og:image" content="${escapeHtmlAttr(input.image)}">
+<meta property="og:url" content="${escapeHtmlAttr(input.url)}">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="${escapeHtmlAttr(input.twitterCard)}">
+${twitterSiteTag}
+<!-- /Nala OG Tags -->`;
+}
+
+function injectMetaTags(html: string, ogTags: string): string {
+  if (!html) return html;
+  return html.includes('</head>')
+    ? html.replace('</head>', `${ogTags}\n</head>`)
+    : `${ogTags}\n${html}`;
+}
 
 // Trust reverse proxy (Railway, Heroku, etc.) for correct IP detection in rate limiting
 if (process.env.NODE_ENV === 'production') {
@@ -177,16 +253,84 @@ app.use('/', routes);
 // In production, serve the UI static files from client/ directory
 const clientDir = path.join(__dirname, '..', 'client');
 if (fs.existsSync(clientDir)) {
-  // Hashed assets (Vite fingerprints filenames) — cache aggressively
+  const indexPath = path.join(clientDir, 'index.html');
+  let cachedIndexHtml = '';
+  try {
+    cachedIndexHtml = fs.readFileSync(indexPath, 'utf-8');
+  } catch (error) {
+    console.error('[SPA] Failed to read index.html for OG injection:', error);
+  }
+
+  // Hashed assets (Vite fingerprints filenames) cache aggressively
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
-  // Other static files (favicon, icons) — short cache, but NEVER serve index.html from here
+  // Other static files (favicon, icons) short cache, but NEVER serve index.html from here
   app.use(express.static(clientDir, { maxAge: '1h', etag: true, index: false }));
+  app.use(async (req, res, next) => {
+    if (req.method !== 'GET' || !cachedIndexHtml) {
+      next();
+      return;
+    }
+
+    const defaultOg: Parameters<typeof buildOgMetaTags>[0] = {
+      title: 'Nala - Portfolio Intelligence Platform',
+      description: 'Track, analyze, and share your investment portfolio with AI-powered insights',
+      image: 'https://nalaai.com/og-default.png',
+      url: 'https://nalaai.com',
+      twitterCard: 'summary_large_image',
+    };
+    let og = defaultOg;
+
+    try {
+      const ua = req.get('user-agent') ?? '';
+      const isCrawler = SOCIAL_CRAWLER_RE.test(ua);
+      const match = req.path.match(/^\/([^/]+)\/?$/);
+
+      if (isCrawler && match) {
+        const segment = decodeURIComponent(match[1]).trim();
+        const normalized = segment.toLowerCase();
+        const isReserved = RESERVED_TOP_LEVEL_PATHS.has(normalized) || segment.includes('.');
+        if (!isReserved) {
+          const user = await prisma.user.findUnique({
+            where: { username: normalized },
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              profilePublic: true,
+            },
+          });
+
+          if (user?.profilePublic) {
+            const displayName = user.displayName || user.username;
+            og = {
+              title: `${displayName} on Nala`,
+              description: `Check out ${displayName}'s portfolio on Nala - the portfolio intelligence platform`,
+              image: `https://nalaai.com/social/${user.id}/share-card`,
+              url: `https://nalaai.com/${user.username}`,
+              twitterCard: 'summary_large_image',
+              twitterSite: '@NalaInvest',
+            };
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[OG] Dynamic OG tag injection failed:', error);
+    }
+
+    res.locals.injectedIndexHtml = injectMetaTags(cachedIndexHtml, buildOgMetaTags(og));
+    next();
+  });
+
   // SPA fallback: ALL HTML requests (including /) get index.html with no-cache
   app.get('*', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    res.sendFile(path.join(clientDir, 'index.html'));
+    if (typeof res.locals.injectedIndexHtml === 'string' && res.locals.injectedIndexHtml.length > 0) {
+      res.type('html').send(res.locals.injectedIndexHtml);
+      return;
+    }
+    res.sendFile(indexPath);
   });
 } else {
   app.use((req, res) => {
@@ -205,3 +349,4 @@ app.use((err: Error, req: express.Request, res: express.Response, _next: express
 });
 
 export default app;
+

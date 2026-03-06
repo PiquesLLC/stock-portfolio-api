@@ -6,6 +6,7 @@ import prisma from '../utils/prisma';
 import { getPerformanceComparison } from './benchmark.service';
 import { getLeaderboard } from './leaderboard.service';
 import { getUserChartSnapshots } from './snapshot.service';
+import { fetchHourlyCandles, fetchStockDetails } from './market.service';
 
 // Load and cache logo as base64 at startup
 let _LOGO_B64 = '';
@@ -306,4 +307,270 @@ export async function generateShareCard(userId: string): Promise<Buffer | null> 
     .toBuffer();
 
   return pngBuffer;
+}
+
+interface StockShareCardData {
+  ticker: string;
+  companyName: string;
+  currentPrice: number;
+  dayChangePercent: number;
+  sparklineValues: number[];
+}
+
+type ShareCardPeriod = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
+
+interface PerformanceShareCardData {
+  username: string;
+  displayName: string;
+  period: ShareCardPeriod;
+  currentValue: number;
+  periodChangeValue: number;
+  periodChangePercent: number;
+  sparklineValues: number[];
+}
+
+function downsampleValues(values: number[], maxPoints: number): number[] {
+  if (values.length <= maxPoints) return values;
+  const step = (values.length - 1) / (maxPoints - 1);
+  return Array.from({ length: maxPoints }, (_, i) => {
+    const idx = Math.round(i * step);
+    return values[idx];
+  });
+}
+
+function normalizePeriod(period?: string): ShareCardPeriod {
+  const normalized = (period ?? '1M').toUpperCase() as ShareCardPeriod;
+  const valid: ShareCardPeriod[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+  return valid.includes(normalized) ? normalized : '1M';
+}
+
+async function getStockShareCardData(inputTicker: string): Promise<StockShareCardData | null> {
+  const ticker = inputTicker.toUpperCase();
+  const [details, candles] = await Promise.all([
+    fetchStockDetails(ticker).catch(() => null),
+    fetchHourlyCandles(ticker, '1M').catch(() => []),
+  ]);
+
+  if (!details?.quote) return null;
+
+  const currentPrice = details.quote.extendedPrice && details.quote.extendedPrice > 0
+    ? details.quote.extendedPrice
+    : details.quote.currentPrice;
+
+  const candleValues = candles
+    .map(c => c.close)
+    .filter(v => Number.isFinite(v) && v > 0);
+  const fallbackValues = details.candles?.closes
+    ?.slice(-48)
+    .filter((v: number) => Number.isFinite(v) && v > 0) ?? [];
+  const sparklineValues = downsampleValues(
+    candleValues.length > 0 ? candleValues : (fallbackValues.length > 0 ? fallbackValues : [currentPrice, currentPrice]),
+    48,
+  );
+
+  return {
+    ticker,
+    companyName: details.profile?.name || ticker,
+    currentPrice,
+    dayChangePercent: details.quote.changePercent ?? 0,
+    sparklineValues,
+  };
+}
+
+async function getPerformanceShareCardData(userId: string, periodInput: string): Promise<PerformanceShareCardData | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      username: true,
+      displayName: true,
+      profilePublic: true,
+    },
+  });
+
+  if (!user || !user.profilePublic) return null;
+
+  const period = normalizePeriod(periodInput);
+  const chart = await getUserChartSnapshots(userId, period).catch(() => ({ points: [], periodStartValue: 0, period }));
+  const values = chart.points
+    .map((p: { value: number }) => p.value)
+    .filter((v: number) => Number.isFinite(v) && v > 0);
+
+  const currentValue = values.length > 0 ? values[values.length - 1] : 0;
+  const fallbackStart = values.length > 0 ? values[0] : currentValue;
+  const periodStartValue = chart.periodStartValue > 0 ? chart.periodStartValue : fallbackStart;
+  const periodChangeValue = currentValue - periodStartValue;
+  const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
+  const sparklineValues = downsampleValues(values.length > 0 ? values : [currentValue, currentValue], 64);
+
+  return {
+    username: user.username,
+    displayName: user.displayName || user.username,
+    period,
+    currentValue,
+    periodChangeValue,
+    periodChangePercent,
+    sparklineValues,
+  };
+}
+
+async function buildStockSvg(data: StockShareCardData): Promise<string> {
+  const W = 1200;
+  const H = 630;
+  const GREEN = '#00c805';
+  const RED = '#e8544e';
+  const F = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+  const positive = data.dayChangePercent >= 0;
+  const accent = positive ? GREEN : RED;
+  const changeText = `${positive ? '+' : ''}${data.dayChangePercent.toFixed(2)}%`;
+
+  const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
+  const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
+  const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
+  const sparkStartX = 78;
+  const sparkEndX = 1122;
+  const sparkTopY = 300;
+  const sparkBottomY = 520;
+  const sparkPoints = data.sparklineValues.length > 1
+    ? data.sparklineValues.map((value, i) => {
+      const t = i / (data.sparklineValues.length - 1);
+      const x = sparkStartX + t * (sparkEndX - sparkStartX);
+      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ')
+    : `${sparkStartX},${sparkBottomY} ${sparkEndX},${sparkBottomY}`;
+
+  const stockUrl = `https://nalaai.com/market/${encodeURIComponent(data.ticker)}`;
+  const qrSize = 88;
+  const qrX = W - 86 - qrSize;
+  const qrY = 76;
+  const qrSvg = await generateQrSvgGroup(stockUrl, qrX, qrY, qrSize);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06080b"/>
+      <stop offset="100%" stop-color="#030405"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#11c5a2" stop-opacity="0.8"/>
+    </linearGradient>
+    <clipPath id="sparkClipStock"><rect x="66" y="286" width="1068" height="248" rx="12"/></clipPath>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <rect x="0" y="0" width="${W}" height="4" fill="url(#line)"/>
+  <rect x="44" y="36" width="${W - 88}" height="${H - 72}" rx="24" fill="#0b1014" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <text x="88" y="132" fill="#f3f4f6" font-size="84" font-weight="800" font-family="${F}">${escapeXml(data.ticker)}</text>
+  <text x="88" y="174" fill="#8d98a5" font-size="28" font-family="${F}">${escapeXml(data.companyName)}</text>
+  <text x="88" y="254" fill="#f9fafb" font-size="72" font-weight="700" font-family="${F}">$${data.currentPrice.toFixed(2)}</text>
+  <text x="470" y="254" fill="${accent}" font-size="50" font-weight="700" font-family="${F}">${changeText}</text>
+  <text x="472" y="282" fill="#8d98a5" font-size="18" font-family="${F}">TODAY</text>
+
+  <rect x="66" y="286" width="1068" height="248" rx="12" fill="rgba(9,13,16,0.9)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <g clip-path="url(#sparkClipStock)">
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.5" opacity="0.95" stroke-linecap="round"/>
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="8" opacity="0.10" stroke-linecap="round"/>
+  </g>
+
+  <text x="86" y="${H - 64}" fill="${GREEN}" font-size="34" font-weight="800" font-family="${F}">Nala</text>
+  <text x="86" y="${H - 34}" fill="#8d98a5" font-size="14" font-family="${F}">Portfolio Intelligence Platform</text>
+  ${qrSvg}
+  <text x="${qrX + qrSize / 2}" y="${qrY + qrSize + 20}" fill="#8d98a5" font-size="10" text-anchor="middle" letter-spacing="1.2" font-family="${F}">OPEN IN NALA</text>
+</svg>`;
+}
+
+async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<string> {
+  const W = 1200;
+  const H = 630;
+  const GREEN = '#00c805';
+  const RED = '#e8544e';
+  const F = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+  const positive = data.periodChangePercent >= 0;
+  const accent = positive ? GREEN : RED;
+  const verb = positive ? 'up' : 'down';
+  const changePctText = `${positive ? '+' : ''}${data.periodChangePercent.toFixed(2)}%`;
+  const changeValueText = `${positive ? '+' : '-'}$${Math.abs(data.periodChangeValue).toFixed(2)}`;
+
+  const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
+  const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
+  const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
+  const sparkStartX = 84;
+  const sparkEndX = 1116;
+  const sparkTopY = 334;
+  const sparkBottomY = 540;
+  const sparkPoints = data.sparklineValues.length > 1
+    ? data.sparklineValues.map((value, i) => {
+      const t = i / (data.sparklineValues.length - 1);
+      const x = sparkStartX + t * (sparkEndX - sparkStartX);
+      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ')
+    : `${sparkStartX},${sparkBottomY} ${sparkEndX},${sparkBottomY}`;
+
+  const profileUrl = `https://nalaai.com/${encodeURIComponent(data.username)}`;
+  const qrSize = 88;
+  const qrX = W - 90 - qrSize;
+  const qrY = 70;
+  const qrSvg = await generateQrSvgGroup(profileUrl, qrX, qrY, qrSize);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="bgPerf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#05080b"/>
+      <stop offset="100%" stop-color="#030405"/>
+    </linearGradient>
+    <linearGradient id="linePerf" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#14b8a6" stop-opacity="0.9"/>
+    </linearGradient>
+    <clipPath id="sparkClipPerf"><rect x="72" y="320" width="1056" height="236" rx="12"/></clipPath>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="url(#bgPerf)"/>
+  <rect x="0" y="0" width="${W}" height="4" fill="url(#linePerf)"/>
+  <rect x="44" y="36" width="${W - 88}" height="${H - 72}" rx="24" fill="#0b1014" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <text x="84" y="122" fill="#f3f4f6" font-size="42" font-weight="700" font-family="${F}">${escapeXml(data.displayName)}</text>
+  <text x="84" y="180" fill="#f3f4f6" font-size="58" font-weight="700" font-family="${F}">My portfolio is ${verb} ${changePctText}</text>
+  <text x="84" y="230" fill="#8d98a5" font-size="30" font-family="${F}">this ${data.period}</text>
+
+  <text x="84" y="286" fill="${accent}" font-size="50" font-weight="700" font-family="${F}">${changeValueText}</text>
+  <text x="320" y="286" fill="#f3f4f6" font-size="44" font-weight="700" font-family="${F}">$${data.currentValue.toFixed(2)}</text>
+  <text x="322" y="310" fill="#8d98a5" font-size="16" font-family="${F}">CURRENT VALUE</text>
+
+  <rect x="72" y="320" width="1056" height="236" rx="12" fill="rgba(9,13,16,0.9)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <g clip-path="url(#sparkClipPerf)">
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.6" opacity="0.95" stroke-linecap="round"/>
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="8" opacity="0.1" stroke-linecap="round"/>
+  </g>
+
+  <text x="86" y="${H - 66}" fill="${GREEN}" font-size="34" font-weight="800" font-family="${F}">Nala</text>
+  <text x="86" y="${H - 36}" fill="#8d98a5" font-size="14" font-family="${F}">Portfolio Intelligence Platform</text>
+  ${qrSvg}
+  <text x="${qrX + qrSize / 2}" y="${qrY + qrSize + 20}" fill="#8d98a5" font-size="10" text-anchor="middle" letter-spacing="1.2" font-family="${F}">VIEW PROFILE</text>
+</svg>`;
+}
+
+export async function generateStockShareCard(ticker: string): Promise<Buffer | null> {
+  const data = await getStockShareCardData(ticker);
+  if (!data) return null;
+
+  const svg = await buildStockSvg(data);
+  return sharp(Buffer.from(svg))
+    .resize(1200, 630)
+    .png({ quality: 90 })
+    .toBuffer();
+}
+
+export async function generatePerformanceCard(userId: string, period: string): Promise<Buffer | null> {
+  const data = await getPerformanceShareCardData(userId, period);
+  if (!data) return null;
+
+  const svg = await buildPerformanceSvg(data);
+  return sharp(Buffer.from(svg))
+    .resize(1200, 630)
+    .png({ quality: 90 })
+    .toBuffer();
 }
