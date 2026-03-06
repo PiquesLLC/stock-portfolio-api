@@ -27,6 +27,7 @@ interface HeatmapStock {
   price: number;
   changePercent: number;
   dayChange: number;
+  weekChangePercent: number;
   marketCapB: number;
   volume: number;
   avgVolume: number;
@@ -215,10 +216,17 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   // Fetch historical change % from candle data for all periods.
   // For 1D: use 2-day lookback as fallback when live quotes show 0%
   // (Finnhub resets dp to 0 after midnight; Polygon free tier hardcodes 0%).
+  // Also fetch 7-day changes for weekChangePercent (in parallel).
   let periodChanges: Map<string, number> | null = null;
+  let weekChanges: Map<string, number> | null = null;
   const candleDays = period === '1D' ? 2 : PERIOD_DAYS[period];
+  const weekFetch = fetchPeriodChanges(uniqueTickers, 7);
   if (candleDays > 0) {
-    periodChanges = await fetchPeriodChanges(uniqueTickers, candleDays);
+    const [pc, wc] = await Promise.all([fetchPeriodChanges(uniqueTickers, candleDays), weekFetch]);
+    periodChanges = pc;
+    weekChanges = wc;
+  } else {
+    weekChanges = await weekFetch;
   }
 
   const fundamentalsMap = new Map<string, any>();
@@ -299,6 +307,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           price: currentPrice,
           changePercent,
           dayChange,
+          weekChangePercent: weekChanges?.get(upper) ?? 0,
           marketCapB,
           volume: polygonVolumes.get(upper) ?? 0,
           avgVolume: getCachedAdv(upper) ?? 0,

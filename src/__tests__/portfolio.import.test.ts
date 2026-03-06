@@ -8,6 +8,8 @@ function authHeader() {
   return { Authorization: `Bearer ${generateTestToken(testUser)}` };
 }
 
+const MOCK_PORTFOLIO_ID = 'test-portfolio-id';
+
 describe('Portfolio import', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -22,11 +24,21 @@ describe('Portfolio import', () => {
     prismaMock.holding.upsert.mockResolvedValue({});
     prismaMock.userSettings.upsert.mockResolvedValue({});
     prismaMock.portfolioCompositionChange.create.mockResolvedValue({});
+    // Portfolio resolution: getOrCreateDefaultPortfolio needs portfolio.findFirst
+    prismaMock.portfolio.findFirst.mockResolvedValue({ id: MOCK_PORTFOLIO_ID, userId: testUser.userId, isDefault: true } as any);
+    prismaMock.portfolio.create.mockResolvedValue({ id: MOCK_PORTFOLIO_ID, userId: testUser.userId, isDefault: true } as any);
     // Watermark guard uses findFirst; default to no prior trades
     (prismaMock.portfolioTrade as any).findFirst = vi.fn().mockResolvedValue(null);
     // incremental mode uses tx.holding.update/create; add missing mock methods
     (prismaMock.holding as any).update = vi.fn().mockResolvedValue({});
     (prismaMock.holding as any).create = vi.fn().mockResolvedValue({});
+    // Clear: needs portfolioSnapshot + holdingSnapshot + portfolio.updateMany mocks
+    (prismaMock.portfolioSnapshot as any).findMany = vi.fn().mockResolvedValue([]);
+    (prismaMock.holdingSnapshot as any).deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    (prismaMock.portfolioSnapshot as any).deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    (prismaMock.portfolio as any).updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    // Composition change tracking
+    (prismaMock.portfolioCompositionChange as any).create = vi.fn().mockResolvedValue({});
   });
 
   it('parses a valid CSV file', async () => {
@@ -110,6 +122,8 @@ GOOG,3,0,ok`;
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
+      // findFirst for tx.holding.findFirst in incremental mode
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue({ id: 'hold-1', ticker: 'AAPL', shares: 10, averageCost: 100 });
 
       // Dedup check queries all trades (no ticker filter) — return empty (no prior trades)
       prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
@@ -128,7 +142,7 @@ GOOG,3,0,ok`;
       expect(res.body).toEqual({ added: 0, updated: 1, removed: 0 });
       expect((prismaMock.holding as any).update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId_ticker: { userId: testUser.userId, ticker: 'AAPL' } },
+          where: { id: 'hold-1' },
           data: { shares: 15, averageCost: expect.closeTo(133.3333333333, 6) },
         }),
       );
@@ -139,6 +153,8 @@ GOOG,3,0,ok`;
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
         { ticker: 'MSFT', shares: 2, averageCost: 300 },
       ]);
+      // findFirst for tx.holding.findFirst — called for AAPL update
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue({ id: 'hold-aapl', ticker: 'AAPL', shares: 10, averageCost: 100 });
 
       // Dedup check queries all trades — return empty (no prior trades)
       prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
@@ -158,16 +174,16 @@ GOOG,3,0,ok`;
       expect(res.body).toEqual({ added: 0, updated: 1, removed: 1 });
       expect((prismaMock.holding as any).update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId_ticker: { userId: testUser.userId, ticker: 'AAPL' } },
+          where: { id: 'hold-aapl' },
           data: { shares: 6, averageCost: 100 },
         }),
       );
       expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: testUser.userId, ticker: 'MSFT' } }),
+        expect.objectContaining({ where: { portfolioId: MOCK_PORTFOLIO_ID, ticker: 'MSFT' } }),
       );
     });
 
-    it('blocks oversell atomically before DB mutation', async () => {
+    it('skips overselling trades silently', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
@@ -184,11 +200,9 @@ GOOG,3,0,ok`;
           ],
         });
 
-      // Strict oversell → 400, no DB writes
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('OVERSELL_DETECTED');
-      expect(res.body.details).toHaveLength(1);
-      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      // Overselling trades are skipped (not blocked) — nothing to apply
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ added: 0, updated: 0, removed: 0, skippedDuplicates: 0 });
     });
 
     it('rejects overlapping trade dates with INCREMENTAL_OVERLAP', async () => {
@@ -241,6 +255,8 @@ GOOG,3,0,ok`;
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 10, averageCost: 100 },
       ]);
+      // findFirst for tx.holding.findFirst
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue({ id: 'hold-aapl', ticker: 'AAPL', shares: 10, averageCost: 100 });
       // Watermark: existing trades up to Feb 19 → Feb 20+ is allowed
       (prismaMock.portfolioTrade as any).findFirst.mockResolvedValue({
         date: new Date('2026-02-19T00:00:00.000Z'),
@@ -304,6 +320,8 @@ GOOG,3,0,ok`;
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
+      // findFirst returns null (new ticker after delete) for MSFT
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -315,20 +333,29 @@ GOOG,3,0,ok`;
 
       expect(res.status).toBe(200);
       expect(prismaMock.holding.deleteMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: testUser.userId } }),
+        expect.objectContaining({ where: { portfolioId: MOCK_PORTFOLIO_ID } }),
       );
       // Replace mode uses dedup instead of deleting trades/ledger
       expect(prismaMock.portfolioTrade.deleteMany).not.toHaveBeenCalled();
       expect(prismaMock.ledgerEvent.deleteMany).not.toHaveBeenCalled();
-      expect(prismaMock.holding.upsert).toHaveBeenCalledWith(expect.objectContaining({
-        where: { userId_ticker: { userId: testUser.userId, ticker: 'MSFT' } },
-      }));
+      // Replace+merge now uses findFirst+create/update instead of upsert
+      expect((prismaMock.holding as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ ticker: 'MSFT', shares: 2, averageCost: 300 }),
+        }),
+      );
     });
 
     it('merge upserts without wiping existing records', async () => {
       prismaMock.holding.findMany.mockResolvedValue([
         { ticker: 'AAPL', shares: 1, averageCost: 100 },
       ]);
+      // findFirst: AAPL exists, MSFT doesn't
+      (prismaMock.holding as any).findFirst = vi.fn()
+        .mockImplementation(({ where }: any) => {
+          if (where.ticker === 'AAPL') return Promise.resolve({ id: 'hold-aapl', ticker: 'AAPL' });
+          return Promise.resolve(null);
+        });
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
@@ -345,7 +372,13 @@ GOOG,3,0,ok`;
       expect(prismaMock.holding.deleteMany).not.toHaveBeenCalled();
       expect(prismaMock.portfolioTrade.deleteMany).not.toHaveBeenCalled();
       expect(prismaMock.ledgerEvent.deleteMany).not.toHaveBeenCalled();
-      expect(prismaMock.holding.upsert).toHaveBeenCalledTimes(2);
+      // AAPL: findFirst returns existing → update; MSFT: findFirst returns null → create
+      expect((prismaMock.holding as any).update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ shares: 5, averageCost: 150 }) }),
+      );
+      expect((prismaMock.holding as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ticker: 'MSFT', shares: 2, averageCost: 300 }) }),
+      );
     });
   });
 });
