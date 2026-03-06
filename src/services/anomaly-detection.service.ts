@@ -133,6 +133,15 @@ export async function detectAnomalies(userId: string): Promise<void> {
     return;
   }
 
+  // Load user-configured price spike threshold (falls back to default 3%)
+  const userSettings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { priceSpikePct: true },
+  });
+  const userPriceSpikePct = userSettings?.priceSpikePct ?? PRICE_SPIKE_PCT;
+  // Critical threshold is always ~2% above warning (matches original 3→5 relationship)
+  const userPriceCriticalPct = userPriceSpikePct + 2.0;
+
   const tickers = holdings.map(h => h.ticker);
   const { quotes } = await fetchPrices(tickers, { preferPolygon: true });
 
@@ -157,9 +166,9 @@ export async function detectAnomalies(userId: string): Promise<void> {
 
     // Price spike check (intraday change %)
     const changePct = Math.abs(q.changePercent);
-    if (changePct >= PRICE_SPIKE_PCT) {
+    if (changePct >= userPriceSpikePct) {
       const direction = q.changePercent > 0 ? 'up' : 'down';
-      const severity = changePct >= PRICE_CRITICAL_PCT ? 'critical' as const : 'warning' as const;
+      const severity = changePct >= userPriceCriticalPct ? 'critical' as const : 'warning' as const;
       candidates.push({
         ticker: h.ticker,
         type: 'price_spike',
@@ -167,7 +176,7 @@ export async function detectAnomalies(userId: string): Promise<void> {
         title: `${h.ticker}: ${direction === 'up' ? 'Surging' : 'Dropping'} ${changePct.toFixed(1)}% today`,
         description: `${h.ticker} is ${direction} ${changePct.toFixed(1)}% ($${q.currentPrice.toFixed(2)}) from previous close of $${q.previousClose.toFixed(2)}.`,
         value: changePct,
-        threshold: PRICE_SPIKE_PCT,
+        threshold: userPriceSpikePct,
       });
     }
 

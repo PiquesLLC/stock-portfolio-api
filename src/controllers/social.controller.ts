@@ -274,6 +274,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
             cashInterestRate: true,
             marginDebt: true,
             annualSalary: true,
+            priceSpikePct: true,
           },
         },
       },
@@ -297,6 +298,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       cashInterestRate: user.settings?.cashInterestRate ?? null,
       marginDebt: user.settings?.marginDebt ?? null,
       annualSalary: user.settings?.annualSalary ?? null,
+      priceSpikePct: user.settings?.priceSpikePct ?? 3.0,
       createdAt: user.createdAt.toISOString(),
     });
   } catch (_error) {
@@ -330,6 +332,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       cashInterestRate,
       marginDebt,
       annualSalary,
+      priceSpikePct,
     } = req.body;
 
     // Validate inputs
@@ -373,6 +376,13 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       }
     }
 
+    if (priceSpikePct !== undefined) {
+      if (typeof priceSpikePct !== 'number' || !Number.isFinite(priceSpikePct) || priceSpikePct < 1 || priceSpikePct > 25) {
+        res.status(400).json({ error: 'priceSpikePct must be a number between 1 and 25' });
+        return;
+      }
+    }
+
     // Build update data for User model
     const userData: Record<string, unknown> = {};
     if (displayName !== undefined) {
@@ -410,10 +420,11 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     let cashInterestRateResult: number | null = null;
     let marginDebtResult: number | null = null;
     let annualSalaryResult: number | null = null;
-    const hasSettingsUpdate = dripEnabled !== undefined || ytdBaselineValue !== undefined || cashInterestRate !== undefined || marginDebt !== undefined || annualSalary !== undefined;
+    let priceSpikePctResult = 3.0;
+    const hasSettingsUpdate = dripEnabled !== undefined || ytdBaselineValue !== undefined || cashInterestRate !== undefined || marginDebt !== undefined || annualSalary !== undefined || priceSpikePct !== undefined;
     if (hasSettingsUpdate) {
-      const settingsUpdate: { dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null } = {};
-      const settingsCreate: { userId: string; dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null } = { userId };
+      const settingsUpdate: { dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null; priceSpikePct?: number } = {};
+      const settingsCreate: { userId: string; dripEnabled?: boolean; ytdBaselineValue?: number | null; cashInterestRate?: number; marginDebt?: number; annualSalary?: number | null; priceSpikePct?: number } = { userId };
       if (dripEnabled !== undefined) {
         settingsUpdate.dripEnabled = dripEnabled;
         settingsCreate.dripEnabled = dripEnabled;
@@ -436,27 +447,33 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
         settingsUpdate.annualSalary = annualSalary;
         settingsCreate.annualSalary = annualSalary;
       }
+      if (priceSpikePct !== undefined) {
+        settingsUpdate.priceSpikePct = Math.round(priceSpikePct * 10) / 10;
+        settingsCreate.priceSpikePct = Math.round(priceSpikePct * 10) / 10;
+      }
       const userSettings = await prisma.userSettings.upsert({
         where: { userId },
         update: settingsUpdate,
         create: settingsCreate,
-        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true },
+        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true, priceSpikePct: true },
       });
       dripEnabledResult = userSettings.dripEnabled;
       ytdBaselineResult = userSettings.ytdBaselineValue;
       cashInterestRateResult = userSettings.cashInterestRate ?? null;
       marginDebtResult = userSettings.marginDebt ?? null;
       annualSalaryResult = userSettings.annualSalary ?? null;
+      priceSpikePctResult = userSettings.priceSpikePct ?? 3.0;
     } else {
       const existing = await prisma.userSettings.findUnique({
         where: { userId },
-        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true },
+        select: { dripEnabled: true, ytdBaselineValue: true, cashInterestRate: true, marginDebt: true, annualSalary: true, priceSpikePct: true },
       });
       dripEnabledResult = existing?.dripEnabled ?? false;
       ytdBaselineResult = existing?.ytdBaselineValue ?? null;
       cashInterestRateResult = existing?.cashInterestRate ?? null;
       marginDebtResult = existing?.marginDebt ?? null;
       annualSalaryResult = existing?.annualSalary ?? null;
+      priceSpikePctResult = existing?.priceSpikePct ?? 3.0;
     }
 
     res.json({
@@ -466,6 +483,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       cashInterestRate: cashInterestRateResult,
       marginDebt: marginDebtResult,
       annualSalary: annualSalaryResult,
+      priceSpikePct: priceSpikePctResult,
     });
   } catch (_error) {
     console.error('Error updating user settings:');

@@ -305,6 +305,9 @@ model UserSettings {
 
   // Annual salary for income coverage calculations
   annualSalary         Float?
+
+  // Anomaly detection thresholds (user-configurable)
+  priceSpikePct        Float    @default(3.0)
 }
 
 model Settings {
