@@ -24,12 +24,27 @@ interface ShareCardData {
   displayName: string;
   returnPct: number | null;
   alphaPct: number | null;
+  benchmarkReturnPct: number | null;
   beta: number | null;
   leaderboardRank: number | null;
+  leaderboardTotal: number | null;
   nalaScore: number | null;
   followerCount: number;
   isCreator: boolean;
   sparklineValues: number[];
+  portfolioValue: number | null;
+  periodChangeValue: number | null;
+}
+
+function getEmotionalTagline(returnPct: number | null): string {
+  if (returnPct == null) return '';
+  if (returnPct >= 15) return 'On fire';
+  if (returnPct >= 8) return 'Crushing it';
+  if (returnPct >= 3) return 'Solid month';
+  if (returnPct >= 0) return 'Steady gains';
+  if (returnPct >= -3) return 'Not my best month';
+  if (returnPct >= -8) return 'Rough patch';
+  return 'Pain.';
 }
 
 async function getShareCardData(userId: string): Promise<ShareCardData | null> {
@@ -54,8 +69,10 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
   ]);
 
   let leaderboardRank: number | null = null;
+  let leaderboardTotal: number | null = null;
   let nalaScore: number | null = null;
   if (leaderboard?.entries) {
+    leaderboardTotal = leaderboard.entries.length;
     const idx = leaderboard.entries.findIndex((e: { userId: string }) => e.userId === userId);
     if (idx >= 0) {
       leaderboardRank = idx + 1;
@@ -73,7 +90,7 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
   const rawValues = (chart?.points ?? [])
     .map((p: { value: number }) => p.value)
     .filter((v: number) => Number.isFinite(v) && v > 0);
-  const targetSparkCount = 36;
+  const targetSparkCount = 48;
   let sparklineValues: number[] = [];
   if (rawValues.length > 0) {
     if (rawValues.length <= targetSparkCount) {
@@ -87,17 +104,30 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
     }
   }
 
+  // Use simple return for share cards — TWR can be misleading when
+  // selling holdings creates auto-withdrawal transactions that inflate TWR.
+  const userReturn = performance?.simpleReturnPct ?? performance?.twrPct ?? null;
+  const userAlpha = performance?.alphaPct ?? null;
+  const currentValue = rawValues.length > 0 ? rawValues[rawValues.length - 1] : null;
+  const psvRaw = chart?.periodStartValue ?? 0;
+  const startValue = psvRaw > 0 ? psvRaw : (rawValues.length > 0 ? rawValues[0] : null);
+  const periodChangeValue = currentValue != null && startValue != null ? currentValue - startValue : null;
+
   return {
     username: user.username,
     displayName: user.displayName || user.username,
-    returnPct: performance?.twrPct ?? performance?.simpleReturnPct ?? null,
-    alphaPct: performance?.alphaPct ?? null,
+    returnPct: userReturn,
+    alphaPct: userAlpha,
+    benchmarkReturnPct: userReturn != null && userAlpha != null ? userReturn - userAlpha : null,
     beta: performance?.beta ?? null,
     leaderboardRank,
+    leaderboardTotal,
     nalaScore,
     followerCount,
     isCreator: user.creator?.status === 'active',
     sparklineValues,
+    portfolioValue: currentValue,
+    periodChangeValue,
   };
 }
 
@@ -143,156 +173,161 @@ async function buildSvg(data: ShareCardData): Promise<string> {
   const W = 1200;
   const H = 630;
   const GREEN = '#00c805';
-  const RED = '#e8544e';
-  const CYAN = '#14b8a6';
-  const F = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+  const GREEN_BRIGHT = '#00ff88';
+  const RED = '#FF4D4D';
+  const RED_DARK = '#B91C1C';
+  const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
 
   const isPositive = data.returnPct != null ? data.returnPct >= 0 : true;
-  const accentColor = isPositive ? GREEN : RED;
+  const accent = isPositive ? GREEN : RED;
+  const accentEnd = isPositive ? GREEN_BRIGHT : RED_DARK;
   const retText = data.returnPct != null
     ? `${data.returnPct >= 0 ? '+' : ''}${data.returnPct.toFixed(1)}%`
     : '--';
 
-  const alphaText = data.alphaPct != null
-    ? `${data.alphaPct >= 0 ? '+' : ''}${data.alphaPct.toFixed(1)}%`
-    : '--';
-  const alphaColor = data.alphaPct != null ? (data.alphaPct >= 0 ? GREEN : RED) : '#7f8894';
-
+  const tagline = getEmotionalTagline(data.returnPct);
   const grade = getGrade(data.nalaScore);
-  const rankText = data.leaderboardRank != null ? `#${data.leaderboardRank}` : '--';
-  const heroHighlight = isPositive ? '#7CFF80' : '#FF9E96';
 
-  const initials = data.displayName
-    .split(' ')
-    .map(w => w[0])
-    .join('')
-    .substring(0, 2)
-    .toUpperCase();
+  const alphaText = data.alphaPct != null ? `${data.alphaPct >= 0 ? '+' : ''}${data.alphaPct.toFixed(1)}%` : '--';
+  const alphaColor = data.alphaPct != null ? (data.alphaPct >= 0 ? GREEN : RED) : '#666';
+  const benchText = data.benchmarkReturnPct != null ? `${data.benchmarkReturnPct >= 0 ? '+' : ''}${data.benchmarkReturnPct.toFixed(1)}%` : '--';
+  const valueText = data.portfolioValue != null ? `$${Math.round(data.portfolioValue).toLocaleString('en-US')}` : '--';
+  const changeText = data.periodChangeValue != null
+    ? `${data.periodChangeValue >= 0 ? '+' : '-'}$${Math.abs(data.periodChangeValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    : '--';
+  const changeColor = data.periodChangeValue != null ? (data.periodChangeValue >= 0 ? GREEN : RED) : '#666';
 
-  const logoEl = `<text x="60" y="${H - 34}" font-size="30" font-weight="800" font-family="${F}">
-    <tspan fill="${GREEN}">N</tspan><tspan fill="#f3f4f6">ala</tspan>
-  </text>`;
-
-  const scoreR = 34;
-  const scoreCirc = 2 * Math.PI * scoreR;
-  const scoreDash = data.nalaScore != null ? (data.nalaScore / 100) * scoreCirc : 0;
-  const scoreText = data.nalaScore != null ? `${data.nalaScore}` : '--';
-
-  const glowR = isPositive ? '0,200,5' : '232,84,78';
-
+  // Chart — full width strip
+  const sparkL = 50;
+  const sparkR = W - 50;
+  const sparkT = 340;
+  const sparkB = 430;
+  const sparkW = sparkR - sparkL;
+  const sparkHt = sparkB - sparkT;
   const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
   const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
-  const sparkStartX = 95;
-  const sparkEndX = 686;
-  const sparkTopY = 422;
-  const sparkBottomY = 516;
-  const sparklinePoints = data.sparklineValues.length > 1
+  const sparkPoints = data.sparklineValues.length > 1
     ? data.sparklineValues.map((value, i) => {
       const t = i / (data.sparklineValues.length - 1);
-      const x = sparkStartX + t * (sparkEndX - sparkStartX);
-      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      const x = sparkL + t * sparkW;
+      const y = sparkT + (1 - (value - sparkMin) / sparkRange) * sparkHt;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ')
-    : '95,500 686,440';
+    : `${sparkL},${sparkB} ${sparkR},${sparkB}`;
+  const fillPoints = `${sparkL},${sparkB} ${sparkPoints} ${sparkR},${sparkB}`;
 
-  // Generate QR code for referral link
+  const logoEl = _LOGO_B64
+    ? `<image x="48" y="${H - 66}" width="34" height="34" href="data:image/png;base64,${_LOGO_B64}"/>`
+    : '';
+
   const referralUrl = `https://nalaai.com/join?ref=${encodeURIComponent(data.username)}`;
-  const qrSize = 72;
-  const qrX = W - 60 - qrSize;
-  const qrY = H - 80;
+  const qrSize = 48;
+  const qrX = W - 44 - qrSize;
+  const qrY = H - 68;
   const qrSvg = await generateQrSvgGroup(referralUrl, qrX, qrY, qrSize);
+
+  // Glass tiles
+  const tileW = 130;
+  const tileH = 52;
+  const tileY = 445;
+  const tileGap = 12;
+  const tiles = [
+    { label: 'ALPHA', value: alphaText, color: alphaColor },
+    { label: 'SCORE', value: `${data.nalaScore ?? '--'} ${grade.letter}`, color: grade.color },
+    { label: 'RANK', value: data.leaderboardRank != null ? `#${data.leaderboardRank}` : '--', color: 'white' },
+    { label: 'FOLLOWERS', value: `${data.followerCount}`, color: 'white' },
+  ];
+  const tilesStartX = 50;
+  const tilesSvg = tiles.map((t, i) => {
+    const tx = tilesStartX + i * (tileW + tileGap);
+    return `
+      <rect x="${tx}" y="${tileY}" width="${tileW}" height="${tileH}" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+      <text x="${tx + 14}" y="${tileY + 18}" fill="#777" font-size="9" font-weight="600" letter-spacing="1.2" font-family="${F}">${t.label}</text>
+      <text x="${tx + 14}" y="${tileY + 40}" fill="${t.color}" font-size="18" font-weight="700" font-family="${F}">${t.value}</text>
+    `;
+  }).join('');
+
+  // SPY comparison tile (wider)
+  const spyTileX = tilesStartX + 4 * (tileW + tileGap);
+  const spyTileW = W - 50 - spyTileX;
+  const spySvg = `
+    <rect x="${spyTileX}" y="${tileY}" width="${spyTileW}" height="${tileH}" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+    <text x="${spyTileX + 14}" y="${tileY + 18}" fill="#777" font-size="9" font-weight="600" letter-spacing="1.2" font-family="${F}">VS SPY</text>
+    <text x="${spyTileX + 14}" y="${tileY + 40}" fill="white" font-size="14" font-weight="600" font-family="${F}">You ${retText}</text>
+    <text x="${spyTileX + 130}" y="${tileY + 40}" fill="#777" font-size="14" font-weight="600" font-family="${F}">SPY ${benchText}</text>
+  `;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <radialGradient id="heroGlow" cx="0.28" cy="0.48" r="0.7" fx="0.28" fy="0.48">
-      <stop offset="0%" stop-color="rgb(${glowR})" stop-opacity="0.18"/>
-      <stop offset="55%" stop-color="rgb(${glowR})" stop-opacity="0.05"/>
-      <stop offset="100%" stop-color="rgb(${glowR})" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#06080b"/>
-      <stop offset="100%" stop-color="#040506"/>
+    <linearGradient id="accentBar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${accent}"/>
+      <stop offset="100%" stop-color="${accentEnd}"/>
     </linearGradient>
-    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#101418"/>
-      <stop offset="100%" stop-color="#0b0f12"/>
+    <linearGradient id="heroGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${accent}"/>
+      <stop offset="100%" stop-color="${accentEnd}"/>
     </linearGradient>
-    <linearGradient id="topLine" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="${accentColor}" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="${CYAN}" stop-opacity="0.9"/>
+    <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.30"/>
+      <stop offset="50%" stop-color="${accent}" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="gradeRing" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="${grade.color}"/>
-      <stop offset="100%" stop-color="${grade.color}" stop-opacity="0.55"/>
-    </linearGradient>
-    <linearGradient id="retFill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${heroHighlight}"/>
-      <stop offset="100%" stop-color="${accentColor}"/>
-    </linearGradient>
-    <filter id="numGlow">
-      <feGaussianBlur stdDeviation="2.2" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
-    <clipPath id="sparkClip"><rect x="84" y="414" width="612" height="112" rx="8"/></clipPath>
+    <filter id="chartGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="url(#bg)"/>
-  <rect x="0" y="0" width="${W}" height="4" fill="url(#topLine)"/>
-  <ellipse cx="370" cy="314" rx="420" ry="250" fill="url(#heroGlow)"/>
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="#0e0e11"/>
 
-  <rect x="56" y="32" width="${W - 112}" height="${H - 124}" rx="22" fill="url(#panel)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <!-- Gradient accent bar -->
+  <rect width="${W}" height="4" fill="url(#accentBar)"/>
 
-  <circle cx="106" cy="88" r="30" fill="rgba(${glowR}, 0.09)"/>
-  <circle cx="106" cy="88" r="30" fill="none" stroke="url(#gradeRing)" stroke-width="2.4"/>
-  <text x="106" y="97" fill="${accentColor}" font-size="17" font-weight="700" text-anchor="middle" font-family="${F}">${initials}</text>
-  <circle cx="128" cy="108" r="12" fill="#0a0e10" stroke="${grade.color}" stroke-width="1.4"/>
-  <text x="128" y="112.5" fill="${grade.color}" font-size="9.5" font-weight="800" text-anchor="middle" font-family="${F}">${grade.letter}</text>
+  <!-- Identity -->
+  <text x="50" y="52" fill="white" font-size="28" font-weight="700" font-family="${F}">${escapeXml(data.displayName)}</text>
+  <text x="${W - 50}" y="52" fill="#555" font-size="16" font-weight="500" text-anchor="end" font-family="${F}">${data.isCreator ? 'Creator Portfolio' : 'Portfolio'}</text>
 
-  <text x="154" y="82" fill="#f3f4f6" font-size="32" font-weight="700" font-family="${F}">${escapeXml(data.displayName)}</text>
-  <text x="154" y="110" fill="#88909b" font-size="15" font-family="${F}">@${escapeXml(data.username)}${data.isCreator ? '  -  Creator' : ''}</text>
-  <rect x="56" y="136" width="${W - 112}" height="1" fill="rgba(255,255,255,0.08)"/>
+  <!-- Label -->
+  <text x="50" y="100" fill="#666" font-size="13" font-weight="600" letter-spacing="2" font-family="${F}">MONTHLY PERFORMANCE</text>
 
-  <text x="96" y="195" fill="#7f8894" font-size="14" font-weight="600" letter-spacing="2" font-family="${F}">1-MONTH RETURN</text>
-  <text x="96" y="330" fill="url(#retFill)" font-size="108" font-weight="800" font-family="${F}" filter="url(#numGlow)">${retText}</text>
-  <text x="96" y="372" fill="#7f8894" font-size="13" letter-spacing="1.5" font-family="${F}">BETA</text>
-  <text x="96" y="404" fill="#e5e7eb" font-size="31" font-weight="700" font-family="${F}">${data.beta != null ? data.beta.toFixed(2) : '--'}</text>
+  <!-- Hero return with glow -->
+  <text x="46" y="220" fill="url(#heroGrad)" font-size="140" font-weight="700" font-family="${F}" filter="url(#glow)">${retText}</text>
 
-  <rect x="84" y="414" width="612" height="112" rx="8" fill="rgba(8,12,15,0.7)" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-  <g clip-path="url(#sparkClip)">
-    <polyline points="${sparklinePoints}"
-      fill="none" stroke="${accentColor}" stroke-width="1.6" opacity="0.55" stroke-linecap="round"/>
-    <polyline points="${sparklinePoints}"
-      fill="none" stroke="${accentColor}" stroke-width="4" opacity="0.08" stroke-linecap="round"/>
-  </g>
+  <!-- Emotional tagline -->
+  <text x="52" y="252" fill="#888" font-size="18" font-weight="400" font-style="italic" font-family="${F}">${escapeXml(tagline)}</text>
 
-  <rect x="744" y="168" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="766" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">VS SPY (ALPHA)</text>
-  <text x="766" y="250" fill="${alphaColor}" font-size="44" font-weight="800" font-family="${F}">${alphaText}</text>
+  <!-- Portfolio value + change -->
+  <text x="52" y="295" fill="white" font-size="20" font-weight="600" font-family="${F}">${valueText}</text>
+  <text x="52" y="318" fill="${changeColor}" font-size="16" font-weight="500" font-family="${F}">${changeText} this month</text>
 
-  <rect x="952" y="168" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="974" y="200" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">FOLLOWERS</text>
-  <text x="974" y="250" fill="#f3f4f6" font-size="48" font-weight="700" font-family="${F}">${data.followerCount}</text>
+  <!-- Chart with glow -->
+  <polygon points="${fillPoints}" fill="url(#chartFill)"/>
+  <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="3" opacity="0.8" stroke-linecap="round" stroke-linejoin="round" filter="url(#chartGlow)"/>
 
-  <rect x="744" y="308" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="766" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">NALA SCORE</text>
-  <circle cx="802" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3" opacity="0.15"/>
-  <circle cx="802" cy="381" r="${scoreR}" fill="none" stroke="${grade.color}" stroke-width="3"
-    stroke-dasharray="${scoreDash} ${scoreCirc}" stroke-linecap="round" transform="rotate(-90 802 381)"/>
-  <text x="802" y="389" fill="${grade.color}" font-size="25" font-weight="800" text-anchor="middle" font-family="${F}">${scoreText}</text>
-  <text x="852" y="389" fill="#88909b" font-size="14" font-family="${F}">/ 100</text>
+  <!-- Glass tiles -->
+  ${tilesSvg}
+  ${spySvg}
 
-  <rect x="952" y="308" width="188" height="126" rx="12" fill="rgba(11,15,18,0.95)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="974" y="340" fill="#7f8894" font-size="12" font-weight="600" letter-spacing="1.4" font-family="${F}">RANK</text>
-  <text x="974" y="394" fill="${GREEN}" font-size="56" font-weight="800" font-family="${F}">${rankText}</text>
-
-  <rect x="56" y="${H - 92}" width="${W - 112}" height="1" fill="rgba(255,255,255,0.08)"/>
+  <!-- Footer -->
+  <rect x="0" y="${H - 76}" width="${W}" height="76" fill="#0a0a0c"/>
+  <rect x="0" y="${H - 76}" width="${W}" height="1" fill="#222"/>
   ${logoEl}
-  <text x="60" y="${H - 19}" fill="#7f8894" font-size="10" font-family="${F}">Portfolio Intelligence Platform</text>
-  <!-- QR code + label -->
+  <text x="90" y="${H - 42}" fill="white" font-size="17" font-weight="700" font-family="${F}">NalaAI.com</text>
+  <text x="90" y="${H - 24}" fill="#555" font-size="11" font-family="${F}">Track creator portfolios</text>
+  <text x="${qrX - 12}" y="${H - 36}" fill="#555" font-size="11" text-anchor="end" font-family="${F}">Scan to follow</text>
   ${qrSvg}
-  <text x="${qrX + qrSize / 2}" y="${qrY - 8}" fill="#7f8894" font-size="9" font-weight="600" text-anchor="middle" letter-spacing="1" font-family="${F}">SCAN TO JOIN</text>
-  <text x="${W / 2}" y="${H - 8}" fill="#49505a" font-size="8" text-anchor="middle" font-family="${F}">Educational content only. Not investment advice. Past performance does not guarantee future results.</text>
 </svg>`;
 }
 
@@ -418,66 +453,77 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
   const H = 630;
   const GREEN = '#00c805';
   const RED = '#e8544e';
-  const F = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+  const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
   const positive = data.dayChangePercent >= 0;
   const accent = positive ? GREEN : RED;
   const changeText = `${positive ? '+' : ''}${data.dayChangePercent.toFixed(2)}%`;
 
+  // Sparkline — bottom half
+  const sparkL = 60;
+  const sparkR = W - 60;
+  const sparkT = 310;
+  const sparkB = 460;
+  const sparkW = sparkR - sparkL;
+  const sparkH_val = sparkB - sparkT;
   const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
   const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
-  const sparkStartX = 78;
-  const sparkEndX = 1122;
-  const sparkTopY = 300;
-  const sparkBottomY = 520;
   const sparkPoints = data.sparklineValues.length > 1
     ? data.sparklineValues.map((value, i) => {
       const t = i / (data.sparklineValues.length - 1);
-      const x = sparkStartX + t * (sparkEndX - sparkStartX);
-      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      const x = sparkL + t * sparkW;
+      const y = sparkT + (1 - (value - sparkMin) / sparkRange) * sparkH_val;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ')
-    : `${sparkStartX},${sparkBottomY} ${sparkEndX},${sparkBottomY}`;
+    : `${sparkL},${sparkB} ${sparkR},${sparkB}`;
+  const fillPoints = `${sparkL},${sparkB} ${sparkPoints} ${sparkR},${sparkB}`;
+
+  const logoEl = _LOGO_B64
+    ? `<image x="48" y="${H - 68}" width="36" height="36" href="data:image/png;base64,${_LOGO_B64}"/>`
+    : '';
 
   const stockUrl = `https://nalaai.com/market/${encodeURIComponent(data.ticker)}`;
-  const qrSize = 88;
-  const qrX = W - 86 - qrSize;
-  const qrY = 76;
+  const qrSize = 50;
+  const qrX = W - 48 - qrSize;
+  const qrY = H - 70;
   const qrSvg = await generateQrSvgGroup(stockUrl, qrX, qrY, qrSize);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#06080b"/>
-      <stop offset="100%" stop-color="#030405"/>
+    <linearGradient id="sparkFillS" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0.02"/>
     </linearGradient>
-    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="${accent}" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#11c5a2" stop-opacity="0.8"/>
-    </linearGradient>
-    <clipPath id="sparkClipStock"><rect x="66" y="286" width="1068" height="248" rx="12"/></clipPath>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="url(#bg)"/>
-  <rect x="0" y="0" width="${W}" height="4" fill="url(#line)"/>
-  <rect x="44" y="36" width="${W - 88}" height="${H - 72}" rx="24" fill="#0b1014" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="#111114"/>
+  <rect width="${W}" height="4" fill="${accent}"/>
 
-  <text x="88" y="132" fill="#f3f4f6" font-size="84" font-weight="800" font-family="${F}">${escapeXml(data.ticker)}</text>
-  <text x="88" y="174" fill="#8d98a5" font-size="28" font-family="${F}">${escapeXml(data.companyName)}</text>
-  <text x="88" y="254" fill="#f9fafb" font-size="72" font-weight="700" font-family="${F}">$${data.currentPrice.toFixed(2)}</text>
-  <text x="470" y="254" fill="${accent}" font-size="50" font-weight="700" font-family="${F}">${changeText}</text>
-  <text x="472" y="282" fill="#8d98a5" font-size="18" font-family="${F}">TODAY</text>
+  <!-- Ticker -->
+  <text x="60" y="90" fill="white" font-size="60" font-weight="700" font-family="${F}">${escapeXml(data.ticker)}</text>
+  <text x="62" y="120" fill="#777" font-size="18" font-weight="400" font-family="${F}">${escapeXml(data.companyName)}</text>
 
-  <rect x="66" y="286" width="1068" height="248" rx="12" fill="rgba(9,13,16,0.9)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <g clip-path="url(#sparkClipStock)">
-    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.5" opacity="0.95" stroke-linecap="round"/>
-    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="8" opacity="0.10" stroke-linecap="round"/>
-  </g>
+  <!-- Price -->
+  <text x="60" y="210" fill="white" font-size="80" font-weight="700" font-family="${F}">$${data.currentPrice.toFixed(2)}</text>
 
-  <text x="86" y="${H - 64}" fill="${GREEN}" font-size="34" font-weight="800" font-family="${F}">Nala</text>
-  <text x="86" y="${H - 34}" fill="#8d98a5" font-size="14" font-family="${F}">Portfolio Intelligence Platform</text>
+  <!-- Change -->
+  <text x="62" y="260" fill="${accent}" font-size="28" font-weight="600" font-family="${F}">${changeText} today</text>
+
+  <!-- Sparkline -->
+  <polygon points="${fillPoints}" fill="url(#sparkFillS)"/>
+  <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.5" opacity="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 1M label -->
+  <text x="${W - 62}" y="${sparkB + 24}" fill="#666" font-size="12" font-weight="400" text-anchor="end" font-family="${F}">1 month</text>
+
+  <!-- Bottom bar -->
+  <rect x="0" y="${H - 80}" width="${W}" height="80" fill="#0a0a0c"/>
+  <rect x="0" y="${H - 80}" width="${W}" height="1" fill="#222"/>
+  ${logoEl}
+  <text x="92" y="${H - 42}" fill="white" font-size="18" font-weight="700" font-family="${F}">NalaAI.com</text>
+  <text x="92" y="${H - 22}" fill="#666" font-size="12" font-family="${F}">Portfolio Intelligence Platform</text>
   ${qrSvg}
-  <text x="${qrX + qrSize / 2}" y="${qrY + qrSize + 20}" fill="#8d98a5" font-size="10" text-anchor="middle" letter-spacing="1.2" font-family="${F}">OPEN IN NALA</text>
 </svg>`;
 }
 
@@ -486,70 +532,90 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
   const H = 630;
   const GREEN = '#00c805';
   const RED = '#e8544e';
-  const F = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+  const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
   const positive = data.periodChangePercent >= 0;
   const accent = positive ? GREEN : RED;
   const verb = positive ? 'up' : 'down';
   const changePctText = `${positive ? '+' : ''}${data.periodChangePercent.toFixed(2)}%`;
-  const changeValueText = `${positive ? '+' : '-'}$${Math.abs(data.periodChangeValue).toFixed(2)}`;
+  const changeValueText = `${positive ? '+' : '-'}$${Math.abs(data.periodChangeValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const currentValueText = `$${data.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
+  const periodLabels: Record<string, string> = {
+    '1D': 'today', '1W': 'this week', '1M': 'this month',
+    '3M': 'in 3 months', 'YTD': 'this year', '1Y': 'in a year', 'ALL': 'all time',
+  };
+  const periodLabel = periodLabels[data.period] || data.period;
+
+  // Sparkline — subtle strip across bottom, above footer
+  const sparkL = 60;
+  const sparkR = W - 60;
+  const sparkT = 440;
+  const sparkB = 530;
+  const sparkW = sparkR - sparkL;
+  const sparkH_val = sparkB - sparkT;
   const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
   const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
-  const sparkStartX = 84;
-  const sparkEndX = 1116;
-  const sparkTopY = 334;
-  const sparkBottomY = 540;
   const sparkPoints = data.sparklineValues.length > 1
     ? data.sparklineValues.map((value, i) => {
       const t = i / (data.sparklineValues.length - 1);
-      const x = sparkStartX + t * (sparkEndX - sparkStartX);
-      const y = sparkBottomY - ((value - sparkMin) / sparkRange) * (sparkBottomY - sparkTopY);
+      const x = sparkL + t * sparkW;
+      const y = sparkT + (1 - (value - sparkMin) / sparkRange) * sparkH_val;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ')
-    : `${sparkStartX},${sparkBottomY} ${sparkEndX},${sparkBottomY}`;
+    : `${sparkL},${sparkB} ${sparkR},${sparkB}`;
+  const fillPoints = `${sparkL},${sparkB} ${sparkPoints} ${sparkR},${sparkB}`;
+
+  const logoEl = _LOGO_B64
+    ? `<image x="48" y="${H - 68}" width="36" height="36" href="data:image/png;base64,${_LOGO_B64}"/>`
+    : '';
 
   const profileUrl = `https://nalaai.com/${encodeURIComponent(data.username)}`;
-  const qrSize = 88;
-  const qrX = W - 90 - qrSize;
-  const qrY = 70;
+  const qrSize = 50;
+  const qrX = W - 48 - qrSize;
+  const qrY = H - 70;
   const qrSvg = await generateQrSvgGroup(profileUrl, qrX, qrY, qrSize);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="bgPerf" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#05080b"/>
-      <stop offset="100%" stop-color="#030405"/>
+    <linearGradient id="sparkFillP" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${accent}" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0.02"/>
     </linearGradient>
-    <linearGradient id="linePerf" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="${accent}" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#14b8a6" stop-opacity="0.9"/>
-    </linearGradient>
-    <clipPath id="sparkClipPerf"><rect x="72" y="320" width="1056" height="236" rx="12"/></clipPath>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="url(#bgPerf)"/>
-  <rect x="0" y="0" width="${W}" height="4" fill="url(#linePerf)"/>
-  <rect x="44" y="36" width="${W - 88}" height="${H - 72}" rx="24" fill="#0b1014" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="#111114"/>
+  <rect width="${W}" height="4" fill="${accent}"/>
 
-  <text x="84" y="122" fill="#f3f4f6" font-size="42" font-weight="700" font-family="${F}">${escapeXml(data.displayName)}</text>
-  <text x="84" y="180" fill="#f3f4f6" font-size="58" font-weight="700" font-family="${F}">My portfolio is ${verb} ${changePctText}</text>
-  <text x="84" y="230" fill="#8d98a5" font-size="30" font-family="${F}">this ${data.period}</text>
+  <!-- Username -->
+  <text x="60" y="68" fill="#777" font-size="18" font-weight="400" font-family="${F}">@${escapeXml(data.username)}</text>
 
-  <text x="84" y="286" fill="${accent}" font-size="50" font-weight="700" font-family="${F}">${changeValueText}</text>
-  <text x="320" y="286" fill="#f3f4f6" font-size="44" font-weight="700" font-family="${F}">$${data.currentValue.toFixed(2)}</text>
-  <text x="322" y="310" fill="#8d98a5" font-size="16" font-family="${F}">CURRENT VALUE</text>
+  <!-- Hero statement -->
+  <text x="60" y="130" fill="white" font-size="40" font-weight="700" font-family="${F}">My portfolio is ${verb}</text>
 
-  <rect x="72" y="320" width="1056" height="236" rx="12" fill="rgba(9,13,16,0.9)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <g clip-path="url(#sparkClipPerf)">
-    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.6" opacity="0.95" stroke-linecap="round"/>
-    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="8" opacity="0.1" stroke-linecap="round"/>
-  </g>
+  <!-- Hero percent -->
+  <text x="56" y="240" fill="${accent}" font-size="100" font-weight="700" font-family="${F}">${changePctText}</text>
 
-  <text x="86" y="${H - 66}" fill="${GREEN}" font-size="34" font-weight="800" font-family="${F}">Nala</text>
-  <text x="86" y="${H - 36}" fill="#8d98a5" font-size="14" font-family="${F}">Portfolio Intelligence Platform</text>
+  <!-- Period label -->
+  <text x="62" y="278" fill="#888" font-size="20" font-weight="400" font-family="${F}">${periodLabel}</text>
+
+  <!-- Value stats -->
+  <text x="60" y="350" fill="${accent}" font-size="28" font-weight="600" font-family="${F}">${changeValueText}</text>
+  <text x="60" y="400" fill="white" font-size="36" font-weight="700" font-family="${F}">${currentValueText}</text>
+  <text x="62" y="428" fill="#666" font-size="14" font-weight="400" font-family="${F}">portfolio value</text>
+
+  <!-- Sparkline — subtle strip above footer -->
+  <polygon points="${fillPoints}" fill="url(#sparkFillP)"/>
+  <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2" opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Bottom bar -->
+  <rect x="0" y="${H - 80}" width="${W}" height="80" fill="#0a0a0c"/>
+  <rect x="0" y="${H - 80}" width="${W}" height="1" fill="#222"/>
+  ${logoEl}
+  <text x="92" y="${H - 42}" fill="white" font-size="18" font-weight="700" font-family="${F}">NalaAI.com</text>
+  <text x="92" y="${H - 22}" fill="#666" font-size="12" font-family="${F}">Portfolio Intelligence Platform</text>
   ${qrSvg}
-  <text x="${qrX + qrSize / 2}" y="${qrY + qrSize + 20}" fill="#8d98a5" font-size="10" text-anchor="middle" letter-spacing="1.2" font-family="${F}">VIEW PROFILE</text>
 </svg>`;
 }
 
