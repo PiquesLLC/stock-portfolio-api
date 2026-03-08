@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
-const { subscriptionsRetrieveMock } = vi.hoisted(() => ({
+const {
+  invoicesRetrieveMock,
+  recordWebhookEventMock,
+  subscriptionsCancelMock,
+  subscriptionsRetrieveMock,
+} = vi.hoisted(() => ({
+  invoicesRetrieveMock: vi.fn(),
+  recordWebhookEventMock: vi.fn(),
+  subscriptionsCancelMock: vi.fn(),
   subscriptionsRetrieveMock: vi.fn(),
 }));
 
@@ -9,6 +17,10 @@ vi.mock('stripe', () => {
   class StripeMock {
     subscriptions = {
       retrieve: subscriptionsRetrieveMock,
+      cancel: subscriptionsCancelMock,
+    };
+    invoices = {
+      retrieve: invoicesRetrieveMock,
     };
     customers = {
       create: vi.fn(),
@@ -34,6 +46,10 @@ vi.mock('stripe', () => {
   };
 });
 
+vi.mock('../utils/webhook-metrics', () => ({
+  recordWebhookEvent: recordWebhookEventMock,
+}));
+
 vi.mock('../config', () => ({
   config: {
     stripeSecretKey: 'sk_test_123',
@@ -46,16 +62,28 @@ vi.mock('../config', () => ({
   },
 }));
 
-import { handleWebhookEvent } from '../services/billing.service';
-import { getBillingStatus } from '../services/billing.service';
+import {
+  getBillingStatus,
+  handleWebhookEvent,
+  pollBillingStatusAfterCheckout,
+} from '../services/billing.service';
 
 describe('billing webhook handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    if (!(prismaMock.user as any).findFirst) {
+      (prismaMock.user as any).findFirst = vi.fn();
+    }
     prismaMock.billingWebhookEvent.create.mockResolvedValue({ id: 'evt_rec_1' });
     prismaMock.billingWebhookEvent.deleteMany.mockResolvedValue({ count: 1 });
     prismaMock.user.update.mockResolvedValue({});
     prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
+    (prismaMock.user as any).findFirst.mockResolvedValue({
+      id: 'user_refund_1',
+      stripeSubscriptionId: 'sub_refund_1',
+    });
+    subscriptionsCancelMock.mockResolvedValue({});
+    invoicesRetrieveMock.mockResolvedValue({ subscription: 'sub_refund_1' });
     subscriptionsRetrieveMock.mockResolvedValue({
       status: 'active',
       cancel_at_period_end: false,
@@ -203,6 +231,68 @@ describe('billing webhook handling', () => {
     expect(prismaMock.billingWebhookEvent.deleteMany).not.toHaveBeenCalled();
   });
 
+  it('dedupes replayed charge.refunded webhook by event id and logs skip behavior', async () => {
+    prismaMock.billingWebhookEvent.create
+      .mockResolvedValueOnce({ id: 'evt_rec_1' })
+      .mockRejectedValueOnce({ code: 'P2002' });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const event = {
+      id: 'evt_refund_replay_1',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_replay_1',
+          amount: 1000,
+          amount_refunded: 1000,
+          invoice: 'in_replay_1',
+        },
+      },
+    };
+
+    await handleWebhookEvent(event as any);
+    await handleWebhookEvent(event as any);
+
+    expect(prismaMock.user.update).toHaveBeenCalledTimes(1);
+    expect(subscriptionsCancelMock).toHaveBeenCalledTimes(1);
+    expect(recordWebhookEventMock).toHaveBeenCalledWith('billing', 'deduped', 'charge.refunded');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Duplicate webhook ignored'));
+
+    logSpy.mockRestore();
+  });
+
+  it('logs and skips old refunded subscription after user re-subscribes', async () => {
+    (prismaMock.user as any).findFirst.mockResolvedValue({
+      id: 'user_2',
+      stripeSubscriptionId: 'sub_new_123',
+    });
+    invoicesRetrieveMock.mockResolvedValue({ subscription: 'sub_old_456' });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const event = {
+      id: 'evt_refund_old_sub_1',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_2',
+          amount: 2500,
+          amount_refunded: 2500,
+          invoice: 'in_old_sub_1',
+        },
+      },
+    };
+
+    await handleWebhookEvent(event as any);
+
+    expect(subscriptionsCancelMock).not.toHaveBeenCalled();
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('does not match current sub_new_123')
+    );
+
+    logSpy.mockRestore();
+  });
+
   it('returns lifecycle fields for billing status', async () => {
     prismaMock.user.findUnique.mockResolvedValue({
       plan: 'pro',
@@ -232,5 +322,62 @@ describe('billing webhook handling', () => {
     expect(result.currentPeriodEnd).toBeInstanceOf(Date);
     expect(result.isGracePeriod).toBe(true);
     expect(result.graceEndsAt).toBeInstanceOf(Date);
+  });
+
+  it('polls billing status with backoff until webhook-settled plan appears', async () => {
+    const sleepCalls: number[] = [];
+    const statusFetcher = vi
+      .fn()
+      .mockResolvedValueOnce({
+        plan: 'free',
+        planStartedAt: null,
+        planExpiresAt: null,
+        stripeCustomerId: 'cus_3',
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
+        isGracePeriod: false,
+        graceEndsAt: null,
+      })
+      .mockResolvedValueOnce({
+        plan: 'free',
+        planStartedAt: null,
+        planExpiresAt: null,
+        stripeCustomerId: 'cus_3',
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
+        isGracePeriod: false,
+        graceEndsAt: null,
+      })
+      .mockResolvedValueOnce({
+        plan: 'pro',
+        planStartedAt: new Date('2026-03-08T00:00:00.000Z'),
+        planExpiresAt: new Date('2026-04-08T00:00:00.000Z'),
+        stripeCustomerId: 'cus_3',
+        stripeSubscriptionId: 'sub_3',
+        subscriptionStatus: 'active',
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: new Date('2026-04-08T00:00:00.000Z'),
+        isGracePeriod: false,
+        graceEndsAt: null,
+      });
+
+    const result = await pollBillingStatusAfterCheckout('user_checkout_1', {
+      maxAttempts: 5,
+      initialDelayMs: 200,
+      backoffMultiplier: 2,
+      maxDelayMs: 500,
+      statusFetcher,
+      sleep: async (ms: number) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(result.plan).toBe('pro');
+    expect(statusFetcher).toHaveBeenCalledTimes(3);
+    expect(sleepCalls).toEqual([200, 400]);
   });
 });

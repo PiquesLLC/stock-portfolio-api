@@ -22,6 +22,51 @@ function getStripeClient(): Stripe {
   return new Stripe(config.stripeSecretKey);
 }
 
+type BillingStatus = Awaited<ReturnType<typeof getBillingStatus>>;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export async function pollBillingStatusAfterCheckout(
+  userId: string,
+  options?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    backoffMultiplier?: number;
+    maxDelayMs?: number;
+    statusFetcher?: (userId: string) => Promise<BillingStatus>;
+    sleep?: (ms: number) => Promise<void>;
+  }
+): Promise<BillingStatus> {
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 6);
+  const backoffMultiplier = options?.backoffMultiplier ?? 1.8;
+  const maxDelayMs = options?.maxDelayMs ?? 3000;
+  let delayMs = Math.max(1, options?.initialDelayMs ?? 300);
+  const fetchStatus = options?.statusFetcher ?? getBillingStatus;
+  const sleep = options?.sleep ?? defaultSleep;
+
+  let status = await fetchStatus(userId);
+
+  // Checkout redirect can beat webhook settlement; poll briefly with backoff so
+  // callers can wait for plan propagation before showing stale "free" state.
+  for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
+    const isSettled =
+      status.plan !== 'free' ||
+      Boolean(status.stripeSubscriptionId) ||
+      status.subscriptionStatus !== null;
+    if (isSettled) {
+      return status;
+    }
+
+    await sleep(delayMs);
+    delayMs = Math.min(maxDelayMs, Math.round(delayMs * backoffMultiplier));
+    status = await fetchStatus(userId);
+  }
+
+  return status;
+}
+
 function resolvePlanFromPriceId(priceId: string | null): PlanTier {
   if (!priceId) return 'free';
   if (
@@ -163,6 +208,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
   } catch (error: unknown) {
     if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002') {
       // Duplicate webhook delivery; already processed.
+      console.log(`[Billing] Duplicate webhook ignored: ${event.type} (${event.id})`);
       recordWebhookEvent('billing', 'deduped', event.type);
       return;
     }
@@ -241,7 +287,8 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         const stripeCustomerId = typeof charge.customer === 'string' ? charge.customer : null;
         if (!stripeCustomerId) return;
 
-        // Only act on full refunds (amount_refunded === amount)
+        // Partial refunds are intentionally a no-op for entitlement; only a
+        // full refund should trigger cancellation + downgrade in this handler.
         if (charge.amount_refunded < charge.amount) return;
 
         // Trace the exact subscription: charge → invoice → subscription
