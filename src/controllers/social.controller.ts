@@ -8,7 +8,7 @@ import {
   getFollowing,
   getFollowCounts,
 } from '../services/follow.service';
-import { getFeed, getUserActivity } from '../services/activity.service';
+import { getFeed, getUserActivity, deleteActivityEvent, ActivityEventResponse } from '../services/activity.service';
 import { getPerformanceComparison } from '../services/benchmark.service';
 import { AuthRequest } from '../types/auth';
 import { getCreatorProfile } from '../services/creator.service';
@@ -174,7 +174,19 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     const counts = await getFollowCounts(userId);
     const viewerFollowing = viewerId ? await isFollowing(viewerId, userId) : false;
-    const activity = user.profilePublic ? await getUserActivity(userId, 10) : [];
+    let activity: ActivityEventResponse[] = user.profilePublic ? await getUserActivity(userId, 10) : [];
+
+    // Trade delay: filter out recent activity events for non-owner viewers
+    if (!isOwner && activity.length > 0) {
+      const creator = await prisma.creator.findUnique({
+        where: { userId },
+        select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+      });
+      if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
+        const cutoff = Date.now() - creator.visibility.tradeDelayHours * 60 * 60 * 1000;
+        activity = activity.filter(e => new Date(e.createdAt).getTime() <= cutoff);
+      }
+    }
 
     // Fetch performance stats for the profile (1M window, SPY benchmark)
     let performance = null;
@@ -530,5 +542,19 @@ export async function getFeedHandler(req: AuthRequest, res: Response): Promise<v
   } catch (_error) {
     console.error('Error getting feed:');
     res.status(500).json({ error: 'Failed to get feed' });
+  }
+}
+
+// DELETE /activity/:id
+export async function deleteActivityEventHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const deleted = await deleteActivityEvent(userId, req.params.id);
+    if (!deleted) { res.status(404).json({ error: 'Event not found' }); return; }
+    res.status(204).send();
+  } catch (_error) {
+    console.error('Error deleting activity event:');
+    res.status(500).json({ error: 'Failed to delete activity event' });
   }
 }

@@ -782,7 +782,7 @@ model CreatorVisibility {
   showSectors      Boolean @default(true)
   showRiskMetrics  Boolean @default(false)
   showWatchlists   Boolean @default(false)
-  tradeDelayHours  Int     @default(0) // 0 | 24 | 48 | 72
+  tradeDelayHours  Int     @default(24) // 24 | 48 | 72 (SEC: 0 not allowed)
   hideShareCount   Boolean @default(false)
   discoverable     Boolean @default(true)
 }

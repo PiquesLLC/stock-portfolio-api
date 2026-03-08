@@ -5,6 +5,7 @@ export const addHoldingSchema = z.object({
   shares: z.number().positive(),
   averageCost: z.number().positive(),
   skipTransaction: z.boolean().optional(),
+  skipActivity: z.boolean().optional(),
 });
 
 export const removeHoldingParamsSchema = z.object({
@@ -13,6 +14,7 @@ export const removeHoldingParamsSchema = z.object({
 
 export const removeHoldingQuerySchema = z.object({
   skipTransaction: z.enum(['true', 'false']).optional(),
+  skipActivity: z.enum(['true', 'false']).optional(),
 });
 
 export const setCashBalanceSchema = z.object({

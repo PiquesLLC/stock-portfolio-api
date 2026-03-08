@@ -24,7 +24,8 @@ export type CreatorEntitlement = {
 
 const MIN_PRICING_CENTS = 100; // $1.00 minimum
 const MAX_PRICING_CENTS = 99999; // $999.99 maximum
-const VALID_TRADE_DELAY_HOURS = new Set([0, 24, 48, 72]);
+// SEC copy-trading guidelines: 0 delay is not allowed — minimum 24hr
+const VALID_TRADE_DELAY_HOURS = new Set([24, 48, 72]);
 const DISCLAIMER = 'Educational content only. Not investment advice.';
 
 export async function applyAsCreator(userId: string, pitch?: string): Promise<{
@@ -53,7 +54,7 @@ export async function applyAsCreator(userId: string, pitch?: string): Promise<{
           showSectors: true,
           showRiskMetrics: false,
           showWatchlists: false,
-          tradeDelayHours: 0,
+          tradeDelayHours: 24,
           hideShareCount: false,
         },
       },

@@ -90,6 +90,17 @@ export async function getUserIntelligenceHandler(req: AuthRequest, res: Response
       res.status(404).json({ error: 'Not found' });
       return;
     }
+
+    // Trade delay: intelligence contributors/detractors reveal recent trades.
+    // Block for creators with active trade delay — the data would expose what they traded.
+    const creator = await prisma.creator.findUnique({
+      where: { userId },
+      select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+    });
+    if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
   }
 
   const windowParam = req.query.window as string | undefined;

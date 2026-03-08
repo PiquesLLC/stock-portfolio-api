@@ -4,6 +4,7 @@ import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createUserSnapshotIfNeeded, getUserChartSnapshots, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes } from '../services/snapshot.service';
 import { AuthRequest } from '../types/auth';
 import { resolveAccessLevel } from '../services/creator.service';
+import { ActivityPayload } from '../services/activity.service';
 
 
 
@@ -150,11 +151,84 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
               }));
             }
             if (visibility.tradeDelayHours > 0) {
-              const cutoff = Date.now() - visibility.tradeDelayHours * 60 * 60 * 1000;
-              portfolio.holdings = portfolio.holdings.filter(h => {
-                const ts = new Date(h.createdAt).getTime();
-                return Number.isFinite(ts) && ts <= cutoff;
+              const cutoff = new Date(Date.now() - visibility.tradeDelayHours * 60 * 60 * 1000);
+
+              // Fetch recent trade events within the delay window
+              const recentEvents = await prisma.activityEvent.findMany({
+                where: { userId, createdAt: { gt: cutoff } },
+                orderBy: { createdAt: 'asc' }, // oldest first so earliest has pre-window state
               });
+
+              if (recentEvents.length > 0) {
+                const holdingMap = new Map(portfolio.holdings.map(h => [h.ticker.toUpperCase(), h]));
+                const removedHoldings: { ticker: string; shares: number; averageCost: number }[] = [];
+                const addedTickers = new Set<string>();
+                // Track reverted state: ticker → { shares, averageCost } (pre-window values)
+                const revertedState = new Map<string, { shares: number; averageCost: number }>();
+
+                for (const evt of recentEvents) {
+                  const payload = JSON.parse(evt.payload) as ActivityPayload;
+                  const t = payload.ticker?.toUpperCase();
+                  if (!t) continue;
+
+                  if (evt.type === 'holding_added') {
+                    addedTickers.add(t);
+                  } else if (evt.type === 'holding_updated') {
+                    if (payload.previousShares != null && !revertedState.has(t)) {
+                      // First (oldest) event has the original pre-window state
+                      const h = holdingMap.get(t);
+                      const preWindowShares = payload.previousShares;
+                      const preWindowCost = payload.previousAverageCost ?? (h?.averageCost ?? payload.averageCost ?? 0);
+                      revertedState.set(t, { shares: preWindowShares, averageCost: preWindowCost });
+
+                      // If the holding still exists in the portfolio, revert its values
+                      if (h) {
+                        const currentShares = h.shares; // capture before mutation
+                        h.shares = preWindowShares;
+                        h.averageCost = preWindowCost;
+                        h.totalCost = h.shares * h.averageCost;
+                        h.currentValue = h.shares * h.currentPrice;
+                        h.profitLoss = h.currentValue - h.totalCost;
+                        h.profitLossPercent = h.totalCost > 0 ? (h.profitLoss / h.totalCost) * 100 : 0;
+                        if (currentShares > 0) {
+                          const ratio = h.shares / currentShares;
+                          h.dayChange = h.dayChange * ratio;
+                        }
+                      }
+                    }
+                  } else if (evt.type === 'holding_removed') {
+                    if (payload.shares != null && payload.averageCost != null) {
+                      // If we already reverted this ticker, use the pre-window state
+                      const reverted = revertedState.get(t);
+                      removedHoldings.push(reverted
+                        ? { ticker: t, shares: reverted.shares, averageCost: reverted.averageCost }
+                        : { ticker: t, shares: payload.shares, averageCost: payload.averageCost }
+                      );
+                    }
+                  }
+                }
+
+                // Hide holdings added within the delay window
+                portfolio.holdings = portfolio.holdings.filter(h => !addedTickers.has(h.ticker.toUpperCase()));
+
+                // Re-show holdings removed within the delay window
+                for (const removed of removedHoldings) {
+                  if (!addedTickers.has(removed.ticker)) {
+                    portfolio.holdings.push({
+                      ticker: removed.ticker,
+                      shares: removed.shares,
+                      averageCost: removed.averageCost,
+                      totalCost: removed.shares * removed.averageCost,
+                      currentPrice: 0,
+                      currentValue: 0,
+                      profitLoss: 0,
+                      profitLossPercent: 0,
+                      dayChange: 0,
+                      dayChangePercent: 0,
+                    } as unknown as typeof portfolio.holdings[number]);
+                  }
+                }
+              }
             }
           }
         }
@@ -264,6 +338,24 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const previousCloseValue = liveValue - portfolio.dayChange;
+
+      // Trade delay: for non-owner viewers of creators with active delay,
+      // use snapshot-only chart to prevent inferring trades from value jumps.
+      // Candle reconstruction uses CURRENT holdings which would reveal recent trades.
+      if (!isOwner) {
+        const creator = await prisma.creator.findUnique({
+          where: { userId },
+          select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+        });
+        if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
+          const chartData = await getUserChartSnapshots(userId, period);
+          const snapshotPoints = chartData.points.length >= 2 ? chartData.points : [];
+          const pStart = previousCloseValue || (snapshotPoints.length > 0 ? snapshotPoints[0].value : liveValue);
+          res.json({ points: snapshotPoints, periodStartValue: pStart, period: '1D', source: 'snapshot' });
+          return;
+        }
+      }
+
       const holdings = await prisma.holding.findMany({ where: { userId } });
 
       // Reconstruct 1D from Yahoo 5-min intraday candles (same as main portfolio chart)
