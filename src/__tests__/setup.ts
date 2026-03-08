@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 process.env.JWT_SECRET = 'test-jwt-secret-key-for-testing-only';
 process.env.NODE_ENV = 'development';
 process.env.DATABASE_URL = 'file:./test.db';
+process.env.AI_PREMIUM_ENABLED = 'true';
 
 // Mock Prisma singleton globally
 vi.mock('../utils/prisma', () => {
