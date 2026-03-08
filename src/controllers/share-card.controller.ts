@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { generatePerformanceCard, generateShareCard, generateStockShareCard } from '../services/share-card.service';
 
-const VALID_PERIODS = new Set(['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL']);
+const VALID_PERIODS = new Set(['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL']);
 
 export async function getShareCardHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -59,7 +59,7 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
 
     const periodRaw = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1M';
     if (!VALID_PERIODS.has(periodRaw)) {
-      res.status(400).json({ error: 'period must be one of: 1D, 1W, 1M, 3M, YTD, 1Y, ALL' });
+      res.status(400).json({ error: 'period must be one of: 1D, 1W, 1M, 3M, 6M, YTD, 1Y, ALL' });
       return;
     }
 

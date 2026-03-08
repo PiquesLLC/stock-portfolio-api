@@ -21,7 +21,7 @@ import { reconstructPortfolioHistory } from './snapshot.service';
 import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';
 
-export type PerformanceWindow = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
+export type PerformanceWindow = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL';
 
 export interface PerformanceData {
   window: PerformanceWindow;
@@ -53,6 +53,7 @@ function getWindowDays(window: PerformanceWindow): number {
     case '1W': return 7;
     case '1M': return 30;
     case '3M': return 90;
+    case '6M': return 180;
     case 'YTD': return Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
     case '1Y': return 365;
     case 'ALL': return 3650; // 10 years max

@@ -171,7 +171,7 @@ export async function sendWaitlistJoinNotificationEmail(adminEmail: string, wait
 }
 
 const PERIOD_LABELS: Record<string, string> = {
-  '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
+  '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months', '6M': '6 Months',
   'YTD': 'Year to Date', '1Y': '1 Year', 'ALL': 'All Time',
 };
 

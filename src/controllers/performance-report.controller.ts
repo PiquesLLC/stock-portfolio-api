@@ -5,7 +5,7 @@ import { PerformanceWindow } from '../services/benchmark.service';
 import { getUserById } from '../services/auth.service';
 import { sendPerformanceReport } from '../services/email.service';
 
-const VALID_PERIODS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const VALID_PERIODS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 const VALID_BENCHMARKS = ['SPY', 'QQQ', 'DIA'];
 
 export async function getPerformanceReportHandler(req: AuthRequest, res: Response) {

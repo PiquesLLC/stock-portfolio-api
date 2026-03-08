@@ -645,7 +645,7 @@ export interface SymbolSearchResponse {
 }
 
 // Leaderboard types
-export type LeaderboardWindow = '1D' | '1W' | '1M' | 'YTD' | '1Y';
+export type LeaderboardWindow = '1D' | '1W' | '1M' | '6M' | 'YTD' | '1Y';
 export type LeaderboardRegion = 'world' | 'na' | 'europe' | 'apac';
 
 export interface LeaderboardEntry {

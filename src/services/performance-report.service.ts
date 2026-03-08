@@ -45,6 +45,7 @@ function periodToDays(period: PerformanceWindow): number {
     case '1W': return 7;
     case '1M': return 30;
     case '3M': return 90;
+    case '6M': return 180;
     case 'YTD': return Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
     case '1Y': return 365;
     case 'ALL': return 3650;
@@ -57,6 +58,7 @@ function periodLabel(period: PerformanceWindow): string {
     case '1W': return '1 Week';
     case '1M': return '1 Month';
     case '3M': return '3 Months';
+    case '6M': return '6 Months';
     case 'YTD': return 'Year to Date';
     case '1Y': return '1 Year';
     case 'ALL': return 'All Time';

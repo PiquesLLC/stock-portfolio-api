@@ -272,6 +272,7 @@ export async function getWatchlistChartHandler(req: AuthRequest, res: Response):
     } else {
       const periodDaysMap: Record<string, number> = {
         '3M': 90,
+        '6M': 180,
         '1Y': 365,
         'ALL': 365 * 5,
       };

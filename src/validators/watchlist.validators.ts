@@ -37,5 +37,5 @@ export const updateWatchlistHoldingSchema = z
   .refine((data) => Object.keys(data).length > 0, 'At least one field must be provided');
 
 export const watchlistChartQuerySchema = z.object({
-  period: z.enum(['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL']).optional(),
+  period: z.enum(['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL']).optional(),
 });

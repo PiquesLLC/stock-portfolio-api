@@ -37,6 +37,11 @@ function getWindowStartDate(window: LeaderboardWindow): Date {
       d.setMonth(d.getMonth() - 1);
       return d;
     }
+    case '6M': {
+      const d = new Date(now);
+      d.setMonth(d.getMonth() - 6);
+      return d;
+    }
     case 'YTD': {
       return new Date(now.getFullYear(), 0, 1);
     }

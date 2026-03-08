@@ -382,7 +382,7 @@ interface StockShareCardData {
   sparklineValues: number[];
 }
 
-type ShareCardPeriod = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
+type ShareCardPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL';
 
 interface PerformanceShareCardData {
   username: string;
@@ -405,7 +405,7 @@ function downsampleValues(values: number[], maxPoints: number): number[] {
 
 function normalizePeriod(period?: string): ShareCardPeriod {
   const normalized = (period ?? '1M').toUpperCase() as ShareCardPeriod;
-  const valid: ShareCardPeriod[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+  const valid: ShareCardPeriod[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
   return valid.includes(normalized) ? normalized : '1M';
 }
 
@@ -590,7 +590,7 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
 
   const periodLabels: Record<string, string> = {
     '1D': 'today', '1W': 'this week', '1M': 'this month',
-    '3M': 'in 3 months', 'YTD': 'this year', '1Y': 'in a year', 'ALL': 'all time',
+    '3M': 'in 3 months', '6M': 'in 6 months', 'YTD': 'this year', '1Y': 'in a year', 'ALL': 'all time',
   };
   const periodLabel = periodLabels[data.period] || data.period;
 
