@@ -5,7 +5,8 @@ export const applySchema = z.object({
 });
 
 const pricingCentsSchema = z.number().int().min(100, 'Minimum price is $1.00').max(99999, 'Maximum price is $999.99');
-const tradeDelaySchema = z.union([z.literal(0), z.literal(24), z.literal(48), z.literal(72)]);
+// SEC copy-trading guidelines: 0 delay is not allowed — minimum 24hr delay
+const tradeDelaySchema = z.union([z.literal(24), z.literal(48), z.literal(72)]);
 
 export const updateSettingsSchema = z.object({
   pricingCents: pricingCentsSchema.optional(),

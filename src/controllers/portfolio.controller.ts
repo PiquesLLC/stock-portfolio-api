@@ -112,7 +112,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       res.status(400).json({ error: 'Invalid request' });
       return;
     }
-    const { ticker, shares, averageCost, skipTransaction } = parsed.data;
+    const { ticker, shares, averageCost, skipTransaction, skipActivity } = parsed.data;
     const portfolioId = req.query.portfolioId as string | undefined;
 
     // Check if this is an update vs new add
@@ -147,14 +147,18 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
 
     // Fire activity event using authenticated user ID
+    // Skip activity events for data corrections (CSV import fixups, manual edits
+    // that aren't real trades). Without this, editing holdings after a CSV import
+    // creates false "Sold"/"Bought" entries in the activity feed.
     const authUserId = req.user?.userId;
-    if (authUserId) {
+    if (authUserId && !skipActivity) {
       if (existingHolding) {
         createActivityEvent(authUserId, 'holding_updated', {
           ticker: ticker.toUpperCase(),
           shares,
           previousShares: existingHolding.shares,
           averageCost,
+          previousAverageCost: existingHolding.averageCost,
         }).catch(() => {});
       } else {
         createActivityEvent(authUserId, 'holding_added', {
@@ -186,6 +190,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     }
     const ticker = parsedParams.data.ticker.toUpperCase();
     const skipTransaction = parsedQuery.data.skipTransaction === 'true';
+    const skipActivity = parsedQuery.data.skipActivity === 'true';
     const portfolioId = req.query.portfolioId as string | undefined;
 
     // Get the holding before deletion to know the cost basis
@@ -215,8 +220,12 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
 
     // Fire activity event using authenticated user ID
     const authUserId = req.user?.userId;
-    if (authUserId) {
-      createActivityEvent(authUserId, 'holding_removed', { ticker }).catch(() => {});
+    if (authUserId && !skipActivity) {
+      createActivityEvent(authUserId, 'holding_removed', {
+        ticker,
+        shares: existingHolding?.shares,
+        averageCost: existingHolding?.averageCost,
+      }).catch(() => {});
     }
 
     res.status(204).send();

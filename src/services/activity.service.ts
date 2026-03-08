@@ -9,6 +9,7 @@ export interface ActivityPayload {
   shares?: number;
   previousShares?: number;
   averageCost?: number;
+  previousAverageCost?: number;
 }
 
 export interface ActivityEventResponse {
@@ -43,6 +44,17 @@ export async function getFeed(
   const followingIds = await getFollowingIds(userId);
   if (followingIds.length === 0) return [];
 
+  // Look up trade delay settings for followed creators
+  const creators = await prisma.creator.findMany({
+    where: { userId: { in: followingIds }, status: 'active' },
+    select: { userId: true, visibility: { select: { tradeDelayHours: true } } },
+  });
+  const delayByUser = new Map<string, number>();
+  for (const c of creators) {
+    const delay = c.visibility?.tradeDelayHours ?? 0;
+    if (delay > 0) delayByUser.set(c.userId, delay);
+  }
+
   const where: Record<string, unknown> = {
     userId: { in: followingIds },
   };
@@ -50,6 +62,7 @@ export async function getFeed(
     where.createdAt = { lt: new Date(before) };
   }
 
+  // Fetch extra events to account for delay-filtered ones being removed
   const events = await prisma.activityEvent.findMany({
     where,
     include: {
@@ -58,11 +71,22 @@ export async function getFeed(
       },
     },
     orderBy: { createdAt: 'desc' },
-    take: limit,
+    take: delayByUser.size > 0 ? limit * 2 : limit,
   });
 
+  const now = Date.now();
   return events
-    .filter((e) => e.user.profilePublic)
+    .filter((e) => {
+      if (!e.user.profilePublic) return false;
+      // Apply trade delay: hide events newer than the creator's delay cutoff
+      const delay = delayByUser.get(e.userId);
+      if (delay) {
+        const cutoff = now - delay * 60 * 60 * 1000;
+        if (e.createdAt.getTime() > cutoff) return false;
+      }
+      return true;
+    })
+    .slice(0, limit)
     .map((e) => ({
       id: e.id,
       userId: e.userId,
@@ -105,6 +129,16 @@ export async function getUserActivityByTicker(
     payload: JSON.parse(e.payload) as ActivityPayload,
     createdAt: new Date(e.createdAt).toISOString(),
   }));
+}
+
+export async function deleteActivityEvent(
+  userId: string,
+  eventId: string
+): Promise<boolean> {
+  const event = await prisma.activityEvent.findUnique({ where: { id: eventId } });
+  if (!event || event.userId !== userId) return false;
+  await prisma.activityEvent.delete({ where: { id: eventId } });
+  return true;
 }
 
 export async function getUserActivity(
