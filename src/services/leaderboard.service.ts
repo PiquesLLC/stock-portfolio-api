@@ -338,6 +338,28 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     }).catch(() => {}) // non-critical
   ));
 
+  // Trade delay: null out returnPct for creators with active delay.
+  // The leaderboard computes returns from CURRENT holdings × historical prices,
+  // which reveals the creator's current position composition.
+  const delayedCreators = await prisma.creator.findMany({
+    where: {
+      userId: { in: entries.map(e => e.userId) },
+      status: 'active',
+      visibility: { tradeDelayHours: { gt: 0 } },
+    },
+    select: { userId: true },
+  });
+  if (delayedCreators.length > 0) {
+    const delayedSet = new Set(delayedCreators.map(c => c.userId));
+    for (const entry of entries) {
+      if (delayedSet.has(entry.userId)) {
+        entry.returnPct = null;
+        entry.returnDollar = null;
+        entry.twrPct = null;
+      }
+    }
+  }
+
   // Sort by return descending, nulls last
   entries.sort((a, b) => {
     const aVal = a.twrPct ?? a.returnPct;

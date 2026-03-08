@@ -400,6 +400,35 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
 
     // Non-1D periods: snapshot-only approach.
     // Use real recorded snapshot data — no reconstruction, no candle fetching.
+
+    // Trade delay: for non-owner viewers of creators with active delay,
+    // filter out snapshots within the delay window so chart doesn't reveal trade timing.
+    if (!isOwner) {
+      const creator = await prisma.creator.findUnique({
+        where: { userId },
+        select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+      });
+      if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
+        const delayCutoff = Date.now() - creator.visibility.tradeDelayHours * 60 * 60 * 1000;
+        const periodDaysMap: Record<string, number> = {
+          '1W': 7, '1M': 30, '3M': 90,
+          'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+          '1Y': 365, 'ALL': 365 * 5,
+        };
+        const pDays = periodDaysMap[period] ?? 30;
+        let pts = await getSnapshotChartPoints(userId, pDays);
+        // Remove snapshots newer than the delay cutoff
+        pts = pts.filter(p => p.time <= delayCutoff);
+        if (pts.length < 2) {
+          res.json({ points: [], insufficientData: true, period, periodStartValue: 0, source: 'snapshot' });
+          return;
+        }
+        const pStart = pts[0].value;
+        res.json({ points: pts, periodStartValue: pStart, period, source: 'snapshot' });
+        return;
+      }
+    }
+
     const now = Date.now();
     const periodDaysMap: Record<string, number> = {
       '1W': 7, '1M': 30, '3M': 90,

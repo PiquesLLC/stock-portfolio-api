@@ -737,6 +737,9 @@ export async function discoverCreators(params: {
     .map((u) => {
       const lbEntry = u.leaderboardCaches[0] ?? null;
       const creator = u.creator?.status === 'active' ? u.creator : null;
+      // Trade delay: hide returnPct for creators with active delay.
+      // Ranking changes reveal trading activity to observers.
+      const hasDelay = creator && (creator.visibility?.tradeDelayHours ?? 0) > 0;
       return {
         userId: u.id,
         username: u.username,
@@ -744,7 +747,7 @@ export async function discoverCreators(params: {
         pitch: creator?.pitch ?? null,
         pricingCents: creator?.pricingCents ?? null,
         subscriberCount: subCountMap.get(u.id) ?? 0,
-        returnPct: lbEntry?.twrPct ?? null,
+        returnPct: hasDelay ? null : (lbEntry?.twrPct ?? null),
         isVerified: lbEntry != null && !lbEntry.flagged,
         isCreator: creator != null,
         sectionsUnlocked: creator ? deriveSectionsUnlocked(creator.visibility) : [],

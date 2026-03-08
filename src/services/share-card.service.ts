@@ -47,6 +47,19 @@ function getEmotionalTagline(returnPct: number | null): string {
   return 'Pain.';
 }
 
+/**
+ * Check if a user is a creator with an active trade delay.
+ * Share cards and performance cards are public — they must not reveal
+ * recent trading activity through return metrics or sparkline changes.
+ */
+async function hasActiveTradeDelay(userId: string): Promise<boolean> {
+  const creator = await prisma.creator.findUnique({
+    where: { userId },
+    select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+  });
+  return creator?.status === 'active' && (creator.visibility?.tradeDelayHours ?? 0) > 0;
+}
+
 async function getShareCardData(userId: string): Promise<ShareCardData | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -61,8 +74,12 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
 
   if (!user || !user.profilePublic) return null;
 
+  // Trade delay: if creator has active delay, use longer-term data only.
+  // Performance metrics derived from current holdings would reveal recent trades.
+  const delayed = await hasActiveTradeDelay(userId);
+
   const [performance, leaderboard, followerCount, chart] = await Promise.all([
-    getPerformanceComparison('1M', 'SPY', userId).catch(() => null),
+    delayed ? Promise.resolve(null) : getPerformanceComparison('1M', 'SPY', userId).catch(() => null),
     getLeaderboard('1M', 'world').catch(() => null),
     prisma.follow.count({ where: { followingId: userId } }),
     getUserChartSnapshots(userId, '1M').catch(() => null),
@@ -87,19 +104,32 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
     nalaScore = Math.round(raw);
   }
 
-  const rawValues = (chart?.points ?? [])
-    .map((p: { value: number }) => p.value)
-    .filter((v: number) => Number.isFinite(v) && v > 0);
+  // Trade delay: filter out recent snapshots for delayed creators
+  let rawValues = (chart?.points ?? [])
+    .map((p: { value: number; time?: number }) => p)
+    .filter((p) => Number.isFinite(p.value) && p.value > 0);
+
+  if (delayed && rawValues.length > 0) {
+    // Get the delay hours to filter out recent snapshots
+    const creator = await prisma.creator.findUnique({
+      where: { userId },
+      select: { visibility: { select: { tradeDelayHours: true } } },
+    });
+    const delayCutoff = Date.now() - (creator?.visibility?.tradeDelayHours ?? 24) * 60 * 60 * 1000;
+    rawValues = rawValues.filter(p => !p.time || p.time <= delayCutoff);
+  }
+
+  const sparkValues = rawValues.map(p => p.value);
   const targetSparkCount = 48;
   let sparklineValues: number[] = [];
-  if (rawValues.length > 0) {
-    if (rawValues.length <= targetSparkCount) {
-      sparklineValues = rawValues;
+  if (sparkValues.length > 0) {
+    if (sparkValues.length <= targetSparkCount) {
+      sparklineValues = sparkValues;
     } else {
-      const step = (rawValues.length - 1) / (targetSparkCount - 1);
+      const step = (sparkValues.length - 1) / (targetSparkCount - 1);
       sparklineValues = Array.from({ length: targetSparkCount }, (_, i) => {
         const idx = Math.round(i * step);
-        return rawValues[idx];
+        return sparkValues[idx];
       });
     }
   }
@@ -108,9 +138,9 @@ async function getShareCardData(userId: string): Promise<ShareCardData | null> {
   // selling holdings creates auto-withdrawal transactions that inflate TWR.
   const userReturn = performance?.simpleReturnPct ?? performance?.twrPct ?? null;
   const userAlpha = performance?.alphaPct ?? null;
-  const currentValue = rawValues.length > 0 ? rawValues[rawValues.length - 1] : null;
+  const currentValue = sparkValues.length > 0 ? sparkValues[sparkValues.length - 1] : null;
   const psvRaw = chart?.periodStartValue ?? 0;
-  const startValue = psvRaw > 0 ? psvRaw : (rawValues.length > 0 ? rawValues[0] : null);
+  const startValue = psvRaw > 0 ? psvRaw : (sparkValues.length > 0 ? sparkValues[0] : null);
   const periodChangeValue = currentValue != null && startValue != null ? currentValue - startValue : null;
 
   return {
@@ -424,18 +454,36 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
 
   if (!user || !user.profilePublic) return null;
 
+  // Trade delay: filter out recent snapshots so chart doesn't reveal trade timing
+  const delayed = await hasActiveTradeDelay(userId);
+  let delayCutoff = 0;
+  if (delayed) {
+    const creator = await prisma.creator.findUnique({
+      where: { userId },
+      select: { visibility: { select: { tradeDelayHours: true } } },
+    });
+    delayCutoff = Date.now() - (creator?.visibility?.tradeDelayHours ?? 24) * 60 * 60 * 1000;
+  }
+
   const period = normalizePeriod(periodInput);
   const chart = await getUserChartSnapshots(userId, period).catch(() => ({ points: [], periodStartValue: 0, period }));
-  const values = chart.points
-    .map((p: { value: number }) => p.value)
-    .filter((v: number) => Number.isFinite(v) && v > 0);
+  let values = chart.points
+    .map((p: { value: number; time?: number }) => p)
+    .filter((p) => Number.isFinite(p.value) && p.value > 0);
 
-  const currentValue = values.length > 0 ? values[values.length - 1] : 0;
-  const fallbackStart = values.length > 0 ? values[0] : currentValue;
+  // Remove snapshots within the delay window
+  if (delayed && delayCutoff > 0) {
+    values = values.filter(p => !p.time || p.time <= delayCutoff);
+  }
+
+  const numValues = values.map(p => p.value);
+
+  const currentValue = numValues.length > 0 ? numValues[numValues.length - 1] : 0;
+  const fallbackStart = numValues.length > 0 ? numValues[0] : currentValue;
   const periodStartValue = chart.periodStartValue > 0 ? chart.periodStartValue : fallbackStart;
   const periodChangeValue = currentValue - periodStartValue;
   const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
-  const sparklineValues = downsampleValues(values.length > 0 ? values : [currentValue, currentValue], 64);
+  const sparklineValues = downsampleValues(numValues.length > 0 ? numValues : [currentValue, currentValue], 64);
 
   return {
     username: user.username,
