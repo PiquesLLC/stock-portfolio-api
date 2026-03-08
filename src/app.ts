@@ -290,15 +290,11 @@ if (fs.existsSync(clientDir)) {
         const normalized = segment.toLowerCase();
         const isReserved = RESERVED_TOP_LEVEL_PATHS.has(normalized) || segment.includes('.');
         if (!isReserved) {
-          const user = await prisma.user.findUnique({
-            where: { username: normalized },
-            select: {
-              id: true,
-              username: true,
-              displayName: true,
-              profilePublic: true,
-            },
-          });
+          // Case-insensitive lookup: URLs may arrive lowercased from social crawlers
+          const rows = await prisma.$queryRaw<Array<{ id: string; username: string; displayName: string | null; profilePublic: number }>>`
+            SELECT id, username, displayName, profilePublic FROM User WHERE username = ${segment} COLLATE NOCASE LIMIT 1
+          `;
+          const user = rows[0] ? { ...rows[0], profilePublic: Boolean(rows[0].profilePublic) } : null;
 
           if (user?.profilePublic) {
             const displayName = user.displayName || user.username;
