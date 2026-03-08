@@ -178,10 +178,10 @@ export async function getPerformanceComparison(
     value: (s.netEquity !== null && Number(s.netEquity) > 0) ? Number(s.netEquity) : Number(s.totalValue),
   }));
 
-  // ALWAYS prefer candle-based reconstruction for metrics accuracy.
-  // Snapshots are taken at arbitrary times throughout the day, causing inaccurate
-  // day-over-day comparisons. Candles represent market close values which is what
-  // users expect when viewing "best day", "worst day", etc.
+  // Prefer candle-based reconstruction for metrics accuracy ONLY when portfolio
+  // composition hasn't changed. Candles represent market close values (better than
+  // arbitrary snapshot times), but reconstruction assumes current holdings were held
+  // for the entire window — creating survivor bias if the user traded.
   const windowDays = getWindowDays(window);
 
   // Fetch current holdings to reconstruct history from candles
@@ -192,11 +192,22 @@ export async function getPerformanceComparison(
   // Only reconstruct from candles if a baseline snapshot exists before the window.
   // Without a pre-window anchor, candle reconstruction fabricates performance —
   // it pretends the user held current positions for the entire window.
-  // A new account with snapshots only from today would pass "snapshots.length >= 2"
-  // but still has no history before the window, producing fake 30-day returns.
   const hasSnapshotHistory = baselineSnapshot != null;
 
-  if (holdings.length > 0 && windowDays > 1 && hasSnapshotHistory) {
+  // Check if portfolio composition changed during the window (holdings added/removed/updated).
+  // If it did, candle reconstruction with current holdings would produce wrong returns
+  // because it uses current share counts for the entire window, ignoring that the user
+  // held different quantities (or different stocks entirely) earlier in the period.
+  const compositionChanges = await prisma.activityEvent.count({
+    where: {
+      userId,
+      type: { in: ['holding_added', 'holding_removed', 'holding_updated'] },
+      createdAt: { gte: windowStart },
+    },
+  });
+  const compositionStable = compositionChanges === 0;
+
+  if (holdings.length > 0 && windowDays > 1 && hasSnapshotHistory && compositionStable) {
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({
       where: { userId },
       orderBy: { timestamp: 'desc' },
