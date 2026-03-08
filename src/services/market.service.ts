@@ -148,10 +148,10 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
 const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourly candles
 
 /**
- * Fetch hourly candles for 1W (15m bars, 5 days) or 1M (60m bars, 30 days).
+ * Fetch hourly candles for 1W (15m bars, 5 days), 1M/6M/YTD (60m bars).
  * Polygon.io primary, Yahoo Finance fallback.
  */
-export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | 'YTD'): Promise<IntradayCandle[]> {
+export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '6M' | 'YTD'): Promise<IntradayCandle[]> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `hourly:${upperTicker}:${period}`;
   const cached = yahooHourlyCache.get<IntradayCandle[]>(cacheKey);
@@ -159,7 +159,7 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
 
   // Polygon.io primary — proper resolution per period
   const today = new Date().toISOString().split('T')[0];
-  const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
+  const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : period === '6M' ? 180 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
   const fromDate = period === 'YTD' ? `${new Date().getFullYear()}-01-01` : new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
   const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
 
@@ -181,6 +181,8 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
   try {
     const params = period === '1W'
       ? 'interval=15m&range=5d&includePrePost=true'
+      : period === '6M'
+      ? 'interval=60m&range=6mo&includePrePost=true'
       : period === 'YTD'
       ? 'interval=60m&range=ytd&includePrePost=true'
       : 'interval=60m&range=1mo&includePrePost=true';

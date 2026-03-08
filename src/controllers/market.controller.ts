@@ -186,6 +186,7 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
     const period = (req.query.period as string)?.toUpperCase() || '3M';
     const daysMap: Record<string, number> = {
       '3M': 90,
+      '6M': 180,
       'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
       '1Y': 365, 'ALL': 365 * 5,
     };

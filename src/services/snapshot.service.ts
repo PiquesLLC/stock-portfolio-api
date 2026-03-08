@@ -1046,6 +1046,10 @@ export async function getUserChartSnapshots(userId: string, period: string): Pro
       startDate = new Date(now);
       startDate.setMonth(startDate.getMonth() - 3);
       break;
+    case '6M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 6);
+      break;
     case 'YTD':
       startDate = new Date(now.getFullYear(), 0, 1);
       break;
@@ -1209,6 +1213,10 @@ export async function getChartSnapshots(userId: string, period: string): Promise
     case '3M':
       startDate = new Date(now);
       startDate.setMonth(startDate.getMonth() - 3);
+      break;
+    case '6M':
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 6);
       break;
     case 'YTD':
       startDate = new Date(now.getFullYear(), 0, 1);

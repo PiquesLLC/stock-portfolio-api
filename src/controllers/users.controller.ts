@@ -8,7 +8,7 @@ import { ActivityPayload } from '../services/activity.service';
 
 
 
-const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 const FREE_CHART_PERIODS = new Set(['1D', '1W', 'YTD']);
 
 /**
@@ -305,7 +305,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
 
     // Plan-based chart period gating (same as portfolio.controller.ts)
     const plan = req.user?.plan ?? 'free';
-    const isProOrHigher = plan === 'pro' || plan === 'premium';
+    const isProOrHigher = plan === 'pro' || plan === 'premium' || plan === 'elite';
     if (!isProOrHigher && !FREE_CHART_PERIODS.has(period)) {
       res.status(403).json({ error: 'upgrade_required', requiredPlan: 'pro' });
       return;
@@ -411,7 +411,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
         const delayCutoff = Date.now() - creator.visibility.tradeDelayHours * 60 * 60 * 1000;
         const periodDaysMap: Record<string, number> = {
-          '1W': 7, '1M': 30, '3M': 90,
+          '1W': 7, '1M': 30, '3M': 90, '6M': 180,
           'YTD': Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
           '1Y': 365, 'ALL': 365 * 5,
         };
@@ -431,7 +431,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
 
     const now = Date.now();
     const periodDaysMap: Record<string, number> = {
-      '1W': 7, '1M': 30, '3M': 90,
+      '1W': 7, '1M': 30, '3M': 90, '6M': 180,
       'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
       '1Y': 365, 'ALL': 365 * 5,
     };
@@ -468,7 +468,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
     // Progressive unlock: each period requires minimum days of snapshot data.
     // YTD with baseline bypasses progressive unlock (minDays=0, minPoints=1).
     const minDaysRequired: Record<string, number> = {
-      '1W': 2, '1M': 7, '3M': 30, 'YTD': 30, '1Y': 90, 'ALL': 90,
+      '1W': 2, '1M': 7, '3M': 30, '6M': 60, 'YTD': 30, '1Y': 90, 'ALL': 90,
     };
     const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
     const spanDays = spanMs / 86400000;

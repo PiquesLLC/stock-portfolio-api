@@ -15,7 +15,7 @@ export const pricesQuerySchema = z.object({
 });
 
 export const hourlyCandlesQuerySchema = z.object({
-  period: z.enum(['1W', '1M', 'YTD']),
+  period: z.enum(['1W', '1M', '6M', 'YTD']),
 });
 
 export const searchSymbolsQuerySchema = z.object({

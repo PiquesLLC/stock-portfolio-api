@@ -324,7 +324,7 @@ export async function getMetricsHandler(req: AuthRequest, res: Response): Promis
   }
 }
 
-const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 
 // Import user chart handler for delegation
 import { getUserChartHandler } from './users.controller';
@@ -339,7 +339,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     const plan = req.user?.plan ?? 'free';
-    const isProOrHigher = plan === 'pro' || plan === 'premium';
+    const isProOrHigher = plan === 'pro' || plan === 'premium' || plan === 'elite';
     if (!isProOrHigher && !FREE_CHART_PERIODS.has(period)) {
       res.status(403).json({ error: 'upgrade_required', requiredPlan: 'pro' });
       return;
@@ -500,7 +500,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // If not enough snapshots, return insufficientData flag for the UI.
     const now = Date.now();
     const periodDaysMap: Record<string, number> = {
-      '1W': 7, '1M': 30, '3M': 90,
+      '1W': 7, '1M': 30, '3M': 90, '6M': 180,
       'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
       '1Y': 365, 'ALL': 365 * 5,
     };
@@ -538,7 +538,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     // Prevents showing e.g. 6 days of data on a 1Y chart with misleading returns.
     // YTD with baseline bypasses progressive unlock (minDays=0, minPoints=1).
     const minDaysRequired: Record<string, number> = {
-      '1W': 2, '1M': 7, '3M': 30, 'YTD': 30, '1Y': 90, 'ALL': 90,
+      '1W': 2, '1M': 7, '3M': 30, '6M': 60, 'YTD': 30, '1Y': 90, 'ALL': 90,
     };
     const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
     const spanDays = spanMs / 86400000;
@@ -588,8 +588,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 export async function getChartGapSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const period = ((req.query.period as string) || '1W').toUpperCase();
-    if (!['1W', '1M', '3M', 'YTD', '1Y', 'ALL'].includes(period)) {
-      res.status(400).json({ error: 'Invalid period. Must be one of: 1W, 1M, 3M, YTD, 1Y, ALL' });
+    if (!['1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'].includes(period)) {
+      res.status(400).json({ error: 'Invalid period. Must be one of: 1W, 1M, 3M, 6M, YTD, 1Y, ALL' });
       return;
     }
 
@@ -604,6 +604,7 @@ export async function getChartGapSummaryHandler(req: AuthRequest, res: Response)
       '1W': 7,
       '1M': 30,
       '3M': 90,
+      '6M': 180,
       'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
       '1Y': 365,
       'ALL': 365 * 5,
@@ -639,7 +640,7 @@ export async function getCurrentPaceHandler(req: AuthRequest, res: Response): Pr
   }
 }
 
-const VALID_PERF_WINDOWS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', 'YTD', '1Y', 'ALL'];
+const VALID_PERF_WINDOWS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 const VALID_BENCHMARKS = ['SPY', 'QQQ', 'DIA'];
 
 export async function getPerformanceHandler(req: AuthRequest, res: Response): Promise<void> {
