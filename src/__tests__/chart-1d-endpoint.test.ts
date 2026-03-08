@@ -273,7 +273,8 @@ describe('GET /portfolio/history/chart?period=1D', () => {
       const { points } = res.body;
       expect(points.length).toBe(98);
       expect(points.length).toBeLessThan(121);
-      expect(res.body.periodStartValue).toBe(points[0].value);
+      // periodStartValue always uses previousCloseValue (totalValue - dayChange = 50750)
+      expect(res.body.periodStartValue).toBe(50750);
     });
 
     it('Test 4: no composition change → full data with previousCloseValue', async () => {
@@ -523,7 +524,7 @@ describe('GET /portfolio/history/chart?period=1D', () => {
       expect(res.body.periodStartValue).toBe(50750);
     });
 
-    it('Test 17: periodStartValue = first filtered point when composition change applied', async () => {
+    it('Test 17: periodStartValue uses previousCloseValue even when composition change applied', async () => {
       const changeAt = new Date(etTime(5, 55));
       getLatestCompositionChangeAfterMock.mockResolvedValue(changeAt);
 
@@ -533,8 +534,8 @@ describe('GET /portfolio/history/chart?period=1D', () => {
         .set('Cookie', `authToken=${token}`);
 
       expect(res.status).toBe(200);
-      const { points, periodStartValue } = res.body;
-      expect(periodStartValue).toBe(points[0].value);
+      // periodStartValue always uses previousCloseValue (totalValue - dayChange = 50750)
+      expect(res.body.periodStartValue).toBe(50750);
     });
   });
 

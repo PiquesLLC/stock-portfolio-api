@@ -77,7 +77,7 @@ describe('creator service', () => {
             create: expect.objectContaining({
               showHoldings: true,
               showTradeHistory: false,
-              tradeDelayHours: 0,
+              tradeDelayHours: 24,
             }),
           }),
         }),
