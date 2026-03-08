@@ -20,6 +20,7 @@ import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
+import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -450,6 +451,11 @@ const server = app.listen(config.port, async () => {
   } else {
     console.log('[Deep Research] Disabled (DEEP_RESEARCH_ENABLED not set)');
   }
+
+  // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
+  setInterval(() => {
+    evaluateWebhookThresholds();
+  }, 5 * 60 * 1000);
 });
 
 process.on('SIGTERM', () => {

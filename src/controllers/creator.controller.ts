@@ -5,6 +5,7 @@ import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 import { formatZodError } from '../validators/auth.validators';
 import { applySchema, reportSchema, updateSettingsSchema } from '../validators/creator.validators';
+import { recordWebhookEvent } from '../utils/webhook-metrics';
 import {
   activateCreator,
   applyAsCreator,
@@ -402,9 +403,11 @@ export async function creatorStripeWebhookHandler(req: Request, res: Response): 
     const stripe = new Stripe(config.stripeSecretKey);
     const event = stripe.webhooks.constructEvent(req.body, signature, config.stripeConnectWebhookSecret);
     await handleCreatorWebhookEvent(event);
+    recordWebhookEvent('creator', 'processed', event.type);
     res.json({ received: true });
   } catch (error) {
     console.error('[Creator] creatorStripeWebhookHandler failed:', error);
+    recordWebhookEvent('creator', 'failed', 'unknown');
     if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
       res.status(400).json({ error: 'Invalid webhook signature' });
       return;

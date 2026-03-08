@@ -4,6 +4,7 @@ import { getFinnhubStatus } from '../utils/finnhub';
 import { getPolygonStatus } from '../utils/polygon';
 import { getYahooStatus } from '../utils/yahoo-http';
 import { getAuthMetrics } from '../utils/auth-metrics';
+import { getWebhookMetrics } from '../utils/webhook-metrics';
 import prisma from '../utils/prisma';
 
 export async function healthCheck(req: Request, res: Response): Promise<void> {
@@ -86,6 +87,10 @@ export async function apiUsage(req: Request, res: Response): Promise<void> {
         .map(([k, v]) => [k, { ...v, cost: round4(v.cost) }])
     ),
   });
+}
+
+export async function webhookMetrics(req: Request, res: Response): Promise<void> {
+  res.json(getWebhookMetrics());
 }
 
 export async function healthStatus(req: Request, res: Response): Promise<void> {

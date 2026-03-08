@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
+import * as Sentry from '@sentry/node';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 import {
@@ -9,6 +10,7 @@ import {
   handleWebhookEvent,
 } from '../services/billing.service';
 import { createCheckoutSchema } from '../validators/billing.validators';
+import { recordWebhookEvent } from '../utils/webhook-metrics';
 
 export function getPricesHandler(_req: Request, res: Response): void {
   res.json({
@@ -83,9 +85,16 @@ export async function billingWebhookHandler(req: Request, res: Response): Promis
     const stripe = new Stripe(config.stripeSecretKey);
     const event = stripe.webhooks.constructEvent(req.body, signature, config.stripeWebhookSecret);
     await handleWebhookEvent(event);
+    recordWebhookEvent('billing', 'processed', event.type);
     res.json({ received: true });
-  } catch {
+  } catch (error) {
     console.error('[Billing] Webhook handling failed');
+    recordWebhookEvent('billing', 'failed', 'unknown');
+    if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
+      res.status(400).json({ error: 'Invalid webhook signature' });
+      return;
+    }
+    Sentry.captureException(error, { tags: { component: 'billing_webhook' } });
     res.status(400).json({ error: 'Webhook processing failed' });
   }
 }

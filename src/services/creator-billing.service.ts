@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { getPayoutBalanceFromLedger } from './creator.service';
+import { recordWebhookEvent } from '../utils/webhook-metrics';
 
 type CreatorBillingCounterKey =
   | 'processed'
@@ -207,6 +208,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
   const shouldProcess = await markWebhookProcessed(event.id, event.type);
   if (!shouldProcess) {
     bumpCounter('deduped');
+    recordWebhookEvent('creator', 'deduped', event.type);
     logCreatorBilling({
       outcome: 'deduped',
       eventId: event.id,
