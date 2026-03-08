@@ -481,9 +481,9 @@ describe('deleteHolding — cascade cleanup in transaction', () => {
     const { deleteHolding } = await import('../services/portfolio.service');
     await deleteHolding('msft', 'test-user-1');
 
-    // findFirst should look up with uppercase
+    // findFirst should look up with uppercase and portfolioId (from getOrCreateDefaultPortfolio)
     expect((__mockPrisma as any).holding.findFirst).toHaveBeenCalledWith({
-      where: { ticker: 'MSFT', userId: 'test-user-1' },
+      where: { ticker: 'MSFT', portfolioId: 'default-portfolio-id' },
     });
   });
 

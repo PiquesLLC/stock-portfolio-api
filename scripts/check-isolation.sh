@@ -14,12 +14,14 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 
 # ── 1. No hardcoded SYSTEM_USER_ID in services or controllers ────────────────
+# Allowlist: email-verification-guard legitimately bypasses verification for system user
 echo "Checking for SYSTEM_USER_ID..."
-if grep -rn 'SYSTEM_USER_ID' "$SRC/services/" "$SRC/controllers/" 2>/dev/null; then
+if grep -rn 'SYSTEM_USER_ID' "$SRC/services/" "$SRC/controllers/" 2>/dev/null \
+  | grep -v 'email-verification-guard'; then
   red "FAIL: SYSTEM_USER_ID found in services/controllers"
   FAIL=1
 else
-  green "OK: No SYSTEM_USER_ID in services/controllers"
+  green "OK: No SYSTEM_USER_ID in services/controllers (allowlisted: email-verification-guard)"
 fi
 
 # ── 2. No resolveUserId helper (legacy pattern) ─────────────────────────────
@@ -32,12 +34,17 @@ else
 fi
 
 # ── 3. No optional userId in service function signatures ─────────────────────
+# Allowlist: batch-operation services that optionally scope to a single user
+# (anomaly-detection, dividend-fetch, dividend-post run as system-wide crons)
 echo "Checking for optional userId in services..."
-if grep -Pn 'userId\?\s*:\s*string' "$SRC/services/"*.ts 2>/dev/null; then
+if grep -Pn 'userId\?\s*:\s*string' "$SRC/services/"*.ts 2>/dev/null \
+  | grep -v 'anomaly-detection' \
+  | grep -v 'dividend-fetch' \
+  | grep -v 'dividend-post'; then
   red "FAIL: Optional userId found in service signatures"
   FAIL=1
 else
-  green "OK: No optional userId in services"
+  green "OK: No optional userId in services (allowlisted: anomaly-detection, dividend-fetch, dividend-post)"
 fi
 
 # ── 4. Advisory: unscoped findMany in user-scoped services (warn only) ───────
