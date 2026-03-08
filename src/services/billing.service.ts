@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
+import { recordWebhookEvent } from '../utils/webhook-metrics';
 
 export type PlanTier = 'free' | 'pro' | 'premium' | 'elite';
 
@@ -162,6 +163,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
   } catch (error: unknown) {
     if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002') {
       // Duplicate webhook delivery; already processed.
+      recordWebhookEvent('billing', 'deduped', event.type);
       return;
     }
     throw error;
