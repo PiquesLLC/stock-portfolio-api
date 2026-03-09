@@ -8,12 +8,17 @@ import { getLeaderboard } from './leaderboard.service';
 import { getUserChartSnapshots } from './snapshot.service';
 import { fetchHourlyCandles, fetchStockDetails } from './market.service';
 
-// Load and cache logo as base64 at startup
+// Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
+let _LOGO_TRANSPARENT_B64 = '';
 try {
   const logoPath = path.join(__dirname, '..', '..', 'assets', 'north-signal-logo-80.png');
   if (fs.existsSync(logoPath)) {
     _LOGO_B64 = fs.readFileSync(logoPath).toString('base64');
+  }
+  const transparentPath = path.join(__dirname, '..', '..', 'assets', 'north-signal-logo-transparent.png');
+  if (fs.existsSync(transparentPath)) {
+    _LOGO_TRANSPARENT_B64 = fs.readFileSync(transparentPath).toString('base64');
   }
 } catch {
   // logo optional
@@ -482,7 +487,7 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
 
   // Use hourly candles if available, otherwise daily
   const rawValues = candleValues.length > 0 ? candleValues : (filteredCloses.length > 0 ? filteredCloses : [currentPrice, currentPrice]);
-  const sparklineValues = downsampleValues(rawValues, 64);
+  const sparklineValues = downsampleValues(rawValues, 128);
 
   // Build date labels for the chart
   const rawDates = candleValues.length > 0
@@ -649,14 +654,13 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="chartFillS" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${accent}" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="${accent}" stop-opacity="0.01"/>
-    </linearGradient>
+    <clipPath id="chartClip">
+      <rect x="${chartL}" y="${chartT}" width="${chartW}" height="${chartH}"/>
+    </clipPath>
   </defs>
 
-  <!-- Background — matches app dark mode -->
-  <rect width="${W}" height="${H}" fill="#0e0e11"/>
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="#000000"/>
 
   <!-- Company logo — glassmorphic box -->
   <rect x="48" y="28" width="48" height="48" rx="12" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
@@ -674,23 +678,21 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
   <text x="${54 + (changeValText.length + changePctText.length + 2) * 11.5}" y="198" fill="#666" font-size="18" font-weight="400" font-family="${F}">${escapeXml(data.periodLabel)}</text>
 
   <!-- Market status badge -->
-  <rect x="52" y="212" width="${data.marketStatus.length * 9 + 20}" height="24" rx="4" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  <text x="62" y="229" fill="#888" font-size="11" font-weight="600" letter-spacing="0.8" font-family="${F}">${data.marketStatus}</text>
+  <rect x="52" y="212" width="${data.marketStatus.length * 9 + 20}" height="24" rx="4" fill="${data.marketStatus === 'OPEN' ? 'rgba(0,200,5,0.08)' : 'rgba(251,146,60,0.08)'}" stroke="${data.marketStatus === 'OPEN' ? 'rgba(0,200,5,0.15)' : 'rgba(251,146,60,0.15)'}" stroke-width="1"/>
+  <text x="62" y="229" fill="${data.marketStatus === 'OPEN' ? '#4ade80' : '#fb923c'}" font-size="11" font-weight="600" letter-spacing="0.8" font-family="${F}">${data.marketStatus}</text>
 
-  <!-- Reference line (dashed, at starting price) -->
-  <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.3"/>
-
-  <!-- Chart fill + line -->
-  <polygon points="${fillPoints}" fill="url(#chartFillS)"/>
-  <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2.5" opacity="0.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Chart (clipped to chart area) -->
+  <g clip-path="url(#chartClip)">
+    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.3"/>
+    <polygon points="${fillPoints}" fill="${accent}" opacity="0.06"/>
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="1.8" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 
   <!-- Date labels -->
   ${dateLabels.join('\n  ')}
 
-  <!-- Footer bar -->
-  <rect x="0" y="${H - 72}" width="${W}" height="72" fill="#0a0a0c"/>
-  <rect x="0" y="${H - 72}" width="${W}" height="1" fill="rgba(255,255,255,0.06)"/>
-  ${logoEl}
+  <!-- Footer area -->
+  ${_LOGO_TRANSPARENT_B64 ? `<image x="44" y="${H - 56}" width="40" height="40" href="data:image/png;base64,${_LOGO_TRANSPARENT_B64}"/>` : ''}
   <text x="88" y="${H - 38}" fill="white" font-size="16" font-weight="700" font-family="${F}">NalaAI.com</text>
   <text x="88" y="${H - 20}" fill="#555" font-size="11" font-family="${F}">Portfolio Intelligence Platform</text>
   <text x="${qrX - 10}" y="${H - 34}" fill="#444" font-size="10" text-anchor="end" font-family="${F}">Scan to view</text>
