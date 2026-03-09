@@ -10,7 +10,7 @@ import { sendPushToUser } from './push.service';
 
 // Cooldown: 1 anomaly per user+ticker+type per 4 hours (general), 7 days (dividend)
 const COOLDOWN_MS = 4 * 60 * 60 * 1000;
-const DIVIDEND_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+const DIVIDEND_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ETFs with variable distributions — skip from dividend raise/cut detection
 const ETF_VARIABLE_DISTRIBUTIONS = new Set([
@@ -359,10 +359,12 @@ export async function detectDividendChanges(userId: string): Promise<void> {
 
     const latest = events[0];
 
-    // Only alert on recent dividend changes — skip if the latest ex-date
-    // is more than 7 days old.
+    // Only alert on newly-discovered dividends — skip if we first synced
+    // this dividend event more than 7 days ago. Using createdAt (when we
+    // stored it) instead of exDate prevents re-alerting old dividend changes
+    // whose ex-date just happens to be recent.
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    if (latest.exDate < sevenDaysAgo) continue;
+    if (latest.createdAt < sevenDaysAgo) continue;
 
     // Only alert if the amount actually changed from the immediately previous
     // payout. This prevents re-alerting every quarter on a stale YoY comparison
