@@ -6,8 +6,8 @@ import { yahooGet } from '../utils/yahoo-http';
 import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
 import { getPolygonSnapshotVolumes, getPolygonMarketCaps } from '../utils/polygon';
 
-// 1D cache: 60s, longer periods: 5min (historical data doesn't change fast)
-const heatmapCache = new NodeCache({ stdTTL: 60 });
+// 1D cache: 20s for live polling, longer periods: 5min (historical data doesn't change fast)
+const heatmapCache = new NodeCache({ stdTTL: 20 });
 const yahooFundamentalsCache = new NodeCache({ stdTTL: 6 * 60 * 60 }); // 6h
 
 export type HeatmapPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
@@ -363,8 +363,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     generated: Date.now(),
   };
 
-  // Cache: 1D=60s, longer periods=300s
-  const ttl = period === '1D' ? 60 : 300;
+  // Cache: 1D=20s, longer periods=300s
+  const ttl = period === '1D' ? 20 : 300;
   heatmapCache.set(cacheKey, response, ttl);
   return response;
 }

@@ -359,7 +359,11 @@ export async function fetchYahooBatchQuotes(
         const symbol = String(item?.symbol || '').toUpperCase();
         if (!symbol) continue;
 
-        const previousCloseRaw = item?.regularMarketPreviousClose ?? item?.previousClose;
+        const previousCloseRaw =
+          item?.regularMarketPreviousClose ??
+          item?.previousClose ??
+          item?.chartPreviousClose ??
+          item?.regularMarketPrice;
         const previousClose = Number(previousCloseRaw);
         if (!Number.isFinite(previousClose) || previousClose <= 0) continue;
 
@@ -441,23 +445,54 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     } catch { /* Finnhub also failed */ }
   }
 
-  // Yahoo Finance last-resort fallback for any remaining failures
-  if (result.failedTickers.length > 0) {
-    const yahooFallbacks = await Promise.all(
-      result.failedTickers.map(async (ticker) => {
-        try {
-          const quote = await fetchYahooQuote(ticker);
-          return quote ? { ticker, quote } : null;
-        } catch { return null; }
-      })
-    );
-    for (const fb of yahooFallbacks) {
-      if (fb) {
-        result.quotes.set(fb.ticker, fb.quote);
-        result.failedTickers = result.failedTickers.filter(t => t !== fb.ticker);
+  // Yahoo cross-check — Polygon can return stale prices during market hours.
+  // Fetch Yahoo batch quotes and override Polygon when prices diverge > 0.5%.
+  try {
+    const allTickers = [...result.quotes.keys(), ...result.failedTickers];
+    if (allTickers.length > 0) {
+      const yahooBatch = await fetchYahooBatchQuotes(allTickers);
+      for (const [ticker, yahooData] of yahooBatch) {
+        const existing = result.quotes.get(ticker);
+        if (!existing) {
+          // Yahoo has it, Polygon didn't — use Yahoo
+          const change = yahooData.price - yahooData.previousClose;
+          const changePercent = yahooData.previousClose > 0 ? (change / yahooData.previousClose) * 100 : 0;
+          const session = getMarketSessionForTicker(ticker);
+          result.quotes.set(ticker, {
+            ticker,
+            currentPrice: yahooData.price,
+            change,
+            changePercent,
+            high: yahooData.price,
+            low: yahooData.price,
+            open: yahooData.price,
+            previousClose: yahooData.previousClose,
+            timestamp: Math.floor(Date.now() / 1000),
+            updatedAt: Date.now(),
+            isStale: false,
+            isRepricing: false,
+            quoteAgeSeconds: 0,
+            session,
+          });
+          result.failedTickers = result.failedTickers.filter(t => t !== ticker);
+        } else if (yahooData.price > 0 && existing.currentPrice > 0) {
+          // Both have data — override if divergence > 0.5%
+          const divergence = Math.abs(yahooData.price - existing.currentPrice) / existing.currentPrice;
+          if (divergence > 0.005) {
+            existing.currentPrice = yahooData.price;
+            existing.previousClose = yahooData.previousClose;
+            existing.change = existing.currentPrice - existing.previousClose;
+            existing.changePercent = existing.previousClose > 0
+              ? (existing.change / existing.previousClose) * 100 : 0;
+            existing.updatedAt = Date.now();
+            existing.timestamp = Math.floor(Date.now() / 1000);
+            existing.quoteAgeSeconds = 0;
+            existing.isStale = false;
+          }
+        }
       }
     }
-  }
+  } catch { /* Yahoo cross-check failed — keep Polygon data */ }
 
   // Set per-ticker session info
   const session = getMarketSession();
@@ -586,15 +621,20 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
 }
 
 /**
- * Fast quote fetch using Yahoo Finance directly - no queue, no rate limits.
+ * Fast quote fetch — Yahoo primary (most accurate real-time), Polygon/Finnhub fallback.
  * Used for progressive loading to show price immediately.
  */
 export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
-  // Finnhub first (real-time data), Yahoo as fallback
+  // Yahoo first — more accurate real-time pricing during market hours
+  try {
+    const yahoo = await fetchYahooQuote(ticker);
+    if (yahoo && yahoo.currentPrice > 0) return yahoo;
+  } catch { /* fall through */ }
+  // Polygon/Finnhub fallback
   try {
     return await fetchQuote(ticker);
   } catch {
-    return fetchYahooQuote(ticker);
+    return null;
   }
 }
 

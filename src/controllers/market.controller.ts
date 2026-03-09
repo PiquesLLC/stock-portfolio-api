@@ -8,6 +8,7 @@ import { askStockQuestion } from '../services/perplexity-qa.service';
 import { getHistoricalCAGRs } from '../services/historical-cagr.service';
 import { getHeatmapData, HeatmapPeriod } from '../services/market-heatmap.service';
 import { getEarningsTrack } from '../services/earnings-track.service';
+import { getMarketSentiment } from '../services/market-sentiment.service';
 import { MarketIndex } from '../utils/sectors';
 import { AxiosError } from 'axios';
 import { AuthRequest } from '../types/auth';
@@ -428,6 +429,17 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
   } catch (_error) {
     console.error('Error fetching heatmap data:');
     res.status(500).json({ error: 'Failed to fetch heatmap data' });
+  }
+}
+
+export async function getMarketSentimentHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const sentiment = await getMarketSentiment();
+    res.json(sentiment);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Sentiment] Error:', msg);
+    res.status(500).json({ error: 'Failed to fetch market sentiment', detail: msg });
   }
 }
 
