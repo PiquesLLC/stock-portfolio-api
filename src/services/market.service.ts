@@ -244,6 +244,7 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
 }
 
 const yahooQuoteCache = new NodeCache({ stdTTL: 30 }); // 30s cache — aligned with Finnhub/Polygon to prevent after-hours oscillation
+const YAHOO_BATCH_SIZE = 200;
 
 // Hardcoded ETF reference data for common ETFs where Finnhub free tier returns nulls.
 // Values are approximate as of early 2026 — better than showing nothing.
@@ -315,45 +316,95 @@ const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
   SPXL: { aumB: 4,   expenseRatio: 0.91,   beta: 3.0 },
 };
 
+interface YahooBatchQuote {
+  price: number;
+  previousClose: number;
+  regularMarketPrice: number; // today's 4 PM close (or yesterday's during PRE)
+  marketState: string;
+}
+
+/**
+ * Fetch extended-hours capable batch quotes from Yahoo Finance quote endpoint.
+ * Returns price + previousClose + regularMarketPrice + marketState for each resolved ticker.
+ */
+export async function fetchYahooBatchQuotes(
+  tickers: string[],
+): Promise<Map<string, YahooBatchQuote>> {
+  const results = new Map<string, YahooBatchQuote>();
+  if (tickers.length === 0) return results;
+
+  const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
+  const uncached: string[] = [];
+
+  for (const ticker of uniqueTickers) {
+    const cached = yahooQuoteCache.get<YahooBatchQuote>(`yahoo-quote:${ticker}`);
+    if (cached) {
+      results.set(ticker, cached);
+    } else {
+      uncached.push(ticker);
+    }
+  }
+
+  for (let i = 0; i < uncached.length; i += YAHOO_BATCH_SIZE) {
+    const batch = uncached.slice(i, i + YAHOO_BATCH_SIZE);
+    const symbols = batch.join(',');
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}`;
+
+    try {
+      const resp = await yahooGet(url, 8000);
+      const quoteResults = resp.data?.quoteResponse?.result;
+      if (!Array.isArray(quoteResults)) continue;
+
+      for (const item of quoteResults) {
+        const symbol = String(item?.symbol || '').toUpperCase();
+        if (!symbol) continue;
+
+        const previousCloseRaw = item?.regularMarketPreviousClose ?? item?.previousClose;
+        const previousClose = Number(previousCloseRaw);
+        if (!Number.isFinite(previousClose) || previousClose <= 0) continue;
+
+        const marketState = String(item?.marketState || 'REGULAR');
+
+        // Pick price based on market state to avoid stale cross-session data
+        let candidates: unknown[];
+        if (marketState === 'PRE') {
+          candidates = [item?.preMarketPrice, item?.regularMarketPrice, item?.bid, item?.ask];
+        } else if (marketState === 'POST' || marketState === 'POSTPOST') {
+          candidates = [item?.postMarketPrice, item?.regularMarketPrice, item?.bid, item?.ask];
+        } else {
+          candidates = [item?.regularMarketPrice, item?.postMarketPrice, item?.preMarketPrice, item?.bid, item?.ask];
+        }
+        const numericPrice = candidates
+          .map((value: unknown) => Number(value))
+          .find((value: number) => Number.isFinite(value) && value > 0);
+        if (!numericPrice) continue;
+
+        // regularMarketPrice = today's 4 PM close (during POST) or yesterday's close (during PRE)
+        const rawRegularPrice = Number(item?.regularMarketPrice);
+        const regularMarketPrice = Number.isFinite(rawRegularPrice) && rawRegularPrice > 0
+          ? rawRegularPrice
+          : previousClose;
+
+        const parsed: YahooBatchQuote = { price: numericPrice, previousClose, regularMarketPrice, marketState };
+        results.set(symbol, parsed);
+        yahooQuoteCache.set(`yahoo-quote:${symbol}`, parsed);
+      }
+    } catch {
+      // Best-effort by batch. Caller handles partial misses.
+      continue;
+    }
+  }
+
+  return results;
+}
+
 /**
  * Fetch extended hours price from Yahoo Finance.
- * Returns { price, marketState } or null if unavailable.
+ * Returns { price, previousClose, regularMarketPrice, marketState } or null if unavailable.
  */
-async function fetchYahooExtendedPrice(ticker: string): Promise<{ price: number; previousClose: number; marketState: string } | null> {
-  const cacheKey = `yahoo-quote:${ticker}`;
-  const cached = yahooQuoteCache.get<{ price: number; previousClose: number; marketState: string }>(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
-    const resp = await yahooGet(url, 8000);
-
-    const meta = resp.data?.chart?.result?.[0]?.meta;
-    if (!meta) return null;
-
-    // regularMarketPrice is regular close; for extended hours, get the last close from indicators
-    const timestamps = resp.data.chart.result[0].timestamp;
-    const closes = resp.data.chart.result[0].indicators?.quote?.[0]?.close;
-    if (!timestamps || !closes || timestamps.length === 0) return null;
-
-    // Find the last non-null close
-    let lastPrice = meta.regularMarketPrice;
-    for (let i = closes.length - 1; i >= 0; i--) {
-      if (closes[i] != null) {
-        lastPrice = closes[i];
-        break;
-      }
-    }
-
-    // Yahoo provides the correct previous close (yesterday's regular session close)
-    const previousClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
-
-    const result = { price: lastPrice, previousClose, marketState: meta.marketState || 'REGULAR' };
-    yahooQuoteCache.set(cacheKey, result);
-    return result;
-  } catch {
-    return null;
-  }
+async function fetchYahooExtendedPrice(ticker: string): Promise<YahooBatchQuote | null> {
+  const quotes = await fetchYahooBatchQuotes([ticker]);
+  return quotes.get(ticker.toUpperCase()) || null;
 }
 
 export async function fetchPrice(ticker: string): Promise<Quote> {
@@ -438,7 +489,39 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
   }
 
   // Override session with per-ticker market hours (international/commodity aware)
-  quote.session = getMarketSessionForTicker(ticker);
+  const session = getMarketSessionForTicker(ticker);
+  quote.session = session;
+
+  // During extended hours, Polygon/Finnhub often return stale regular-session prices.
+  // Yahoo's quote endpoint has real-time extended-hours data.
+  if (session === 'PRE' || session === 'POST') {
+    const polygonPrice = quote.currentPrice; // Capture Polygon's price before overlay
+    const yahooExtended = await fetchYahooExtendedPrice(ticker);
+    if (yahooExtended && yahooExtended.price > 0) {
+      quote.currentPrice = yahooExtended.price;
+      quote.previousClose = yahooExtended.previousClose || quote.previousClose;
+      quote.change = quote.currentPrice - quote.previousClose;
+      quote.changePercent = quote.previousClose !== 0
+        ? (quote.change / quote.previousClose) * 100
+        : 0;
+      quote.updatedAt = Date.now();
+      quote.timestamp = Math.floor(quote.updatedAt / 1000);
+      quote.isStale = false;
+      quote.quoteAgeSeconds = 0;
+
+      // Set extended hours fields for consistent portfolio regular/extended split.
+      // During POST: regularClose = today's 4PM close (regularMarketPrice).
+      // During PRE: regularClose = yesterday's close (previousClose — no "today" close yet).
+      quote.regularClose = session === 'POST'
+        ? (yahooExtended.regularMarketPrice || polygonPrice)
+        : quote.previousClose;
+      quote.extendedPrice = yahooExtended.price;
+      quote.extendedChange = quote.extendedPrice - (quote.regularClose || quote.previousClose);
+      quote.extendedChangePercent = (quote.regularClose || quote.previousClose) > 0
+        ? (quote.extendedChange / (quote.regularClose || quote.previousClose)) * 100
+        : 0;
+    }
+  }
 
   return quote;
 }
@@ -470,7 +553,7 @@ async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
 
     const session = getMarketSessionForTicker(ticker);
     const previousClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
-    const currentPrice = meta.regularMarketPrice;
+    const currentPrice = lastPrice;
     const change = currentPrice - previousClose;
     const changePercent = previousClose !== 0 ? (change / previousClose) * 100 : 0;
 

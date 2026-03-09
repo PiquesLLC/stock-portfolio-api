@@ -34,7 +34,8 @@ export async function getStockShareCardHandler(req: Request, res: Response): Pro
       return;
     }
 
-    const period = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1W';
+    const raw = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1W';
+    const period = raw === 'MAX' ? 'ALL' : raw;
     const pngBuffer = await generateStockShareCard(ticker, period);
     if (!pngBuffer) {
       res.status(404).json({ error: 'Stock data unavailable' });

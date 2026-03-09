@@ -430,6 +430,14 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
           const { price, timestamp } = getBestPrice(snapshot);
           const prevClose = snapshot.prevDay?.c || price;
 
+          // If timestamp is 0, Polygon has no actual current data (e.g. pre-market
+          // just started and no trades yet). Mark as failed so fallback providers
+          // (Finnhub/Yahoo) can provide real-time pre-market data.
+          if (timestamp <= 0 && price === prevClose) {
+            failedTickers.push(ticker);
+            continue;
+          }
+
           // CRITICAL: Never use 0 as a valid price
           if (price <= 0) {
             const backup = backupCache.get<Quote>(`polygon:${ticker}`);
@@ -694,4 +702,15 @@ export function getPolygonStatus(): { lastSuccessMs: number; rateLimitedUntil: n
     hasPremiumAccess,
     cache: getPolygonCacheStats(),
   };
+}
+
+/**
+ * Upsert quote into Polygon caches (primary + backup).
+ * Used by background refresh overlays (e.g., Yahoo extended-hours updates).
+ */
+export function upsertPolygonQuoteCache(ticker: string, quote: Quote): void {
+  const upperTicker = ticker.toUpperCase();
+  const normalizedQuote: Quote = { ...quote, ticker: upperTicker };
+  cache.set(`polygon:${upperTicker}`, normalizedQuote);
+  backupCache.set(`polygon:${upperTicker}`, normalizedQuote);
 }

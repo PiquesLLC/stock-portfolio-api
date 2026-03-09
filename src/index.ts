@@ -20,6 +20,7 @@ import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
+import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
@@ -152,9 +153,14 @@ const server = app.listen(config.port, async () => {
   ensureBenchmarksCached()
     .then(() => {
       // After benchmarks are ready, warm holdings cache in background (non-blocking)
-      warmHoldingsCache().catch(err => console.error('[Startup] Holdings cache warm failed:', err));
+      warmHoldingsCache()
+        .catch(err => console.error('[Startup] Holdings cache warm failed:', err))
+        .finally(() => startQuoteRefresh());
     })
-    .catch(err => console.error('Benchmark cache init failed:', err));
+    .catch(err => {
+      console.error('Benchmark cache init failed:', err);
+      startQuoteRefresh();
+    });
   setInterval(() => {
     ensureBenchmarksCached().catch(err => console.error('Benchmark cache refresh failed:', err));
   }, 6 * 60 * 60 * 1000);
@@ -460,6 +466,18 @@ const server = app.listen(config.port, async () => {
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
+  stopQuoteRefresh();
+  prisma.$disconnect().catch(() => undefined);
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  stopQuoteRefresh();
+  prisma.$disconnect().catch(() => undefined);
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
