@@ -73,6 +73,18 @@ function cleanCandles(candles: IntradayCandle[]): IntradayCandle[] {
   );
 }
 
+/** Filter to weekday trading hours only (4 AM – 8 PM ET) */
+function filterTradingHours(candles: IntradayCandle[]): IntradayCandle[] {
+  return candles.filter((c) => {
+    const d = new Date(c.time);
+    const et = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const day = et.getDay();
+    if (day === 0 || day === 6) return false; // weekend
+    const hour = et.getHours();
+    return hour >= 4 && hour < 20;
+  });
+}
+
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -110,7 +122,7 @@ async function fetchCandlesForPeriod(ticker: string, period: SectorPeriod): Prom
 
 async function buildSectorItem(def: SectorDefinition, period: SectorPeriod): Promise<SectorPerformanceItem> {
   const [candles, quote] = await Promise.all([fetchCandlesForPeriod(def.ticker, period), fetchQuote(def.ticker)]);
-  const filteredCandles = cleanCandles(candles);
+  const filteredCandles = period !== '1D' ? filterTradingHours(cleanCandles(candles)) : cleanCandles(candles);
   if (filteredCandles.length === 0) {
     throw new Error(`No candles available for ${def.ticker}`);
   }
@@ -146,7 +158,7 @@ async function buildSectorItem(def: SectorDefinition, period: SectorPeriod): Pro
 
 async function buildBenchmark(period: SectorPeriod): Promise<BenchmarkPerformance> {
   const [candles, quote] = await Promise.all([fetchCandlesForPeriod(BENCHMARK_TICKER, period), fetchQuote(BENCHMARK_TICKER)]);
-  const filteredCandles = cleanCandles(candles);
+  const filteredCandles = period !== '1D' ? filterTradingHours(cleanCandles(candles)) : cleanCandles(candles);
   if (filteredCandles.length === 0) {
     throw new Error('No benchmark candles available');
   }
