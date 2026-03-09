@@ -400,10 +400,12 @@ interface PerformanceShareCardData {
   username: string;
   displayName: string;
   period: ShareCardPeriod;
+  periodLabel: string;
   currentValue: number;
   periodChangeValue: number;
   periodChangePercent: number;
   sparklineValues: number[];
+  sparklineDates: string[];
 }
 
 async function fetchLogoAsBase64(url: string): Promise<string> {
@@ -467,6 +469,7 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
     case '6M': cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 6); periodLabel = 'Past 6 Months'; break;
     case 'YTD': cutoff = new Date(now.getFullYear(), 0, 1); periodLabel = 'Year to Date'; break;
     case '1Y': cutoff = new Date(now); cutoff.setFullYear(cutoff.getFullYear() - 1); periodLabel = 'Past Year'; break;
+    case 'ALL': cutoff = new Date(0); periodLabel = 'All Time'; break;
     default: cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 7); periodLabel = 'Past Week'; break;
   }
 
@@ -560,28 +563,83 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
     .map((p: { value: number; time?: number }) => p)
     .filter((p) => Number.isFinite(p.value) && p.value > 0);
 
+  // For non-1D periods, filter to market hours (weekday 4 AM–8 PM ET)
+  // to exclude overnight snapshots with stale/garbage prices
+  if (period !== '1D') {
+    values = values.filter(p => {
+      if (!p.time) return true;
+      const d = new Date(p.time);
+      const day = d.getUTCDay();
+      if (day === 0 || day === 6) return false; // weekend
+      // Convert to ET (UTC-5 approximation)
+      const etHour = d.getUTCHours() - 5;
+      return etHour >= 4 && etHour < 20;
+    });
+  }
+
   // Remove snapshots within the delay window
   if (delayed && delayCutoff > 0) {
     values = values.filter(p => !p.time || p.time <= delayCutoff);
   }
 
   const numValues = values.map(p => p.value);
+  const numTimes = values.map(p => p.time ?? 0);
 
   const currentValue = numValues.length > 0 ? numValues[numValues.length - 1] : 0;
-  const fallbackStart = numValues.length > 0 ? numValues[0] : currentValue;
-  const periodStartValue = chart.periodStartValue > 0 ? chart.periodStartValue : fallbackStart;
-  const periodChangeValue = currentValue - periodStartValue;
-  const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
+  // Change must be calculated from the first value in the filtered data —
+  // this is what the chart actually shows. Using the raw periodStartValue
+  // would mismatch when market-hours filtering shifts the start point.
+  const startValue = numValues.length > 0 ? numValues[0] : currentValue;
+  const periodChangeValue = currentValue - startValue;
+  const periodChangePercent = startValue > 0 ? (periodChangeValue / startValue) * 100 : 0;
   const sparklineValues = downsampleValues(numValues.length > 0 ? numValues : [currentValue, currentValue], 64);
+
+  // Build date labels from snapshot timestamps
+  const downsampledIndices = downsampleValues(
+    numTimes.length > 0 ? numTimes.map((_, i) => i) : [0, 1],
+    64,
+  );
+  const sparklineDates = downsampledIndices.map(idx => {
+    const t = numTimes[Math.round(idx)];
+    if (!t) return '';
+    const date = new Date(t);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  });
+
+  // Compute an accurate period label based on actual data range
+  const idealLabels: Record<string, string> = {
+    '1D': 'Today', '1W': 'Past Week', '1M': 'Past Month',
+    '3M': 'Past 3 Months', '6M': 'Past 6 Months', 'YTD': 'Year to Date',
+    '1Y': 'Past Year', 'ALL': 'All Time',
+  };
+  let periodLabel = idealLabels[period] || period;
+
+  // If actual data range is shorter than the requested period, show real range
+  if (numTimes.length >= 2) {
+    const firstTime = numTimes[0];
+    const lastTime = numTimes[numTimes.length - 1];
+    const actualDays = Math.round((lastTime - firstTime) / (24 * 60 * 60 * 1000));
+    const expectedDays: Record<string, number> = {
+      '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365,
+    };
+    const expected = expectedDays[period];
+    // If data covers less than 70% of the requested period, show actual range
+    if (expected && actualDays < expected * 0.7) {
+      const startDate = new Date(firstTime);
+      periodLabel = `Since ${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    }
+  }
 
   return {
     username: user.username,
     displayName: user.displayName || user.username,
     period,
+    periodLabel,
     currentValue,
     periodChangeValue,
     periodChangePercent,
     sparklineValues,
+    sparklineDates,
   };
 }
 
@@ -708,86 +766,101 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
   const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
   const positive = data.periodChangePercent >= 0;
   const accent = positive ? GREEN : RED;
-  const verb = positive ? 'up' : 'down';
-  const changePctText = `${positive ? '+' : ''}${data.periodChangePercent.toFixed(2)}%`;
-  const changeValueText = `${positive ? '+' : '-'}$${Math.abs(data.periodChangeValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const currentValueText = `$${data.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const changePctText = `(${positive ? '+' : ''}${data.periodChangePercent.toFixed(2)}%)`;
+  const changeValueText = `${positive ? '+' : ''}$${Math.abs(data.periodChangeValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const currentValueText = `$${data.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const periodLabels: Record<string, string> = {
-    '1D': 'today', '1W': 'this week', '1M': 'this month',
-    '3M': 'in 3 months', '6M': 'in 6 months', 'YTD': 'this year', '1Y': 'in a year', 'ALL': 'all time',
-  };
-  const periodLabel = periodLabels[data.period] || data.period;
+  const periodLabel = data.periodLabel;
 
-  // Sparkline — subtle strip across bottom, above footer
-  const sparkL = 60;
-  const sparkR = W - 60;
-  const sparkT = 440;
-  const sparkB = 530;
-  const sparkW = sparkR - sparkL;
-  const sparkH_val = sparkB - sparkT;
-  const sparkMin = data.sparklineValues.length > 0 ? Math.min(...data.sparklineValues) : 0;
-  const sparkMax = data.sparklineValues.length > 0 ? Math.max(...data.sparklineValues) : 0;
+  // Chart area — generous, matching stock card proportions
+  const chartL = 48;
+  const chartR = W - 48;
+  const chartT = 260;
+  const chartB = 490;
+  const chartW = chartR - chartL;
+  const chartH = chartB - chartT;
+
+  const vals = data.sparklineValues;
+  const sparkMin = vals.length > 0 ? Math.min(...vals) : 0;
+  const sparkMax = vals.length > 0 ? Math.max(...vals) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
-  const sparkPoints = data.sparklineValues.length > 1
-    ? data.sparklineValues.map((value, i) => {
-      const t = i / (data.sparklineValues.length - 1);
-      const x = sparkL + t * sparkW;
-      const y = sparkT + (1 - (value - sparkMin) / sparkRange) * sparkH_val;
+
+  // Reference line at starting price (first value)
+  const refPrice = vals.length > 0 ? vals[0] : data.currentValue;
+  const refY = chartT + (1 - (refPrice - sparkMin) / sparkRange) * chartH;
+
+  const sparkPoints = vals.length > 1
+    ? vals.map((value, i) => {
+      const t = i / (vals.length - 1);
+      const x = chartL + t * chartW;
+      const y = chartT + (1 - (value - sparkMin) / sparkRange) * chartH;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ')
-    : `${sparkL},${sparkB} ${sparkR},${sparkB}`;
-  const fillPoints = `${sparkL},${sparkB} ${sparkPoints} ${sparkR},${sparkB}`;
+    : `${chartL},${chartB} ${chartR},${chartB}`;
 
-  const logoEl = _LOGO_B64
-    ? `<image x="48" y="${H - 68}" width="36" height="36" href="data:image/png;base64,${_LOGO_B64}"/>`
-    : '';
+  const fillPoints = `${chartL},${chartB} ${sparkPoints} ${chartR},${chartB}`;
 
+  // Date labels along the bottom of the chart (pick ~5 evenly spaced)
+  const dateLabels: string[] = [];
+  if (data.sparklineDates.length > 0) {
+    const step = Math.max(1, Math.floor(data.sparklineDates.length / 5));
+    for (let i = 0; i < data.sparklineDates.length; i += step) {
+      const label = data.sparklineDates[i];
+      if (label) {
+        const x = chartL + (i / Math.max(1, data.sparklineDates.length - 1)) * chartW;
+        dateLabels.push(`<text x="${x.toFixed(0)}" y="${chartB + 24}" fill="#444" font-size="12" font-weight="400" font-family="${F}" text-anchor="middle">${escapeXml(label)}</text>`);
+      }
+    }
+  }
+
+  // Footer
   const profileUrl = `https://nalaai.com/${encodeURIComponent(data.username)}`;
-  const qrSize = 50;
-  const qrX = W - 48 - qrSize;
-  const qrY = H - 70;
+  const qrSize = 44;
+  const qrX = W - 44 - qrSize;
+  const qrY = H - 62;
   const qrSvg = await generateQrSvgGroup(profileUrl, qrX, qrY, qrSize);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="sparkFillP" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${accent}" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="${accent}" stop-opacity="0.02"/>
-    </linearGradient>
+    <clipPath id="chartClipP">
+      <rect x="${chartL}" y="${chartT}" width="${chartW}" height="${chartH}"/>
+    </clipPath>
   </defs>
 
   <!-- Background -->
-  <rect width="${W}" height="${H}" fill="#111114"/>
-  <rect width="${W}" height="4" fill="${accent}"/>
+  <rect width="${W}" height="${H}" fill="#000000"/>
 
-  <!-- Username -->
-  <text x="60" y="68" fill="#777" font-size="18" font-weight="400" font-family="${F}">@${escapeXml(data.username)}</text>
+  <!-- Avatar glassmorphic box with initials -->
+  <rect x="48" y="28" width="48" height="48" rx="12" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <text x="72" y="60" fill="${accent}" font-size="18" font-weight="700" text-anchor="middle" font-family="${F}">${escapeXml(data.displayName.slice(0, 2).toUpperCase())}</text>
 
-  <!-- Hero statement -->
-  <text x="60" y="130" fill="white" font-size="40" font-weight="700" font-family="${F}">My portfolio is ${verb}</text>
+  <!-- Display name + @username -->
+  <text x="110" y="54" fill="#ddd" font-size="22" font-weight="600" font-family="${F}">${escapeXml(data.displayName)}</text>
+  <text x="110" y="76" fill="#666" font-size="13" font-weight="500" font-family="${F}">@${escapeXml(data.username)}</text>
+  <text x="${W - 50}" y="54" fill="#555" font-size="16" font-weight="500" text-anchor="end" font-family="${F}">Portfolio</text>
 
-  <!-- Hero percent -->
-  <text x="56" y="240" fill="${accent}" font-size="100" font-weight="700" font-family="${F}">${changePctText}</text>
+  <!-- Portfolio value — large, prominent -->
+  <text x="52" y="160" fill="white" font-size="64" font-weight="700" font-family="${F}">${currentValueText}</text>
 
-  <!-- Period label -->
-  <text x="62" y="278" fill="#888" font-size="20" font-weight="400" font-family="${F}">${periodLabel}</text>
+  <!-- Change + period label -->
+  <text x="54" y="198" fill="${accent}" font-size="22" font-weight="600" font-family="${F}">${changeValueText}  ${changePctText}</text>
+  <text x="${54 + (changeValueText.length + changePctText.length + 2) * 11.5}" y="198" fill="#666" font-size="18" font-weight="400" font-family="${F}">${escapeXml(periodLabel)}</text>
 
-  <!-- Value stats -->
-  <text x="60" y="350" fill="${accent}" font-size="28" font-weight="600" font-family="${F}">${changeValueText}</text>
-  <text x="60" y="400" fill="white" font-size="36" font-weight="700" font-family="${F}">${currentValueText}</text>
-  <text x="62" y="428" fill="#666" font-size="14" font-weight="400" font-family="${F}">portfolio value</text>
+  <!-- Chart (clipped to chart area) -->
+  <g clip-path="url(#chartClipP)">
+    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.3"/>
+    <polygon points="${fillPoints}" fill="${accent}" opacity="0.06"/>
+    <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="1.8" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 
-  <!-- Sparkline — subtle strip above footer -->
-  <polygon points="${fillPoints}" fill="url(#sparkFillP)"/>
-  <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="2" opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Date labels -->
+  ${dateLabels.join('\n  ')}
 
-  <!-- Bottom bar -->
-  <rect x="0" y="${H - 80}" width="${W}" height="80" fill="#0a0a0c"/>
-  <rect x="0" y="${H - 80}" width="${W}" height="1" fill="#222"/>
-  ${logoEl}
-  <text x="92" y="${H - 42}" fill="white" font-size="18" font-weight="700" font-family="${F}">NalaAI.com</text>
-  <text x="92" y="${H - 22}" fill="#666" font-size="12" font-family="${F}">Portfolio Intelligence Platform</text>
+  <!-- Footer area -->
+  ${_LOGO_TRANSPARENT_B64 ? `<image x="44" y="${H - 56}" width="40" height="40" href="data:image/png;base64,${_LOGO_TRANSPARENT_B64}"/>` : ''}
+  <text x="88" y="${H - 38}" fill="white" font-size="16" font-weight="700" font-family="${F}">NalaAI.com</text>
+  <text x="88" y="${H - 20}" fill="#555" font-size="11" font-family="${F}">Portfolio Intelligence Platform</text>
+  <text x="${qrX - 10}" y="${H - 34}" fill="#444" font-size="10" text-anchor="end" font-family="${F}">Scan to view</text>
   ${qrSvg}
 </svg>`;
 }

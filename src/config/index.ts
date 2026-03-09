@@ -64,6 +64,8 @@ export const config = {
   polygonApiKey: process.env.POLYGON_API_KEY || '',
   quoteCacheTtlSeconds: parseInt(process.env.QUOTE_CACHE_TTL_SECONDS || '30', 10),
   repriceThresholdSeconds: parseInt(process.env.REPRICE_THRESHOLD_SECONDS || '30', 10),
+  quoteRefreshIntervalMs: parseInt(process.env.QUOTE_REFRESH_INTERVAL_MS || '30000', 10),
+  maxRefreshTickers: parseInt(process.env.MAX_REFRESH_TICKERS || '500', 10),
 
   // Projection settings
   sp500CagrTotalReturn: parseFloat(process.env.SP500_CAGR_TOTAL_RETURN || '0.10'), // 10% default

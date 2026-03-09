@@ -1068,7 +1068,7 @@ export async function getUserChartSnapshots(userId: string, period: string): Pro
     }
   }
 
-  // Baseline
+  // Baseline: latest snapshot at or before startDate
   const baseline = await prisma.portfolioSnapshot.findFirst({
     where: { userId, timestamp: { lte: startDate } },
     orderBy: { timestamp: 'desc' },
