@@ -9,7 +9,7 @@ import { sendPushToUser } from './push.service';
 
 
 // Cooldown: 1 anomaly per user+ticker+type per 4 hours (general), 7 days (dividend)
-const COOLDOWN_MS = 4 * 60 * 60 * 1000;
+const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h — one alert per stock per day
 const DIVIDEND_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ETFs with variable distributions — skip from dividend raise/cut detection
@@ -330,10 +330,13 @@ export async function detectAnomalies(userId: string): Promise<void> {
  * Creates AnomalyEvent with type 'dividend_change'.
  *
  * Guards:
- * 1. Cooldown scoped by userId (7-day window prevents repeat spam)
- * 2. ETFs with variable distributions are excluded (consecutive comparison is noisy)
- * 3. Re-checks holding exists at emit time (avoids post-sell stale alerts)
- * 4. Prefers YoY same-quarter comparison for equities when available
+ * 1. exDate recency — latest dividend must be within 60 days (prevents bulk-sync stale alerts)
+ * 2. Amount changed — latest vs previous payout must differ
+ * 3. Exact-match dedup — skip if we already alerted on this exact changePct for this ticker
+ * 4. Cooldown scoped by userId (30-day window prevents repeat spam)
+ * 5. ETFs with variable distributions are excluded (consecutive comparison is noisy)
+ * 6. Re-checks holding exists at emit time (avoids post-sell stale alerts)
+ * 7. Prefers YoY same-quarter comparison for equities when available
  */
 export async function detectDividendChanges(userId: string): Promise<void> {
   console.log('[Dividend Change Detection] Running scan...');
@@ -359,12 +362,12 @@ export async function detectDividendChanges(userId: string): Promise<void> {
 
     const latest = events[0];
 
-    // Only alert on newly-discovered dividends — skip if we first synced
-    // this dividend event more than 7 days ago. Using createdAt (when we
-    // stored it) instead of exDate prevents re-alerting old dividend changes
-    // whose ex-date just happens to be recent.
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    if (latest.createdAt < sevenDaysAgo) continue;
+    // Only alert on recent dividend changes — the latest dividend's exDate
+    // must be within 60 days of now (covers quarterly) OR in the future.
+    // This prevents stale alerts when old dividend events are bulk-synced
+    // (all getting a fresh createdAt despite exDates months/years ago).
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    if (latest.exDate < sixtyDaysAgo) continue;
 
     // Only alert if the amount actually changed from the immediately previous
     // payout. This prevents re-alerting every quarter on a stale YoY comparison
@@ -382,7 +385,22 @@ export async function detectDividendChanges(userId: string): Promise<void> {
 
     if (latest.amountPerShare === compareEvent.amountPerShare) continue;
 
-    // User-scoped cooldown — 7 days to prevent repeat spam
+    // Exact-match dedup: skip if we already alerted on this exact dividend
+    // amount for this ticker (prevents infinite re-alerting on the same change)
+    const changePctPreview = compareEvent.amountPerShare > 0
+      ? ((latest.amountPerShare - compareEvent.amountPerShare) / compareEvent.amountPerShare) * 100
+      : 0;
+    const alreadyAlerted = await prisma.anomalyEvent.findFirst({
+      where: {
+        userId,
+        ticker,
+        type: 'dividend_change',
+        value: { gte: changePctPreview - 0.1, lte: changePctPreview + 0.1 },
+      },
+    });
+    if (alreadyAlerted) continue;
+
+    // User-scoped cooldown — 30 days to prevent repeat spam
     const onCooldown = await checkCooldown(userId, ticker, 'dividend_change', DIVIDEND_COOLDOWN_MS);
     if (onCooldown) continue;
 
