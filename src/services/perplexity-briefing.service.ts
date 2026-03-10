@@ -3,7 +3,7 @@ import { callPerplexity, extractJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
-// Cache briefings for 2 hours (7200s) — weekly analysis doesn't need 30-min refresh
+// Cache briefings for 2 hours (7200s) -- weekly analysis doesn't need 30-min refresh
 const briefingCache = new NodeCache({ stdTTL: 7200 });
 
 export interface BriefingSection {
@@ -22,7 +22,7 @@ export interface PortfolioBriefingResponse {
   cached: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a senior portfolio analyst explaining a weekly briefing to a retail investor in Slack — not writing a report.
+const SYSTEM_PROMPT = `You are a senior portfolio analyst explaining a weekly briefing to a retail investor in Slack -- not writing a report.
 Return ONLY valid JSON with this structure:
 {
   "verdict": "One calm sentence framing the week's theme (e.g. 'This week was about stability, not momentum.')",
@@ -38,10 +38,10 @@ Rules:
 - Prefer "because" over "while"
 - Be specific about company names and events
 - Use plain language, no jargon or parentheticals
-- The title should be a clear headline — if a user reads only titles, they understand the week
+- The title should be a clear headline -- if a user reads only titles, they understand the week
 - The takeaway is a single memorable sentence summarizing the section
 - Focus on: what drove gains/losses and WHY, upcoming catalysts to watch
-- Do NOT repeat raw numbers the user already sees — add insight and context
+- Do NOT repeat raw numbers the user already sees -- add insight and context
 - Do NOT recommend buying or selling
 - CRITICAL: Never invent or estimate portfolio dollar values. Use ONLY the exact total value provided in the user message. If you mention the portfolio value, use the exact number given.`;
 
@@ -51,7 +51,20 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
-  const portfolio = await getPortfolio(userId);
+  let portfolio;
+  try {
+    portfolio = await getPortfolio(userId);
+  } catch (err) {
+    console.error('[Perplexity Briefing] Failed to load portfolio:', err);
+    return {
+      generatedAt: new Date().toISOString(),
+      verdict: 'Briefing temporarily unavailable.',
+      headline: 'Unable to load portfolio data.',
+      sections: [],
+      holdingCount: 0,
+      cached: false,
+    };
+  }
 
   if (portfolio.holdings.length === 0) {
     return {
@@ -104,7 +117,7 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
     if (movers.length > 0) {
       sections.push({
         title: 'Biggest movers',
-        takeaway: 'A few names drove most of today’s move.',
+        takeaway: "A few names drove most of today's move.",
         body: movers.map(h => `${h.ticker} moved ${h.dayChangePercent >= 0 ? '+' : ''}${h.dayChangePercent.toFixed(1)}%.`).join(' '),
         sentiment: 'neutral',
       });
@@ -153,7 +166,7 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
     console.log(`[Perplexity Briefing] Generated ${result.sections.length} sections for ${portfolio.holdings.length} holdings`);
     return result;
   } catch (_error) {
-    console.error('[Perplexity Briefing] Error');
+    console.error('[Perplexity Briefing] Error:', _error);
     return buildFallback();
   }
 }
@@ -168,7 +181,7 @@ export interface BriefingExplainResponse {
   cached: boolean;
 }
 
-const EXPLAIN_SYSTEM_PROMPT = `You are a senior financial analyst explaining context to a retail investor — like a knowledgeable colleague in Slack, not a research report.
+const EXPLAIN_SYSTEM_PROMPT = `You are a senior financial analyst explaining context to a retail investor -- like a knowledgeable colleague in Slack, not a research report.
 
 The user will give you a brief summary from their portfolio briefing. Explain the full context:
 - What happened and why (news, events, policy changes, earnings)

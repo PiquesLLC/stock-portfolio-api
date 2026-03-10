@@ -215,7 +215,7 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
     console.log(`[Perplexity Daily Report] Generated ${result.topStories.length} stories, ${result.watchToday.length} watch items in ${elapsed}ms`);
     return result;
   } catch (_error) {
-    console.error('[Perplexity Daily Report] Error');
+    console.error('[Perplexity Daily Report] Error:', _error);
     return buildFallback();
   }
 }

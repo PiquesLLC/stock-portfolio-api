@@ -22,6 +22,7 @@ import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
+import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -472,11 +473,16 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     evaluateWebhookThresholds();
   }, 5 * 60 * 1000);
+
+  // Fundamentals prefetch — continuously cycles through stock universe
+  // pre-fetching fundamentals + earnings so data is ready before users search
+  startFundamentalsPrefetch();
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
   stopQuoteRefresh();
+  await stopFundamentalsPrefetch();
   prisma.$disconnect().catch(() => undefined);
   server.close(() => {
     console.log('Server closed');
@@ -484,9 +490,10 @@ process.on('SIGTERM', () => {
   });
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
   stopQuoteRefresh();
+  await stopFundamentalsPrefetch();
   prisma.$disconnect().catch(() => undefined);
   server.close(() => {
     console.log('Server closed');
