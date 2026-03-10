@@ -1,10 +1,8 @@
 import prisma from '../utils/prisma';
-import { getDailyCallsRemaining } from '../utils/alpha-vantage';
-import { refreshFundamentalsForTicker } from './fundamentals.service';
+import { refreshFundamentalsForTicker } from './polygon-fundamentals.service';
 import { subSectorGroups } from '../utils/sectors';
 
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const CALLS_PER_TICKER = 4;
 
 function collectHeatmapTickers(): string[] {
   const tickers: string[] = [];
@@ -36,14 +34,12 @@ export async function backfillHeatmapFundamentals(): Promise<void> {
   });
 
   const cachedCount = total - staleOrMissing.length;
-  const remainingCalls = await getDailyCallsRemaining();
-  const maxTickers = Math.floor(remainingCalls / CALLS_PER_TICKER);
-  const toBackfill = staleOrMissing.slice(0, maxTickers);
 
+  // Polygon has no daily limit — refresh all stale tickers
   let backfilled = 0;
   let failed = 0;
 
-  for (const ticker of toBackfill) {
+  for (const ticker of staleOrMissing) {
     try {
       await refreshFundamentalsForTicker(ticker);
       backfilled += 1;
