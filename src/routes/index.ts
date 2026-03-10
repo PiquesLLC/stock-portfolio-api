@@ -31,6 +31,7 @@ import waitlistRoutes from './waitlist.routes';
 import pushRoutes from './push.routes';
 import appleIapRoutes from './apple-iap.routes';
 import adminRoutes from './admin.routes';
+import jobAdminRoutes from './job-admin.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -69,5 +70,6 @@ if (config.billingEnabled) {
 }
 router.use('/billing', appleIapRoutes);
 router.use('/admin', adminRoutes);
+router.use('/admin', jobAdminRoutes);
 
 export default router;
