@@ -21,8 +21,8 @@ const ETF_VARIABLE_DISTRIBUTIONS = new Set([
   'GLD', 'SLV', 'IAU', 'GDXJ', 'XBI', 'XME', 'IGV', 'NLR',
 ]);
 
-// Perplexity explanation cache: 4 hours per ticker — news explanation is stable after initial break
-const analysisCache = new NodeCache({ stdTTL: 14400 });
+// Perplexity explanation cache: 8 hours per ticker — news explanation is stable after initial break
+const analysisCache = new NodeCache({ stdTTL: 28800 });
 
 // Volume baseline cache: daily candles cached 6 hours (historical data won't change intraday)
 const volumeCache = new NodeCache({ stdTTL: 21600 });
@@ -272,22 +272,29 @@ export async function detectAnomalies(userId: string): Promise<void> {
   console.log(`[Anomaly Detection] Found ${candidates.length} candidates`);
 
   // Filter by cooldown and create events
+  // Cap Perplexity calls per scan to control costs (cache hits don't count)
+  const MAX_PERPLEXITY_PER_SCAN = 3;
+  let perplexityCalls = 0;
   let created = 0;
   for (const c of candidates) {
     const onCooldown = await checkCooldown(userId, c.ticker, c.type);
     if (onCooldown) continue;
 
-    // Get Perplexity analysis for price and volume spikes
+    // Only call Perplexity for critical severity (5%+ price, 5x+ volume) to control costs.
+    // Warning-level anomalies still get created with the descriptive text but skip AI analysis.
     let analysis: string | null = null;
     let citations: string | null = null;
 
-    if (c.type === 'price_spike' || c.type === 'volume_spike') {
+    if (c.severity === 'critical' && (c.type === 'price_spike' || c.type === 'volume_spike') && perplexityCalls < MAX_PERPLEXITY_PER_SCAN) {
       const q = quotes.get(c.ticker);
       const context = c.type === 'price_spike'
         ? `Stock ${c.ticker} is ${q && q.changePercent > 0 ? 'up' : 'down'} ${c.value.toFixed(1)}% today. What news, events, or market conditions are driving this move?`
         : `Stock ${c.ticker} is trading at ${c.value.toFixed(1)}x its average daily volume today. What news or events are causing this unusual trading activity?`;
 
+      const cacheKey = `analysis:${c.ticker}:${formatDate(new Date())}`;
+      const wasCached = analysisCache.get(cacheKey) != null;
       const result = await getPerplexityAnalysis(c.ticker, context, userId);
+      if (!wasCached) perplexityCalls++;
       if (result) {
         analysis = result.analysis;
         citations = result.citations.length > 0 ? JSON.stringify(result.citations) : null;
