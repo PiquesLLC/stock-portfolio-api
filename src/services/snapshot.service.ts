@@ -2202,13 +2202,24 @@ export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
     let gapCount = 0;
     let longestGapMinutes = 0;
 
+    const isMarketOpen = (d: Date) => {
+      const s = getMarketSession(d);
+      return s === 'PRE' || s === 'REG' || s === 'POST';
+    };
+
     const checkGap = (start: Date, end: Date) => {
       const gapMs = end.getTime() - start.getTime();
       const gapMinutes = gapMs / (1000 * 60);
       if (gapMinutes <= 15) return;
-      const midpoint = new Date(start.getTime() + gapMs / 2);
-      const midSession = getMarketSession(midpoint);
-      if (midSession === 'PRE' || midSession === 'REG' || midSession === 'POST') {
+      // Sample every 30 minutes across the gap to catch spans crossing overnight
+      let overlapsMarket = false;
+      const step = Math.min(30 * 60 * 1000, gapMs); // 30-min steps
+      for (let t = start.getTime(); t <= end.getTime(); t += step) {
+        if (isMarketOpen(new Date(t))) { overlapsMarket = true; break; }
+      }
+      // Also check the end point
+      if (!overlapsMarket && isMarketOpen(end)) overlapsMarket = true;
+      if (overlapsMarket) {
         gapCount++;
         if (gapMinutes > longestGapMinutes) {
           longestGapMinutes = gapMinutes;
