@@ -225,19 +225,16 @@ export async function pruneOldJobRuns(): Promise<number> {
 }
 
 /**
- * Heal orphaned jobs — find BackgroundJobRun records stuck as "running"
- * that started more than 5 minutes ago (meaning the server restarted mid-execution)
- * and mark them as failed.
+ * Heal orphaned jobs — find all BackgroundJobRun records stuck as "running"
+ * and mark them as failed. On startup, ALL running records are orphans because
+ * the in-memory inFlightJobs Set was cleared on restart.
  *
  * Call once on startup, before any new jobs are scheduled.
  */
 export async function healOrphanedJobs(): Promise<number> {
-  const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
-
   const result = await prisma.backgroundJobRun.updateMany({
     where: {
       status: 'running',
-      startedAt: { lt: cutoff },
     },
     data: {
       status: 'failed',
