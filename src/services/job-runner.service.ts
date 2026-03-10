@@ -223,3 +223,50 @@ export async function pruneOldJobRuns(): Promise<number> {
   });
   return result.count;
 }
+
+/**
+ * Heal orphaned jobs — find BackgroundJobRun records stuck as "running"
+ * that started more than 5 minutes ago (meaning the server restarted mid-execution)
+ * and mark them as failed.
+ *
+ * Call once on startup, before any new jobs are scheduled.
+ */
+export async function healOrphanedJobs(): Promise<number> {
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+
+  const result = await prisma.backgroundJobRun.updateMany({
+    where: {
+      status: 'running',
+      startedAt: { lt: cutoff },
+    },
+    data: {
+      status: 'failed',
+      error: 'Orphaned — server restarted during execution',
+      completedAt: new Date(),
+    },
+  });
+
+  if (result.count > 0) {
+    console.log(`[JobRunner] Healed ${result.count} orphaned job(s) from previous run`);
+  }
+
+  return result.count;
+}
+
+/**
+ * Detect stuck jobs — find BackgroundJobRun records still marked as "running"
+ * that started more than `thresholdMinutes` ago. Returns them for admin review.
+ *
+ * Does NOT auto-fix — use healOrphanedJobs() for that.
+ */
+export async function detectStuckJobs(thresholdMinutes = 30) {
+  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+
+  return prisma.backgroundJobRun.findMany({
+    where: {
+      status: 'running',
+      startedAt: { lt: cutoff },
+    },
+    orderBy: { startedAt: 'desc' },
+  });
+}

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
-import { getJobStats, getDeadLetterEntries, resolveDeadLetterEntry, pruneOldJobRuns } from '../services/job-runner.service';
+import { getJobStats, getDeadLetterEntries, resolveDeadLetterEntry, pruneOldJobRuns, healOrphanedJobs, detectStuckJobs } from '../services/job-runner.service';
+import { getSnapshotHealth } from '../services/snapshot.service';
 import { config } from '../config';
 
 const router = Router();
@@ -98,6 +99,67 @@ router.post('/jobs/prune', requireAuth, async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('[JobAdmin] prune error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to prune job runs' });
+  }
+});
+
+// POST /admin/jobs/heal - Heal orphaned jobs (stuck as "running" > 5 min)
+router.post('/jobs/heal', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const healed = await healOrphanedJobs();
+    res.json({ healed, message: `Healed ${healed} orphaned job(s)` });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] heal error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to heal orphaned jobs' });
+  }
+});
+
+// GET /admin/jobs/stuck - Detect stuck jobs (running > threshold)
+router.get('/jobs/stuck', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const thresholdMinutes = Math.max(1, parseInt(req.query.thresholdMinutes as string) || 30);
+    const stuck = await detectStuckJobs(thresholdMinutes);
+    res.json({ stuck, count: stuck.length, thresholdMinutes });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] stuck error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to detect stuck jobs' });
+  }
+});
+
+// GET /admin/jobs/snapshot-health - Snapshot integrity checks per user
+router.get('/jobs/snapshot-health', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const reports = await getSnapshotHealth();
+
+    const summary = {
+      totalUsers: reports.length,
+      healthy: reports.filter(r => r.status === 'healthy').length,
+      stale: reports.filter(r => r.status === 'stale').length,
+      gaps: reports.filter(r => r.status === 'gaps').length,
+      critical: reports.filter(r => r.status === 'critical').length,
+    };
+
+    res.json({ summary, reports });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] snapshot-health error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to check snapshot health' });
   }
 });
 
