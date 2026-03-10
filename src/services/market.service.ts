@@ -243,7 +243,7 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
   return [];
 }
 
-const yahooQuoteCache = new NodeCache({ stdTTL: 30 }); // 30s cache — aligned with Finnhub/Polygon to prevent after-hours oscillation
+const yahooQuoteCache = new NodeCache({ stdTTL: 15 }); // 15s cache — Yahoo is primary real-time source during market hours
 const YAHOO_BATCH_SIZE = 200;
 
 // Hardcoded ETF reference data for common ETFs where Finnhub free tier returns nulls.
@@ -445,9 +445,11 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     } catch { /* Finnhub also failed */ }
   }
 
-  // Yahoo cross-check — Polygon can return stale prices during market hours.
-  // Fetch Yahoo batch quotes and override Polygon when prices diverge > 0.5%.
+  // Yahoo real-time overlay — Polygon Developer plan has ~15-min delay.
+  // During regular market hours, ALWAYS prefer Yahoo's near-real-time quotes.
+  // During PRE/POST/CLOSED, only override on significant divergence (>0.5%).
   try {
+    const currentSession = getMarketSession();
     const allTickers = [...result.quotes.keys(), ...result.failedTickers];
     if (allTickers.length > 0) {
       const yahooBatch = await fetchYahooBatchQuotes(allTickers);
@@ -476,9 +478,11 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
           });
           result.failedTickers = result.failedTickers.filter(t => t !== ticker);
         } else if (yahooData.price > 0 && existing.currentPrice > 0) {
-          // Both have data — override if divergence > 0.5%
+          // During REGULAR hours: always prefer Yahoo (near-real-time) over Polygon (~15-min delayed).
+          // During PRE/POST: only override on >0.5% divergence (extended hours data is spottier).
+          const alwaysPreferYahoo = currentSession === 'REG';
           const divergence = Math.abs(yahooData.price - existing.currentPrice) / existing.currentPrice;
-          if (divergence > 0.005) {
+          if (alwaysPreferYahoo || divergence > 0.005) {
             existing.currentPrice = yahooData.price;
             existing.previousClose = yahooData.previousClose;
             existing.change = existing.currentPrice - existing.previousClose;
@@ -492,7 +496,7 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
         }
       }
     }
-  } catch { /* Yahoo cross-check failed — keep Polygon data */ }
+  } catch { /* Yahoo overlay failed — keep Polygon data */ }
 
   // Set per-ticker session info
   const session = getMarketSession();

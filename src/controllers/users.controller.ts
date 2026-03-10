@@ -36,7 +36,7 @@ export async function getUserByUsernameHandler(req: AuthRequest, res: Response):
     }
 
     res.json(user);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error looking up user by username:');
     res.status(500).json({ error: 'Failed to look up user' });
   }
@@ -69,7 +69,7 @@ export async function getUsersHandler(req: AuthRequest, res: Response): Promise<
     const nextCursor = hasMore ? results[results.length - 1].id : undefined;
 
     res.json({ users: results, nextCursor });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching users:');
     res.status(500).json({ error: 'Failed to fetch users' });
   }
@@ -260,7 +260,7 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
     }
 
     res.json(portfolio);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching user portfolio:');
     res.status(500).json({ error: 'Failed to fetch user portfolio' });
   }
@@ -286,7 +286,7 @@ export async function updateHoldingsVisibilityHandler(req: AuthRequest, res: Res
     }
     await prisma.user.update({ where: { id: userId }, data: { holdingsVisibility } });
     res.json({ holdingsVisibility });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error updating holdings visibility:');
     res.status(500).json({ error: 'Failed to update holdings visibility' });
   }
@@ -499,7 +499,7 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
     }
 
     res.json({ points, periodStartValue, period, source: 'snapshot' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching user chart:');
     res.status(500).json({ error: 'Failed to fetch user chart data' });
   }

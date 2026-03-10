@@ -103,6 +103,9 @@ async function runRefreshCycle(): Promise<void> {
       }
     }
 
+    // Yahoo overlay: during REGULAR hours Yahoo is near-real-time while Polygon
+    // Developer plan is ~15-min delayed. During PRE/POST Yahoo provides extended
+    // hours pricing that Polygon often misses. Only skip during CLOSED.
     if ((session === 'PRE' || session === 'POST') && isProviderAvailable('Yahoo')) {
       try {
         const yahooQuotes = await fetchYahooBatchQuotes(tickers);

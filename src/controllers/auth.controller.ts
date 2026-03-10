@@ -122,7 +122,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       body.refreshToken = result.refreshToken;
     }
     res.json(body);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Login error:');
     res.status(500).json({ error: 'Login failed' });
   }
@@ -166,7 +166,7 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
       ...user,
       isWaitlistAdmin: isWaitlistAdmin(user.id, user.email, user.emailVerified),
     });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Me error:');
     res.status(500).json({ error: 'Failed to get user info' });
   }
@@ -198,7 +198,7 @@ export async function setPasswordHandler(req: AuthRequest, res: Response): Promi
     }
 
     res.json({ message: 'Password set successfully' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Set password error:');
     res.status(500).json({ error: 'Failed to set password' });
   }
@@ -267,7 +267,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       signupBody.refreshToken = result.refreshToken;
     }
     res.status(201).json(signupBody);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Signup error:');
     res.status(500).json({ error: 'Failed to create account' });
   }
@@ -325,7 +325,7 @@ export async function verifyEmailHandler(req: AuthRequest, res: Response): Promi
     }
 
     res.json({ message: 'Email verified successfully' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Verify email error:');
     res.status(500).json({ error: 'Failed to verify email' });
   }
@@ -357,7 +357,7 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
     }
 
     res.json({ message: 'If this email is registered, a verification code was sent.' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Resend verification error:');
     res.status(500).json({ error: 'Failed to resend verification code' });
   }
@@ -376,7 +376,7 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
 
     await requestPasswordReset(parsed.data.email);
     res.json({ message: 'If this email is registered, a reset code was sent.' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Forgot password error:');
     res.status(500).json({ error: 'Failed to process password reset request' });
   }
@@ -407,7 +407,7 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
 
     clearAllAuthCookies(res, req);
     res.json({ message: 'Password reset successfully' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Reset password error:');
     res.status(500).json({ error: 'Failed to reset password' });
   }
@@ -460,7 +460,7 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
 
     const exists = await usernameExists(username);
     res.json({ available: !exists });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Check username error:');
     res.status(500).json({ error: 'Failed to check username' });
   }
@@ -492,7 +492,7 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
 
     await revokeAllRefreshTokens(req.user.userId);
     res.json({ message: 'Password changed successfully' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Change password error:');
     res.status(500).json({ error: 'Failed to change password' });
   }
@@ -596,7 +596,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
 
     clearAllAuthCookies(res, req);
     res.json({ message: 'Account deleted successfully' });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Delete account error:');
     res.status(500).json({ error: 'Failed to delete account' });
   }
@@ -631,7 +631,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
       refreshBody.refreshToken = result.refreshToken;
     }
     res.json(refreshBody);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Refresh token error:');
     res.status(500).json({ error: 'Failed to refresh token' });
   }

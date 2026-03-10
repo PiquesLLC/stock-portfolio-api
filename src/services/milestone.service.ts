@@ -1,8 +1,8 @@
 ﻿import prisma from '../utils/prisma';
-import { getPolygonQuotes } from '../utils/polygon';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 import { getMarketSession } from '../utils/market-hours';
 import { sendPushToUser } from './push.service';
+import { fetchPrices } from './market.service';
 import NodeCache from 'node-cache';
 
 // Track which milestones we've already notified (ticker-userId-type -> timestamp)
@@ -10,13 +10,13 @@ import NodeCache from 'node-cache';
 // Auto-evicts entries after 24h to prevent memory leaks
 const recentNotifications = new NodeCache({ stdTTL: 24 * 60 * 60, checkperiod: 600 });
 
-// Cooldowns per event type — ATH/ATL/52W use 4 hours to avoid spam during
-// rapid price movements while still catching genuinely new records later in the day
+// Cooldowns: 24 hours to avoid spamming users when a stock hovers near a milestone.
+// Only re-notify if the price actually exceeds the previous notification price (high water mark).
 const COOLDOWN_MS: Record<string, number> = {
-  'ath': 4 * 60 * 60 * 1000,       // 4 hours
-  'atl': 4 * 60 * 60 * 1000,       // 4 hours
-  '52w_high': 4 * 60 * 60 * 1000,  // 4 hours
-  '52w_low': 4 * 60 * 60 * 1000,   // 4 hours
+  'ath': 24 * 60 * 60 * 1000,       // 24 hours
+  'atl': 24 * 60 * 60 * 1000,       // 24 hours
+  '52w_high': 24 * 60 * 60 * 1000,  // 24 hours
+  '52w_low': 24 * 60 * 60 * 1000,   // 24 hours
 };
 const DEFAULT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours fallback
 
@@ -76,9 +76,9 @@ export async function checkMilestoneAlerts(): Promise<void> {
 
     console.log(`[Milestone] Checking ${tickerHolders.length} tickers across ${holdings.length} holdings`);
 
-    // Fetch quotes for all tickers
+    // Fetch quotes for all tickers (uses Yahoo real-time during market hours)
     const allTickers = tickerHolders.map(t => t.ticker);
-    const { quotes } = await getPolygonQuotes(allTickers);
+    const { quotes } = await fetchPrices(allTickers);
 
     // Process each ticker
     for (const { ticker, userIds } of tickerHolders) {
@@ -169,9 +169,17 @@ export async function checkMilestoneAlerts(): Promise<void> {
               eventType: type,
               createdAt: { gte: new Date(now - cooldown) },
             },
+            orderBy: { createdAt: 'desc' },
           });
 
-          if (recentEvent) continue;
+          if (recentEvent) {
+            // High water mark: only re-notify if the price actually beat the
+            // previous notification price. This prevents alerting at $268 after
+            // we already alerted at $271 for the same milestone.
+            if (isHigh && currentPrice <= recentEvent.currentPrice) continue;
+            if (!isHigh && currentPrice >= recentEvent.currentPrice) continue;
+            // Price beat the previous notification — allow it through
+          }
 
           // For 52W_HIGH suppression: also check if an ATH was recently created
           // in the DB (covers cases where ATH fired in a previous cycle within cooldown)

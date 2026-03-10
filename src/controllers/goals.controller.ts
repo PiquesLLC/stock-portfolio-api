@@ -17,7 +17,7 @@ export async function listGoalsHandler(req: AuthRequest, res: Response): Promise
   try {
     const goals = await getAllGoalsWithProgress(req.user!.userId);
     res.json(goals);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error listing goals:');
     res.status(500).json({ error: 'Failed to list goals' });
   }
@@ -40,7 +40,7 @@ export async function getGoalHandler(req: AuthRequest, res: Response): Promise<v
     }
 
     res.json(goal);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting goal:');
     res.status(500).json({ error: 'Failed to get goal' });
   }
@@ -63,7 +63,7 @@ export async function createGoalHandler(req: AuthRequest, res: Response): Promis
     }, req.user!.userId);
 
     res.status(201).json(goal);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error creating goal:');
     res.status(500).json({ error: 'Failed to create goal' });
   }

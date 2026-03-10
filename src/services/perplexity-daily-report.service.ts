@@ -9,6 +9,12 @@ import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 // Cache daily reports for 8 hours (28800s) — news doesn't shift fast enough to justify 4h
 const reportCache = new NodeCache({ stdTTL: 28800 });
 
+// Strip internal prompt section tags that Perplexity sometimes echoes back
+const LEAKED_TAGS = /\[(?:ECONOMIC SNAPSHOT|MARKET HEADLINES|UPCOMING EARNINGS|MY PORTFOLIO)\]/gi;
+function stripLeakedTags(text: string): string {
+  return text.replace(LEAKED_TAGS, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 // Non-ticker acronyms that Perplexity sometimes returns as "relatedTickers"
 const TICKER_BLACKLIST = new Set([
   'YTD', 'QTD', 'MTD', 'ATH', 'ATL', 'EPS', 'ROE', 'ROA', 'ROI', 'NAV', 'AUM',
@@ -43,7 +49,8 @@ const SYSTEM_PROMPT = `You are a portfolio analyst writing a concise daily morni
   ],
   "watchToday": ["1-2 sentence actionable item to watch today"]
 }
-Return 3-5 top stories and 2-3 watch items. Focus on what's actionable and relevant to the user's holdings.`;
+Return 3-5 top stories and 2-3 watch items. Focus on what's actionable and relevant to the user's holdings.
+IMPORTANT: Do NOT include any section labels like [ECONOMIC SNAPSHOT], [MARKET HEADLINES], or similar bracketed tags in your response. Write clean, natural prose.`;
 
 function isWeekendET(): boolean {
   const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
@@ -192,18 +199,18 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
 
     const result: DailyReportResponse = {
       generatedAt: new Date().toISOString(),
-      greeting: String(parsed.greeting || '').slice(0, 200),
-      marketOverview: String(parsed.marketOverview || '').slice(0, 500),
-      portfolioSummary: String(parsed.portfolioSummary || '').slice(0, 500),
+      greeting: stripLeakedTags(String(parsed.greeting || '').slice(0, 200)),
+      marketOverview: stripLeakedTags(String(parsed.marketOverview || '').slice(0, 500)),
+      portfolioSummary: stripLeakedTags(String(parsed.portfolioSummary || '').slice(0, 500)),
       topStories: (parsed.topStories || []).slice(0, 5).map((s: any) => ({
-        headline: String(s.headline || '').slice(0, 100),
-        body: String(s.body || '').slice(0, 300),
+        headline: stripLeakedTags(String(s.headline || '').slice(0, 100)),
+        body: stripLeakedTags(String(s.body || '').slice(0, 300)),
         sentiment: ['positive', 'negative', 'neutral'].includes(s.sentiment) ? s.sentiment : 'neutral',
         relatedTickers: Array.isArray(s.relatedTickers)
           ? s.relatedTickers.filter((t: any) => typeof t === 'string' && t.length >= 1 && !TICKER_BLACKLIST.has(t.toUpperCase()))
           : [],
       })),
-      watchToday: (parsed.watchToday || []).slice(0, 4).map((w: any) => String(w || '').slice(0, 300)),
+      watchToday: (parsed.watchToday || []).slice(0, 4).map((w: any) => stripLeakedTags(String(w || '').slice(0, 300))),
       cached: false,
     };
 

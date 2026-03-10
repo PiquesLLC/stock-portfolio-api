@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
 import { getEarningsSummary, EarningsSummaryItem } from './earnings-summary.service';
 import { getEarningsTrack, EarningsTrackResult } from './earnings-track.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -100,8 +100,9 @@ async function getAiPreview(
     return fallback;
   }
 
-  try {
-    const parsed = JSON.parse(extractJson(resp.content)) as Partial<AiPreviewPayload>;
+  const parseResult = parsePerplexityJson<Partial<AiPreviewPayload>>(resp.content);
+  if (parseResult.ok) {
+    const parsed = parseResult.data;
     const normalized: AiPreviewPayload = {
       whatToWatch: String(parsed.whatToWatch || '').slice(0, 400),
       analystSentiment: String(parsed.analystSentiment || '').slice(0, 250),
@@ -111,7 +112,8 @@ async function getAiPreview(
     const payload = { preview: normalized, citations: resp.citations || [] };
     previewCache.set(cacheKey, payload);
     return payload;
-  } catch {
+  } else {
+    console.warn(`[Earnings Preview] parse_failed ticker=${item.ticker} reason=${parseResult.reason}`);
     const fallback = { preview: null, citations: [] as string[] };
     previewCache.set(cacheKey, fallback, 300); // 5 min TTL for failures
     return fallback;

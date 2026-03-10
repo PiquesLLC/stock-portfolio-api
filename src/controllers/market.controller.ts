@@ -76,8 +76,8 @@ export async function getPrices(req: Request, res: Response): Promise<void> {
     };
 
     res.json(response);
-  } catch (_error) {
-    console.error('Error fetching prices:');
+  } catch (error: unknown) {
+    console.error('[Market] getPrices error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch prices' });
   }
 }
@@ -93,8 +93,8 @@ export async function getQuote(req: Request, res: Response): Promise<void> {
 
     const quote = await fetchQuote(ticker);
     res.json(quote);
-  } catch (_error) {
-    console.error('Error fetching quote:');
+  } catch (error: unknown) {
+    console.error('[Market] getQuote error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch quote' });
   }
 }
@@ -118,8 +118,8 @@ export async function getFastQuote(req: Request, res: Response): Promise<void> {
       return;
     }
     res.json(quote);
-  } catch (_error) {
-    console.error('Error fetching fast quote:');
+  } catch (error: unknown) {
+    console.error('[Market] getFastQuote error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch quote' });
   }
 }
@@ -134,8 +134,8 @@ export async function getStockDetails(req: Request, res: Response): Promise<void
     const { ticker } = parsed.data;
     const details = await fetchStockDetails(ticker);
     res.json(details);
-  } catch (_error) {
-    console.error('Error fetching stock details:');
+  } catch (error: unknown) {
+    console.error('[Market] getStockDetails error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch stock details' });
   }
 }
@@ -150,8 +150,8 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
     const { ticker } = parsed.data;
     const candles = await fetchIntradayCandles(ticker);
     res.json({ ticker, candles });
-  } catch (_error) {
-    console.error('Error fetching intraday data:');
+  } catch (error: unknown) {
+    console.error('[Market] getIntraday error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch intraday data' });
   }
 }
@@ -170,8 +170,8 @@ export async function getHourlyCandles(req: Request, res: Response): Promise<voi
     const { period } = parsedQuery.data;
     const candles = await fetchHourlyCandles(ticker, period);
     res.json({ ticker, candles });
-  } catch (_error) {
-    console.error('Error fetching hourly candles:');
+  } catch (error: unknown) {
+    console.error('[Market] getHourlyCandles error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch hourly data' });
   }
 }
@@ -194,8 +194,8 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
     const days = daysMap[period] ?? 90;
     const candles = await fetchDailyCandles(ticker, days);
     res.json({ ticker, candles });
-  } catch (_error) {
-    console.error('Error fetching daily candles:');
+  } catch (error: unknown) {
+    console.error('[Market] getDailyCandles error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch daily data' });
   }
 }
@@ -225,8 +225,8 @@ export async function searchSymbols(req: Request, res: Response): Promise<void> 
 
     const response = await searchTickers(query, heldTickers);
     res.json(response);
-  } catch (_error) {
-    console.error('Error searching symbols:');
+  } catch (error: unknown) {
+    console.error('[Market] searchSymbols error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to search symbols' });
   }
 }
@@ -241,8 +241,8 @@ export async function getMarketNews(req: Request, res: Response): Promise<void> 
     const limit = parsed.data.limit ?? 20;
     const news = await fetchMarketNews(limit);
     res.json(news);
-  } catch (_error) {
-    console.error('Error fetching market news:');
+  } catch (error: unknown) {
+    console.error('[Market] getMarketNews error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch news' });
   }
 }
@@ -259,8 +259,8 @@ export async function getTickerNews(req: Request, res: Response): Promise<void> 
     const limit = parsedQuery.data.limit ?? 30;
     const news = await fetchTickerNews(ticker, limit);
     res.json(news);
-  } catch (_error) {
-    console.error('Error fetching ticker news:');
+  } catch (error: unknown) {
+    console.error('[Market] getTickerNews error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch ticker news' });
   }
 }
@@ -287,8 +287,8 @@ export async function getBenchmarkClosesHandler(req: Request, res: Response): Pr
       close: data.closes[i],
     }));
     res.json({ ticker, candles });
-  } catch (_error) {
-    console.error('Error fetching benchmark closes:');
+  } catch (error: unknown) {
+    console.error('[Market] getBenchmarkCloses error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch benchmark data' });
   }
 }
@@ -309,8 +309,8 @@ export async function getETFHoldingsHandler(req: Request, res: Response): Promis
     }
 
     res.json(holdings);
-  } catch (_error) {
-    console.error('Error fetching ETF holdings:');
+  } catch (error: unknown) {
+    console.error('[Market] getETFHoldings error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch ETF holdings' });
   }
 }
@@ -336,7 +336,7 @@ export async function getAIEventsHandler(req: AuthRequest, res: Response): Promi
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('Error fetching AI events:');
+    console.error('[Market] getAIEvents error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch AI events' });
   }
 }
@@ -357,8 +357,8 @@ export async function getAssetAboutHandler(req: Request, res: Response): Promise
     }
 
     res.json(about);
-  } catch (_error) {
-    console.error('Error fetching asset about:');
+  } catch (error: unknown) {
+    console.error('[Market] getAssetAbout error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch asset about data' });
   }
 }
@@ -389,7 +389,7 @@ export async function askStockQuestionHandler(req: AuthRequest, res: Response): 
       res.status(429).json({ error: 'Rate limited. Please wait a moment.' });
       return;
     }
-    console.error('Error in stock Q&A:');
+    console.error('[Market] stockQ&A error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get answer' });
   }
 }
@@ -405,8 +405,8 @@ export async function getHistoricalCAGRHandler(req: Request, res: Response): Pro
 
     const cagrs = await getHistoricalCAGRs(tickers);
     res.json({ cagrs });
-  } catch (_error) {
-    console.error('Error fetching historical CAGR:');
+  } catch (error: unknown) {
+    console.error('[Market] getHistoricalCAGR error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch historical CAGR data' });
   }
 }
@@ -426,8 +426,8 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
 
     const data = await getHeatmapData(period, index);
     res.json(data);
-  } catch (_error) {
-    console.error('Error fetching heatmap data:');
+  } catch (error: unknown) {
+    console.error('[Market] getHeatmap error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch heatmap data' });
   }
 }
@@ -453,8 +453,8 @@ export async function getNalaScoreHandler(req: Request, res: Response): Promise<
     const { ticker } = parsed.data;
     const score = await getNalaScore(ticker);
     res.json(score);
-  } catch (_error) {
-    console.error(`[Nala Score] Error for ${req.params.ticker}:`);
+  } catch (error: unknown) {
+    console.error(`[Market] getNalaScore error for ${req.params.ticker}:`, error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to compute Nala Score' });
   }
 }
@@ -471,8 +471,8 @@ export async function getThemesHeatmapHandler(req: Request, res: Response): Prom
       (validPeriods.includes(period) ? period : '1D') as import('../services/market-heatmap.service').HeatmapPeriod
     );
     res.json(data);
-  } catch (_error) {
-    console.error('Error fetching themes heatmap:');
+  } catch (error: unknown) {
+    console.error('[Market] getThemesHeatmap error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch themes heatmap' });
   }
 }
@@ -485,8 +485,8 @@ export async function getEtfHeatmapHandler(req: Request, res: Response): Promise
       (validPeriods.includes(period) ? period : '1D') as import('../services/market-heatmap.service').HeatmapPeriod
     );
     res.json(data);
-  } catch (_error) {
-    console.error('Error fetching ETF heatmap:');
+  } catch (error: unknown) {
+    console.error('[Market] getEtfHeatmap error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch ETF heatmap' });
   }
 }
@@ -498,8 +498,8 @@ export async function getEarningsTrackHandler(req: Request, res: Response): Prom
     const { ticker } = parsed.data;
     const track = await getEarningsTrack(ticker);
     res.json(track);
-  } catch (_error) {
-    console.error(`[Earnings Track] Error for ${req.params.ticker}:`);
+  } catch (error: unknown) {
+    console.error(`[Market] getEarningsTrack error for ${req.params.ticker}:`, error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to compute earnings track record' });
   }
 }

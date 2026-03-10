@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
@@ -143,19 +143,23 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
       return buildFallback();
     }
 
-    const jsonStr = extractJson(resp.content);
-    const parsed = JSON.parse(jsonStr);
+    const parsedResult = parsePerplexityJson<unknown>(resp.content);
+    if (!parsedResult.ok) {
+      console.warn(`[Perplexity Briefing] parse_failed reason=${parsedResult.reason} extractedLen=${parsedResult.extracted.length}`);
+      return buildFallback();
+    }
+    const parsed = parsedResult.data as any;
 
     const result: PortfolioBriefingResponse = {
       generatedAt: new Date().toISOString(),
       verdict: String(parsed.verdict || '').slice(0, 200),
       headline: String(parsed.headline || '').slice(0, 200),
-      sections: (parsed.sections || []).map((s: any) => ({
-        title: String(s.title || '').slice(0, 100),
-        takeaway: String(s.takeaway || '').slice(0, 200),
-        body: String(s.body || '').slice(0, 1000),
+      sections: (Array.isArray(parsed.sections) ? parsed.sections : []).map((s: any) => ({
+        title: String(s.title || '').trim().slice(0, 100),
+        takeaway: String(s.takeaway || '').trim().slice(0, 200),
+        body: String(s.body || '').trim().slice(0, 1000),
         sentiment: ['positive', 'neutral', 'negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
-      })),
+      })).filter((s: BriefingSection) => s.title.length > 0 && s.body.length > 0),
       holdingCount: portfolio.holdings.length,
       cached: false,
     };
@@ -166,7 +170,8 @@ export async function getPortfolioBriefing(userId: string): Promise<PortfolioBri
     console.log(`[Perplexity Briefing] Generated ${result.sections.length} sections for ${portfolio.holdings.length} holdings`);
     return result;
   } catch (_error) {
-    console.error('[Perplexity Briefing] Error:', _error);
+    const msg = _error instanceof Error ? _error.message : String(_error);
+    console.error(`[Perplexity Briefing] Error: ${msg}`);
     return buildFallback();
   }
 }
@@ -216,12 +221,14 @@ export async function explainBriefingSection(title: string, body: string, userId
   }
 
   const result: BriefingExplainResponse = {
-    explanation: resp.content,
+    explanation: resp.content.trim(),
     citations: resp.citations || [],
     cached: false,
   };
 
-  explainCache.set(cacheKey, result);
+  if (result.explanation.length > 0) {
+    explainCache.set(cacheKey, result);
+  }
   console.log(`[Perplexity Briefing Explain] Generated explanation for "${title}"`);
   return result;
 }

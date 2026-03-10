@@ -27,7 +27,7 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
       flagReason: entry.flagged ? 'Under review' : null,
     }));
     res.json({ ...result, entries: sanitizedEntries });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching leaderboard:');
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }

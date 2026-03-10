@@ -13,7 +13,7 @@ export async function getCalendarICS(req: AuthRequest, res: Response): Promise<v
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="nala-dividends.ics"');
     res.send(ical);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('[Calendar] Error generating ICS:');
     res.status(500).json({ error: 'Failed to generate calendar file' });
   }

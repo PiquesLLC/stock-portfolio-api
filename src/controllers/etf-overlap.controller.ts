@@ -6,7 +6,7 @@ export async function getEtfOverlapHandler(req: AuthRequest, res: Response): Pro
   try {
     const data = await getEtfOverlap(req.user!.userId);
     res.json(data);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching ETF overlap:');
     res.status(500).json({ error: 'Failed to fetch ETF overlap' });
   }

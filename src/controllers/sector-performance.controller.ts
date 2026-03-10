@@ -240,7 +240,7 @@ export async function getSectorPerformanceHandler(req: Request, res: Response): 
 
     sectorPerformanceCache.set(cacheKey, response);
     res.json(response);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching sector performance data:');
     res.status(503).json({
       sectors: [],

@@ -11,7 +11,7 @@ export async function getAnomaliesHandler(req: AuthRequest, res: Response): Prom
       take: limit,
     });
     res.json(anomalies);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching anomalies');
     res.status(500).json({ error: 'Failed to fetch anomalies' });
   }
@@ -23,7 +23,7 @@ export async function getUnreadAnomalyCountHandler(req: AuthRequest, res: Respon
       where: { userId: req.user!.userId, read: false },
     });
     res.json({ count });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching unread anomaly count');
     res.status(500).json({ error: 'Failed to get unread count' });
   }
@@ -36,7 +36,7 @@ export async function markAnomalyReadHandler(req: AuthRequest, res: Response): P
       data: { read: true },
     });
     res.json({ success: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error marking anomaly read');
     res.status(500).json({ error: 'Failed to mark anomaly as read' });
   }
@@ -49,7 +49,7 @@ export async function markAllAnomaliesReadHandler(req: AuthRequest, res: Respons
       data: { read: true },
     });
     res.json({ success: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error marking all anomalies read');
     res.status(500).json({ error: 'Failed to mark all anomalies as read' });
   }

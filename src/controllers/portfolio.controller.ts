@@ -175,7 +175,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
       return;
     }
-    console.error('Error adding holding:');
+    console.error('[Portfolio] addHolding error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to add holding' });
   }
 }
@@ -234,7 +234,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       res.status(404).json({ error: 'Holding not found' });
       return;
     }
-    console.error('Error removing holding:');
+    console.error('[Portfolio] removeHolding error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to remove holding' });
   }
 }
@@ -252,8 +252,8 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     // Single atomic write to UserSettings (or Portfolio if scoped)
     const settings = await updateCashBalance(req.user!.userId, cashBalance, portfolioId);
     res.json({ cashBalance: settings.cashBalance });
-  } catch (_error) {
-    console.error('Error updating cash balance:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] updateCash error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update cash balance' });
   }
 }
@@ -262,8 +262,8 @@ export async function getHistory(req: AuthRequest, res: Response): Promise<void>
   try {
     const snapshots = await getAllSnapshots(req.user!.userId);
     res.json(snapshots);
-  } catch (_error) {
-    console.error('Error fetching history:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] getHistory error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 }
@@ -298,8 +298,8 @@ export async function getProjectionsHandler(req: AuthRequest, res: Response): Pr
     }
 
     res.json(projections);
-  } catch (_error) {
-    console.error('Error calculating projections:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] projections error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to calculate projections' });
   }
 }
@@ -318,8 +318,8 @@ export async function getMetricsHandler(req: AuthRequest, res: Response): Promis
 
     const metrics = await getMetrics(userId, lookback);
     res.json(metrics);
-  } catch (_error) {
-    console.error('Error calculating metrics:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] metrics error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to calculate metrics' });
   }
 }
@@ -612,8 +612,8 @@ export async function getChartGapSummaryHandler(req: AuthRequest, res: Response)
     const periodDays = periodDaysMap[period] ?? 30;
     const gaps = await getLedgerReplayGapSummary(req.user!.userId, periodDays);
     res.json({ period, gaps });
-  } catch (_error) {
-    console.error('Error fetching chart gap summary:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] chartGaps error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch chart gap summary' });
   }
 }
@@ -634,8 +634,8 @@ export async function getCurrentPaceHandler(req: AuthRequest, res: Response): Pr
 
     const result = await getCurrentPaceProjection(userId, window);
     res.json(result);
-  } catch (_error) {
-    console.error('Error calculating current pace:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] currentPace error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to calculate current pace' });
   }
 }
@@ -680,8 +680,8 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
 
     const result = await getPerformanceComparison(window, benchmark, userId || req.user!.userId);
     res.json(result);
-  } catch (_error) {
-    console.error('Error fetching performance:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] performance error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch performance data' });
   }
 }
@@ -700,8 +700,8 @@ export async function getTickerActivity(req: AuthRequest, res: Response): Promis
     }
     const events = await getUserActivityByTicker(userId, ticker);
     res.json(events);
-  } catch (_error) {
-    console.error('Error fetching ticker activity:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] tickerActivity error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch ticker activity' });
   }
 }
@@ -1322,8 +1322,8 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       validRows: parsedRows.length,
       skippedRows,
     });
-  } catch (_error) {
-    console.error('CSV import parse error:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] CSV import parse error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to parse CSV' });
   }
 }
@@ -1727,8 +1727,8 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
         parseDurationMs,
       },
     });
-  } catch (_error) {
-    console.error('[MappedImport] Error:', _error);
+  } catch (error: unknown) {
+    console.error('[MappedImport] Error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to process mapped CSV' });
   }
 }
@@ -2321,8 +2321,8 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
     console.log(`[Clear] userId=${req.user!.userId.slice(0, 8)} holdings=${deleted.count} trades=${tradesDeleted.count} ledger=${ledgerDeleted.count} snapshots=${snapshotsDeleted.count}`);
 
     res.json({ cleared: true, holdingsRemoved: deleted.count, tradesRemoved: tradesDeleted.count, ledgerEventsRemoved: ledgerDeleted.count });
-  } catch (_error) {
-    console.error('Clear portfolio error:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] clearPortfolio error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to clear portfolio' });
   }
 }
@@ -2412,8 +2412,8 @@ export async function seedSamplePortfolio(req: AuthRequest, res: Response): Prom
     }
 
     res.json({ seeded: true, holdings: SAMPLE_HOLDINGS.length });
-  } catch (_error) {
-    console.error('Error seeding sample portfolio:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] seedSample error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to seed sample portfolio' });
   }
 }
@@ -2434,8 +2434,8 @@ export async function getAccountHistoryHandler(req: AuthRequest, res: Response):
 
     const result = await getAccountHistory({ userId, limit, cursor, category, ticker });
     res.json(result);
-  } catch (_error) {
-    console.error('Error fetching account history:');
+  } catch (error: unknown) {
+    console.error('[Portfolio] accountHistory error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch account history' });
   }
 }

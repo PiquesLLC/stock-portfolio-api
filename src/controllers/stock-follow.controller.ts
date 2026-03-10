@@ -36,7 +36,7 @@ export async function followStockHandler(req: AuthRequest, res: Response): Promi
 
     await followStock(userId, symbol);
     res.json({ ok: true, symbol });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error following stock:');
     res.status(500).json({ error: 'Failed to follow stock' });
   }
@@ -56,7 +56,7 @@ export async function unfollowStockHandler(req: AuthRequest, res: Response): Pro
 
     await unfollowStock(userId, symbol);
     res.json({ ok: true, symbol });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error unfollowing stock:');
     res.status(500).json({ error: 'Failed to unfollow stock' });
   }
@@ -70,7 +70,7 @@ export async function getStockFollowStatusHandler(req: AuthRequest, res: Respons
 
     const status = await getStockFollowStatus(req.user?.userId, symbol);
     res.json(status);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching stock follow status:');
     res.status(500).json({ error: 'Failed to fetch stock follow status' });
   }
@@ -83,7 +83,7 @@ export async function getMostFollowedStocksHandler(req: AuthRequest, res: Respon
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 100;
     const items = await getMostFollowedStocks(limit);
     res.json(items);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching most-followed stocks:');
     res.status(500).json({ error: 'Failed to fetch most-followed stocks' });
   }
@@ -100,7 +100,7 @@ export async function getMyStockFollowsHandler(req: AuthRequest, res: Response):
 
     const symbols = await getMyFollowedSymbols(userId);
     res.json(symbols);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching my stock follows:');
     res.status(500).json({ error: 'Failed to fetch followed symbols' });
   }
