@@ -1103,3 +1103,37 @@ model ApiUsageLog {
   durationMs      Int      @default(0)
   createdAt       DateTime @default(now())
 }
+
+// ─── Background Job Reliability ──────────────────────────────────────
+
+model BackgroundJobRun {
+  id             String    @id @default(uuid())
+  jobName        String    // e.g. "milestone_check", "dividend_sync"
+  status         String    @default("running") // running | success | failed | dead_lettered
+  attempt        Int       @default(1)
+  maxAttempts    Int       @default(3)
+  error          String?
+  durationMs     Int?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([jobName])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model DeadLetterEntry {
+  id          String    @id @default(uuid())
+  jobName     String
+  error       String
+  attempts    Int
+  context     String?   // JSON payload for debugging
+  resolved    Boolean   @default(false)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([jobName])
+  @@index([resolved])
+  @@index([createdAt])
+}

@@ -23,6 +23,7 @@ import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
+import { runJob, pruneOldJobRuns } from './services/job-runner.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -163,15 +164,15 @@ const server = app.listen(config.port, async () => {
       startQuoteRefresh();
     });
   setInterval(() => {
-    ensureBenchmarksCached().catch(err => console.error('Benchmark cache refresh failed:', err));
+    runJob({ name: 'benchmark_cache', fn: ensureBenchmarksCached });
   }, 6 * 60 * 60 * 1000);
 
   // Background snapshot scheduler â€” creates portfolio snapshots even when
   // no browser is connected, so the 1D chart never has gaps.
   const SNAPSHOT_INTERVAL_MS = config.snapshotIntervalSeconds * 1000;
   console.log(`[Snapshot Scheduler] Running every ${config.snapshotIntervalSeconds}s`);
-  setInterval(async () => {
-    try {
+  setInterval(() => {
+    runJob({ name: 'snapshot_scheduler', fn: async () => {
       const userIds = await prisma.holding.findMany({
         select: { userId: true },
         distinct: ['userId'],
@@ -186,9 +187,7 @@ const server = app.listen(config.port, async () => {
           });
         }
       }
-    } catch (err: unknown) {
-      console.error('[Snapshot Scheduler] Error fetching users:', (err as Error).message);
-    }
+    }, maxAttempts: 1 }); // maxAttempts: 1 — runs every ~60s, no point retrying
   }, SNAPSHOT_INTERVAL_MS);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
@@ -196,9 +195,7 @@ const server = app.listen(config.port, async () => {
   if (process.env.DEMO_LEADERBOARD === 'true') {
     console.log('[Demo Data] DEMO_LEADERBOARD=true — backfilling demo users');
     setTimeout(() => {
-      backfillLeaderboardDemoData().catch(err =>
-        console.error('[Demo Data] Backfill failed:', (err as Error).message)
-      );
+      runJob({ name: 'demo_leaderboard_backfill', fn: backfillLeaderboardDemoData, maxAttempts: 1 });
     }, 60000); // 60s delay after startup
   } else {
     console.log('[Demo Data] Skipped (DEMO_LEADERBOARD not set)');
@@ -210,111 +207,78 @@ const server = app.listen(config.port, async () => {
   setTimeout(() => {
     const session = getMarketSession();
     if (session === 'CLOSED') return;
-    refreshLeaderboardSnapshots().catch(err =>
-      console.error('[Leaderboard Refresh] Startup run failed:', (err as Error).message)
-    );
+    runJob({ name: 'leaderboard_refresh', fn: refreshLeaderboardSnapshots });
   }, 120000); // 2 min delay after startup (backfill may still be running)
   setInterval(() => {
     const session = getMarketSession();
     if (session === 'CLOSED') return;
-    refreshLeaderboardSnapshots().catch(err =>
-      console.error('[Leaderboard Refresh] Error:', (err as Error).message)
-    );
+    runJob({ name: 'leaderboard_refresh', fn: refreshLeaderboardSnapshots });
   }, 3 * 60 * 60 * 1000); // Every 3 hours
 
   // Dividend sync â€" fetch dividend events from Yahoo Finance on startup + every 6 hours (skip weekends)
   if (!isWeekendET()) {
-    syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Init failed:', err));
+    runJob({ name: 'dividend_sync', fn: syncAllHeldTickers });
   }
   setInterval(() => {
     if (isWeekendET()) return;
-    syncAllHeldTickers().catch(err => console.error('[Dividend Sync] Error:', err));
+    runJob({ name: 'dividend_sync', fn: syncAllHeldTickers });
   }, 6 * 60 * 60 * 1000);
 
   // Dividend posting â€" check for payable dividends every hour (skip weekends — no pay dates)
   if (!isWeekendET()) {
-    postDividendsForDate().catch(err => console.error('[Dividend Post] Init failed:', err));
+    runJob({ name: 'dividend_post', fn: postDividendsForDate });
   }
   // NOTE: backfillMissedDividends removed â€" it double-counts dividends already
   // reflected in historical stock prices, inflating portfolio value via DRIP.
   setInterval(() => {
     if (isWeekendET()) return;
-    postDividendsForDate().catch(err => console.error('[Dividend Post] Error:', err));
+    runJob({ name: 'dividend_post', fn: postDividendsForDate });
   }, 60 * 60 * 1000);
 
   // Price alert evaluation â€" check every 60 seconds (skip weekends — prices are stale)
   console.log('[Price Alert Scheduler] Running every 60s');
   setInterval(() => {
     if (isWeekendET()) return;
-    evaluatePriceAlerts().catch(err =>
-      console.error('[Price Alerts] Error:', err.message)
-    );
+    runJob({ name: 'price_alert_eval', fn: evaluatePriceAlerts, maxAttempts: 1 });
   }, 60000);
 
   // Analyst updates â€” check once per day (every 24 hours)
-  // Also run on startup after a short delay
   console.log('[Analyst Scheduler] Running every 24 hours');
-  setTimeout(async () => {
-    try {
+  setTimeout(() => {
+    runJob({ name: 'analyst_updates', fn: async () => {
       const tickers = await getAllHeldTickers();
       await checkAnalystUpdates(tickers);
-    } catch (err: any) {
-      console.error('[Analyst Scheduler] Startup check failed:', err.message);
-    }
-  }, 30000); // 30 second delay after startup
-
-  setInterval(async () => {
-    try {
+    }});
+  }, 30000);
+  setInterval(() => {
+    runJob({ name: 'analyst_updates', fn: async () => {
       const tickers = await getAllHeldTickers();
       await checkAnalystUpdates(tickers);
-    } catch (err: any) {
-      console.error('[Analyst Scheduler] Error:', err.message);
-    }
-  }, 24 * 60 * 60 * 1000); // Every 24 hours
+    }});
+  }, 24 * 60 * 60 * 1000);
 
   // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls)
   console.log('[AV Economic] Running daily');
   setTimeout(() => {
-    refreshEconomicIndicators().catch(err =>
-      console.error('[AV Economic] Startup refresh failed:', (err as Error).message)
-    );
-  }, 60000); // 60s delay
+    runJob({ name: 'economic_indicators', fn: refreshEconomicIndicators });
+  }, 60000);
   setInterval(() => {
-    refreshEconomicIndicators().catch(err =>
-      console.error('[AV Economic] Error:', (err as Error).message)
-    );
+    runJob({ name: 'economic_indicators', fn: refreshEconomicIndicators });
   }, 24 * 60 * 60 * 1000);
 
   // World Bank: International economic indicators â€” refresh daily (6 API calls, no key needed)
   console.log('[WB International] Running daily');
   setTimeout(() => {
-    refreshInternationalIndicators().catch(err =>
-      console.error('[WB International] Startup refresh failed:', (err as Error).message)
-    );
-  }, 90000); // 90s delay
+    runJob({ name: 'international_indicators', fn: refreshInternationalIndicators });
+  }, 90000);
   setInterval(() => {
-    refreshInternationalIndicators().catch(err =>
-      console.error('[WB International] Error:', (err as Error).message)
-    );
+    runJob({ name: 'international_indicators', fn: refreshInternationalIndicators });
   }, 24 * 60 * 60 * 1000);
 
   // Polygon Fundamentals: refresh all held tickers every 12 hours (unlimited API calls)
   console.log('[Polygon Fundamentals] Rotating every 12 hours');
-  setTimeout(async () => {
-    try {
-      const tickers = await getAllHeldTickers();
-      for (const t of tickers) {
-        await refreshFundamentalsForTicker(t).catch(err =>
-          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
-        );
-      }
-      console.log(`[Polygon Fundamentals] Startup rotation complete: ${tickers.length} tickers`);
-    } catch (err) {
-      console.error('[Polygon Fundamentals] Startup rotation failed:', (err as Error).message);
-    }
-  }, 120000);
-  setInterval(async () => {
-    try {
+  setTimeout(() => {
+    runJob({ name: 'polygon_fundamentals', fn: async () => {
       const tickers = await getAllHeldTickers();
       for (const t of tickers) {
         await refreshFundamentalsForTicker(t).catch(err =>
@@ -322,63 +286,56 @@ const server = app.listen(config.port, async () => {
         );
       }
       console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
-    } catch (err) {
-      console.error('[Polygon Fundamentals] Rotation error:', (err as Error).message);
-    }
+    }});
+  }, 120000);
+  setInterval(() => {
+    runJob({ name: 'polygon_fundamentals', fn: async () => {
+      const tickers = await getAllHeldTickers();
+      for (const t of tickers) {
+        await refreshFundamentalsForTicker(t).catch(err =>
+          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
+        );
+      }
+      console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
+    }});
   }, 12 * 60 * 60 * 1000);
 
   // Heatmap fundamentals backfill â€” refresh heatmap tickers (missing/stale) on startup + daily
   console.log('[Heatmap Fundamentals] Backfill scheduled');
   setTimeout(() => {
-    backfillHeatmapFundamentals().catch(err =>
-      console.error('[Heatmap Fundamentals] Startup backfill failed:', (err as Error).message)
-    );
+    runJob({ name: 'heatmap_fundamentals', fn: backfillHeatmapFundamentals });
   }, 150000); // 150s delay after startup
   setInterval(() => {
-    backfillHeatmapFundamentals().catch(err =>
-      console.error('[Heatmap Fundamentals] Backfill error:', (err as Error).message)
-    );
+    runJob({ name: 'heatmap_fundamentals', fn: backfillHeatmapFundamentals });
   }, 24 * 60 * 60 * 1000);
 
   // Polygon Screener backfill — fetch EPS, dividends, beta, 52W range on startup + every 12 hours
   console.log('[Polygon Screener] Backfill scheduled');
   setTimeout(() => {
-    backfillPolygonScreenerData().catch(err =>
-      console.error('[Polygon Screener] Startup backfill failed:', (err as Error).message)
-    );
+    runJob({ name: 'polygon_screener', fn: backfillPolygonScreenerData });
   }, 180000); // 180s delay after startup
   setInterval(() => {
-    backfillPolygonScreenerData().catch(err =>
-      console.error('[Polygon Screener] Backfill error:', (err as Error).message)
-    );
+    runJob({ name: 'polygon_screener', fn: backfillPolygonScreenerData });
   }, 12 * 60 * 60 * 1000); // Every 12 hours
 
   // Earnings alerts — audit log for upcoming earnings (every 6 hours, skip weekends)
   console.log('[Notifications] Earnings alerts scheduled');
   setTimeout(() => {
     if (isWeekendET()) return;
-    sendEarningsAlerts().catch(err =>
-      console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
-    );
-  }, 90000); // 90s delay after startup
+    runJob({ name: 'earnings_alerts', fn: sendEarningsAlerts });
+  }, 90000);
   setInterval(() => {
     if (isWeekendET()) return;
-    sendEarningsAlerts().catch(err =>
-      console.error('[Notifications] Earnings alert run failed:', (err as Error).message)
-    );
+    runJob({ name: 'earnings_alerts', fn: sendEarningsAlerts });
   }, 6 * 60 * 60 * 1000);
 
   // Milestone alerts (52w high/low, ATH/ATL) â€” using Yahoo Finance for accurate 52w data
   console.log('[Milestone Scheduler] Running every 30 minutes');
   setTimeout(() => {
-    checkMilestoneAlerts().catch(err =>
-      console.error('[Milestone Scheduler] Startup check failed:', err.message)
-    );
+    runJob({ name: 'milestone_check', fn: checkMilestoneAlerts });
   }, 45000);
   setInterval(() => {
-    checkMilestoneAlerts().catch(err =>
-      console.error('[Milestone Scheduler] Error:', err.message)
-    );
+    runJob({ name: 'milestone_check', fn: checkMilestoneAlerts });
   }, 30 * 60 * 1000);
 
   // AI Anomaly Detection — check every 30 minutes during market hours (all users)
@@ -400,14 +357,10 @@ const server = app.listen(config.port, async () => {
     }
   }
   setTimeout(() => {
-    runAnomalyDetectionForAllUsers().catch(err =>
-      console.error('[Anomaly Detection] Startup check failed:', (err as Error).message)
-    );
-  }, 120000); // 2 min delay
+    runJob({ name: 'anomaly_detection', fn: runAnomalyDetectionForAllUsers });
+  }, 120000);
   setInterval(() => {
-    runAnomalyDetectionForAllUsers().catch(err =>
-      console.error('[Anomaly Detection] Error:', (err as Error).message)
-    );
+    runJob({ name: 'anomaly_detection', fn: runAnomalyDetectionForAllUsers });
   }, 30 * 60 * 1000);
 
   // Dividend change detection — every 6 hours (skip weekends — no new dividend data, all users)
@@ -428,14 +381,10 @@ const server = app.listen(config.port, async () => {
     }
   }
   setTimeout(() => {
-    runDividendChangeDetectionForAllUsers().catch(err =>
-      console.error('[Dividend Change Detection] Init failed:', (err as Error).message)
-    );
+    runJob({ name: 'dividend_change_detection', fn: runDividendChangeDetectionForAllUsers });
   }, 60000);
   setInterval(() => {
-    runDividendChangeDetectionForAllUsers().catch(err =>
-      console.error('[Dividend Change Detection] Error:', (err as Error).message)
-    );
+    runJob({ name: 'dividend_change_detection', fn: runDividendChangeDetectionForAllUsers });
   }, 6 * 60 * 60 * 1000);
 
   // Creator reconciliation — daily ledger vs subscription consistency audit.
@@ -443,15 +392,11 @@ const server = app.listen(config.port, async () => {
   if (config.creatorMonetizationEnabled) {
     console.log('[Creator Reconciliation] Running daily');
     setTimeout(() => {
-      runCreatorLedgerReconciliation().catch(err =>
-        console.error('[Creator Reconciliation] Startup run failed:', (err as Error).message)
-      );
+      runJob({ name: 'creator_reconciliation', fn: runCreatorLedgerReconciliation });
     }, 180000); // 3 min delay after startup
 
     setInterval(() => {
-      runCreatorLedgerReconciliation().catch(err =>
-        console.error('[Creator Reconciliation] Daily run failed:', (err as Error).message)
-      );
+      runJob({ name: 'creator_reconciliation', fn: runCreatorLedgerReconciliation });
     }, 24 * 60 * 60 * 1000);
   } else {
     console.log('[Creator Reconciliation] Skipped (creator monetization disabled)');
@@ -461,9 +406,7 @@ const server = app.listen(config.port, async () => {
   if (config.deepResearchEnabled) {
     console.log(`[Deep Research] Poller running every ${config.deepResearchPollIntervalMs / 1000}s`);
     setInterval(() => {
-      pollActiveResearchJobs().catch(err =>
-        console.error('[Deep Research] Poll error:', err instanceof Error ? err.message : err)
-      );
+      runJob({ name: 'deep_research_poller', fn: pollActiveResearchJobs, maxAttempts: 1 });
     }, config.deepResearchPollIntervalMs);
   } else {
     console.log('[Deep Research] Disabled (DEEP_RESEARCH_ENABLED not set)');
@@ -471,8 +414,16 @@ const server = app.listen(config.port, async () => {
 
   // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
   setInterval(() => {
-    evaluateWebhookThresholds();
+    runJob({ name: 'webhook_threshold_eval', fn: async () => { evaluateWebhookThresholds(); }, maxAttempts: 1 });
   }, 5 * 60 * 1000);
+
+  // Prune old job run records daily (keeps last 7 days)
+  setInterval(() => {
+    runJob({ name: 'job_run_prune', fn: async () => {
+      const count = await pruneOldJobRuns();
+      if (count > 0) console.log(`[JobRunner] Pruned ${count} old job runs`);
+    }, maxAttempts: 2 });
+  }, 24 * 60 * 60 * 1000);
 
   // Fundamentals prefetch — continuously cycles through stock universe
   // pre-fetching fundamentals + earnings so data is ready before users search
