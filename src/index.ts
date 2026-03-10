@@ -23,7 +23,7 @@ import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
-import { runJob, pruneOldJobRuns } from './services/job-runner.service';
+import { runJob, pruneOldJobRuns, healOrphanedJobs } from './services/job-runner.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -147,6 +147,9 @@ const server = app.listen(config.port, async () => {
     data: { emailVerified: true },
   }).then(r => { if (r.count > 0) console.log(`[Init] Auto-verified ${r.count} pre-existing users`); })
     .catch(err => console.error('[Init] Auto-verify failed:', err.message));
+
+  // Heal any orphaned jobs from a previous server crash/restart
+  await healOrphanedJobs().catch(err => console.error('[Init] Failed to heal orphaned jobs:', err.message));
 
   // One-time cleanup of incorrectly migrated holdings
   await cleanupMigratedHoldings().catch(err => console.error('[Cleanup] Failed:', err.message));

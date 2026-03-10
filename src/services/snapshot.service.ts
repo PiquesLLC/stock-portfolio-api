@@ -6,6 +6,7 @@ import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 import { replayDailyLedger } from './ledger/replay.service';
 import { LEDGER_SETTLEMENT_POLICY, TRADE_SETTLEMENT_POLICY, isValidLedgerEventType } from './ledger/settlement-policy';
+import { getMarketSession } from '../utils/market-hours';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
@@ -2113,3 +2114,145 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
   return points;
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot Health Check
+// ---------------------------------------------------------------------------
+
+export interface SnapshotHealthReport {
+  userId: string;
+  username: string;
+  lastSnapshotAge: number; // minutes since last snapshot
+  snapshotsLast24h: number;
+  gapCount: number; // number of gaps > 15min during market hours
+  longestGapMinutes: number;
+  status: 'healthy' | 'stale' | 'gaps' | 'critical'; // critical = no snapshots in 24h
+}
+
+/**
+ * Checks snapshot integrity for every user with active holdings (shares > 0).
+ *
+ * For each user it reports:
+ *  - age of the most recent snapshot
+ *  - total snapshot count in the last 24 hours
+ *  - number of gaps > 15 min during market hours (PRE/REG/POST) in the last 24h
+ *  - longest such gap
+ *  - an overall health status
+ */
+export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
+  const now = new Date();
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  // Find all users who have at least one holding with shares > 0
+  const usersWithHoldings = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+
+  const userIds = usersWithHoldings
+    .map(h => h.userId)
+    .filter((id): id is string => id != null);
+
+  if (userIds.length === 0) return [];
+
+  // Batch-fetch usernames
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, username: true },
+  });
+  const usernameMap = new Map(users.map(u => [u.id, u.username]));
+
+  const currentSession = getMarketSession(now);
+  const marketOpen = currentSession === 'PRE' || currentSession === 'REG' || currentSession === 'POST';
+
+  const reports: SnapshotHealthReport[] = [];
+
+  for (const userId of userIds) {
+    // Get snapshots from last 24h ordered chronologically
+    const snapshots = await prisma.portfolioSnapshot.findMany({
+      where: {
+        userId,
+        timestamp: { gte: twentyFourHoursAgo },
+      },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    });
+
+    const snapshotsLast24h = snapshots.length;
+
+    // Last snapshot age — check regardless of 24h window
+    let lastSnapshotAge = Infinity;
+    if (snapshotsLast24h > 0) {
+      const lastTs = snapshots[snapshots.length - 1].timestamp;
+      lastSnapshotAge = (now.getTime() - new Date(lastTs).getTime()) / (1000 * 60);
+    } else {
+      // Check if there's any snapshot at all (older than 24h)
+      const anySnapshot = await prisma.portfolioSnapshot.findFirst({
+        where: { userId },
+        orderBy: { timestamp: 'desc' },
+        select: { timestamp: true },
+      });
+      if (anySnapshot) {
+        lastSnapshotAge = (now.getTime() - new Date(anySnapshot.timestamp).getTime()) / (1000 * 60);
+      }
+    }
+
+    // Analyze gaps during market hours in last 24h
+    let gapCount = 0;
+    let longestGapMinutes = 0;
+
+    if (snapshotsLast24h >= 2) {
+      for (let i = 1; i < snapshots.length; i++) {
+        const prevTime = new Date(snapshots[i - 1].timestamp);
+        const currTime = new Date(snapshots[i].timestamp);
+        const gapMs = currTime.getTime() - prevTime.getTime();
+        const gapMinutes = gapMs / (1000 * 60);
+
+        if (gapMinutes <= 15) continue;
+
+        // Check if the midpoint of the gap falls during market hours
+        const midpoint = new Date(prevTime.getTime() + gapMs / 2);
+        const midSession = getMarketSession(midpoint);
+        if (midSession === 'PRE' || midSession === 'REG' || midSession === 'POST') {
+          gapCount++;
+          if (gapMinutes > longestGapMinutes) {
+            longestGapMinutes = gapMinutes;
+          }
+        }
+      }
+    }
+
+    // Determine status
+    let status: SnapshotHealthReport['status'];
+    if (snapshotsLast24h === 0) {
+      status = 'critical';
+    } else if (marketOpen && lastSnapshotAge > 10) {
+      status = 'stale';
+    } else if (gapCount > 0) {
+      status = 'gaps';
+    } else {
+      status = 'healthy';
+    }
+
+    reports.push({
+      userId,
+      username: usernameMap.get(userId) ?? 'unknown',
+      lastSnapshotAge: Math.round(lastSnapshotAge * 10) / 10, // 1 decimal place
+      snapshotsLast24h,
+      gapCount,
+      longestGapMinutes: Math.round(longestGapMinutes * 10) / 10,
+      status,
+    });
+  }
+
+  // Sort: critical first, then stale, then gaps, then healthy
+  const statusOrder: Record<SnapshotHealthReport['status'], number> = {
+    critical: 0,
+    stale: 1,
+    gaps: 2,
+    healthy: 3,
+  };
+  reports.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+
+  return reports;
+}
