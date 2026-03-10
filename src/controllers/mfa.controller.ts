@@ -99,7 +99,7 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
       mfaBody.refreshToken = refreshToken;
     }
     res.json(mfaBody);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('MFA verify error:');
     res.status(500).json({ error: 'Verification failed' });
   }
@@ -133,7 +133,7 @@ export async function sendEmailOtpHandler(req: Request, res: Response): Promise<
 
     await sendEmailOtp(challenge.userId);
     res.json({ sent: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Send email OTP error:');
     res.status(500).json({ error: 'Failed to send code' });
   }
@@ -146,7 +146,7 @@ export async function mfaStatusHandler(req: AuthRequest, res: Response): Promise
     if (!req.user) { res.status(401).json({ error: 'Not authenticated' }); return; }
     const status = await getUserMfaStatus(req.user.userId);
     res.json(status);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('MFA status error:');
     res.status(500).json({ error: 'Failed to get MFA status' });
   }
@@ -172,7 +172,7 @@ export async function totpSetupHandler(req: AuthRequest, res: Response): Promise
 
     const result = await beginTotpSetup(req.user.userId);
     res.json(result);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('TOTP setup error:');
     res.status(500).json({ error: 'Failed to start TOTP setup' });
   }
@@ -192,7 +192,7 @@ export async function totpVerifySetupHandler(req: AuthRequest, res: Response): P
       return;
     }
     res.json({ enabled: true, backupCodes });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('TOTP verify setup error:');
     res.status(500).json({ error: 'Failed to verify TOTP setup' });
   }
@@ -221,7 +221,7 @@ export async function totpDisableHandler(req: AuthRequest, res: Response): Promi
     }
     await disableTotp(req.user.userId);
     res.json({ disabled: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('TOTP disable error:');
     res.status(500).json({ error: 'Failed to disable TOTP' });
   }
@@ -273,7 +273,7 @@ export async function verifyEmailHandler(req: AuthRequest, res: Response): Promi
       return;
     }
     res.json({ verified: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Verify email error:');
     res.status(500).json({ error: 'Failed to verify email' });
   }
@@ -323,7 +323,7 @@ export async function emailOtpVerifySetupHandler(req: AuthRequest, res: Response
       return;
     }
     res.json({ enabled: true, backupCodes });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Email OTP verify setup error:');
     res.status(500).json({ error: 'Failed to verify email OTP setup' });
   }
@@ -352,7 +352,7 @@ export async function emailOtpDisableHandler(req: AuthRequest, res: Response): P
     }
     await disableEmailOtp(req.user.userId);
     res.json({ disabled: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Email OTP disable error:');
     res.status(500).json({ error: 'Failed to disable email OTP' });
   }
@@ -383,7 +383,7 @@ export async function regenerateBackupCodesHandler(req: AuthRequest, res: Respon
     }
     const codes = await generateBackupCodes(req.user.userId);
     res.json({ backupCodes: codes });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Regenerate backup codes error:');
     res.status(500).json({ error: 'Failed to regenerate backup codes' });
   }

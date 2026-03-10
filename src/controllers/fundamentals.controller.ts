@@ -11,7 +11,7 @@ export async function getEconomicDashboardHandler(req: Request, res: Response): 
   try {
     const dashboard = await getEconomicDashboard();
     res.json(dashboard);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching economic dashboard:');
     res.status(500).json({ error: 'Failed to fetch economic indicators' });
   }
@@ -22,7 +22,7 @@ export async function getInternationalEconomicHandler(req: Request, res: Respons
   try {
     const dashboard = await getInternationalEconomicDashboard();
     res.json(dashboard);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching international economic dashboard:');
     res.status(500).json({ error: 'Failed to fetch international economic indicators' });
   }
@@ -33,7 +33,7 @@ export async function getAVStatusHandler(req: Request, res: Response): Promise<v
   try {
     const stats = await getDailyStats();
     res.json(stats);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching AV status:');
     res.status(500).json({ error: 'Failed to fetch Alpha Vantage status' });
   }
@@ -44,7 +44,7 @@ export async function getPortfolioMacroImpactHandler(req: AuthRequest, res: Resp
   try {
     const impact = await getPortfolioMacroImpact(req.user!.userId);
     res.json(impact);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error computing portfolio macro impact:');
     res.status(500).json({ error: 'Failed to compute macro impact insights' });
   }
@@ -60,7 +60,7 @@ export async function getFundamentalsHandler(req: Request, res: Response): Promi
     }
     const data = await getCompanyFundamentals(ticker);
     res.json(data);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching fundamentals:');
     res.status(500).json({ error: 'Failed to fetch company fundamentals' });
   }
@@ -76,7 +76,7 @@ export async function getEarningsHandler(req: Request, res: Response): Promise<v
     }
     const data = await getEarningsData(ticker);
     res.json(data);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching earnings:');
     res.status(500).json({ error: 'Failed to fetch earnings data' });
   }
@@ -127,7 +127,7 @@ export async function getEarningsBatchHandler(req: Request, res: Response): Prom
 
     const partial = results.some(r => r.status === 'rejected');
     res.json({ results: payload, partial });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching earnings batch:');
     res.status(500).json({ error: 'Failed to fetch earnings batch' });
   }

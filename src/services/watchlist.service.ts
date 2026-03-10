@@ -5,8 +5,8 @@ import NodeCache from 'node-cache';
 import { PlanLimitError } from '../utils/plan-limit.error';
 
 
-// Cache performance data for 5 minutes
-const perfCache = new NodeCache({ stdTTL: 300 });
+// Cache performance data for 15 minutes — balances freshness vs rate-limit protection
+const perfCache = new NodeCache({ stdTTL: 900 });
 
 export interface WatchlistSummary {
   totalValue: number;
@@ -87,6 +87,51 @@ async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
   }
 }
 
+/**
+ * Batch-fetch performance data for multiple tickers.
+ * Checks cache first, then fetches uncached tickers in parallel (max 6 concurrent).
+ */
+async function fetchBatchTickerPerf(tickers: string[]): Promise<Map<string, TickerPerf>> {
+  const result = new Map<string, TickerPerf>();
+  const uncached: string[] = [];
+
+  for (const t of tickers) {
+    const cached = perfCache.get<TickerPerf>(`wl-perf:${t}`);
+    if (cached) {
+      result.set(t, cached);
+    } else {
+      uncached.push(t);
+    }
+  }
+
+  if (uncached.length > 0) {
+    // Fetch uncached tickers in parallel, limited to 6 concurrent
+    const BATCH = 6;
+    for (let i = 0; i < uncached.length; i += BATCH) {
+      const batch = uncached.slice(i, i + BATCH);
+      const settled = await Promise.allSettled(
+        batch.map(async t => {
+          const perf = await fetchTickerPerf(t);
+          return [t, perf] as const;
+        })
+      );
+      for (const r of settled) {
+        if (r.status === 'fulfilled') {
+          result.set(r.value[0], r.value[1]);
+        }
+      }
+    }
+  }
+
+  // Fill missing with zeros
+  const zero: TickerPerf = { weekChangePercent: 0, monthChangePercent: 0, yearChangePercent: 0 };
+  for (const t of tickers) {
+    if (!result.has(t)) result.set(t, zero);
+  }
+
+  return result;
+}
+
 async function fetchPERatios(tickers: string[]): Promise<Map<string, number | null>> {
   const result = new Map<string, number | null>();
   if (tickers.length === 0) return result;
@@ -146,8 +191,7 @@ export async function getWatchlistDetail(id: string, userId: string) {
   const tickers = watchlist.holdings.map(h => h.ticker.toUpperCase());
   const [{ quotes }, perfMap, peMap] = await Promise.all([
     tickers.length > 0 ? fetchPrices(tickers) : { quotes: new Map() as Map<string, any> },
-    Promise.all(tickers.map(async t => [t, await fetchTickerPerf(t)] as const))
-      .then(entries => new Map(entries)),
+    fetchBatchTickerPerf(tickers),
     fetchPERatios(tickers),
   ]);
 

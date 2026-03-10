@@ -174,6 +174,18 @@ app.use((req, res, next) => {
   jsonParser(req, res, next);
 });
 
+// Request timing — log slow requests (>3s) for diagnostics
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (duration > 3000) {
+      console.warn(`[SlowRequest] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+    }
+  });
+  next();
+});
+
 // Global rate limiting - 100 requests per minute
 app.use(apiLimiter);
 

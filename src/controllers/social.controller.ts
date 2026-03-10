@@ -36,7 +36,7 @@ export async function followHandler(req: AuthRequest, res: Response): Promise<vo
 
     await followUser(followerId, userId);
     res.json({ ok: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error following user:');
     res.status(400).json({ error: 'Failed to follow user' });
   }
@@ -56,7 +56,7 @@ export async function unfollowHandler(req: AuthRequest, res: Response): Promise<
 
     await unfollowUser(followerId, userId);
     res.json({ ok: true });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error unfollowing:');
     res.status(500).json({ error: 'Failed to unfollow' });
   }
@@ -73,7 +73,7 @@ export async function isFollowingHandler(req: AuthRequest, res: Response): Promi
     }
     const following = await isFollowing(followerId, userId);
     res.json({ following });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error checking follow:');
     res.status(500).json({ error: 'Failed to check follow status' });
   }
@@ -100,7 +100,7 @@ export async function getFollowersHandler(req: AuthRequest, res: Response): Prom
 
     const followers = await getFollowers(userId);
     res.json(followers);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting followers:');
     res.status(500).json({ error: 'Failed to get followers' });
   }
@@ -127,7 +127,7 @@ export async function getFollowingHandler(req: AuthRequest, res: Response): Prom
 
     const following = await getFollowing(userId);
     res.json(following);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting following:');
     res.status(500).json({ error: 'Failed to get following' });
   }
@@ -211,7 +211,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       creator: creatorProfile,
       viewerAccessLevel: creatorProfile?.accessLevel ?? 'public',
     });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting profile:');
     res.status(500).json({ error: 'Failed to get profile' });
   }
@@ -249,7 +249,7 @@ export async function updateRegionHandler(req: AuthRequest, res: Response): Prom
     });
 
     res.json(user);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error updating region:');
     res.status(500).json({ error: 'Failed to update region' });
   }
@@ -313,7 +313,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       priceSpikePct: user.settings?.priceSpikePct ?? 3.0,
       createdAt: user.createdAt.toISOString(),
     });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting user settings:');
     res.status(500).json({ error: 'Failed to get user settings' });
   }
@@ -497,7 +497,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       annualSalary: annualSalaryResult,
       priceSpikePct: priceSpikePctResult,
     });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error updating user settings:');
     res.status(500).json({ error: 'Failed to update user settings' });
   }
@@ -539,7 +539,7 @@ export async function getFeedHandler(req: AuthRequest, res: Response): Promise<v
     const before = req.query.before as string | undefined;
     const events = await getFeed(userId, 50, before);
     res.json({ events });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error getting feed:');
     res.status(500).json({ error: 'Failed to get feed' });
   }
@@ -553,7 +553,7 @@ export async function deleteActivityEventHandler(req: AuthRequest, res: Response
     const deleted = await deleteActivityEvent(userId, req.params.id);
     if (!deleted) { res.status(404).json({ error: 'Event not found' }); return; }
     res.status(204).send();
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error deleting activity event:');
     res.status(500).json({ error: 'Failed to delete activity event' });
   }

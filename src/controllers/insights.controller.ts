@@ -30,8 +30,8 @@ export async function getHealthHandler(req: AuthRequest, res: Response): Promise
   try {
     const healthScore = await getHealthScore(req.user!.userId);
     res.json(healthScore);
-  } catch (_error) {
-    console.error('Error getting health score:', _error);
+  } catch (error: unknown) {
+    console.error('Error getting health score:', error);
     res.status(500).json({
       error: 'Failed to calculate health score',
       partial: true,
@@ -50,8 +50,8 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
 
     const attribution = await getAttribution(req.user!.userId, window);
     res.json(attribution);
-  } catch (_error) {
-    console.error('Error getting attribution:', _error);
+  } catch (error: unknown) {
+    console.error('Error getting attribution:', error);
     res.status(500).json({
       error: 'Failed to get attribution',
       partial: true,
@@ -63,8 +63,8 @@ export async function getLeakDetectorHandler(req: AuthRequest, res: Response): P
   try {
     const leaks = await getLeakDetector(req.user!.userId);
     res.json(leaks);
-  } catch (_error) {
-    console.error('Error getting leak detector:', _error);
+  } catch (error: unknown) {
+    console.error('Error getting leak detector:', error);
     res.status(500).json({
       error: 'Failed to analyze correlations',
       correlationClusters: [],
@@ -79,8 +79,8 @@ export async function getRiskForecastHandler(req: AuthRequest, res: Response): P
   try {
     const riskForecast = await getRiskForecast(req.user!.userId);
     res.json(riskForecast);
-  } catch (_error) {
-    console.error('Error getting risk forecast:', _error);
+  } catch (error: unknown) {
+    console.error('Error getting risk forecast:', error);
     res.status(500).json({
       error: 'Failed to calculate risk forecast',
       expectedAnnualVol: null,
@@ -105,8 +105,8 @@ export async function getIncomeInsightsHandler(req: AuthRequest, res: Response):
 
     const incomeInsights = await getIncomeInsights(req.user!.userId, window);
     res.json(incomeInsights);
-  } catch (_error) {
-    console.error('Error getting income insights:', _error);
+  } catch (error: unknown) {
+    console.error('Error getting income insights:', error);
     res.status(500).json({
       error: 'Failed to get income insights',
       healthScore: { overall: 0, breakdown: { stability: 0, growth: 0, coverage: 0, diversification: 0 }, grade: 'Poor' },
@@ -205,8 +205,8 @@ export async function getEarningsSummaryHandler(req: AuthRequest, res: Response)
   try {
     const result = await getEarningsSummary(req.user!.userId);
     res.json(result);
-  } catch (_error) {
-    console.error('Earnings summary error:', _error);
+  } catch (error: unknown) {
+    console.error('Earnings summary error:', error);
     res.status(500).json({
       results: [],
       partial: true,

@@ -53,7 +53,7 @@ export async function addDividendEvent(req: AuthRequest, res: Response): Promise
       source: 'manual',
     });
     res.status(201).json(event);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error adding dividend event:');
     res.status(500).json({ error: 'Failed to add dividend event' });
   }
@@ -69,7 +69,7 @@ export async function getEventsHandler(req: AuthRequest, res: Response): Promise
       userId: req.user!.userId,
     });
     res.json(events);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching dividend events:');
     res.status(500).json({ error: 'Failed to fetch dividend events' });
   }
@@ -79,7 +79,7 @@ export async function getUpcomingHandler(req: AuthRequest, res: Response): Promi
   try {
     const events = await getUpcomingDividendEvents(req.user!.userId);
     res.json(events);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching upcoming dividends:');
     res.status(500).json({ error: 'Failed to fetch upcoming dividends' });
   }
@@ -116,7 +116,7 @@ export async function getCreditsHandler(req: AuthRequest, res: Response): Promis
       ticker as string | undefined,
     );
     res.json(credits);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching dividend credits:');
     res.status(500).json({ error: 'Failed to fetch dividend credits' });
   }
@@ -126,7 +126,7 @@ export async function getSummaryHandler(req: AuthRequest, res: Response): Promis
   try {
     const summary = await getDividendSummary(req.user!.userId);
     res.json(summary);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching dividend summary:');
     res.status(500).json({ error: 'Failed to fetch dividend summary' });
   }
@@ -149,7 +149,7 @@ export async function syncHandler(req: AuthRequest, res: Response): Promise<void
       const backfilled = await backfillMissedDividends(userId);
       res.json({ ...result, posted: posted.posted, backfilled: backfilled.totalPosted });
     }
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error syncing dividends:');
     res.status(500).json({ error: 'Failed to sync dividends' });
   }
@@ -159,7 +159,7 @@ export async function backfillHandler(req: AuthRequest, res: Response): Promise<
   try {
     const result = await backfillMissedDividends(req.user!.userId);
     res.json(result);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error backfilling dividends:');
     res.status(500).json({ error: 'Failed to backfill dividends' });
   }
@@ -175,7 +175,7 @@ export async function getReinvestmentsHandler(req: AuthRequest, res: Response): 
       ticker as string | undefined
     );
     res.json(reinvestments);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching reinvestments:');
     res.status(500).json({ error: 'Failed to fetch reinvestments' });
   }
@@ -226,7 +226,7 @@ export async function getDripSettingsHandler(req: AuthRequest, res: Response): P
   try {
     const settings = await getDripSettings(req.user!.userId);
     res.json(settings);
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error fetching DRIP settings:');
     res.status(500).json({ error: 'Failed to fetch DRIP settings' });
   }
@@ -242,7 +242,7 @@ export async function updateDripSettingsHandler(req: AuthRequest, res: Response)
     // Always use system user — never accept userId from body
     await updateDripSettings(req.user!.userId, enabled);
     res.json({ enabled });
-  } catch (_error) {
+  } catch (error: unknown) {
     console.error('Error updating DRIP settings:');
     res.status(500).json({ error: 'Failed to update DRIP settings' });
   }

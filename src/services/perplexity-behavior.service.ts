@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { getUserActivity } from './activity.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -146,8 +146,12 @@ export async function getBehaviorInsights(userId: string): Promise<BehaviorInsig
       return buildFallback();
     }
 
-    const jsonStr = extractJson(resp.content);
-    const parsed = JSON.parse(jsonStr);
+    const parseResult = parsePerplexityJson(resp.content);
+    if (!parseResult.ok) {
+      console.warn(`[Perplexity Behavior] parse_failed reason=${parseResult.reason}`);
+      return buildFallback();
+    }
+    const parsed = parseResult.data as any;
 
     const validCategories = ['concentration', 'timing', 'sizing', 'diversification', 'general'];
     const validSeverities = ['info', 'warning', 'positive'];
