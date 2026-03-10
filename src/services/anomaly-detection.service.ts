@@ -264,6 +264,9 @@ export async function detectAnomalies(userId: string): Promise<void> {
   console.log(`[Anomaly Detection] Found ${candidates.length} candidates`);
 
   // Filter by cooldown and create events
+  // Cap news fetches per scan to avoid bursting Finnhub rate limits during volatile sessions
+  const MAX_NEWS_PER_SCAN = 5;
+  let newsFetches = 0;
   let created = 0;
   for (const c of candidates) {
     const onCooldown = await checkCooldown(userId, c.ticker, c.type);
@@ -273,8 +276,9 @@ export async function detectAnomalies(userId: string): Promise<void> {
     let analysis: string | null = null;
     let citations: string | null = null;
 
-    if (c.type === 'price_spike' || c.type === 'volume_spike') {
+    if ((c.type === 'price_spike' || c.type === 'volume_spike') && newsFetches < MAX_NEWS_PER_SCAN) {
       const result = await getNewsAnalysis(c.ticker);
+      newsFetches++;
       if (result) {
         analysis = result.analysis;
         citations = result.citations.length > 0 ? JSON.stringify(result.citations) : null;

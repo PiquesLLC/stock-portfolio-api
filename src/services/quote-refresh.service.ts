@@ -74,13 +74,18 @@ async function runRefreshCycle(): Promise<void> {
   const startMs = Date.now();
 
   try {
+    const nowMs = Date.now();
+    const session = getMarketSession(new Date(nowMs));
+
+    // Skip refresh when market is closed — no new price data to fetch
+    if (session === 'CLOSED') {
+      return;
+    }
+
     const tickers = await getActiveTickers();
     if (tickers.length === 0) {
       return;
     }
-
-    const nowMs = Date.now();
-    const session = getMarketSession(new Date(nowMs));
 
     let polygonRefreshed = 0;
     let yahooOverlayCount = 0;

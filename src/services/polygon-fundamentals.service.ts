@@ -561,6 +561,9 @@ async function refreshFundamentals(ticker: string): Promise<void> {
   console.log(`[Polygon Fundamentals] Cached ${upper} (${annualFilings.length} annual, ${quarterlyFilings.length} quarterly)`);
 }
 
+// In-flight dedupe: prevents thundering herd on concurrent requests for the same ticker
+const inflightRefresh = new Map<string, Promise<void>>();
+
 /** Get fundamentals — serve from cache, refresh from Polygon if stale. */
 export async function getCompanyFundamentals(ticker: string): Promise<FundamentalsResponse> {
   const upper = ticker.toUpperCase();
@@ -585,11 +588,12 @@ export async function getCompanyFundamentals(ticker: string): Promise<Fundamenta
 
     const result = deserializeCache(upper, cached, dataAge);
 
-    if (dataAge === 'stale') {
-      // Refresh in background, return stale data now
-      refreshFundamentals(upper).catch(err =>
-        console.error(`[Polygon Fundamentals] Background refresh failed for ${upper}:`, err.message)
-      );
+    if (dataAge === 'stale' && !inflightRefresh.has(upper)) {
+      // Refresh in background, return stale data now. Dedupe concurrent requests.
+      const p = refreshFundamentals(upper)
+        .catch(err => console.error(`[Polygon Fundamentals] Background refresh failed for ${upper}:`, err.message))
+        .finally(() => inflightRefresh.delete(upper));
+      inflightRefresh.set(upper, p);
     }
 
     return result;
