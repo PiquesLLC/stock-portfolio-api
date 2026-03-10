@@ -2121,7 +2121,7 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
 export interface SnapshotHealthReport {
   userId: string;
   username: string;
-  lastSnapshotAge: number; // minutes since last snapshot
+  lastSnapshotAge: number | null; // minutes since last snapshot, null if never
   snapshotsLast24h: number;
   gapCount: number; // number of gaps > 15min during market hours
   longestGapMinutes: number;
@@ -2181,7 +2181,7 @@ export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
     const snapshotsLast24h = snapshots.length;
 
     // Last snapshot age — check regardless of 24h window
-    let lastSnapshotAge = Infinity;
+    let lastSnapshotAge: number | null = null;
     if (snapshotsLast24h > 0) {
       const lastTs = snapshots[snapshots.length - 1].timestamp;
       lastSnapshotAge = (now.getTime() - new Date(lastTs).getTime()) / (1000 * 60);
@@ -2198,35 +2198,40 @@ export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
     }
 
     // Analyze gaps during market hours in last 24h
+    // Include boundary gaps: windowStart→firstSnapshot and lastSnapshot→now
     let gapCount = 0;
     let longestGapMinutes = 0;
 
-    if (snapshotsLast24h >= 2) {
-      for (let i = 1; i < snapshots.length; i++) {
-        const prevTime = new Date(snapshots[i - 1].timestamp);
-        const currTime = new Date(snapshots[i].timestamp);
-        const gapMs = currTime.getTime() - prevTime.getTime();
-        const gapMinutes = gapMs / (1000 * 60);
-
-        if (gapMinutes <= 15) continue;
-
-        // Check if the midpoint of the gap falls during market hours
-        const midpoint = new Date(prevTime.getTime() + gapMs / 2);
-        const midSession = getMarketSession(midpoint);
-        if (midSession === 'PRE' || midSession === 'REG' || midSession === 'POST') {
-          gapCount++;
-          if (gapMinutes > longestGapMinutes) {
-            longestGapMinutes = gapMinutes;
-          }
+    const checkGap = (start: Date, end: Date) => {
+      const gapMs = end.getTime() - start.getTime();
+      const gapMinutes = gapMs / (1000 * 60);
+      if (gapMinutes <= 15) return;
+      const midpoint = new Date(start.getTime() + gapMs / 2);
+      const midSession = getMarketSession(midpoint);
+      if (midSession === 'PRE' || midSession === 'REG' || midSession === 'POST') {
+        gapCount++;
+        if (gapMinutes > longestGapMinutes) {
+          longestGapMinutes = gapMinutes;
         }
       }
+    };
+
+    if (snapshotsLast24h > 0) {
+      // Boundary gap: window start → first snapshot
+      checkGap(twentyFourHoursAgo, new Date(snapshots[0].timestamp));
+      // Gaps between consecutive snapshots
+      for (let i = 1; i < snapshots.length; i++) {
+        checkGap(new Date(snapshots[i - 1].timestamp), new Date(snapshots[i].timestamp));
+      }
+      // Boundary gap: last snapshot → now
+      checkGap(new Date(snapshots[snapshots.length - 1].timestamp), now);
     }
 
     // Determine status
     let status: SnapshotHealthReport['status'];
     if (snapshotsLast24h === 0) {
       status = 'critical';
-    } else if (marketOpen && lastSnapshotAge > 10) {
+    } else if (marketOpen && (lastSnapshotAge == null || lastSnapshotAge > 10)) {
       status = 'stale';
     } else if (gapCount > 0) {
       status = 'gaps';
@@ -2237,7 +2242,7 @@ export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
     reports.push({
       userId,
       username: usernameMap.get(userId) ?? 'unknown',
-      lastSnapshotAge: Math.round(lastSnapshotAge * 10) / 10, // 1 decimal place
+      lastSnapshotAge: lastSnapshotAge != null ? Math.round(lastSnapshotAge * 10) / 10 : null,
       snapshotsLast24h,
       gapCount,
       longestGapMinutes: Math.round(longestGapMinutes * 10) / 10,

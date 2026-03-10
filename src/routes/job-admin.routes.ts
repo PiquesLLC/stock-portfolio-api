@@ -6,7 +6,8 @@ import { config } from '../config';
 
 const router = Router();
 
-function isAdmin(userId: string): boolean {
+function isAdmin(userId?: string): boolean {
+  if (!userId) return false;
   return config.waitlistAdminUserIds.includes(userId) ||
     config.creatorAdminUserIds.includes(userId);
 }
