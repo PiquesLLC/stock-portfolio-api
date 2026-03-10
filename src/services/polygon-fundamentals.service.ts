@@ -194,8 +194,8 @@ function parseBalanceSheet(filing: PolygonFiling, period: 'annual' | 'quarterly'
       pVal(bs, 'cash_and_short_term_investments') ??
       pVal(bs, 'cash') ??
       pVal(bs, 'cash_cash_equivalents_and_short_term_investments'),
-    longTermDebt: pVal(bs, 'long_term_debt') ?? pVal(bs, 'noncurrent_liabilities'),
-    currentDebt: pVal(bs, 'current_debt') ?? pVal(bs, 'other_current_liabilities'),
+    longTermDebt: pVal(bs, 'long_term_debt'),
+    currentDebt: pVal(bs, 'current_debt'),
   };
 }
 
@@ -206,12 +206,15 @@ function parseCashFlow(filing: PolygonFiling, period: 'annual' | 'quarterly'): P
   const opCF = pVal(cf, 'net_cash_flow_from_operating_activities') ??
     pVal(cf, 'net_cash_flow_from_operating_activities_continuing');
 
-  // Polygon doesn't break out CapEx separately — use investing activities as proxy
+  // Prefer explicit CapEx fields; fall back to total investing activities as proxy
+  const explicitCapex = pVal(cf, 'capital_expenditure') ??
+    pVal(cf, 'payments_to_acquire_property_plant_and_equipment');
   const investingCF = pVal(cf, 'net_cash_flow_from_investing_activities') ??
     pVal(cf, 'net_cash_flow_from_investing_activities_continuing');
+  const capex = explicitCapex ?? investingCF;
 
-  // Free cash flow = operating - |investing| (conservative proxy since investing includes acquisitions)
-  const fcf = opCF != null && investingCF != null ? opCF + investingCF : null;
+  // Free cash flow: OCF + CapEx (CapEx is typically negative)
+  const fcf = opCF != null && capex != null ? opCF + capex : null;
 
   // Financing activities includes dividends + buybacks (not broken out separately)
   const financingCF = pVal(cf, 'net_cash_flow_from_financing_activities') ??
@@ -221,7 +224,7 @@ function parseCashFlow(filing: PolygonFiling, period: 'annual' | 'quarterly'): P
     fiscalDateEnding: filing.end_date,
     period,
     operatingCashflow: opCF,
-    capitalExpenditures: investingCF != null ? (investingCF < 0 ? investingCF : -investingCF) : null,
+    capitalExpenditures: capex != null ? (capex < 0 ? capex : -capex) : null,
     freeCashFlow: fcf,
     dividendPayout: financingCF, // Financing activities as proxy (includes dividends + buybacks)
     netIncome: pVal(is, 'net_income_loss'),
@@ -284,9 +287,16 @@ function buildOverviewFromFilings(
     ? netIncomeTTM / equity
     : null;
 
-  const sharesOutstanding = pVal(is, 'weighted_average_shares') ??
-    pVal(is, 'diluted_average_shares') ??
-    (tickerDetails?.weighted_shares_outstanding ?? tickerDetails?.share_class_shares_outstanding ?? null);
+  // Prefer ticker details (authoritative) over quarterly filing data which can have
+  // bogus diluted_average_shares (e.g. AMZN Q4 reports 12M instead of 10.8B)
+  const tickerShares = tickerDetails?.weighted_shares_outstanding ?? tickerDetails?.share_class_shares_outstanding ?? null;
+  // Prefer annual filing shares over quarterly (quarterly Q4 filings often have bad data)
+  const annualIS = latestAnnual?.financials?.income_statement;
+  const filingShares = pVal(annualIS, 'weighted_average_shares') ?? pVal(annualIS, 'diluted_average_shares')
+    ?? pVal(is, 'weighted_average_shares') ?? pVal(is, 'diluted_average_shares');
+  const sharesOutstanding = tickerShares
+    ?? filingShares
+    ?? null;
 
   const marketCap = tickerDetails?.market_cap ?? null;
 
@@ -317,6 +327,128 @@ function buildOverviewFromFilings(
   };
 }
 
+// ── Finnhub SEC Filing Enrichment ─────────────────────────────────────
+
+interface XBRLEntry { concept: string; value: number; unit: string; label: string; }
+
+function findXBRL(entries: XBRLEntry[] | undefined, patterns: string[]): number | null {
+  if (!entries) return null;
+  for (const pat of patterns) {
+    const lower = pat.toLowerCase();
+    // Use endsWith to avoid substring ambiguity (e.g. 'LongTermDebt' matching 'LongTermDebtCurrent')
+    const found = entries.find(e => e.concept.toLowerCase().endsWith(lower));
+    if (found && typeof found.value === 'number' && Number.isFinite(found.value)) return found.value;
+  }
+  return null;
+}
+
+/**
+ * Fetch Finnhub financials-reported (SEC XBRL) and backfill missing data on
+ * Polygon-parsed balance sheets and cash flow statements.
+ * Fixes: cash (missing for AMZN/AAPL/TSLA/META), capex/FCF (investingCF proxy),
+ * and debt (currentDebt often missing from Polygon).
+ */
+async function enrichFromFinnhubReported(
+  ticker: string,
+  balanceParsed: { annual: ParsedBalanceSheet[]; quarterly: ParsedBalanceSheet[] },
+  cashFlowParsed: { annual: ParsedCashFlow[]; quarterly: ParsedCashFlow[] },
+): Promise<void> {
+  const { finnhubQueue } = await import('../utils/finnhub-queue');
+
+  const data = await finnhubQueue.request<{
+    data?: Array<{ year: number; quarter: number; report: { bs?: XBRLEntry[]; cf?: XBRLEntry[]; ic?: XBRLEntry[] } }>;
+  }>('/stock/financials-reported', { symbol: ticker, freq: 'annual' });
+
+  if (!data?.data?.length) return;
+
+  let enriched = 0;
+
+  // Build a map of fiscal year end → XBRL data for matching
+  for (const filing of data.data) {
+    const bs = filing.report?.bs;
+    const cf = filing.report?.cf;
+    if (!bs && !cf) continue;
+
+    // Match to our parsed annual data by fiscal year.
+    // Most companies: end_date year === fiscal year (e.g. "2024-12-31" for FY2024).
+    // Non-calendar FY (e.g. Walmart Jan end): FY2024 → end_date "2025-01-31".
+    // So also check year+1 as fallback for off-calendar fiscal years.
+    const yearStr = String(filing.year);
+    const yearPlusOne = String(filing.year + 1);
+
+    // Enrich balance sheet
+    const matchedBS = balanceParsed.annual.find(b => b.fiscalDateEnding.startsWith(yearStr))
+      ?? balanceParsed.annual.find(b => b.fiscalDateEnding.startsWith(yearPlusOne));
+    if (matchedBS) {
+      // Cash
+      if (matchedBS.cashAndEquivalents == null) {
+        const cashVal = findXBRL(bs, [
+          'CashAndCashEquivalentsAtCarryingValue',
+          'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents',
+          'CashAndCashEquivalents',
+        ]);
+        // Also try to include short-term investments (closer to "cash & equivalents" used in DCF)
+        const stInv = findXBRL(bs, [
+          'MarketableSecuritiesCurrent',
+          'ShortTermInvestments',
+          'AvailableForSaleSecuritiesCurrent',
+        ]);
+        if (cashVal != null) {
+          matchedBS.cashAndEquivalents = cashVal + (stInv ?? 0);
+          enriched++;
+        }
+      }
+      // Long-term debt
+      if (matchedBS.longTermDebt == null) {
+        const ltd = findXBRL(bs, [
+          'LongTermDebtNoncurrent', 'LongTermDebt',
+          'LongTermDebtAndCapitalLeaseObligations',
+        ]);
+        if (ltd != null) { matchedBS.longTermDebt = ltd; enriched++; }
+      }
+      // Current debt
+      if (matchedBS.currentDebt == null) {
+        const cd = findXBRL(bs, [
+          'LongTermDebtCurrent', 'DebtCurrent', 'ShortTermBorrowings',
+          'CommercialPaper', 'CurrentPortionOfLongTermDebt',
+        ]);
+        if (cd != null) { matchedBS.currentDebt = cd; enriched++; }
+      }
+    }
+
+    // Enrich cash flow statement
+    const matchedCF = cashFlowParsed.annual.find(c => c.fiscalDateEnding.startsWith(yearStr))
+      ?? cashFlowParsed.annual.find(c => c.fiscalDateEnding.startsWith(yearPlusOne));
+    if (matchedCF && cf) {
+      const realCapex = findXBRL(cf, [
+        'PaymentsToAcquirePropertyPlantAndEquipment',
+        'PaymentsToAcquireProductiveAssets',
+      ]);
+      const realOpCF = findXBRL(cf, [
+        'NetCashProvidedByUsedInOperatingActivities',
+        'NetCashProvidedByOperatingActivities',
+      ]);
+      if (realCapex != null) {
+        // XBRL reports capex as positive (cash outflow); our format expects negative
+        matchedCF.capitalExpenditures = -Math.abs(realCapex);
+        if (realOpCF != null) {
+          // Keep operatingCashflow consistent with the OCF used for FCF
+          matchedCF.operatingCashflow = realOpCF;
+          matchedCF.freeCashFlow = realOpCF - Math.abs(realCapex);
+          enriched++;
+        } else if (matchedCF.operatingCashflow != null) {
+          matchedCF.freeCashFlow = matchedCF.operatingCashflow - Math.abs(realCapex);
+          enriched++;
+        }
+      }
+    }
+  }
+
+  if (enriched > 0) {
+    console.log(`[Polygon Fundamentals] Enriched ${ticker} with ${enriched} fields from Finnhub SEC data`);
+  }
+}
+
 // ── Cache + Public API ────────────────────────────────────────────────
 
 function deserializeCache(
@@ -324,10 +456,19 @@ function deserializeCache(
   cached: { overviewJson: string | null; incomeJson: string | null; balanceJson: string | null; cashFlowJson: string | null; lastFetchedAt: Date },
   dataAge: 'fresh' | 'cached' | 'stale',
 ): FundamentalsResponse {
-  const overview = cached.overviewJson ? JSON.parse(cached.overviewJson) : null;
-  const income = cached.incomeJson ? JSON.parse(cached.incomeJson) : { annual: [], quarterly: [] };
-  const balance = cached.balanceJson ? JSON.parse(cached.balanceJson) : { annual: [], quarterly: [] };
-  const cashFlow = cached.cashFlowJson ? JSON.parse(cached.cashFlowJson) : { annual: [], quarterly: [] };
+  const empty = { annual: [], quarterly: [] };
+  let overview = null;
+  let income = empty;
+  let balance = empty;
+  let cashFlow = empty;
+  try {
+    overview = cached.overviewJson ? JSON.parse(cached.overviewJson) : null;
+    income = cached.incomeJson ? JSON.parse(cached.incomeJson) : empty;
+    balance = cached.balanceJson ? JSON.parse(cached.balanceJson) : empty;
+    cashFlow = cached.cashFlowJson ? JSON.parse(cached.cashFlowJson) : empty;
+  } catch (err) {
+    console.error(`[Fundamentals] Corrupted cache for ${ticker}, returning empty:`, (err as Error).message);
+  }
 
   return {
     ticker,
@@ -387,6 +528,11 @@ async function refreshFundamentals(ticker: string): Promise<void> {
     quarterly: quarterlyFilings.map(f => parseCashFlow(f, 'quarterly')),
   };
 
+  // Enrich from Finnhub financials-reported (SEC XBRL data) for accurate cash, capex, debt
+  try {
+    await enrichFromFinnhubReported(upper, balanceParsed, cashFlowParsed);
+  } catch { /* Finnhub enrichment is best-effort */ }
+
   await prisma.fundamentalsCache.upsert({
     where: { ticker: upper },
     update: {
@@ -405,6 +551,12 @@ async function refreshFundamentals(ticker: string): Promise<void> {
       lastFetchedAt: new Date(),
     },
   });
+
+  // Invalidate Nala Score cache since underlying data changed
+  try {
+    const { invalidateNalaScoreCache } = await import('./nala-score.service');
+    invalidateNalaScoreCache(upper);
+  } catch { /* nala-score service may not be loaded yet at startup */ }
 
   console.log(`[Polygon Fundamentals] Cached ${upper} (${annualFilings.length} annual, ${quarterlyFilings.length} quarterly)`);
 }

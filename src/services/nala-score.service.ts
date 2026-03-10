@@ -163,10 +163,12 @@ function scoreQuality(fundamentals: FundamentalsResponse): NalaDimension {
   const marginScore = margin == null ? NEUTRAL
     : margin >= 25 ? 25 : margin >= 20 ? 22 : margin >= 15 ? 18 : margin >= 10 ? 14 : margin >= 5 ? 10 : margin >= 0 ? 6 : 3;
 
-  // Debt-to-Equity
-  const totalDebt = (bs?.longTermDebt ?? 0) + (bs?.currentDebt ?? 0);
+  // Debt-to-Equity — only score when at least one debt field is present;
+  // missing debt ≠ zero debt (would falsely give perfect 25/25)
+  const hasAnyDebtData = bs?.longTermDebt != null || bs?.currentDebt != null;
+  const totalDebt = hasAnyDebtData ? (bs?.longTermDebt ?? 0) + (bs?.currentDebt ?? 0) : null;
   const equity = bs?.totalShareholderEquity;
-  const deRatio = equity != null && equity > 0 ? totalDebt / equity : null;
+  const deRatio = totalDebt != null && equity != null && equity > 0 ? totalDebt / equity : null;
   // Lower is better — invert for scoring
   const deScore = deRatio == null ? NEUTRAL
     : deRatio <= 0.3 ? 25 : deRatio <= 0.5 ? 22 : deRatio <= 1.0 ? 18 : deRatio <= 1.5 ? 14 : deRatio <= 2.0 ? 10 : deRatio <= 3.0 ? 6 : 3;
@@ -427,7 +429,7 @@ function scoreETFDiversification(about: AssetAbout | null, metrics: StockMetrics
   const isBroadMarket = /blend|total|market|composite|500|index|core/i.test(category);
   const isSectorSpecific = /sector|tech|health|energy|financ|real estate|utilities|communication/i.test(category);
   const isIntl = /international|global|emerging|foreign|world|europe|asia|pacific|japan/i.test(category);
-  const categoryScore = isBroadMarket ? 25 : isIntl ? 20 : category ? 15 : isSectorSpecific ? 12 : NEUTRAL;
+  const categoryScore = isBroadMarket ? 25 : isIntl ? 20 : isSectorSpecific ? 12 : category ? 15 : NEUTRAL;
 
   // Holdings depth
   const holdings = about?.numberOfHoldings;
@@ -663,4 +665,15 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
 
   insightsCache.set(cacheKey, result, 86400);
   return result;
+}
+
+/** Invalidate Nala Score cache when underlying fundamentals data changes */
+export function invalidateNalaScoreCache(ticker?: string): void {
+  if (ticker) {
+    insightsCache.del(`nala-score:${ticker.toUpperCase()}`);
+    return;
+  }
+  for (const key of insightsCache.keys()) {
+    if (key.startsWith('nala-score:')) insightsCache.del(key);
+  }
 }

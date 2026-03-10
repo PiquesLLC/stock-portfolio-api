@@ -31,7 +31,7 @@ export async function getHealthHandler(req: AuthRequest, res: Response): Promise
     const healthScore = await getHealthScore(req.user!.userId);
     res.json(healthScore);
   } catch (_error) {
-    console.error('Error getting health score:');
+    console.error('Error getting health score:', _error);
     res.status(500).json({
       error: 'Failed to calculate health score',
       partial: true,
@@ -51,7 +51,7 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
     const attribution = await getAttribution(req.user!.userId, window);
     res.json(attribution);
   } catch (_error) {
-    console.error('Error getting attribution:');
+    console.error('Error getting attribution:', _error);
     res.status(500).json({
       error: 'Failed to get attribution',
       partial: true,
@@ -64,7 +64,7 @@ export async function getLeakDetectorHandler(req: AuthRequest, res: Response): P
     const leaks = await getLeakDetector(req.user!.userId);
     res.json(leaks);
   } catch (_error) {
-    console.error('Error getting leak detector:');
+    console.error('Error getting leak detector:', _error);
     res.status(500).json({
       error: 'Failed to analyze correlations',
       correlationClusters: [],
@@ -80,7 +80,7 @@ export async function getRiskForecastHandler(req: AuthRequest, res: Response): P
     const riskForecast = await getRiskForecast(req.user!.userId);
     res.json(riskForecast);
   } catch (_error) {
-    console.error('Error getting risk forecast:');
+    console.error('Error getting risk forecast:', _error);
     res.status(500).json({
       error: 'Failed to calculate risk forecast',
       expectedAnnualVol: null,
@@ -106,7 +106,7 @@ export async function getIncomeInsightsHandler(req: AuthRequest, res: Response):
     const incomeInsights = await getIncomeInsights(req.user!.userId, window);
     res.json(incomeInsights);
   } catch (_error) {
-    console.error('Error getting income insights:');
+    console.error('Error getting income insights:', _error);
     res.status(500).json({
       error: 'Failed to get income insights',
       healthScore: { overall: 0, breakdown: { stability: 0, growth: 0, coverage: 0, diversification: 0 }, grade: 'Poor' },
@@ -138,7 +138,7 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('Error getting portfolio briefing:');
+    console.error('Error getting portfolio briefing:', error);
     res.status(500).json({
       error: 'Failed to generate briefing',
       generatedAt: new Date().toISOString(),
@@ -165,7 +165,7 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('Error getting behavior insights:');
+    console.error('Error getting behavior insights:', error);
     res.status(500).json({
       error: 'Failed to generate behavior insights',
       generatedAt: new Date().toISOString(),
@@ -188,7 +188,7 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('Daily report error:');
+    console.error('Daily report error:', error);
     res.status(500).json({
       generatedAt: new Date().toISOString(),
       greeting: 'Good morning!',
@@ -206,7 +206,7 @@ export async function getEarningsSummaryHandler(req: AuthRequest, res: Response)
     const result = await getEarningsSummary(req.user!.userId);
     res.json(result);
   } catch (_error) {
-    console.error('Earnings summary error:');
+    console.error('Earnings summary error:', _error);
     res.status(500).json({
       results: [],
       partial: true,
@@ -224,7 +224,7 @@ export async function regenerateDailyReportHandler(req: AuthRequest, res: Respon
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('Daily report regenerate error:');
+    console.error('Daily report regenerate error:', error);
     res.status(500).json({
       generatedAt: new Date().toISOString(),
       greeting: 'Good morning!',
@@ -264,7 +264,7 @@ export async function explainBriefingHandler(req: AuthRequest, res: Response): P
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
-    console.error('[Briefing Explain] Error');
+    console.error('[Briefing Explain] Error:', error);
     res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
   }
 }
