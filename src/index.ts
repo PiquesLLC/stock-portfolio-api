@@ -12,7 +12,7 @@ import { detectAnomalies, detectDividendChanges } from './services/anomaly-detec
 import { getMarketSession } from './utils/market-hours';
 import prisma from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
-import { rotateTickerFundamentals } from './services/fundamentals.service';
+import { refreshFundamentalsForTicker } from './services/polygon-fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { backfillPolygonScreenerData } from './services/polygon-screener.service';
 import { sendEarningsAlerts } from './services/notifications.service';
@@ -297,24 +297,34 @@ const server = app.listen(config.port, async () => {
     );
   }, 24 * 60 * 60 * 1000);
 
-  // Alpha Vantage: Fundamentals rotation â€” refresh oldest tickers every 6 hours (4 API calls per ticker)
-  console.log('[AV Fundamentals] Rotating every 6 hours');
+  // Polygon Fundamentals: refresh all held tickers every 12 hours (unlimited API calls)
+  console.log('[Polygon Fundamentals] Rotating every 12 hours');
   setTimeout(async () => {
     try {
       const tickers = await getAllHeldTickers();
-      await rotateTickerFundamentals(tickers);
+      for (const t of tickers) {
+        await refreshFundamentalsForTicker(t).catch(err =>
+          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
+        );
+      }
+      console.log(`[Polygon Fundamentals] Startup rotation complete: ${tickers.length} tickers`);
     } catch (err) {
-      console.error('[AV Fundamentals] Startup rotation failed:', (err as Error).message);
+      console.error('[Polygon Fundamentals] Startup rotation failed:', (err as Error).message);
     }
-  }, 120000); // 120s delay
+  }, 120000);
   setInterval(async () => {
     try {
       const tickers = await getAllHeldTickers();
-      await rotateTickerFundamentals(tickers);
+      for (const t of tickers) {
+        await refreshFundamentalsForTicker(t).catch(err =>
+          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
+        );
+      }
+      console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
     } catch (err) {
-      console.error('[AV Fundamentals] Rotation error:', (err as Error).message);
+      console.error('[Polygon Fundamentals] Rotation error:', (err as Error).message);
     }
-  }, 6 * 60 * 60 * 1000);
+  }, 12 * 60 * 60 * 1000);
 
   // Heatmap fundamentals backfill â€” refresh heatmap tickers (missing/stale) on startup + daily
   console.log('[Heatmap Fundamentals] Backfill scheduled');

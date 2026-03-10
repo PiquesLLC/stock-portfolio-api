@@ -16,7 +16,7 @@
  */
 
 import { insightsCache } from '../utils/finnhub';
-import { getCompanyFundamentals, FundamentalsResponse, ParsedOverview } from './fundamentals.service';
+import { getCompanyFundamentals, FundamentalsResponse, ParsedOverview } from './polygon-fundamentals.service';
 import { getAnalystSnapshot } from './analyst.service';
 import { fetchDailyCandles, fetchStockDetails } from './market.service';
 import { getAssetAbout } from '../utils/yahoo-finance';

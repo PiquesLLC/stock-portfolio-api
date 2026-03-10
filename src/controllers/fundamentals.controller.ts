@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { getEconomicDashboard, getInternationalEconomicDashboard } from '../services/economic.service';
 import { getPortfolioMacroImpact } from '../services/portfolioMacroImpact.service';
-import { getCompanyFundamentals } from '../services/fundamentals.service';
+import { getCompanyFundamentals } from '../services/polygon-fundamentals.service';
 import { getEarningsData } from '../services/earnings.service';
 import { getDailyStats } from '../utils/alpha-vantage';
 
