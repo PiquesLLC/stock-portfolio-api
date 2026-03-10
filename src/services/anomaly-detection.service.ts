@@ -4,7 +4,7 @@ import { getHoldings } from './portfolio.service';
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { getSector } from '../utils/sectors';
-import { callPerplexity } from '../utils/perplexity';
+import { fetchTickerNews } from './news.service';
 import { sendPushToUser } from './push.service';
 
 
@@ -21,7 +21,7 @@ const ETF_VARIABLE_DISTRIBUTIONS = new Set([
   'GLD', 'SLV', 'IAU', 'GDXJ', 'XBI', 'XME', 'IGV', 'NLR',
 ]);
 
-// Perplexity explanation cache: 8 hours per ticker — news explanation is stable after initial break
+// News analysis cache: 8 hours per ticker — news doesn't change fast for the same move
 const analysisCache = new NodeCache({ stdTTL: 28800 });
 
 // Volume baseline cache: daily candles cached 6 hours (historical data won't change intraday)
@@ -87,39 +87,31 @@ async function checkCooldown(userId: string, ticker: string, type: string, coold
   return recent != null; // true = on cooldown, skip
 }
 
-async function getPerplexityAnalysis(ticker: string, context: string, userId?: string): Promise<{ analysis: string; citations: string[] } | null> {
+/**
+ * Get news-based analysis for a ticker using Finnhub company news (free).
+ * Picks the most recent relevant headlines and builds a short summary.
+ */
+async function getNewsAnalysis(ticker: string): Promise<{ analysis: string; citations: string[] } | null> {
   const cacheKey = `analysis:${ticker}:${formatDate(new Date())}`;
   const cached = analysisCache.get<{ analysis: string; citations: string[] }>(cacheKey);
   if (cached) return cached;
 
   try {
-    const resp = await callPerplexity([
-      {
-        role: 'system',
-        content: 'You are a financial news analyst. Provide a brief 2-3 sentence explanation. Be specific about today\'s catalysts. Respond in plain text, no JSON.',
-      },
-      {
-        role: 'user',
-        content: context,
-      },
-    ], { timeout: 30000, feature: 'anomaly-analysis', userId, ticker });
+    const news = await fetchTickerNews(ticker, 5);
+    if (!news || news.length === 0) return null;
 
-    if (!resp?.content) return null;
+    // Pick up to 3 most recent headlines as the analysis
+    const recent = news.slice(0, 3);
+    const analysis = recent
+      .map(n => `${n.headline} (${n.source})`)
+      .join('. ') + '.';
+    const citations = recent.map(n => n.url).filter(Boolean);
 
-    // sonar-pro may wrap in markdown fences — strip them
-    let analysis = resp.content;
-    if (analysis.startsWith('```')) {
-      analysis = analysis.replace(/```[a-z]*\n?/g, '').replace(/```$/g, '').trim();
-    }
-
-    const result = {
-      analysis,
-      citations: resp.citations ?? [],
-    };
+    const result = { analysis, citations };
     analysisCache.set(cacheKey, result);
     return result;
   } catch (err: any) {
-    console.error(`[Anomaly] Perplexity failed for ${ticker}:`, err.message);
+    console.error(`[Anomaly] News fetch failed for ${ticker}:`, err.message);
     return null;
   }
 }
@@ -272,29 +264,17 @@ export async function detectAnomalies(userId: string): Promise<void> {
   console.log(`[Anomaly Detection] Found ${candidates.length} candidates`);
 
   // Filter by cooldown and create events
-  // Cap Perplexity calls per scan to control costs (cache hits don't count)
-  const MAX_PERPLEXITY_PER_SCAN = 3;
-  let perplexityCalls = 0;
   let created = 0;
   for (const c of candidates) {
     const onCooldown = await checkCooldown(userId, c.ticker, c.type);
     if (onCooldown) continue;
 
-    // Only call Perplexity for critical severity (5%+ price, 5x+ volume) to control costs.
-    // Warning-level anomalies still get created with the descriptive text but skip AI analysis.
+    // Attach recent news headlines for price and volume spikes (free via Finnhub)
     let analysis: string | null = null;
     let citations: string | null = null;
 
-    if (c.severity === 'critical' && (c.type === 'price_spike' || c.type === 'volume_spike') && perplexityCalls < MAX_PERPLEXITY_PER_SCAN) {
-      const q = quotes.get(c.ticker);
-      const context = c.type === 'price_spike'
-        ? `Stock ${c.ticker} is ${q && q.changePercent > 0 ? 'up' : 'down'} ${c.value.toFixed(1)}% today. What news, events, or market conditions are driving this move?`
-        : `Stock ${c.ticker} is trading at ${c.value.toFixed(1)}x its average daily volume today. What news or events are causing this unusual trading activity?`;
-
-      const cacheKey = `analysis:${c.ticker}:${formatDate(new Date())}`;
-      const wasCached = analysisCache.get(cacheKey) != null;
-      const result = await getPerplexityAnalysis(c.ticker, context, userId);
-      if (!wasCached) perplexityCalls++;
+    if (c.type === 'price_spike' || c.type === 'volume_spike') {
+      const result = await getNewsAnalysis(c.ticker);
       if (result) {
         analysis = result.analysis;
         citations = result.citations.length > 0 ? JSON.stringify(result.citations) : null;
