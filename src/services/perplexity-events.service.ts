@@ -3,8 +3,8 @@ import { AxiosError } from 'axios';
 import { callPerplexity, extractJson } from '../utils/perplexity';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
-// Cache AI events for 10 minutes per ticker+days combo
-const aiEventsCache = new NodeCache({ stdTTL: 600 });
+// Cache AI events for 30 minutes per ticker+days combo
+const aiEventsCache = new NodeCache({ stdTTL: 1800 });
 
 export interface AIEvent {
   date: string; // YYYY-MM-DD

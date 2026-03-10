@@ -381,8 +381,8 @@ const server = app.listen(config.port, async () => {
     );
   }, 30 * 60 * 1000);
 
-  // AI Anomaly Detection — check every 15 minutes during market hours (all users)
-  console.log('[Anomaly Detection] Running every 15 minutes (market hours only)');
+  // AI Anomaly Detection — check every 30 minutes during market hours (all users)
+  console.log('[Anomaly Detection] Running every 30 minutes (market hours only)');
   async function runAnomalyDetectionForAllUsers() {
     const session = getMarketSession();
     if (session !== 'PRE' && session !== 'REG' && session !== 'POST') return;
@@ -408,7 +408,7 @@ const server = app.listen(config.port, async () => {
     runAnomalyDetectionForAllUsers().catch(err =>
       console.error('[Anomaly Detection] Error:', (err as Error).message)
     );
-  }, 15 * 60 * 1000);
+  }, 30 * 60 * 1000);
 
   // Dividend change detection — every 6 hours (skip weekends — no new dividend data, all users)
   console.log('[Dividend Change Detection] Running every 6 hours');
