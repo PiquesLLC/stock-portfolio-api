@@ -148,9 +148,12 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   const portfolio = await getPortfolio(userId, { portfolioId });
   const holdings = portfolio.holdings;
 
+  // All holding tickers for queries throughout this function
+  const allHoldingTickers = holdings.map((h: any) => h.ticker.toUpperCase());
+
   // When viewing a specific portfolio, filter credits to only tickers in that portfolio
   const portfolioTickers = portfolioId
-    ? new Set(holdings.map((h: any) => h.ticker.toUpperCase()))
+    ? new Set(allHoldingTickers)
     : null;
   const credits = portfolioTickers
     ? allCredits.filter((c: any) => portfolioTickers.has(c.ticker.toUpperCase()))
@@ -209,7 +212,25 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   }
 
   // Cash Flow calculations
-  const totalYTD = summary.totalYTD;
+  // Compute YTD from DividendEvent payDates × shares held (not DividendCredit records)
+  const holdingSharesMap = new Map<string, number>();
+  for (const h of holdings) {
+    holdingSharesMap.set((h as any).ticker.toUpperCase(), (h as any).shares);
+  }
+  const ytdEvents = await prisma.dividendEvent.findMany({
+    where: {
+      ticker: { in: allHoldingTickers },
+      payDate: { gte: ytdStart, lt: now },
+    },
+    select: { ticker: true, amountPerShare: true, payDate: true },
+  });
+  let totalYTD = 0;
+  for (const ev of ytdEvents) {
+    const shares = holdingSharesMap.get(ev.ticker.toUpperCase()) ?? 0;
+    totalYTD += ev.amountPerShare * shares;
+  }
+  totalYTD = Math.round(totalYTD * 100) / 100;
+
   const totalThisYear = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
   const totalLastYear = creditsLastYear.reduce((sum, c) => sum + c.amountGross, 0);
 
@@ -314,7 +335,6 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   // ============================================================================
 
   // Use ScreenerCache + ETF reference data to get annual dividend for every holding
-  const allHoldingTickers = holdings.map((h: any) => h.ticker.toUpperCase());
   const contribScreener = await prisma.screenerCache.findMany({
     where: { ticker: { in: allHoldingTickers } },
     select: { ticker: true, annualDividend: true },
