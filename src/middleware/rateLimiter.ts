@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -10,14 +10,15 @@ import rateLimit from 'express-rate-limit';
  * This prevents shared-IP collateral damage (corporate networks, VPNs)
  * while still rate-limiting unauthenticated abuse by IP.
  */
-function userOrIpKey(req: Request): string {
-  const userId = (req as any).user?.userId;
-  return userId ? `user:${userId}` : req.ip || 'unknown';
+function userOrIpKey(request: Request): string {
+  const userId = (request as any).user?.userId;
+  return userId
+    ? `user:${userId}`
+    : ipKeyGenerator(request.ip ?? 'unknown');
 }
 
-/** Always key by IP (for unauthenticated endpoints like login/signup). */
-function ipKey(req: Request): string {
-  return req.ip || 'unknown';
+function ipOnlyKey(request: Request): string {
+  return ipKeyGenerator(request.ip ?? 'unknown');
 }
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -54,7 +55,7 @@ export const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
   skipSuccessfulRequests: true,
 });
 
@@ -65,7 +66,7 @@ export const oauthLimiter = rateLimit({
   message: { error: 'Too many authentication attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** Password setting. 3/15min. */
@@ -75,7 +76,7 @@ export const setPasswordLimiter = rateLimit({
   message: { error: 'Too many password attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** Signup. 5/hour per IP. */
@@ -85,7 +86,7 @@ export const signupLimiter = rateLimit({
   message: { error: 'Too many signup attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** Username/password check enumeration. 20/15min prod. */
@@ -95,7 +96,7 @@ export const enumerationLimiter = rateLimit({
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** MFA code verify. 5/15min prod. */
@@ -105,7 +106,7 @@ export const mfaVerifyLimiter = rateLimit({
   message: { error: 'Too many verification attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** MFA code send. 3/15min prod. */
@@ -115,7 +116,7 @@ export const mfaSendLimiter = rateLimit({
   message: { error: 'Too many code requests. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 /** Waitlist join. 5/hour prod. */
@@ -125,7 +126,7 @@ export const waitlistJoinLimiter = rateLimit({
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: ipOnlyKey,
 });
 
 // ---------------------------------------------------------------------------
