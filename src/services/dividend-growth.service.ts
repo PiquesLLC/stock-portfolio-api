@@ -36,7 +36,11 @@ export async function getDividendGrowthRates(
   const tickers = holdings.map(h => h.ticker.toUpperCase());
 
   const events = await prisma.dividendEvent.findMany({
-    where: { ticker: { in: tickers } },
+    where: {
+      ticker: { in: tickers },
+      dividendType: 'regular',
+      status: 'confirmed',
+    },
     orderBy: { payDate: 'asc' },
   });
 
