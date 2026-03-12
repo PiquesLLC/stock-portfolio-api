@@ -143,10 +143,10 @@ export async function restartTracking(userId: string) {
   return settings;
 }
 
-export async function getPerformanceSummary(userId: string): Promise<PerformanceSummary> {
+export async function getPerformanceSummary(userId: string, portfolioId?: string): Promise<PerformanceSummary> {
   const [settings, portfolio] = await Promise.all([
     getTrackingSettings(userId),
-    getPortfolio(userId),
+    getPortfolio(userId, { portfolioId }),
   ]);
 
   // Calculate holdings P/L (unrealized)
