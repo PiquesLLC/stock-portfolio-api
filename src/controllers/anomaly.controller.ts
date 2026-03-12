@@ -31,6 +31,14 @@ export async function getUnreadAnomalyCountHandler(req: AuthRequest, res: Respon
 
 export async function markAnomalyReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    // Verify the anomaly belongs to the authenticated user before updating
+    const anomaly = await prisma.anomalyEvent.findFirst({
+      where: { id: req.params.id, userId: req.user!.userId },
+    });
+    if (!anomaly) {
+      res.status(404).json({ error: 'Anomaly not found' });
+      return;
+    }
     await prisma.anomalyEvent.update({
       where: { id: req.params.id },
       data: { read: true },

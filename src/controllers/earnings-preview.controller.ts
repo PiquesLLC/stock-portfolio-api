@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { getEarningsPreviews } from '../services/earnings-preview.service';
 import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 export async function getEarningsPreviewHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -10,11 +11,17 @@ export async function getEarningsPreviewHandler(req: AuthRequest, res: Response)
       return;
     }
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user.userId);
     const result = await getEarningsPreviews(req.user.userId, portfolioId);
     res.json(result);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
+      return;
+    }
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
     console.error('[Earnings Preview] Error:', error);

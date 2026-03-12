@@ -13,6 +13,7 @@ import {
   restartTracking,
 } from '../services/settings.service';
 import { cleanupDuplicateSnapshots, getSnapshotCount } from '../services/snapshot.service';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 
 
@@ -242,9 +243,15 @@ export async function getSummaryHandler(req: AuthRequest, res: Response): Promis
   try {
     const userId = req.user!.userId;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, userId);
     const summary = await getPerformanceSummary(userId, portfolioId);
     res.json(summary);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('Error fetching summary:');
     res.status(500).json({ error: 'Failed to fetch performance summary' });
   }

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { getPortfolioIntelligence, IntelligenceWindow, PortfolioIntelligenceResponse } from '../services/portfolioIntelligence.service';
 import prisma from '../utils/prisma';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 const VALID_WINDOWS: IntelligenceWindow[] = ['1d', '5d', '1m'];
 const INTELLIGENCE_TIMEOUT_MS = 12_000;
@@ -51,9 +52,15 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
   }
 
   try {
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const intelligence = await fetchWithTimeout(req.user!.userId, window, portfolioId);
     res.json(intelligence);
   } catch (err) {
+    const status = (err as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     if (err instanceof Error && err.message === 'intelligence_timeout') {
       console.warn(`[Intelligence] Timeout after ${INTELLIGENCE_TIMEOUT_MS}ms for window=${window}`);
       res.json(timeoutResponse(window));

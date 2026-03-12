@@ -32,6 +32,7 @@ import {
   setCashBalanceSchema,
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 import { getAccountHistory, HistoryCategory } from '../services/account-history.service';
@@ -88,6 +89,7 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
         return;
       }
       const portfolioId = req.query.portfolioId as string | undefined;
+      await validatePortfolioOwnership(portfolioId, req.user.userId);
       await createSnapshotIfNeeded(req.user.userId);
       portfolio = await getPortfolio(req.user.userId, { portfolioId });
     }
@@ -100,6 +102,11 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       paceProjection,
     });
   } catch (error) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('Error fetching portfolio:', error);
     res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
@@ -114,6 +121,7 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
     const { ticker, shares, averageCost, skipTransaction, skipActivity } = parsed.data;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
 
     // Check if this is an update vs new add
     // Always use system/default portfolio â€” auth is for access control only
@@ -175,6 +183,11 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
       return;
     }
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('[Portfolio] addHolding error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to add holding' });
   }
@@ -192,6 +205,7 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     const skipTransaction = parsedQuery.data.skipTransaction === 'true';
     const skipActivity = parsedQuery.data.skipActivity === 'true';
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
 
     // Get the holding before deletion to know the cost basis
     // Always use system/default portfolio â€” auth is for access control only
@@ -230,6 +244,11 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
 
     res.status(204).send();
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'P2025') {
       res.status(404).json({ error: 'Holding not found' });
       return;
@@ -248,11 +267,17 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
     }
     const { cashBalance } = parsed.data;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
 
     // Single atomic write to UserSettings (or Portfolio if scoped)
     const settings = await updateCashBalance(req.user!.userId, cashBalance, portfolioId);
     res.json({ cashBalance: settings.cashBalance });
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('[Portfolio] updateCash error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update cash balance' });
   }
@@ -358,6 +383,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
 
     const chartPortfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(chartPortfolioId, req.user.userId);
     const portfolio = await getPortfolio(req.user.userId, { portfolioId: chartPortfolioId });
 
     const includeDebug = String(req.query.debug) === '1';
@@ -580,6 +606,11 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     }
     res.json(response);
   } catch (chartError) {
+    const status = (chartError as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('Error fetching chart data:', chartError instanceof Error ? chartError.stack : String(chartError));
     res.status(500).json({ error: 'Failed to fetch chart data' });
   }
@@ -679,9 +710,15 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
     }
 
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const result = await getPerformanceComparison(window, benchmark, userId || req.user!.userId, portfolioId);
     res.json(result);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('[Portfolio] performance error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch performance data' });
   }
@@ -2393,6 +2430,7 @@ const SAMPLE_HOLDINGS = [
 export async function seedSamplePortfolio(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const existing = await getHoldings(req.user!.userId, portfolioId);
     if (existing.length > 0) {
       res.status(409).json({ error: 'Portfolio already has holdings. Clear first to re-seed.' });
@@ -2414,6 +2452,11 @@ export async function seedSamplePortfolio(req: AuthRequest, res: Response): Prom
 
     res.json({ seeded: true, holdings: SAMPLE_HOLDINGS.length });
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
     console.error('[Portfolio] seedSample error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to seed sample portfolio' });
   }
