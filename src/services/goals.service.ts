@@ -210,9 +210,9 @@ function calculateTimeToGoalRange(
 /**
  * Get all goals with progress calculations
  */
-export async function getAllGoalsWithProgress(userId: string): Promise<GoalWithProgress[]> {
+export async function getAllGoalsWithProgress(userId: string, portfolioId?: string): Promise<GoalWithProgress[]> {
   const goals = await getAllGoals(userId);
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
 
   return goals.map((goal) => {
@@ -240,11 +240,11 @@ export async function getAllGoalsWithProgress(userId: string): Promise<GoalWithP
 /**
  * Get a single goal with progress
  */
-export async function getGoalWithProgress(id: string, userId: string): Promise<GoalWithProgress | null> {
+export async function getGoalWithProgress(id: string, userId: string, portfolioId?: string): Promise<GoalWithProgress | null> {
   const goal = await getGoalById(id, userId);
   if (!goal) return null;
 
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
 
   const progress = Math.min(100, (currentValue / goal.targetValue) * 100);

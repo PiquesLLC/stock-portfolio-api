@@ -296,6 +296,8 @@ export async function getHistory(req: AuthRequest, res: Response): Promise<void>
 export async function getProjectionsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, userId);
     const mode = (req.query.mode as ProjectionMode) || 'sp500';
     const lookback = (req.query.lookback as LookbackPeriod) || '1y';
 
@@ -317,9 +319,9 @@ export async function getProjectionsHandler(req: AuthRequest, res: Response): Pr
 
     let projections;
     if (mode === 'sp500') {
-      projections = await getSP500Projections(userId);
+      projections = await getSP500Projections(userId, portfolioId);
     } else {
-      projections = await getRealizedProjections(userId, lookback);
+      projections = await getRealizedProjections(userId, lookback, portfolioId);
     }
 
     res.json(projections);
@@ -332,6 +334,8 @@ export async function getProjectionsHandler(req: AuthRequest, res: Response): Pr
 export async function getMetricsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, userId);
     const lookback = (req.query.lookback as LookbackPeriod) || '1y';
 
     if (!VALID_LOOKBACKS.includes(lookback)) {
@@ -341,7 +345,7 @@ export async function getMetricsHandler(req: AuthRequest, res: Response): Promis
       return;
     }
 
-    const metrics = await getMetrics(userId, lookback);
+    const metrics = await getMetrics(userId, lookback, portfolioId);
     res.json(metrics);
   } catch (error: unknown) {
     console.error('[Portfolio] metrics error:', error instanceof Error ? error.message : String(error));
@@ -654,6 +658,8 @@ const VALID_PACE_WINDOWS: PaceWindow[] = ['1D', '1M', '6M', '1Y', 'YTD'];
 export async function getCurrentPaceHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, userId);
     const window = ((req.query.window as string) || '1M').toUpperCase() as PaceWindow;
 
     if (!VALID_PACE_WINDOWS.includes(window)) {
@@ -663,7 +669,7 @@ export async function getCurrentPaceHandler(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const result = await getCurrentPaceProjection(userId, window);
+    const result = await getCurrentPaceProjection(userId, window, portfolioId);
     res.json(result);
   } catch (error: unknown) {
     console.error('[Portfolio] currentPace error:', error instanceof Error ? error.message : String(error));

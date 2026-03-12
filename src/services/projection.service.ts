@@ -50,8 +50,8 @@ function getLookbackStartDate(lookback: LookbackPeriod): Date | null {
 /**
  * Project portfolio value using S&P 500 long-run total return
  */
-export async function getSP500Projections(userId: string): Promise<SP500ProjectionResponse> {
-  const portfolio = await getPortfolio(userId);
+export async function getSP500Projections(userId: string, portfolioId?: string): Promise<SP500ProjectionResponse> {
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
   const annualReturn = config.sp500CagrTotalReturn;
 
@@ -231,9 +231,10 @@ function getBestAvailableLookback(
  */
 export async function getRealizedProjections(
   userId: string,
-  lookback: LookbackPeriod = '1y'
+  lookback: LookbackPeriod = '1y',
+  portfolioId?: string,
 ): Promise<RealizedProjectionResponse> {
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
   const allSnapshots = await getAllSnapshots(userId);
 
@@ -310,8 +311,8 @@ export async function getRealizedProjections(
 /**
  * Get metrics only (without projections)
  */
-export async function getMetrics(userId: string, lookback: LookbackPeriod = '1y'): Promise<MetricsResponse> {
-  const portfolio = await getPortfolio(userId);
+export async function getMetrics(userId: string, lookback: LookbackPeriod = '1y', portfolioId?: string): Promise<MetricsResponse> {
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
   const allSnapshots = await getAllSnapshots(userId);
 
@@ -341,8 +342,8 @@ export async function getMetrics(userId: string, lookback: LookbackPeriod = '1y'
 }
 
 // Legacy export for backwards compatibility during transition
-export async function getProjections(userId: string): Promise<RealizedProjectionResponse> {
-  return getRealizedProjections(userId, '1y');
+export async function getProjections(userId: string, portfolioId?: string): Promise<RealizedProjectionResponse> {
+  return getRealizedProjections(userId, '1y', portfolioId);
 }
 
 /**
@@ -351,7 +352,7 @@ export async function getProjections(userId: string): Promise<RealizedProjection
  *
  * Uses ASSETS ONLY (holdings + cash) - margin debt is NOT included.
  */
-export async function getPaceProjection(userId: string, currentAssets: number): Promise<PaceProjection> {
+export async function getPaceProjection(userId: string, currentAssets: number, portfolioId?: string): Promise<PaceProjection> {
   const now = new Date();
   const daysIntoMonth = now.getDate(); // 1-31
 
@@ -512,12 +513,12 @@ function getCurrentMonthNumber(): number {
   return new Date().getMonth() + 1; // 1-12
 }
 
-async function computeYtd(userId: string, portfolio: Portfolio): Promise<CurrentPaceResponse> {
+async function computeYtd(userId: string, portfolio: Portfolio, portfolioId?: string): Promise<CurrentPaceResponse> {
   const currentAssets = portfolio.netEquity;
 
   // Use reconstructed Yahoo data to get Jan 1 baseline (matches chart)
   const ytdDays = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-  const holdings = await getHoldings(userId);
+  const holdings = await getHoldings(userId, portfolioId);
   const reconstructed = await reconstructPortfolioHistory(
     holdings, portfolio.cashBalance, ytdDays, portfolio.marginDebt
   );
@@ -590,13 +591,14 @@ async function computeYtd(userId: string, portfolio: Portfolio): Promise<Current
 export async function getCurrentPaceProjection(
   userId: string,
   window: PaceWindow = '1M',
+  portfolioId?: string,
 ): Promise<CurrentPaceResponse> {
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const currentAssets = portfolio.netEquity;
 
   // ---- YTD: simple return with linear annualization ----
   if (window === 'YTD') {
-    return computeYtd(userId, portfolio);
+    return computeYtd(userId, portfolio, portfolioId);
   }
 
   const emptyResponse = (
@@ -661,7 +663,7 @@ export async function getCurrentPaceProjection(
   const WINDOW_DAYS: Record<string, number> = { '1M': 30, '6M': 182, '1Y': 365 };
   const targetDays = WINDOW_DAYS[window] ?? 30;
 
-  const holdings = await getHoldings(userId);
+  const holdings = await getHoldings(userId, portfolioId);
   const reconstructed = await reconstructPortfolioHistory(
     holdings, portfolio.cashBalance, targetDays, portfolio.marginDebt
   );

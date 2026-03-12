@@ -12,10 +12,13 @@ import {
   goalIdParamSchema,
   updateGoalSchema,
 } from '../validators/goals.validators';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 export async function listGoalsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const goals = await getAllGoalsWithProgress(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+    const goals = await getAllGoalsWithProgress(req.user!.userId, portfolioId);
     res.json(goals);
   } catch (error: unknown) {
     console.error('Error listing goals:');
@@ -31,8 +34,11 @@ export async function getGoalHandler(req: AuthRequest, res: Response): Promise<v
       return;
     }
 
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const { id } = parsedParams.data;
-    const goal = await getGoalWithProgress(id, req.user!.userId);
+    const goal = await getGoalWithProgress(id, req.user!.userId, portfolioId);
 
     if (!goal) {
       res.status(404).json({ error: 'Goal not found' });
