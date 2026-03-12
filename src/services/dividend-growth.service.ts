@@ -42,9 +42,12 @@ export async function getDividendGrowthRates(
   });
   const screenerMap = new Map(screenerRows.map(r => [r.ticker.toUpperCase(), r.annualDividend ?? 0]));
 
-  // Secondary: DividendEvent history for growth rate calculations
+  // Secondary: DividendEvent history for growth rate calculations (regular dividends only)
   const events = await prisma.dividendEvent.findMany({
-    where: { ticker: { in: tickers } },
+    where: {
+      ticker: { in: tickers },
+      dividendType: 'regular',
+    },
     orderBy: { payDate: 'asc' },
   });
 
