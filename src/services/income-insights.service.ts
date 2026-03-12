@@ -310,42 +310,55 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   };
 
   // ============================================================================
-  // CONTRIBUTORS (trailing 12 months)
+  // CONTRIBUTORS (based on current holdings × annual dividend per share)
   // ============================================================================
 
-  // Build per-ticker totals from trailing 12 months only
-  const ttmTickerMap = new Map<string, { total: number; count: number }>();
-  for (const c of creditsThisYear) {
-    const existing = ttmTickerMap.get(c.ticker) ?? { total: 0, count: 0 };
-    existing.total += c.amountGross;
-    existing.count++;
-    ttmTickerMap.set(c.ticker, existing);
-  }
+  // Use ScreenerCache + ETF reference data to get annual dividend for every holding
+  const allHoldingTickers = holdings.map((h: any) => h.ticker.toUpperCase());
+  const contribScreener = await prisma.screenerCache.findMany({
+    where: { ticker: { in: allHoldingTickers } },
+    select: { ticker: true, annualDividend: true },
+  });
+  const contribDivMap = new Map(contribScreener.map(r => [r.ticker.toUpperCase(), r.annualDividend ?? 0]));
 
   const contributors: IncomeContributor[] = [];
-  const totalDividendsTTM = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
+  let totalAnnualDividendIncome = 0;
 
-  for (const [ticker, data] of ttmTickerMap) {
-    const tickerUpper = ticker.toUpperCase();
-    const holding = holdings.find((h: any) => h.ticker.toUpperCase() === tickerUpper);
-    let yieldPct: number | null = null;
+  for (const holding of holdings) {
+    const ticker = (holding as any).ticker.toUpperCase();
+    let annualDivPerShare = contribDivMap.get(ticker) ?? 0;
 
-    if (holding && holding.currentValue > 0) {
-      yieldPct = Math.round((data.total / holding.currentValue) * 10000) / 100;
+    // ETF fallback: use reference yield × price
+    if (annualDivPerShare <= 0) {
+      const etfRef = ETF_REFERENCE_DATA[ticker];
+      if (etfRef?.dividendYield && etfRef.dividendYield > 0 && holding.currentPrice > 0) {
+        annualDivPerShare = (etfRef.dividendYield / 100) * holding.currentPrice;
+      }
     }
+    if (annualDivPerShare <= 0) continue; // Non-dividend payer
+
+    const annualIncome = annualDivPerShare * (holding as any).shares;
+    totalAnnualDividendIncome += annualIncome;
+
+    const yieldPct = holding.currentValue > 0
+      ? Math.round((annualIncome / holding.currentValue) * 10000) / 100
+      : null;
 
     contributors.push({
       ticker,
-      dividendDollar: Math.round(data.total * 100) / 100,
+      dividendDollar: Math.round(annualIncome * 100) / 100,
       yieldPct,
-      percentOfTotal: totalDividendsTTM > 0
-        ? Math.round((data.total / totalDividendsTTM) * 10000) / 100
-        : 0,
-      paymentCount: data.count,
+      percentOfTotal: 0, // Filled in below
+      paymentCount: 0,   // Not applicable for forward-looking view
     });
   }
 
-  // Sort by dividend amount descending
+  // Calculate percent of total and sort
+  for (const c of contributors) {
+    c.percentOfTotal = totalAnnualDividendIncome > 0
+      ? Math.round((c.dividendDollar / totalAnnualDividendIncome) * 10000) / 100
+      : 0;
+  }
   contributors.sort((a, b) => b.dividendDollar - a.dividendDollar);
 
   // ============================================================================
