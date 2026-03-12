@@ -6,6 +6,7 @@
 import { getPortfolio } from './portfolio.service';
 import { getDividendSummary, getDividendCredits } from './dividend-post.service';
 import { insightsCache } from '../utils/finnhub';
+import prisma from '../utils/prisma';
 
 
 
@@ -465,8 +466,44 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   }
 
   // Coverage (0-25): % of holdings that pay dividends
-  const dividendPayingHoldings = new Set(summary.byTicker.map(t => t.ticker));
-  const holdingsPayingDividends = holdings.filter(h => dividendPayingHoldings.has(h.ticker)).length;
+  // Use both historical credits AND market data (screener cache) to determine dividend-paying status.
+  // This ensures new portfolios with no credit history still show correct coverage for dividend stocks.
+  const creditPayingTickers = new Set(summary.byTicker.map(t => t.ticker.toUpperCase()));
+  const holdingTickers = holdings.map((h: any) => h.ticker.toUpperCase());
+  const tickersToCheck = holdingTickers.filter((t: string) => !creditPayingTickers.has(t));
+  let marketDividendTickers = new Set<string>();
+  if (tickersToCheck.length > 0) {
+    const screenerRows = await prisma.screenerCache.findMany({
+      where: { ticker: { in: tickersToCheck } },
+      select: { ticker: true, annualDividend: true },
+    });
+    marketDividendTickers = new Set(
+      screenerRows
+        .filter(r => r.annualDividend != null && r.annualDividend > 0)
+        .map(r => r.ticker.toUpperCase())
+    );
+    // Fallback: check FundamentalsCache for tickers not in screener
+    const stillMissing = tickersToCheck.filter((t: string) => !marketDividendTickers.has(t));
+    if (stillMissing.length > 0) {
+      const fundRows = await prisma.fundamentalsCache.findMany({
+        where: { ticker: { in: stillMissing } },
+        select: { ticker: true, overviewJson: true },
+      });
+      for (const row of fundRows) {
+        if (row.overviewJson) {
+          try {
+            const overview = JSON.parse(row.overviewJson);
+            if (overview.dividendYield != null && overview.dividendYield > 0) {
+              marketDividendTickers.add(row.ticker.toUpperCase());
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    }
+  }
+  const holdingsPayingDividends = holdings.filter((h: any) =>
+    creditPayingTickers.has(h.ticker.toUpperCase()) || marketDividendTickers.has(h.ticker.toUpperCase())
+  ).length;
   const coverageRatio = holdings.length > 0 ? holdingsPayingDividends / holdings.length : 0;
 
   let coverageScore = 5;
