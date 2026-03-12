@@ -260,7 +260,7 @@ interface ETFRefData {
   beta?: number;
 }
 
-const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
+export const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
   // S&P 500 trackers
   SPY:  { aumB: 550, expenseRatio: 0.0945, peRatio: 23.5, dividendYield: 1.2, beta: 1.0 },
   VOO:  { aumB: 430, expenseRatio: 0.03,   peRatio: 23.5, dividendYield: 1.2, beta: 1.0 },

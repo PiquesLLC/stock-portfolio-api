@@ -1,5 +1,5 @@
 import prisma from '../utils/prisma';
-import { fetchPrices } from './market.service';
+import { fetchPrices, ETF_REFERENCE_DATA } from './market.service';
 
 
 
@@ -35,12 +35,16 @@ export async function getDividendGrowthRates(
 
   const tickers = holdings.map(h => h.ticker.toUpperCase());
 
+  // Primary source: ScreenerCache has annualDividend per share from Polygon
+  const screenerRows = await prisma.screenerCache.findMany({
+    where: { ticker: { in: tickers } },
+    select: { ticker: true, annualDividend: true },
+  });
+  const screenerMap = new Map(screenerRows.map(r => [r.ticker.toUpperCase(), r.annualDividend ?? 0]));
+
+  // Secondary: DividendEvent history for growth rate calculations
   const events = await prisma.dividendEvent.findMany({
-    where: {
-      ticker: { in: tickers },
-      dividendType: 'regular',
-      status: 'confirmed',
-    },
+    where: { ticker: { in: tickers } },
     orderBy: { payDate: 'asc' },
   });
 
@@ -66,68 +70,84 @@ export async function getDividendGrowthRates(
 
   for (const holding of holdings) {
     const ticker = holding.ticker.toUpperCase();
-    const yearMap = byTicker.get(ticker);
-    if (!yearMap) continue;
-
-    let years = Array.from(yearMap.keys()).sort((a, b) => a - b);
-    if (excludeCurrentYear) {
-      years = years.filter(y => y < currentYear);
-    }
-    if (years.length < 2) continue;
-
-    const history = years.map(year => ({
-      year,
-      totalPerShare: round(yearMap.get(year)!.total, 2),
-    }));
-
-    const lastYear = years[years.length - 1];
-    const prevYear = years[years.length - 2];
-    const lastTotal = yearMap.get(lastYear)!.total;
-    const prevTotal = yearMap.get(prevYear)!.total;
-
-    const growth1yr = calcYoY(lastTotal, prevTotal);
-
-    const year3 = lastYear - 3;
-    const year5 = lastYear - 5;
-    const total3 = yearMap.get(year3)?.total;
-    const total5 = yearMap.get(year5)?.total;
-
-    const growth3yr = total3 !== undefined ? calcCagr(lastTotal, total3, 3) : null;
-    const growth5yr = total5 !== undefined ? calcCagr(lastTotal, total5, 5) : null;
-
-    // Consecutive years of dividend growth
-    let consecutiveYearsGrowth = 0;
-    for (let i = years.length - 1; i > 0; i--) {
-      const curr = yearMap.get(years[i])!.total;
-      const prev = yearMap.get(years[i - 1])!.total;
-      if (curr > prev) consecutiveYearsGrowth++;
-      else break;
-    }
-
-    // Last increase date + pct
-    let lastIncreaseDate: string | null = null;
-    let lastIncreasePct: number | null = null;
-    for (let i = years.length - 1; i > 0; i--) {
-      const currYear = years[i];
-      const prevYearLocal = years[i - 1];
-      const currTotal = yearMap.get(currYear)!.total;
-      const prevTotalLocal = yearMap.get(prevYearLocal)!.total;
-      if (currTotal > prevTotalLocal) {
-        lastIncreaseDate = yearMap.get(currYear)!.lastPayDate.toISOString().slice(0, 10);
-        lastIncreasePct = calcYoY(currTotal, prevTotalLocal);
-        break;
-      }
-    }
-
     const quote = quotesResult.quotes.get(ticker);
     const currentPrice = quote?.currentPrice ?? null;
-    const currentAnnualDividend = round(lastTotal, 2);
+
+    // Resolve annual dividend per share: ScreenerCache → ETF reference yield → skip
+    let annualDivPerShare = screenerMap.get(ticker) ?? 0;
+    if (annualDivPerShare <= 0 && currentPrice && currentPrice > 0) {
+      const etfRef = ETF_REFERENCE_DATA[ticker];
+      if (etfRef?.dividendYield) {
+        annualDivPerShare = round((etfRef.dividendYield / 100) * currentPrice, 4);
+      }
+    }
+    if (annualDivPerShare <= 0) continue; // Non-dividend payer
+
+    const currentAnnualDividend = round(annualDivPerShare, 2);
     const dividendYield = currentPrice && currentPrice > 0
       ? round((currentAnnualDividend / currentPrice) * 100, 2)
       : null;
 
     const annualIncome = currentAnnualDividend * holding.shares;
     totalAnnualIncome += annualIncome;
+
+    // Growth rates from DividendEvent history (optional — only if we have 2+ years)
+    let growth1yr: number | null = null;
+    let growth3yr: number | null = null;
+    let growth5yr: number | null = null;
+    let consecutiveYearsGrowth = 0;
+    let lastIncreaseDate: string | null = null;
+    let lastIncreasePct: number | null = null;
+    let history: { year: number; totalPerShare: number }[] = [];
+
+    const yearMap = byTicker.get(ticker);
+    if (yearMap) {
+      let years = Array.from(yearMap.keys()).sort((a, b) => a - b);
+      if (excludeCurrentYear) {
+        years = years.filter(y => y < currentYear);
+      }
+
+      if (years.length >= 2) {
+        history = years.map(year => ({
+          year,
+          totalPerShare: round(yearMap.get(year)!.total, 2),
+        }));
+
+        const lastYear = years[years.length - 1];
+        const prevYear = years[years.length - 2];
+        const lastTotal = yearMap.get(lastYear)!.total;
+        const prevTotal = yearMap.get(prevYear)!.total;
+
+        growth1yr = calcYoY(lastTotal, prevTotal);
+
+        const year3 = lastYear - 3;
+        const year5 = lastYear - 5;
+        const total3 = yearMap.get(year3)?.total;
+        const total5 = yearMap.get(year5)?.total;
+
+        growth3yr = total3 !== undefined ? calcCagr(lastTotal, total3, 3) : null;
+        growth5yr = total5 !== undefined ? calcCagr(lastTotal, total5, 5) : null;
+
+        for (let i = years.length - 1; i > 0; i--) {
+          const curr = yearMap.get(years[i])!.total;
+          const prev = yearMap.get(years[i - 1])!.total;
+          if (curr > prev) consecutiveYearsGrowth++;
+          else break;
+        }
+
+        for (let i = years.length - 1; i > 0; i--) {
+          const currYear = years[i];
+          const prevYearLocal = years[i - 1];
+          const currTotal = yearMap.get(currYear)!.total;
+          const prevTotalLocal = yearMap.get(prevYearLocal)!.total;
+          if (currTotal > prevTotalLocal) {
+            lastIncreaseDate = yearMap.get(currYear)!.lastPayDate.toISOString().slice(0, 10);
+            lastIncreasePct = calcYoY(currTotal, prevTotalLocal);
+            break;
+          }
+        }
+      }
+    }
 
     const primaryGrowthRate = growth5yr ?? growth3yr ?? growth1yr;
     if (primaryGrowthRate !== null) {
