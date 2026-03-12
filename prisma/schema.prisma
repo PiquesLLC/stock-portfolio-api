@@ -1137,3 +1137,20 @@ model DeadLetterEntry {
   @@index([resolved])
   @@index([createdAt])
 }
+
+model JobIdempotencyKey {
+  id            String    @id @default(uuid())
+  key           String    @unique
+  jobName       String
+  expiresAt     DateTime
+  duplicateHits Int       @default(0)
+  lastRunStatus String?   // success | failed | dead_lettered
+  lastRunAt     DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([jobName])
+  @@index([expiresAt])
+  @@index([updatedAt])
+}

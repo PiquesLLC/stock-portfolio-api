@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
-import { getJobStats, getDeadLetterEntries, resolveDeadLetterEntry, pruneOldJobRuns, healOrphanedJobs, detectStuckJobs } from '../services/job-runner.service';
+import { getJobStats, getDeadLetterEntries, resolveDeadLetterEntry, pruneOldJobRuns, healOrphanedJobs, detectStuckJobs, getJobRunnerAlertSummary } from '../services/job-runner.service';
 import { getSnapshotHealth } from '../services/snapshot.service';
+import { healSnapshot } from '../services/snapshot-heal.service';
 import { config } from '../config';
 
 const router = Router();
@@ -23,6 +24,7 @@ router.get('/jobs/stats', requireAuth, async (req: Request, res: Response) => {
 
     const jobName = req.query.jobName as string | undefined;
     const stats = await getJobStats(jobName);
+    const alert = getJobRunnerAlertSummary(stats);
 
     const totalRuns = stats.reduce((a, s) => a + s.total, 0);
     const totalFailed = stats.reduce((a, s) => a + s.failed, 0);
@@ -35,6 +37,7 @@ router.get('/jobs/stats', requireAuth, async (req: Request, res: Response) => {
         totalFailed,
         totalDeadLettered,
         failureRate: totalRuns > 0 ? ((totalFailed + totalDeadLettered) / totalRuns * 100).toFixed(1) + '%' : '0%',
+        alert,
       },
       jobs: stats,
     });
@@ -103,7 +106,7 @@ router.post('/jobs/prune', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /admin/jobs/heal - Heal orphaned jobs (stuck as "running" > 5 min)
+// POST /admin/jobs/heal - Snapshot heal (supports dry-run) or orphaned job heal via target
 router.post('/jobs/heal', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
@@ -112,11 +115,26 @@ router.post('/jobs/heal', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const healed = await healOrphanedJobs();
-    res.json({ healed, message: `Healed ${healed} orphaned job(s)` });
+    const target = typeof req.body?.target === 'string' ? req.body.target : 'snapshots';
+    const dryRun = req.body?.dryRun === true;
+
+    if (target === 'orphaned_jobs') {
+      const healed = await healOrphanedJobs();
+      res.json({ target, healed, message: `Healed ${healed} orphaned job(s)` });
+      return;
+    }
+
+    const SYSTEM_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+    const result = await healSnapshot(SYSTEM_USER_ID, { dryRun });
+    res.json({
+      target: 'snapshots',
+      dryRun,
+      result,
+      message: dryRun ? 'Dry-run completed. No snapshot data was written.' : 'Snapshot heal completed.',
+    });
   } catch (error: unknown) {
     console.error('[JobAdmin] heal error:', error instanceof Error ? error.message : String(error));
-    res.status(500).json({ error: 'Failed to heal orphaned jobs' });
+    res.status(500).json({ error: 'Failed to execute heal operation' });
   }
 });
 

@@ -23,7 +23,8 @@ import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
-import { runJob, pruneOldJobRuns, healOrphanedJobs } from './services/job-runner.service';
+import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys } from './services/job-runner.service';
+import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -116,6 +117,11 @@ async function getAllHeldTickers(): Promise<string[]> {
   return Array.from(new Set(tickers));
 }
 
+function buildTimeBucketIdempotencyKey(jobName: string, windowMs: number): string {
+  const bucket = Math.floor(Date.now() / windowMs);
+  return `${jobName}:${bucket}`;
+}
+
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
@@ -190,7 +196,7 @@ const server = app.listen(config.port, async () => {
           });
         }
       }
-    }, maxAttempts: 1 }); // maxAttempts: 1 — runs every ~60s, no point retrying
+    }, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('snapshot_scheduler', SNAPSHOT_INTERVAL_MS), idempotencyTtlMs: SNAPSHOT_INTERVAL_MS + 10000 }); // maxAttempts: 1 — runs every ~60s, no point retrying
   }, SNAPSHOT_INTERVAL_MS);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
@@ -220,22 +226,42 @@ const server = app.listen(config.port, async () => {
 
   // Dividend sync â€" fetch dividend events from Yahoo Finance on startup + every 6 hours (skip weekends)
   if (!isWeekendET()) {
-    runJob({ name: 'dividend_sync', fn: syncAllHeldTickers });
+    runJob({
+      name: 'dividend_sync',
+      fn: syncAllHeldTickers,
+      idempotencyKey: buildTimeBucketIdempotencyKey('dividend_sync', 6 * 60 * 60 * 1000),
+      idempotencyTtlMs: 6 * 60 * 60 * 1000,
+    });
   }
   setInterval(() => {
     if (isWeekendET()) return;
-    runJob({ name: 'dividend_sync', fn: syncAllHeldTickers });
+    runJob({
+      name: 'dividend_sync',
+      fn: syncAllHeldTickers,
+      idempotencyKey: buildTimeBucketIdempotencyKey('dividend_sync', 6 * 60 * 60 * 1000),
+      idempotencyTtlMs: 6 * 60 * 60 * 1000,
+    });
   }, 6 * 60 * 60 * 1000);
 
   // Dividend posting â€" check for payable dividends every hour (skip weekends — no pay dates)
   if (!isWeekendET()) {
-    runJob({ name: 'dividend_post', fn: postDividendsForDate });
+    runJob({
+      name: 'dividend_post',
+      fn: postDividendsForDate,
+      idempotencyKey: buildTimeBucketIdempotencyKey('dividend_post', 60 * 60 * 1000),
+      idempotencyTtlMs: 60 * 60 * 1000,
+    });
   }
   // NOTE: backfillMissedDividends removed â€" it double-counts dividends already
   // reflected in historical stock prices, inflating portfolio value via DRIP.
   setInterval(() => {
     if (isWeekendET()) return;
-    runJob({ name: 'dividend_post', fn: postDividendsForDate });
+    runJob({
+      name: 'dividend_post',
+      fn: postDividendsForDate,
+      idempotencyKey: buildTimeBucketIdempotencyKey('dividend_post', 60 * 60 * 1000),
+      idempotencyTtlMs: 60 * 60 * 1000,
+    });
   }, 60 * 60 * 1000);
 
   // Price alert evaluation â€" check every 60 seconds (skip weekends — prices are stale)
@@ -395,11 +421,21 @@ const server = app.listen(config.port, async () => {
   if (config.creatorMonetizationEnabled) {
     console.log('[Creator Reconciliation] Running daily');
     setTimeout(() => {
-      runJob({ name: 'creator_reconciliation', fn: runCreatorLedgerReconciliation });
+      runJob({
+        name: 'creator_reconciliation',
+        fn: runCreatorLedgerReconciliation,
+        idempotencyKey: buildTimeBucketIdempotencyKey('creator_reconciliation', 24 * 60 * 60 * 1000),
+        idempotencyTtlMs: 24 * 60 * 60 * 1000,
+      });
     }, 180000); // 3 min delay after startup
 
     setInterval(() => {
-      runJob({ name: 'creator_reconciliation', fn: runCreatorLedgerReconciliation });
+      runJob({
+        name: 'creator_reconciliation',
+        fn: runCreatorLedgerReconciliation,
+        idempotencyKey: buildTimeBucketIdempotencyKey('creator_reconciliation', 24 * 60 * 60 * 1000),
+        idempotencyTtlMs: 24 * 60 * 60 * 1000,
+      });
     }, 24 * 60 * 60 * 1000);
   } else {
     console.log('[Creator Reconciliation] Skipped (creator monetization disabled)');
@@ -427,6 +463,36 @@ const server = app.listen(config.port, async () => {
       if (count > 0) console.log(`[JobRunner] Pruned ${count} old job runs`);
     }, maxAttempts: 2 });
   }, 24 * 60 * 60 * 1000);
+
+  // Prune expired idempotency keys daily
+  setInterval(() => {
+    runJob({ name: 'idempotency_key_prune', fn: async () => {
+      const count = await pruneExpiredIdempotencyKeys();
+      if (count > 0) console.log(`[JobRunner] Pruned ${count} expired idempotency key(s)`);
+    }, maxAttempts: 2 });
+  }, 24 * 60 * 60 * 1000);
+
+  // Daily Report pre-generation — warm cache so reports load instantly
+  // Runs 2 min after startup + every 4 hours (aligns with 8h cache TTL)
+  console.log('[Daily Report Pre-Gen] Scheduled: startup + every 4 hours');
+  setTimeout(() => {
+    runJob({
+      name: 'daily_report_pregen',
+      fn: preGenerateDailyReports,
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('daily_report_pregen', 4 * 60 * 60 * 1000),
+      idempotencyTtlMs: 4 * 60 * 60 * 1000,
+    });
+  }, 120000); // 2 min after startup
+  setInterval(() => {
+    runJob({
+      name: 'daily_report_pregen',
+      fn: preGenerateDailyReports,
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('daily_report_pregen', 4 * 60 * 60 * 1000),
+      idempotencyTtlMs: 4 * 60 * 60 * 1000,
+    });
+  }, 4 * 60 * 60 * 1000);
 
   // Fundamentals prefetch — continuously cycles through stock universe
   // pre-fetching fundamentals + earnings so data is ready before users search

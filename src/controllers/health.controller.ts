@@ -6,6 +6,7 @@ import { getYahooStatus } from '../utils/yahoo-http';
 import { getAuthMetrics } from '../utils/auth-metrics';
 import { getWebhookMetrics } from '../utils/webhook-metrics';
 import prisma from '../utils/prisma';
+import { getJobRunnerMetrics } from '../services/job-runner.service';
 
 export async function healthCheck(req: Request, res: Response): Promise<void> {
   res.json({
@@ -91,6 +92,12 @@ export async function apiUsage(req: Request, res: Response): Promise<void> {
 
 export async function webhookMetrics(req: Request, res: Response): Promise<void> {
   res.json(getWebhookMetrics());
+}
+
+export async function jobMetrics(req: Request, res: Response): Promise<void> {
+  const hours = Math.min(Math.max(parseInt(req.query.hours as string) || 24, 1), 168);
+  const metrics = await getJobRunnerMetrics(hours);
+  res.json(metrics);
 }
 
 export async function healthStatus(req: Request, res: Response): Promise<void> {
