@@ -75,7 +75,8 @@ function getWindowStartDate(window: PerformanceWindow): Date {
 export async function getPerformanceComparison(
   window: PerformanceWindow = '1M',
   benchmarkTicker: string = 'SPY',
-  userId: string
+  userId: string,
+  portfolioId?: string
 ): Promise<PerformanceData> {
   const windowStart = getWindowStartDate(window);
   const tradingDays = getWindowTradingDays(window);
@@ -84,7 +85,7 @@ export async function getPerformanceComparison(
   // This ensures accuracy by using the same dayChange calculation as the chart
   if (window === '1D') {
     try {
-      const portfolio = await getPortfolio(userId);
+      const portfolio = await getPortfolio(userId, { portfolioId });
       if (portfolio.holdings.length === 0) {
         return emptyPerformanceData(window, benchmarkTicker);
       }
@@ -186,8 +187,9 @@ export async function getPerformanceComparison(
   const windowDays = getWindowDays(window);
 
   // Fetch current holdings to reconstruct history from candles
+  const holdingWhere = portfolioId ? { portfolioId } : { userId };
   const holdings = await prisma.holding.findMany({
-    where: { userId },
+    where: holdingWhere,
   });
 
   // Only reconstruct from candles if a baseline snapshot exists before the window.

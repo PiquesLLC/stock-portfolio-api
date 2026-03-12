@@ -241,7 +241,8 @@ export async function clearYtdHandler(req: AuthRequest, res: Response): Promise<
 export async function getSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const summary = await getPerformanceSummary(userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const summary = await getPerformanceSummary(userId, portfolioId);
     res.json(summary);
   } catch (error: unknown) {
     console.error('Error fetching summary:');

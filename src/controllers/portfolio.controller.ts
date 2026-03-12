@@ -678,7 +678,8 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
       }
     }
 
-    const result = await getPerformanceComparison(window, benchmark, userId || req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const result = await getPerformanceComparison(window, benchmark, userId || req.user!.userId, portfolioId);
     res.json(result);
   } catch (error: unknown) {
     console.error('[Portfolio] performance error:', error instanceof Error ? error.message : String(error));
