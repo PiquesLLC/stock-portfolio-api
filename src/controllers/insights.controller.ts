@@ -12,6 +12,7 @@ import { getDailyReport, regenerateDailyReport } from '../services/perplexity-da
 import { getEarningsSummary } from '../services/earnings-summary.service';
 import { AuthRequest } from '../types/auth';
 import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
@@ -29,9 +30,12 @@ function requirePremium(res: Response): boolean {
 export async function getHealthHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const healthScore = await getHealthScore(req.user!.userId, portfolioId);
     res.json(healthScore);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting health score:', error);
     res.status(500).json({
       error: 'Failed to calculate health score',
@@ -43,6 +47,7 @@ export async function getHealthHandler(req: AuthRequest, res: Response): Promise
 export async function getAttributionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const windowParam = req.query.window as string | undefined;
     let window: AttributionWindow = '1d';
 
@@ -53,6 +58,8 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
     const attribution = await getAttribution(req.user!.userId, window, portfolioId);
     res.json(attribution);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting attribution:', error);
     res.status(500).json({
       error: 'Failed to get attribution',
@@ -64,9 +71,12 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
 export async function getLeakDetectorHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const leaks = await getLeakDetector(req.user!.userId, portfolioId);
     res.json(leaks);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting leak detector:', error);
     res.status(500).json({
       error: 'Failed to analyze correlations',
@@ -81,9 +91,12 @@ export async function getLeakDetectorHandler(req: AuthRequest, res: Response): P
 export async function getRiskForecastHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const riskForecast = await getRiskForecast(req.user!.userId, portfolioId);
     res.json(riskForecast);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting risk forecast:', error);
     res.status(500).json({
       error: 'Failed to calculate risk forecast',
@@ -101,6 +114,7 @@ export async function getIncomeInsightsHandler(req: AuthRequest, res: Response):
   try {
     if (!requirePremium(res)) return;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const windowParam = req.query.window as string | undefined;
     let window: IncomeWindow = 'today';
 
@@ -111,6 +125,8 @@ export async function getIncomeInsightsHandler(req: AuthRequest, res: Response):
     const incomeInsights = await getIncomeInsights(req.user!.userId, window, portfolioId);
     res.json(incomeInsights);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting income insights:', error);
     res.status(500).json({
       error: 'Failed to get income insights',
@@ -137,6 +153,7 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
       return;
     }
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user.userId);
     const briefing = await getPortfolioBriefing(req.user.userId, portfolioId);
     res.json(briefing);
   } catch (error) {
@@ -144,6 +161,8 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting portfolio briefing:', error);
     res.status(500).json({
       error: 'Failed to generate briefing',
@@ -165,6 +184,7 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
       return;
     }
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user.userId);
     const behavior = await getBehaviorInsights(req.user.userId, portfolioId);
     res.json(behavior);
   } catch (error) {
@@ -172,6 +192,8 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Error getting behavior insights:', error);
     res.status(500).json({
       error: 'Failed to generate behavior insights',
@@ -189,6 +211,7 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
   try {
     if (!requirePremium(res)) return;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const report = await getDailyReport(req.user!.userId, portfolioId);
     res.json(report);
   } catch (error) {
@@ -196,6 +219,8 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Daily report error:', error);
     res.status(500).json({
       generatedAt: new Date().toISOString(),
@@ -212,9 +237,12 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
 export async function getEarningsSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const result = await getEarningsSummary(req.user!.userId, portfolioId);
     res.json(result);
   } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Earnings summary error:', error);
     res.status(500).json({
       results: [],
@@ -227,6 +255,7 @@ export async function regenerateDailyReportHandler(req: AuthRequest, res: Respon
   try {
     if (!requirePremium(res)) return;
     const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
     const report = await regenerateDailyReport(req.user!.userId, portfolioId);
     res.json(report);
   } catch (error) {
@@ -234,6 +263,8 @@ export async function regenerateDailyReportHandler(req: AuthRequest, res: Respon
       res.status(403).json({ error: 'email_verification_required', message: 'Verify your email to use AI features' });
       return;
     }
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
     console.error('Daily report regenerate error:', error);
     res.status(500).json({
       generatedAt: new Date().toISOString(),
