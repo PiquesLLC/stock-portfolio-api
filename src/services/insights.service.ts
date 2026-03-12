@@ -230,8 +230,13 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
         value: `${top1Pct.toFixed(1)}%`,
         impact: `-${penalty.toFixed(1)} pts (threshold 25%)`,
       });
-      concFixes.push(`Consider trimming ${sortedByValue[0].ticker} to below 25% of portfolio.`);
-      quickFixes.push(`Consider trimming ${sortedByValue[0].ticker} to reduce single-stock risk`);
+      if (holdings.length < 3) {
+        concFixes.push('Add more positions to reduce concentration — aim for 7-10 holdings across different sectors.');
+        quickFixes.push('Add more positions to diversify and reduce single-stock risk');
+      } else {
+        concFixes.push(`Consider trimming ${sortedByValue[0].ticker} to below 25% of portfolio.`);
+        quickFixes.push(`Consider trimming ${sortedByValue[0].ticker} to reduce single-stock risk`);
+      }
     } else {
       concDrivers.push({
         label: `${sortedByValue[0].ticker} weight`,
