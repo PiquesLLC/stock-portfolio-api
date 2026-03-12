@@ -95,7 +95,8 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
     }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
-    const paceProjection = await getPaceProjection(req.user!.userId, portfolio.netEquity);
+    const portfolioIdForPace = req.query.portfolioId as string | undefined;
+    const paceProjection = await getPaceProjection(req.user!.userId, portfolio.netEquity, portfolioIdForPace);
 
     res.json({
       ...portfolio,

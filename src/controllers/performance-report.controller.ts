@@ -4,6 +4,7 @@ import { generatePerformanceReport } from '../services/performance-report.servic
 import { PerformanceWindow } from '../services/benchmark.service';
 import { getUserById } from '../services/auth.service';
 import { sendPerformanceReport } from '../services/email.service';
+import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
 
 const VALID_PERIODS: PerformanceWindow[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 const VALID_BENCHMARKS = ['SPY', 'QQQ', 'DIA'];
@@ -20,8 +21,11 @@ export async function getPerformanceReportHandler(req: AuthRequest, res: Respons
       return res.status(400).json({ error: `Invalid benchmark. Must be one of: ${VALID_BENCHMARKS.join(', ')}` });
     }
 
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const theme = (req.query.theme as string) === 'dark' ? 'dark' : 'light';
-    const html = await generatePerformanceReport(req.user!.userId, period, benchmark, theme);
+    const html = await generatePerformanceReport(req.user!.userId, period, benchmark, theme, portfolioId);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) {
@@ -42,13 +46,16 @@ export async function emailPerformanceReportHandler(req: AuthRequest, res: Respo
       return res.status(400).json({ error: `Invalid benchmark. Must be one of: ${VALID_BENCHMARKS.join(', ')}` });
     }
 
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const user = await getUserById(req.user!.userId);
     if (!user?.email) {
       return res.status(400).json({ error: 'No email address on file. Add an email in account settings.' });
     }
 
     const theme = (req.body?.theme as string) === 'dark' ? 'dark' : 'light';
-    const html = await generatePerformanceReport(req.user!.userId, period, benchmark, theme);
+    const html = await generatePerformanceReport(req.user!.userId, period, benchmark, theme, portfolioId);
 
     await sendPerformanceReport(user.email, html, period);
 

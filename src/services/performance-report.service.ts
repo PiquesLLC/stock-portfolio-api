@@ -112,16 +112,17 @@ export async function generatePerformanceReport(
   period: PerformanceWindow,
   benchmarkTicker: string,
   theme: 'light' | 'dark' = 'light',
+  portfolioId?: string,
 ): Promise<string> {
   // 4 parallel data fetches + sparkline
   const days = periodToDays(period);
   const intelligenceWindow = days <= 1 ? '1d' : days <= 7 ? '5d' : '1m';
 
   const [portfolio, summary, comparison, intelligence, chartPoints] = await Promise.all([
-    getPortfolio(userId),
-    getPerformanceSummary(userId),
-    getPerformanceComparison(period, benchmarkTicker, userId).catch(() => null as PerformanceData | null),
-    getPortfolioIntelligence(userId, intelligenceWindow).catch(() => null),
+    getPortfolio(userId, { portfolioId }),
+    getPerformanceSummary(userId, portfolioId),
+    getPerformanceComparison(period, benchmarkTicker, userId, portfolioId).catch(() => null as PerformanceData | null),
+    getPortfolioIntelligence(userId, intelligenceWindow, portfolioId).catch(() => null),
     getSnapshotChartPoints(userId, days).catch(() => [] as { time: number; value: number }[]),
   ]);
 

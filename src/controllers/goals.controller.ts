@@ -54,6 +54,9 @@ export async function getGoalHandler(req: AuthRequest, res: Response): Promise<v
 
 export async function createGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const parsed = createGoalSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid request' });
@@ -77,6 +80,9 @@ export async function createGoalHandler(req: AuthRequest, res: Response): Promis
 
 export async function updateGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const parsedParams = goalIdParamSchema.safeParse(req.params);
     const parsedBody = updateGoalSchema.safeParse(req.body);
     if (!parsedParams.success || !parsedBody.success) {
@@ -106,6 +112,9 @@ export async function updateGoalHandler(req: AuthRequest, res: Response): Promis
 
 export async function deleteGoalHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
     const parsedParams = goalIdParamSchema.safeParse(req.params);
     if (!parsedParams.success) {
       res.status(400).json({ error: 'Invalid request' });

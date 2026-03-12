@@ -236,6 +236,43 @@ export async function getRealizedProjections(
 ): Promise<RealizedProjectionResponse> {
   const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
+
+  // When portfolioId is provided, snapshots are user-wide and can't be scoped.
+  // Fall back to SP500-based projections using current portfolio value only,
+  // to avoid mixing scoped current data with unscoped historical data.
+  if (portfolioId) {
+    const annualReturn = config.sp500CagrTotalReturn;
+    const monthlyRate = Math.pow(1 + annualReturn, 1 / 12) - 1;
+    const notes: string[] = ['Sub-portfolio: using SP500 projections (historical snapshots are user-wide)'];
+
+    const horizons: ProjectionHorizons = {
+      '6m': { base: 0 },
+      '1y': { base: 0 },
+      '5y': { base: 0 },
+      '10y': { base: 0 },
+    };
+
+    for (const { key, years } of HORIZONS) {
+      const months = years * 12;
+      const futureValue = currentValue * Math.pow(1 + monthlyRate, months);
+      horizons[key] = { base: Math.round(futureValue * 100) / 100 };
+    }
+
+    return {
+      mode: 'realized',
+      lookback,
+      lookbackUsed: lookback,
+      asOf: new Date().toISOString(),
+      currentValue,
+      realized: { cagr: null, volatility: null, maxDrawdown: null, sharpe: null },
+      horizons,
+      notes,
+      snapshotCount: 0,
+      dataStartDate: null,
+      dataEndDate: null,
+    };
+  }
+
   const allSnapshots = await getAllSnapshots(userId);
 
   // Determine what lookback to actually use
@@ -314,6 +351,23 @@ export async function getRealizedProjections(
 export async function getMetrics(userId: string, lookback: LookbackPeriod = '1y', portfolioId?: string): Promise<MetricsResponse> {
   const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
+
+  // When portfolioId is provided, snapshots are user-wide and can't be scoped.
+  // Return empty metrics to avoid mixing scoped current data with unscoped history.
+  if (portfolioId) {
+    return {
+      lookback,
+      lookbackUsed: lookback,
+      asOf: new Date().toISOString(),
+      currentValue,
+      metrics: { cagr: null, volatility: null, maxDrawdown: null, sharpe: null },
+      notes: ['Sub-portfolio: historical metrics unavailable (snapshots are user-wide)'],
+      snapshotCount: 0,
+      dataStartDate: null,
+      dataEndDate: null,
+    };
+  }
+
   const allSnapshots = await getAllSnapshots(userId);
 
   const lookbackUsed = getBestAvailableLookback(allSnapshots, lookback);
@@ -355,6 +409,24 @@ export async function getProjections(userId: string, portfolioId?: string): Prom
 export async function getPaceProjection(userId: string, currentAssets: number, portfolioId?: string): Promise<PaceProjection> {
   const now = new Date();
   const daysIntoMonth = now.getDate(); // 1-31
+
+  // When portfolioId is provided, snapshots are user-wide and can't be scoped.
+  // Return a data-less projection to avoid mixing scoped current data with unscoped history.
+  if (portfolioId) {
+    return {
+      hasData: false,
+      mtdReturnPct: null,
+      paceMonthlyPct: null,
+      paceAnnualPct: null,
+      horizonPct: { '1y': null, '2y': null, '5y': null, '10y': null },
+      horizonValue: { '1y': null, '2y': null, '5y': null, '10y': null },
+      baselineMonthDate: null,
+      baselineMonthAssets: null,
+      currentAssets,
+      daysIntoMonth,
+      note: 'Sub-portfolio: pace projections unavailable (snapshots are user-wide)',
+    };
+  }
 
   // Get first day of current month
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
