@@ -28,7 +28,8 @@ function requirePremium(res: Response): boolean {
 
 export async function getHealthHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const healthScore = await getHealthScore(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const healthScore = await getHealthScore(req.user!.userId, portfolioId);
     res.json(healthScore);
   } catch (error: unknown) {
     console.error('Error getting health score:', error);
@@ -41,6 +42,7 @@ export async function getHealthHandler(req: AuthRequest, res: Response): Promise
 
 export async function getAttributionHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const portfolioId = req.query.portfolioId as string | undefined;
     const windowParam = req.query.window as string | undefined;
     let window: AttributionWindow = '1d';
 
@@ -48,7 +50,7 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
       window = windowParam as AttributionWindow;
     }
 
-    const attribution = await getAttribution(req.user!.userId, window);
+    const attribution = await getAttribution(req.user!.userId, window, portfolioId);
     res.json(attribution);
   } catch (error: unknown) {
     console.error('Error getting attribution:', error);
@@ -61,7 +63,8 @@ export async function getAttributionHandler(req: AuthRequest, res: Response): Pr
 
 export async function getLeakDetectorHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const leaks = await getLeakDetector(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const leaks = await getLeakDetector(req.user!.userId, portfolioId);
     res.json(leaks);
   } catch (error: unknown) {
     console.error('Error getting leak detector:', error);
@@ -77,7 +80,8 @@ export async function getLeakDetectorHandler(req: AuthRequest, res: Response): P
 
 export async function getRiskForecastHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const riskForecast = await getRiskForecast(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const riskForecast = await getRiskForecast(req.user!.userId, portfolioId);
     res.json(riskForecast);
   } catch (error: unknown) {
     console.error('Error getting risk forecast:', error);
@@ -96,6 +100,7 @@ const VALID_INCOME_WINDOWS = ['today', '5d', '1m'] as const;
 export async function getIncomeInsightsHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
+    const portfolioId = req.query.portfolioId as string | undefined;
     const windowParam = req.query.window as string | undefined;
     let window: IncomeWindow = 'today';
 
@@ -103,7 +108,7 @@ export async function getIncomeInsightsHandler(req: AuthRequest, res: Response):
       window = windowParam as IncomeWindow;
     }
 
-    const incomeInsights = await getIncomeInsights(req.user!.userId, window);
+    const incomeInsights = await getIncomeInsights(req.user!.userId, window, portfolioId);
     res.json(incomeInsights);
   } catch (error: unknown) {
     console.error('Error getting income insights:', error);
@@ -131,7 +136,8 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const briefing = await getPortfolioBriefing(req.user.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const briefing = await getPortfolioBriefing(req.user.userId, portfolioId);
     res.json(briefing);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {
@@ -158,7 +164,8 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const behavior = await getBehaviorInsights(req.user.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const behavior = await getBehaviorInsights(req.user.userId, portfolioId);
     res.json(behavior);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {
@@ -181,7 +188,8 @@ export async function getBehaviorHandler(req: AuthRequest, res: Response): Promi
 export async function getDailyReportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const report = await getDailyReport(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const report = await getDailyReport(req.user!.userId, portfolioId);
     res.json(report);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {
@@ -203,7 +211,8 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
 
 export async function getEarningsSummaryHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const result = await getEarningsSummary(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const result = await getEarningsSummary(req.user!.userId, portfolioId);
     res.json(result);
   } catch (error: unknown) {
     console.error('Earnings summary error:', error);
@@ -217,7 +226,8 @@ export async function getEarningsSummaryHandler(req: AuthRequest, res: Response)
 export async function regenerateDailyReportHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!requirePremium(res)) return;
-    const report = await regenerateDailyReport(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const report = await regenerateDailyReport(req.user!.userId, portfolioId);
     res.json(report);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {

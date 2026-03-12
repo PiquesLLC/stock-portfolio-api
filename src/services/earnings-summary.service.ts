@@ -24,12 +24,12 @@ function daysUntil(target: Date, now: Date): number {
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
-export async function getEarningsSummary(userId: string): Promise<{ results: EarningsSummaryItem[]; partial: boolean }> {
-  const cacheKey = `earnings-summary:${userId}`;
+export async function getEarningsSummary(userId: string, portfolioId?: string): Promise<{ results: EarningsSummaryItem[]; partial: boolean }> {
+  const cacheKey = `earnings-summary:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached = insightsCache.get<{ results: EarningsSummaryItem[]; partial: boolean }>(cacheKey);
   if (cached) return cached;
 
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const tickers = portfolio.holdings.map(h => h.ticker.toUpperCase());
   if (tickers.length === 0) {
     const empty = { results: [], partial: false };

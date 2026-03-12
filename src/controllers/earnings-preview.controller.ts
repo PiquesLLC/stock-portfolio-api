@@ -9,7 +9,8 @@ export async function getEarningsPreviewHandler(req: AuthRequest, res: Response)
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const result = await getEarningsPreviews(req.user.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const result = await getEarningsPreviews(req.user.userId, portfolioId);
     res.json(result);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {

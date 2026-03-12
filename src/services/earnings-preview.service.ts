@@ -120,9 +120,9 @@ async function getAiPreview(
   }
 }
 
-export async function getEarningsPreviews(userId: string): Promise<EarningsPreviewResponse> {
+export async function getEarningsPreviews(userId: string, portfolioId?: string): Promise<EarningsPreviewResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const summary = await getEarningsSummary(userId);
+  const summary = await getEarningsSummary(userId, portfolioId);
   const upcoming = summary.results.filter(item => item.daysUntil >= 0 && item.daysUntil <= UPCOMING_WINDOW_DAYS);
   if (upcoming.length === 0) return { results: [], partial: summary.partial };
 

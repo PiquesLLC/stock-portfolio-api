@@ -44,14 +44,14 @@ Focus on: position sizing, concentration risk, sector diversification, cost-basi
 activity frequency (too much trading vs buy-and-hold), and unrealized gain/loss management.
 For "positive" severity, highlight good habits. For "warning", flag potential risks. For "info", offer educational tips.`;
 
-export async function getBehaviorInsights(userId: string): Promise<BehaviorInsightsResponse> {
+export async function getBehaviorInsights(userId: string, portfolioId?: string): Promise<BehaviorInsightsResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = `behavior-insights:${userId}`;
+  const cacheKey = `behavior-insights:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached = behaviorCache.get<BehaviorInsightsResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
   const [portfolio, activity] = await Promise.all([
-    getPortfolio(userId),
+    getPortfolio(userId, { portfolioId }),
     getUserActivity(userId, 50),
   ]);
 
