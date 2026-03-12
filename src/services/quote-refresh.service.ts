@@ -4,6 +4,7 @@ import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hou
 import { Quote } from '../types';
 import { getPolygonQuotes, upsertPolygonQuoteCache } from '../utils/polygon';
 import { fetchYahooBatchQuotes } from './market.service';
+import { JobExecutionError, runJob } from './job-runner.service';
 
 type ProviderName = 'Polygon' | 'Yahoo';
 
@@ -90,6 +91,8 @@ async function runRefreshCycle(): Promise<void> {
     let polygonRefreshed = 0;
     let yahooOverlayCount = 0;
     let polygonQuotes = new Map<string, Quote>();
+    let polygonError: Error | null = null;
+    let yahooError: Error | null = null;
 
     if (isProviderAvailable('Polygon')) {
       try {
@@ -99,14 +102,14 @@ async function runRefreshCycle(): Promise<void> {
         markProviderSuccess('Polygon');
       } catch (error) {
         markProviderFailure('Polygon');
-        console.warn('[QuoteRefresh] Polygon refresh failed:', (error as Error).message);
+        polygonError = error instanceof Error ? error : new Error(String(error));
+        console.warn('[QuoteRefresh] Polygon refresh failed:', polygonError.message);
       }
     }
 
-    // Yahoo overlay: during REGULAR hours Yahoo is near-real-time while Polygon
-    // Developer plan is ~15-min delayed. During PRE/POST Yahoo provides extended
-    // hours pricing that Polygon often misses. Only skip during CLOSED.
-    if ((session === 'PRE' || session === 'POST') && isProviderAvailable('Yahoo')) {
+    // Yahoo overlay: Polygon Developer plan is ~15-min delayed, Yahoo is near-real-time.
+    // Apply during all active sessions (REGULAR, PRE, POST). CLOSED already exited above.
+    if (isProviderAvailable('Yahoo')) {
       try {
         const yahooQuotes = await fetchYahooBatchQuotes(tickers);
         for (const [ticker, yahooQuote] of yahooQuotes.entries()) {
@@ -157,16 +160,23 @@ async function runRefreshCycle(): Promise<void> {
         markProviderSuccess('Yahoo');
       } catch (error) {
         markProviderFailure('Yahoo');
-        console.warn('[QuoteRefresh] Yahoo overlay failed:', (error as Error).message);
+        yahooError = error instanceof Error ? error : new Error(String(error));
+        console.warn('[QuoteRefresh] Yahoo overlay failed:', yahooError.message);
       }
+    }
+
+    if (tickers.length > 0 && polygonRefreshed === 0 && yahooOverlayCount === 0 && (polygonError || yahooError)) {
+      const msg = (polygonError?.message || '') + ' ' + (yahooError?.message || '');
+      if (msg.toLowerCase().includes('rate limit') || msg.includes('429')) {
+        throw new JobExecutionError('Quote refresh failed due to provider rate limits', 'RATE_LIMITED');
+      }
+      throw new JobExecutionError('Quote refresh failed for all available providers', 'TRANSIENT');
     }
 
     const elapsedSeconds = ((Date.now() - startMs) / 1000).toFixed(1);
     console.log(
       `[QuoteRefresh] Refreshed ${tickers.length} tickers in ${elapsedSeconds}s (Polygon: ${polygonRefreshed}, Yahoo overlay: ${yahooOverlayCount})`,
     );
-  } catch (error) {
-    console.error('[QuoteRefresh] Refresh cycle failed:', (error as Error).message);
   } finally {
     cycleInProgress = false;
   }
@@ -178,9 +188,9 @@ export function startQuoteRefresh(): void {
   const intervalMs = Math.max(5_000, config.quoteRefreshIntervalMs);
   console.log(`[QuoteRefresh] Starting background refresh every ${Math.round(intervalMs / 1000)}s`);
 
-  void runRefreshCycle();
+  runJob({ name: 'quote_refresh', fn: runRefreshCycle, maxAttempts: 1 });
   refreshTimer = setInterval(() => {
-    void runRefreshCycle();
+    runJob({ name: 'quote_refresh', fn: runRefreshCycle, maxAttempts: 1 });
   }, intervalMs);
 }
 

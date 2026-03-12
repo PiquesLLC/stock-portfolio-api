@@ -1,6 +1,7 @@
 import { fetchPrices, fetchDailyCandles } from './market.service';
 import themesData from '../data/finviz-themes-detailed.json';
 import type { HeatmapPeriod } from './market-heatmap.service';
+import { runJob } from './job-runner.service';
 
 // ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
 
@@ -129,13 +130,18 @@ async function refreshQuotesBackground(): Promise<void> {
   }
 }
 
-// Start background refresh on module load
-refreshQuotesBackground();
+const isTestEnv = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+const shouldScheduleBackgroundRefresh = !isTestEnv;
 
-// Refresh every 5 minutes
-setInterval(() => {
-  refreshQuotesBackground();
-}, CACHE_TTL);
+if (shouldScheduleBackgroundRefresh) {
+  // Start background refresh on module load
+  runJob({ name: 'themes_heatmap_refresh', fn: refreshQuotesBackground, maxAttempts: 1 });
+
+  // Refresh every 5 minutes
+  setInterval(() => {
+    runJob({ name: 'themes_heatmap_refresh', fn: refreshQuotesBackground, maxAttempts: 1 });
+  }, CACHE_TTL);
+}
 
 // ── Historical period changes ─────────────────────────────────
 

@@ -1,6 +1,8 @@
 import * as jose from 'jose';
+import { createHash } from 'crypto';
 import prisma from '../utils/prisma';
 import { config } from '../config';
+import { JobExecutionError, runJob } from './job-runner.service';
 
 // Apple's public keys for JWS verification (cached)
 let applePublicKeys: jose.JWK[] | null = null;
@@ -17,6 +19,45 @@ async function getApplePublicKeys(): Promise<jose.JWK[]> {
   applePublicKeys = data.keys;
   appleKeysExpiry = Date.now() + 24 * 60 * 60 * 1000; // cache 24h
   return applePublicKeys;
+}
+
+function decodeNotificationMetadata(signedPayload: string): { notificationUUID?: string; notificationType?: string } {
+  try {
+    const decoded = jose.decodeJwt(signedPayload) as { notificationUUID?: string; notificationType?: string };
+    return {
+      notificationUUID: decoded.notificationUUID,
+      notificationType: decoded.notificationType,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function toJobName(notificationId?: string, signedPayload?: string): string {
+  if (notificationId) return `apple_iap_webhook_${notificationId}`;
+  const payloadHash = createHash('sha256').update(signedPayload || '').digest('hex').slice(0, 16);
+  return `apple_iap_webhook_${payloadHash}`;
+}
+
+function classifyAppleNotificationError(err: unknown): unknown {
+  if (err instanceof JobExecutionError) return err;
+
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  const lower = message.toLowerCase();
+  const permanentPatterns = [
+    'bundle id mismatch',
+    'sandbox transaction rejected',
+    'failed to verify apple jws transaction',
+    'missing signedpayload',
+    'missing notificationuuid',
+    'missing notificationtype',
+  ];
+
+  if (permanentPatterns.some((pattern) => lower.includes(pattern))) {
+    return new JobExecutionError(message, 'PERMANENT');
+  }
+
+  return err;
 }
 
 /**
@@ -69,7 +110,7 @@ export async function verifySignedTransaction(signedTransaction: string): Promis
       continue;
     }
   }
-  throw new Error('Failed to verify Apple JWS transaction — no matching key');
+  throw new Error('Failed to verify Apple JWS transaction - no matching key');
 }
 
 /**
@@ -130,7 +171,7 @@ export async function verifyAndActivatePlan(
 }
 
 /**
- * Restore purchases — look up existing Apple subscription and reactivate.
+ * Restore purchases - look up existing Apple subscription and reactivate.
  */
 export async function restorePurchases(
   userId: string,
@@ -169,13 +210,46 @@ export async function restorePurchases(
  * The payload is a signed JWS from Apple containing notification type and transaction info.
  */
 export async function handleAppleNotification(signedPayload: string): Promise<void> {
+  const decoded = decodeNotificationMetadata(signedPayload);
+  const notificationId = decoded.notificationUUID;
+  const notificationType = decoded.notificationType;
+
+  await runJob({
+    name: toJobName(notificationId, signedPayload),
+    maxAttempts: 3,
+    baseDelayMs: 3000,
+    throwOnFailure: true,
+    context: {
+      provider: 'apple_iap',
+      notificationId: notificationId || null,
+      notificationType: notificationType || null,
+    },
+    fn: async () => {
+      try {
+        await processAppleNotification(signedPayload);
+      } catch (err) {
+        throw classifyAppleNotificationError(err);
+      }
+    },
+  });
+}
+
+async function processAppleNotification(signedPayload: string): Promise<void> {
   // Decode outer notification JWS
   const notification = await verifySignedTransaction(signedPayload);
   const notificationType = notification.notificationType as string;
   const notificationUUID = notification.notificationUUID as string;
 
-  // Idempotency: try to insert first — unique constraint prevents double-processing
-  // This eliminates the TOCTOU race of find-then-create
+  if (!notificationUUID) {
+    throw new JobExecutionError('Missing notificationUUID in Apple notification payload', 'PERMANENT');
+  }
+
+  if (!notificationType) {
+    throw new JobExecutionError('Missing notificationType in Apple notification payload', 'PERMANENT');
+  }
+
+  // Idempotency: try to insert first - unique constraint prevents double-processing.
+  // This eliminates the TOCTOU race of find-then-create.
   try {
     await prisma.appleIAPWebhookEvent.create({
       data: {
@@ -184,74 +258,82 @@ export async function handleAppleNotification(signedPayload: string): Promise<vo
       },
     });
   } catch (err: any) {
-    // Unique constraint violation = duplicate notification — skip
+    // Unique constraint violation = duplicate notification - skip.
     if (err?.code === 'P2002') {
       console.log(`[Apple IAP] Duplicate notification ${notificationUUID}, skipping`);
       return;
     }
-    throw err; // Re-throw unexpected errors
+    throw err;
   }
 
-  // Extract the signed transaction from the notification data
-  const data = notification.data as any;
-  if (!data?.signedTransactionInfo) {
-    console.log(`[Apple IAP] No transaction info in ${notificationType} notification`);
-    return;
-  }
+  try {
+    // Extract the signed transaction from the notification data
+    const data = notification.data as any;
+    if (!data?.signedTransactionInfo) {
+      console.log(`[Apple IAP] No transaction info in ${notificationType} notification`);
+      return;
+    }
 
-  const txn = await verifySignedTransaction(data.signedTransactionInfo);
-  const originalTransactionId = txn.originalTransactionId as string;
-  const productId = txn.productId as string;
-  const expiresDate = txn.expiresDate ? new Date(txn.expiresDate as number) : null;
+    const txn = await verifySignedTransaction(data.signedTransactionInfo);
+    const originalTransactionId = txn.originalTransactionId as string;
+    const productId = txn.productId as string;
+    const expiresDate = txn.expiresDate ? new Date(txn.expiresDate as number) : null;
 
-  // Find the user by their Apple transaction ID
-  const user = await prisma.user.findFirst({
-    where: { appleOriginalTransactionId: originalTransactionId },
-  });
+    // Find the user by their Apple transaction ID
+    const user = await prisma.user.findFirst({
+      where: { appleOriginalTransactionId: originalTransactionId },
+    });
 
-  if (!user) {
-    console.warn(`[Apple IAP] No user found for originalTransactionId ${originalTransactionId}`);
-    return;
-  }
+    if (!user) {
+      console.warn(`[Apple IAP] No user found for originalTransactionId ${originalTransactionId}`);
+      return;
+    }
 
-  switch (notificationType) {
-    case 'DID_RENEW':
-    case 'SUBSCRIBED':
-    case 'DID_CHANGE_RENEWAL_STATUS': {
-      const plan = mapAppleProductToPlan(productId);
-      if (plan !== 'free') {
+    switch (notificationType) {
+      case 'DID_RENEW':
+      case 'SUBSCRIBED':
+      case 'DID_CHANGE_RENEWAL_STATUS': {
+        const plan = mapAppleProductToPlan(productId);
+        if (plan !== 'free') {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { plan, planExpiresAt: expiresDate },
+          });
+          console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
+        }
+        break;
+      }
+
+      case 'EXPIRED':
+      case 'REVOKE':
+      case 'REFUND': {
         await prisma.user.update({
           where: { id: user.id },
-          data: { plan, planExpiresAt: expiresDate },
+          data: {
+            plan: 'free',
+            planExpiresAt: null,
+            appleOriginalTransactionId: null,
+            applePurchaseSource: null,
+          },
         });
-        console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
+        console.log(`[Apple IAP] Downgraded user ${user.id} to free (${notificationType})`);
+        break;
       }
-      break;
-    }
 
-    case 'EXPIRED':
-    case 'REVOKE':
-    case 'REFUND': {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          plan: 'free',
-          planExpiresAt: null,
-          appleOriginalTransactionId: null,
-          applePurchaseSource: null,
-        },
-      });
-      console.log(`[Apple IAP] Downgraded user ${user.id} to free (${notificationType})`);
-      break;
-    }
+      case 'DID_CHANGE_RENEWAL_INFO': {
+        // User changed their auto-renew preferences - log but no action needed.
+        console.log(`[Apple IAP] User ${user.id} changed renewal info`);
+        break;
+      }
 
-    case 'DID_CHANGE_RENEWAL_INFO': {
-      // User changed their auto-renew preferences — log but no action needed
-      console.log(`[Apple IAP] User ${user.id} changed renewal info`);
-      break;
+      default:
+        console.log(`[Apple IAP] Unhandled notification type: ${notificationType}`);
     }
-
-    default:
-      console.log(`[Apple IAP] Unhandled notification type: ${notificationType}`);
+  } catch (err) {
+    // Allow retries by removing idempotency marker when processing fails mid-flight.
+    await prisma.appleIAPWebhookEvent.deleteMany({
+      where: { notificationId: notificationUUID },
+    }).catch(() => {});
+    throw err;
   }
 }
