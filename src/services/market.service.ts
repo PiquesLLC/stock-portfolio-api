@@ -84,13 +84,46 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
   const cached = yahooIntradayCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
-  // Polygon.io primary — 5-minute bars for the last trading day
+  const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+
+  // Fetch BOTH sources in parallel — pick whichever has better coverage
   const today = new Date().toISOString().split('T')[0];
-  const daysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0]; // 5 days covers weekends
-  const pg = await fetchPolygonAggs(upperTicker, 5, 'minute', daysAgo, today, 60);
+  const daysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0];
+
+  const [pg, yahooCandles] = await Promise.all([
+    fetchPolygonAggs(upperTicker, 5, 'minute', daysAgo, today, 60),
+    (async (): Promise<IntradayCandle[]> => {
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?interval=5m&range=1d&includePrePost=true`;
+        const resp = await yahooGet(url);
+        const result = resp.data?.chart?.result?.[0];
+        if (result?.timestamp && result?.indicators?.quote?.[0]) {
+          const timestamps: number[] = result.timestamp;
+          const q = result.indicators.quote[0];
+          const candles: IntradayCandle[] = [];
+          for (let i = 0; i < timestamps.length; i++) {
+            if (q.close[i] != null) {
+              candles.push({
+                time: new Date(timestamps[i] * 1000).toISOString(),
+                open: q.open?.[i] ?? q.close[i],
+                high: q.high?.[i] ?? q.close[i],
+                low: q.low?.[i] ?? q.close[i],
+                close: q.close[i],
+                volume: q.volume?.[i] ?? 0,
+              });
+            }
+          }
+          return candles;
+        }
+      } catch { /* Yahoo failed */ }
+      return [];
+    })(),
+  ]);
+
+  // Build Polygon candles filtered to latest trading day
+  let polygonCandles: IntradayCandle[] = [];
   if (pg && pg.closes.length > 0) {
-    // Filter to only today's trading session (or last trading day if weekend/holiday)
-    const candles: IntradayCandle[] = pg.timestamps.map((t, i) => ({
+    const raw: IntradayCandle[] = pg.timestamps.map((t, i) => ({
       time: new Date(t * 1000).toISOString(),
       open: pg.opens[i],
       high: pg.highs[i],
@@ -98,49 +131,19 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
       close: pg.closes[i],
       volume: pg.volumes[i],
     }));
-
-    // Keep only the most recent trading day's candles (using ET date, not UTC)
-    if (candles.length > 0) {
-      const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-      const lastDateET = etDateFmt.format(new Date(candles[candles.length - 1].time));
-      const todayCandles = candles.filter(c => etDateFmt.format(new Date(c.time)) === lastDateET);
-      if (todayCandles.length > 0) {
-        yahooIntradayCache.set(cacheKey, todayCandles);
-        return todayCandles;
-      }
+    if (raw.length > 0) {
+      const lastDateET = etDateFmt.format(new Date(raw[raw.length - 1].time));
+      const todayOnly = raw.filter(c => etDateFmt.format(new Date(c.time)) === lastDateET);
+      polygonCandles = todayOnly.length > 0 ? todayOnly : raw;
     }
-
-    yahooIntradayCache.set(cacheKey, candles);
-    return candles;
   }
 
-  // Yahoo Finance fallback
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?interval=5m&range=1d&includePrePost=true`;
-    const resp = await yahooGet(url);
-    const result = resp.data?.chart?.result?.[0];
-    if (result?.timestamp && result?.indicators?.quote?.[0]) {
-      const timestamps: number[] = result.timestamp;
-      const q = result.indicators.quote[0];
-      const candles: IntradayCandle[] = [];
-      for (let i = 0; i < timestamps.length; i++) {
-        if (q.close[i] != null) {
-          candles.push({
-            time: new Date(timestamps[i] * 1000).toISOString(),
-            open: q.open?.[i] ?? q.close[i],
-            high: q.high?.[i] ?? q.close[i],
-            low: q.low?.[i] ?? q.close[i],
-            close: q.close[i],
-            volume: q.volume?.[i] ?? 0,
-          });
-        }
-      }
-      if (candles.length > 0) {
-        yahooIntradayCache.set(cacheKey, candles);
-        return candles;
-      }
-    }
-  } catch { /* Yahoo also failed */ }
+  // Pick the source with more data points (better pre-market coverage)
+  const best = polygonCandles.length >= yahooCandles.length ? polygonCandles : yahooCandles;
+  if (best.length > 0) {
+    yahooIntradayCache.set(cacheKey, best);
+    return best;
+  }
 
   return [];
 }
@@ -151,7 +154,7 @@ const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourl
  * Fetch hourly candles for 1W (15m bars, 5 days), 1M/6M/YTD (60m bars).
  * Polygon.io primary, Yahoo Finance fallback.
  */
-export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '6M' | 'YTD'): Promise<IntradayCandle[]> {
+export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y'): Promise<IntradayCandle[]> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `hourly:${upperTicker}:${period}`;
   const cached = yahooHourlyCache.get<IntradayCandle[]>(cacheKey);
@@ -159,7 +162,7 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
 
   // Polygon.io primary — proper resolution per period
   const today = new Date().toISOString().split('T')[0];
-  const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : period === '6M' ? 180 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
+  const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : period === '3M' ? 90 : period === '6M' ? 180 : period === '1Y' ? 365 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
   const fromDate = period === 'YTD' ? `${new Date().getFullYear()}-01-01` : new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
   const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
 

@@ -534,7 +534,20 @@ export async function reconstructPortfolioHistoryHiRes(
     if (cached) return cached;
 
     // Polygon.io primary â€” map Yahoo params to Polygon params
-    const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 30, '3mo': 95, '6mo': 185 };
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1).getTime();
+    const ytdDays = Math.max(2, Math.ceil((Date.now() - startOfYear) / 86400000) + 2);
+    const rangeDaysMap: Record<string, number> = {
+      '1d': 2,
+      '5d': 7,
+      '1mo': 30,
+      '3mo': 95,
+      '6mo': 185,
+      'ytd': ytdDays,
+      '1y': 370,
+      '2y': 740,
+      '5y': 1850,
+      'max': 3650,
+    };
     const rangeDays = rangeDaysMap[yahooRange] || 30;
     const today = new Date().toISOString().split('T')[0];
     const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];

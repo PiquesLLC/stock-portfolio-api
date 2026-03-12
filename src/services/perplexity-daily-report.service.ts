@@ -39,22 +39,75 @@ export interface DailyReportResponse {
   cached: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a portfolio analyst writing a concise daily morning briefing. Return valid JSON only with this exact structure:
-{
-  "greeting": "short friendly 1-sentence greeting referencing the day and market mood",
-  "marketOverview": "2-3 sentence summary of today's macro environment — indices, rates, key headlines",
-  "portfolioSummary": "2-3 sentence summary of the user's portfolio — value, daily change, notable movers",
-  "topStories": [
-    { "headline": "short headline max 80 chars", "body": "1-2 sentence explanation of why this matters to the portfolio", "sentiment": "positive or negative or neutral", "relatedTickers": ["AAPL"] }
-  ],
-  "watchToday": ["1-2 sentence actionable item to watch today"]
-}
-Return 3-5 top stories and 2-3 watch items. Focus on what's actionable and relevant to the user's holdings.
-IMPORTANT: Do NOT include any section labels like [ECONOMIC SNAPSHOT], [MARKET HEADLINES], or similar bracketed tags in your response. Write clean, natural prose.`;
+const SYSTEM_PROMPT = `Portfolio analyst. Return valid JSON only:
+{"greeting":"1 sentence","marketOverview":"2-3 sentences on macro","portfolioSummary":"2-3 sentences on portfolio","topStories":[{"headline":"max 80 chars","body":"1-2 sentences","sentiment":"positive|negative|neutral","relatedTickers":["AAPL"]}],"watchToday":["1-2 sentence item"]}
+3-5 stories, 2-3 watch items. No bracketed tags. JSON only.`;
 
 function isWeekendET(): boolean {
   const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
   return etDay === 'Sat' || etDay === 'Sun';
+}
+
+/** Quick fallback when deadline hits before data is even gathered */
+function buildQuickFallback(weekend: boolean): DailyReportResponse {
+  return {
+    generatedAt: new Date().toISOString(),
+    greeting: weekend ? 'Happy weekend!' : 'Good morning!',
+    marketOverview: 'Markets are active. Your AI briefing is generating in the background — refresh in a moment for the full report.',
+    portfolioSummary: '',
+    topStories: [],
+    watchToday: [],
+    cached: false,
+  };
+}
+
+/** Rich fallback using actual portfolio + news data */
+function buildFallbackReport(
+  portfolio: any,
+  sortedHoldings: any[],
+  news: any[],
+  upcomingEarnings: string[],
+  weekend: boolean,
+): DailyReportResponse {
+  const dayChange = portfolio.dayChangePercent ?? 0;
+  const totalValue = portfolio.netEquity ?? 0;
+  const dollarChange = portfolio.dayChange ?? 0;
+
+  const fallbackStories: { headline: string; body: string; sentiment: 'positive' | 'negative' | 'neutral'; relatedTickers: string[] }[] = news.slice(0, 3).map((n: any) => ({
+    headline: n.headline?.slice(0, 100) || 'Market Update',
+    body: n.summary?.slice(0, 200) || '',
+    sentiment: 'neutral' as const,
+    relatedTickers: [] as string[],
+  }));
+
+  const movers = sortedHoldings
+    .filter(h => Math.abs(h.dayChangePercent) > 1)
+    .slice(0, 3);
+  if (movers.length > 0) {
+    fallbackStories.unshift({
+      headline: `Portfolio movers: ${movers.map((m: any) => `${m.ticker} ${m.dayChangePercent >= 0 ? '+' : ''}${m.dayChangePercent.toFixed(1)}%`).join(', ')}`,
+      body: `Your biggest moves today among your ${portfolio.holdings.length} holdings.`,
+      sentiment: movers[0].dayChangePercent >= 0 ? 'positive' as const : 'negative' as const,
+      relatedTickers: movers.map((m: any) => m.ticker),
+    });
+  }
+
+  const watchToday: string[] = [];
+  if (upcomingEarnings.length > 0) {
+    watchToday.push(`Upcoming earnings: ${upcomingEarnings.join(', ')}`);
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    greeting: weekend ? 'Happy weekend!' : 'Good morning!',
+    marketOverview: news.length > 0
+      ? `Here's what's driving markets: ${news[0]?.headline || 'Markets are active today.'}`
+      : 'Markets are open. Check back shortly for AI-powered analysis.',
+    portfolioSummary: `Your portfolio ($${totalValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}) is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% ($${Math.abs(dollarChange).toFixed(0)}) today.`,
+    topStories: fallbackStories.slice(0, 5),
+    watchToday,
+    cached: false,
+  };
 }
 
 export async function getDailyReport(userId: string): Promise<DailyReportResponse> {
@@ -63,141 +116,115 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
+  // Single hard deadline wrapping EVERYTHING — data gathering + AI call.
+  // User never waits more than 12 seconds.
+  const HARD_DEADLINE_MS = 12000;
+  const startTime = Date.now();
   const weekend = isWeekendET();
 
-  // Gather data in parallel
-  const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
-    getPortfolio(userId),
-    fetchMarketNews(10),
-    getEconomicDashboard(),
-    getEarningsSummary(userId),
-  ]);
+  const fullPipeline = (async (): Promise<DailyReportResponse> => {
+    // Gather data in parallel — 5s timeout per source (these are local/cached, should be fast)
+    const withDataTimeout = <T,>(p: Promise<T>, label: string, ms = 5000): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)),
+      ]);
 
-  const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
-  const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
-  const economic = economicResult.status === 'fulfilled' ? economicResult.value : null;
-  const earnings = earningsResult.status === 'fulfilled' ? earningsResult.value : { results: [], partial: true };
+    const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
+      withDataTimeout(getPortfolio(userId), 'portfolio'),
+      withDataTimeout(fetchMarketNews(10), 'news'),
+      withDataTimeout(getEconomicDashboard(), 'economic'),
+      withDataTimeout(getEarningsSummary(userId), 'earnings'),
+    ]);
 
-  if (!portfolio || portfolio.holdings.length === 0) {
-    return {
-      generatedAt: new Date().toISOString(),
-      greeting: 'Good morning!',
-      marketOverview: 'Add holdings to your portfolio to receive a daily briefing.',
-      portfolioSummary: '',
-      topStories: [],
-      watchToday: [],
-      cached: false,
-    };
-  }
+    const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
+    const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
+    const economic = economicResult.status === 'fulfilled' ? economicResult.value : null;
+    const earnings = earningsResult.status === 'fulfilled' ? earningsResult.value : { results: [], partial: true };
 
-  // Format date like "Thursday, February 6, 2026"
-  const now = new Date();
-  const formattedDate = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
-  // Build holdings summary (top 25 by value)
-  const sortedHoldings = portfolio.holdings
-    .sort((a, b) => b.currentValue - a.currentValue)
-    .slice(0, 25);
-
-  const holdingsSummary = sortedHoldings
-    .map(h =>
-      `${h.ticker}: ${h.shares} shares, $${h.currentValue.toFixed(0)}, ` +
-      `day ${h.dayChangePercent >= 0 ? '+' : ''}${h.dayChangePercent.toFixed(1)}%, ` +
-      `total P/L ${h.profitLossPercent >= 0 ? '+' : ''}${h.profitLossPercent.toFixed(1)}%`
-    )
-    .join('\n');
-
-  // Build news summary
-  const newsSummary = news
-    .map(n => `- ${n.headline} (${n.source}): ${n.summary}`)
-    .join('\n');
-
-  // Build economic snapshot
-  let economicSummary = '';
-  if (economic) {
-    const indicators = economic.indicators;
-    const parts: string[] = [];
-    if (indicators.cpi?.latestValue != null) {
-      parts.push(`Consumer Price Index: ${indicators.cpi.latestValue}${indicators.cpi.unit} (prev: ${indicators.cpi.previousValue})`);
+    if (!portfolio || portfolio.holdings.length === 0) {
+      return {
+        generatedAt: new Date().toISOString(),
+        greeting: 'Good morning!',
+        marketOverview: 'Add holdings to your portfolio to receive a daily briefing.',
+        portfolioSummary: '',
+        topStories: [],
+        watchToday: [],
+        cached: false,
+      };
     }
-    if (indicators.fedFundsRate?.latestValue != null) {
-      parts.push(`Federal Funds Rate: ${indicators.fedFundsRate.latestValue}${indicators.fedFundsRate.unit} (prev: ${indicators.fedFundsRate.previousValue})`);
-    }
-    if (indicators.treasuryYield10Y?.latestValue != null) {
-      parts.push(`10-Year Treasury Yield: ${indicators.treasuryYield10Y.latestValue}${indicators.treasuryYield10Y.unit} (prev: ${indicators.treasuryYield10Y.previousValue})`);
-    }
-    if (indicators.unemployment?.latestValue != null) {
-      parts.push(`Unemployment Rate: ${indicators.unemployment.latestValue}${indicators.unemployment.unit} (prev: ${indicators.unemployment.previousValue})`);
-    }
-    if (indicators.gdp?.latestValue != null) {
-      parts.push(`Real GDP: ${indicators.gdp.latestValue}${indicators.gdp.unit} (prev: ${indicators.gdp.previousValue})`);
-    }
-    economicSummary = parts.join('\n');
-  }
 
-  // Build upcoming earnings (next 7 days)
-  const upcomingEarnings = earnings.results
-    .filter(e => e.daysUntil >= 0 && e.daysUntil <= 7)
-    .slice(0, 8)
-    .map(e => {
-      const date = new Date(e.reportDate);
-      const dow = date.toLocaleDateString('en-US', { weekday: 'short' });
-      return `${e.ticker} (${dow})`;
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
-  const earningsSummaryLine = upcomingEarnings.length > 0
-    ? `UPCOMING EARNINGS THIS WEEK: ${upcomingEarnings.join(', ')}`
-    : 'UPCOMING EARNINGS THIS WEEK: None';
 
-  const weekendNote = weekend
-    ? `NOTE: Markets are closed today (weekend). Focus on the week ahead — upcoming catalysts, earnings, macro events. Do NOT reference "today's" price movements; instead recap last week and preview next week.\n\n`
-    : '';
+    const sortedHoldings = portfolio.holdings
+      .sort((a, b) => b.currentValue - a.currentValue)
+      .slice(0, 10);
 
-  const userMessage =
-    `Today is ${formattedDate}. Generate my ${weekend ? 'weekend' : 'daily'} portfolio briefing.\n\n` +
-    weekendNote +
-    `MY PORTFOLIO (${portfolio.holdings.length} holdings, total value $${portfolio.netEquity.toFixed(0)}):\n` +
-    `${holdingsSummary}\n` +
-    `${weekend ? 'Last session' : 'Yesterday'}'s change: $${portfolio.dayChange.toFixed(0)} (${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}%)\n\n` +
-    `MARKET HEADLINES:\n${newsSummary}\n\n` +
-    `ECONOMIC SNAPSHOT:\n${economicSummary}\n\n` +
-    `${earningsSummaryLine}\n\n` +
-    `Give me 3-5 top stories relevant to my portfolio and the broader market.\n` +
-    `Give me 2-3 things to ${weekend ? 'watch next week' : 'watch today'}.`;
+    const holdingsSummary = sortedHoldings
+      .map(h =>
+        `${h.ticker} $${h.currentValue.toFixed(0)} ${h.dayChangePercent >= 0 ? '+' : ''}${h.dayChangePercent.toFixed(1)}%`
+      )
+      .join(', ');
 
-  const buildFallback = (): DailyReportResponse => {
-    const dayChange = portfolio.dayChangePercent ?? 0;
-    const watchToday = upcomingEarnings.length > 0 ? [upcomingEarnings.join(', ')] : [];
-    return {
-      generatedAt: new Date().toISOString(),
-      greeting: 'Good morning!',
-      marketOverview: 'Daily report generated in basic mode.',
-      portfolioSummary: `Your portfolio is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% today.`,
-      topStories: [],
-      watchToday,
-      cached: false,
-    };
-  };
+    const newsSummary = news.slice(0, 5)
+      .map(n => `- ${n.headline}`)
+      .join('\n');
 
-  try {
-    const startTime = Date.now();
+    let economicSummary = '';
+    if (economic) {
+      const ind = economic.indicators;
+      const parts: string[] = [];
+      if (ind.fedFundsRate?.latestValue != null) parts.push(`Fed rate: ${ind.fedFundsRate.latestValue}%`);
+      if (ind.treasuryYield10Y?.latestValue != null) parts.push(`10Y: ${ind.treasuryYield10Y.latestValue}%`);
+      if (ind.cpi?.latestValue != null) parts.push(`CPI: ${ind.cpi.latestValue}%`);
+      economicSummary = parts.join(', ');
+    }
+
+    const upcomingEarnings = earnings.results
+      .filter(e => e.daysUntil >= 0 && e.daysUntil <= 7)
+      .slice(0, 8)
+      .map(e => {
+        const date = new Date(e.reportDate);
+        const dow = date.toLocaleDateString('en-US', { weekday: 'short' });
+        return `${e.ticker} (${dow})`;
+      });
+    const earningsSummaryLine = upcomingEarnings.length > 0
+      ? `Earnings: ${upcomingEarnings.join(', ')}`
+      : '';
+
+    const weekendNote = weekend
+      ? `Weekend. Recap last week, preview next week.\n`
+      : '';
+
+    const userMessage =
+      `${formattedDate}. ${weekend ? 'Weekend' : 'Daily'} briefing.\n` +
+      weekendNote +
+      `Portfolio: ${portfolio.holdings.length} holdings, $${portfolio.netEquity.toFixed(0)}, ${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}% ($${portfolio.dayChange.toFixed(0)})\n` +
+      `Top: ${holdingsSummary}\n` +
+      `News:\n${newsSummary}\n` +
+      (economicSummary ? `Macro: ${economicSummary}\n` : '') +
+      earningsSummaryLine;
+
+    // How much time is left for Perplexity after data gathering?
+    const elapsedSoFar = Date.now() - startTime;
+    const perplexityTimeout = Math.max(3000, HARD_DEADLINE_MS - elapsedSoFar - 500);
+
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
-    ], { timeout: 60000, feature: 'daily-report', userId });
+    ], { timeout: perplexityTimeout, feature: 'daily-report', userId, model: 'sonar' });
 
     if (!resp || !resp.content) {
-      return buildFallback();
+      return buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
     }
 
     const jsonStr = extractJson(resp.content);
     const parsed = JSON.parse(jsonStr);
 
-    const result: DailyReportResponse = {
+    return {
       generatedAt: new Date().toISOString(),
       greeting: stripLeakedTags(String(parsed.greeting || '').slice(0, 200)),
       marketOverview: stripLeakedTags(String(parsed.marketOverview || '').slice(0, 500)),
@@ -213,21 +240,73 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
       watchToday: (parsed.watchToday || []).slice(0, 4).map((w: any) => stripLeakedTags(String(w || '').slice(0, 300))),
       cached: false,
     };
+  })();
 
+  const deadlinePromise = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), HARD_DEADLINE_MS);
+  });
+
+  try {
+    const raceResult = await Promise.race([fullPipeline, deadlinePromise]);
+
+    if (raceResult === null) {
+      console.warn(`[Daily Report] Hard deadline (${HARD_DEADLINE_MS}ms) hit, returning fallback`);
+      const fallback = buildQuickFallback(weekend);
+      // Let pipeline finish in background and cache
+      fullPipeline.then(aiResult => {
+        if (aiResult.topStories.length > 0) {
+          reportCache.set(cacheKey, aiResult);
+          console.log(`[Daily Report] Background generation complete, cached`);
+        }
+      }).catch(() => {});
+      return fallback;
+    }
+
+    const result = raceResult;
     if (result.topStories.length > 0) {
       reportCache.set(cacheKey, result);
     }
-
-    const elapsed = Date.now() - startTime;
-    console.log(`[Perplexity Daily Report] Generated ${result.topStories.length} stories, ${result.watchToday.length} watch items in ${elapsed}ms`);
+    console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms`);
     return result;
   } catch (_error) {
-    console.error('[Perplexity Daily Report] Error:', _error);
-    return buildFallback();
+    console.error('[Daily Report] Error:', _error);
+    return buildQuickFallback(weekend);
   }
 }
 
 export async function regenerateDailyReport(userId: string): Promise<DailyReportResponse> {
   reportCache.del(`daily-report:${userId}`);
   return getDailyReport(userId);
+}
+
+/**
+ * Pre-generate daily reports for all users with holdings.
+ * Called by a background job so reports are cached before users open the modal.
+ */
+export async function preGenerateDailyReports(): Promise<void> {
+  // Dynamic import to avoid circular dependency
+  const prisma = (await import('../utils/prisma')).default;
+  const users = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+
+  let generated = 0;
+  for (const { userId } of users) {
+    if (!userId) continue;
+    const cacheKey = `daily-report:${userId}`;
+    if (reportCache.has(cacheKey)) continue; // Already cached, skip
+
+    try {
+      await getDailyReport(userId);
+      generated++;
+    } catch (err: any) {
+      console.warn(`[Daily Report Pre-Gen] Failed for user ${userId.slice(0, 8)}: ${err.message}`);
+    }
+  }
+
+  if (generated > 0) {
+    console.log(`[Daily Report Pre-Gen] Pre-generated ${generated} reports for ${users.length} users`);
+  }
 }
