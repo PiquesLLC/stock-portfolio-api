@@ -28,12 +28,15 @@ export async function healthCheck(req: Request, res: Response): Promise<void> {
     };
   }
 
-  const [lastSnapshot] = await Promise.all([
-    prisma.portfolioSnapshot.findFirst({
+  let lastSnapshot: { timestamp: Date } | null = null;
+  try {
+    lastSnapshot = await prisma.portfolioSnapshot.findFirst({
       orderBy: { timestamp: 'desc' },
       select: { timestamp: true },
-    }),
-  ]);
+    });
+  } catch {
+    // Table may not exist in test/CI environments
+  }
   const memoryUsage = process.memoryUsage();
 
   res.json({
