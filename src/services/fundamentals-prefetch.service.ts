@@ -24,6 +24,7 @@
 import prisma from '../utils/prisma';
 import { refreshFundamentalsForTicker } from './polygon-fundamentals.service';
 import { subSectorGroups } from '../utils/sectors';
+import { JobExecutionError, runJob } from './job-runner.service';
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CYCLE_DELAY_MS = 15_000; // 15s between tickers (4/min — safe for all APIs)
@@ -31,6 +32,7 @@ const STARTUP_DELAY_MS = 300_000; // 5 min after server start
 const SKIP_BACKOFF_MS = 2 * 60 * 60 * 1000; // Skip failed tickers for 2 hours
 const MAX_FAILURES = 3; // After 3 failures, back off
 const LOG_PREFIX = '[Prefetch]';
+const IDLE_DELAY_MS = 10 * 60 * 1000;
 
 let running = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -205,42 +207,98 @@ async function prefetchTicker(ticker: string, reason: string): Promise<void> {
   }
 }
 
+function classifyPrefetchError(err: unknown): JobExecutionError {
+  if (err instanceof JobExecutionError) return err;
+
+  const e = err as {
+    message?: string;
+    status?: number;
+    statusCode?: number;
+    response?: { status?: number };
+  };
+  const message = e?.message || String(err || 'Unknown prefetch error');
+  const status = e?.status ?? e?.statusCode ?? e?.response?.status;
+  const msg = message.toLowerCase();
+
+  if (status === 429 || msg.includes('rate limit') || msg.includes('too many request')) {
+    return new JobExecutionError(message, 'RATE_LIMITED');
+  }
+  if (status === 401 || status === 403 || msg.includes('unauthorized') || msg.includes('forbidden')) {
+    return new JobExecutionError(message, 'PERMANENT');
+  }
+  if (
+    status === 408 ||
+    (typeof status === 'number' && status >= 500 && status <= 599) ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('network error') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up')
+  ) {
+    return new JobExecutionError(message, 'TRANSIENT');
+  }
+  if (
+    msg.includes('malformed') ||
+    msg.includes('invalid json') ||
+    msg.includes('json parse') ||
+    msg.includes('unexpected token') ||
+    msg.includes('missing required') ||
+    msg.includes('validation')
+  ) {
+    return new JobExecutionError(message, 'DATA_QUALITY');
+  }
+
+  return new JobExecutionError(message, 'UNKNOWN');
+}
+
 /** Single cycle: pick a ticker, fetch it, schedule next */
 async function cycle(): Promise<void> {
   if (!running) return;
-
-  let currentTicker = '';
+  const context: { ticker: string | null; reason: string | null } = { ticker: null, reason: null };
+  let nextDelayMs = CYCLE_DELAY_MS;
   try {
-    const next = await pickNextTicker();
+    await runJob({
+      name: 'fundamentals_prefetch',
+      context,
+      throwOnFailure: true,
+      fn: async () => {
+        const next = await pickNextTicker();
 
-    if (!next) {
-      if (stats.cycleCount % 100 === 0) {
-        console.log(`${LOG_PREFIX} All ${getSectorUniverse().length} tickers fresh (${failureMap.size} skipped). Sleeping 10 min.`);
-      }
-      stats.cycleCount++;
-      if (running) timer = setTimeout(cycleWrapper, 10 * 60 * 1000);
-      return;
-    }
+        if (!next) {
+          if (stats.cycleCount % 100 === 0) {
+            console.log(`${LOG_PREFIX} All ${getSectorUniverse().length} tickers fresh (${failureMap.size} skipped). Sleeping 10 min.`);
+          }
+          nextDelayMs = IDLE_DELAY_MS;
+          return;
+        }
 
-    currentTicker = next.ticker;
-    await prefetchTicker(next.ticker, next.reason);
-    recordSuccess(next.ticker);
+        context.ticker = next.ticker;
+        context.reason = next.reason;
 
-    stats.tickersFetched++;
-    stats.lastTicker = next.ticker;
-    stats.lastRun = new Date().toISOString();
+        try {
+          await prefetchTicker(next.ticker, next.reason);
+        } catch (err) {
+          throw classifyPrefetchError(err);
+        }
 
-    if (stats.tickersFetched % 25 === 0) {
-      console.log(`${LOG_PREFIX} Progress: ${stats.tickersFetched} tickers fetched, last: ${next.ticker} (${next.reason}), skipped: ${failureMap.size}`);
-    }
+        recordSuccess(next.ticker);
+        stats.tickersFetched++;
+        stats.lastTicker = next.ticker;
+        stats.lastRun = new Date().toISOString();
+
+        if (stats.tickersFetched % 25 === 0) {
+          console.log(`${LOG_PREFIX} Progress: ${stats.tickersFetched} tickers fetched, last: ${next.ticker} (${next.reason}), skipped: ${failureMap.size}`);
+        }
+      },
+    });
   } catch (err) {
     stats.errors++;
-    if (currentTicker) recordFailure(currentTicker);
-    console.error(`${LOG_PREFIX} Error on ${currentTicker || 'pick'}:`, (err as Error).message);
+    if (context.ticker) recordFailure(context.ticker);
+    console.error(`${LOG_PREFIX} Error on ${context.ticker || 'pick'}:`, err instanceof Error ? err.message : String(err));
   }
 
   stats.cycleCount++;
-  if (running) timer = setTimeout(cycleWrapper, CYCLE_DELAY_MS);
+  if (running) timer = setTimeout(cycleWrapper, nextDelayMs);
 }
 
 /** Wrapper that tracks inflight promise for graceful shutdown (Codex finding #7) */
