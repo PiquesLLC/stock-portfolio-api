@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import NodeCache from 'node-cache';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchQuote, IntradayCandle } from '../services/market.service';
 
-type SectorPeriod = '1D' | '1W' | '1M';
+type SectorPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y';
 
 interface SectorDefinition {
   ticker: string;
@@ -55,7 +55,8 @@ const BENCHMARK_TICKER = 'SPY' as const;
 
 function toSectorPeriod(raw: unknown): SectorPeriod {
   const upper = typeof raw === 'string' ? raw.toUpperCase() : '1D';
-  return upper === '1W' || upper === '1M' ? upper : '1D';
+  const valid: SectorPeriod[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y'];
+  return valid.includes(upper as SectorPeriod) ? (upper as SectorPeriod) : '1D';
 }
 
 function isValidNumber(value: unknown): value is number {

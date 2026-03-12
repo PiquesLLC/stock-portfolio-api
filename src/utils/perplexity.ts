@@ -31,28 +31,31 @@ export type PerplexityJsonParseResult<T> =
   | { ok: true; data: T; extracted: string }
   | { ok: false; reason: PerplexityJsonParseFailureReason; error?: string; extracted: string };
 
-// sonar-pro pricing: $3/M input, $15/M output, $5/1K searches
-const INPUT_COST_PER_TOKEN = 3 / 1_000_000;
-const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
+// Pricing per model (per token)
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'sonar-pro': { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+  'sonar': { input: 1 / 1_000_000, output: 1 / 1_000_000 },
+};
 
 /**
- * Call the Perplexity sonar-pro model.
+ * Call a Perplexity model (sonar or sonar-pro).
  * Returns null if API key is not configured.
  */
 export async function callPerplexity(
   messages: PerplexityMessage[],
-  options?: PerplexityCallOptions
+  options?: PerplexityCallOptions & { model?: string }
 ): Promise<PerplexityResponse | null> {
   if (!config.perplexityApiKey) return null;
 
   const startMs = Date.now();
+  const model = options?.model || 'sonar-pro';
 
   let resp;
   try {
     resp = await axios.post(
       'https://api.perplexity.ai/chat/completions',
       {
-        model: 'sonar-pro',
+        model,
         messages,
       },
       {
@@ -84,7 +87,8 @@ export async function callPerplexity(
   // Extract token usage from API response
   const inputTokens = resp.data?.usage?.prompt_tokens ?? 0;
   const outputTokens = resp.data?.usage?.completion_tokens ?? 0;
-  const costUsdEstimate = inputTokens * INPUT_COST_PER_TOKEN + outputTokens * OUTPUT_COST_PER_TOKEN;
+  const pricing = MODEL_PRICING[model] || MODEL_PRICING['sonar-pro'];
+  const costUsdEstimate = inputTokens * pricing.input + outputTokens * pricing.output;
 
   const usage: PerplexityUsage = { inputTokens, outputTokens, costUsdEstimate };
 
@@ -92,7 +96,7 @@ export async function callPerplexity(
   if (options?.feature) {
     logApiUsage({
       provider: 'perplexity',
-      model: 'sonar-pro',
+      model,
       feature: options.feature,
       inputTokens,
       outputTokens,
