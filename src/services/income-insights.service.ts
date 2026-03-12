@@ -309,33 +309,37 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   };
 
   // ============================================================================
-  // CONTRIBUTORS
+  // CONTRIBUTORS (trailing 12 months)
   // ============================================================================
 
-  const contributors: IncomeContributor[] = [];
-  const totalDividends = summary.totalAllTime;
+  // Build per-ticker totals from trailing 12 months only
+  const ttmTickerMap = new Map<string, { total: number; count: number }>();
+  for (const c of creditsThisYear) {
+    const existing = ttmTickerMap.get(c.ticker) ?? { total: 0, count: 0 };
+    existing.total += c.amountGross;
+    existing.count++;
+    ttmTickerMap.set(c.ticker, existing);
+  }
 
-  for (const tickerData of summary.byTicker) {
-    // Find holding to get current value for yield calculation
-    const holding = holdings.find(h => h.ticker === tickerData.ticker);
+  const contributors: IncomeContributor[] = [];
+  const totalDividendsTTM = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
+
+  for (const [ticker, data] of ttmTickerMap) {
+    const holding = holdings.find((h: any) => h.ticker === ticker);
     let yieldPct: number | null = null;
 
     if (holding && holding.currentValue > 0) {
-      // Annual yield = (annual dividends / current value) * 100
-      // Estimate annual from total / years of data
-      const yearsOfData = Math.max(1, creditsByMonth.size / 12);
-      const annualDividend = tickerData.total / yearsOfData;
-      yieldPct = Math.round((annualDividend / holding.currentValue) * 10000) / 100;
+      yieldPct = Math.round((data.total / holding.currentValue) * 10000) / 100;
     }
 
     contributors.push({
-      ticker: tickerData.ticker,
-      dividendDollar: Math.round(tickerData.total * 100) / 100,
+      ticker,
+      dividendDollar: Math.round(data.total * 100) / 100,
       yieldPct,
-      percentOfTotal: totalDividends > 0
-        ? Math.round((tickerData.total / totalDividends) * 10000) / 100
+      percentOfTotal: totalDividendsTTM > 0
+        ? Math.round((data.total / totalDividendsTTM) * 10000) / 100
         : 0,
-      paymentCount: tickerData.count,
+      paymentCount: data.count,
     });
   }
 
@@ -549,7 +553,7 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   const divEvidence: string[] = [];
   const divDrivers: { label: string; value: string; impact: string }[] = [];
   const divFixes: string[] = [];
-  const numSources = summary.byTicker.length;
+  const numSources = contributors.length;
 
   divEvidence.push(`Number of dividend sources: ${numSources}.`);
   if (top1Ticker) {
