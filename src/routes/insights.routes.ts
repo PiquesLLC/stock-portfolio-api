@@ -20,7 +20,7 @@ import {
   markAllAnomaliesReadHandler,
 } from '../controllers/anomaly.controller';
 import { getTaxHarvestHandler } from '../controllers/tax-harvest.controller';
-import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, mutationLimiter, aiLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
 const router = Router();
@@ -30,16 +30,16 @@ router.get('/attribution', heavyReadLimiter, requireAuth, getAttributionHandler)
 router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
-router.get('/briefing', heavyReadLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
-router.post('/briefing/explain', mutationLimiter, requireAuth, requirePlan('premium'), explainBriefingHandler);
-router.get('/behavior', heavyReadLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);
-router.get('/daily-report', heavyReadLimiter, requireAuth, requirePlan('premium'), getDailyReportHandler);
-router.post('/daily-report/regenerate', mutationLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
+router.get('/briefing', aiLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
+router.post('/briefing/explain', aiLimiter, requireAuth, requirePlan('premium'), explainBriefingHandler);
+router.get('/behavior', aiLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);
+router.get('/daily-report', aiLimiter, requireAuth, requirePlan('premium'), getDailyReportHandler);
+router.post('/daily-report/regenerate', aiLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
-router.get('/earnings-preview', heavyReadLimiter, requireAuth, requirePlan('elite'), getEarningsPreviewHandler);
+router.get('/earnings-preview', aiLimiter, requireAuth, requirePlan('elite'), getEarningsPreviewHandler);
 
 // Tax-Loss Harvesting
-router.get('/tax-harvest', heavyReadLimiter, requireAuth, requirePlan('premium'), getTaxHarvestHandler);
+router.get('/tax-harvest', aiLimiter, requireAuth, requirePlan('premium'), getTaxHarvestHandler);
 
 // Anomaly Detection
 router.get('/anomalies', requireAuth, getAnomaliesHandler);

@@ -1,173 +1,230 @@
+import { Request } from 'express';
 import rateLimit from 'express-rate-limit';
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Login rate limiter - prevent brute force
- * 10 attempts per 15 minutes in production, 50 in dev
+ * Key by authenticated user ID when available, fall back to IP.
+ * This prevents shared-IP collateral damage (corporate networks, VPNs)
+ * while still rate-limiting unauthenticated abuse by IP.
  */
+function userOrIpKey(req: Request): string {
+  const userId = (req as any).user?.userId;
+  return userId ? `user:${userId}` : req.ip || 'unknown';
+}
+
+/** Always key by IP (for unauthenticated endpoints like login/signup). */
+function ipKey(req: Request): string {
+  return req.ip || 'unknown';
+}
+
+const isProd = process.env.NODE_ENV === 'production';
+
+/**
+ * Trusted sources that bypass rate limiting entirely.
+ * Webhook providers verify authenticity via signatures, not rate limits.
+ */
+const TRUSTED_USER_AGENTS = [
+  'Stripe/',       // Stripe webhooks
+  'PlaidWebhook',  // Plaid webhooks
+  'BetterStack',   // Uptime monitoring
+];
+
+function isTrustedTraffic(req: Request): boolean {
+  // Health checks
+  if (req.path === '/health') return true;
+
+  // Known webhook/monitoring user agents
+  const ua = req.headers['user-agent'] || '';
+  if (TRUSTED_USER_AGENTS.some(prefix => ua.includes(prefix))) return true;
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Unauthenticated endpoint limiters (keyed by IP)
+// ---------------------------------------------------------------------------
+
+/** Login - prevent brute force. 10/15min prod, 50/15min dev. */
 export const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 10 : 50,
+  windowMs: 15 * 60 * 1000,
+  max: isProd ? 10 : 50,
   message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skipSuccessfulRequests: true, // Don't count successful logins
+  keyGenerator: ipKey,
+  skipSuccessfulRequests: true,
 });
 
-/**
- * OAuth callback rate limiter - stricter than generic mutations
- * 10 attempts per 15 minutes in production, 50 in dev
- */
+/** OAuth callback. 10/15min prod, 50/15min dev. */
 export const oauthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 10 : 50,
+  max: isProd ? 10 : 50,
   message: { error: 'Too many authentication attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
 });
 
-/**
- * Password setting rate limiter
- * 3 attempts per 15 minutes
- */
+/** Password setting. 3/15min. */
 export const setPasswordLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 3,
   message: { error: 'Too many password attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
 });
 
-/**
- * Signup rate limiter
- * 5 signups per hour per IP
- */
+/** Signup. 5/hour per IP. */
 export const signupLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: 'Too many signup attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
 });
 
-/**
- * Mutation rate limiter - protect POST/PUT/DELETE endpoints
- * 30 mutations per minute per IP
- */
-export const mutationLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 mutations per minute
-  message: { error: 'Too many requests. Please slow down.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-/**
- * Billing mutation limiter - stricter than generic mutation endpoints.
- */
-export const billingMutationLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 10 : 50,
-  message: { error: 'Too many billing requests. Please try again shortly.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-/**
- * Heavy read limiter - protect expensive GET endpoints (charts, AI, news, etc.)
- */
-export const heavyReadLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 120 : 1000,
-  message: { error: 'Too many requests. Please slow down.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-/**
- * Enumeration rate limiter - for check-username, has-password etc.
- * Does NOT skip successful requests (unlike loginLimiter).
- */
+/** Username/password check enumeration. 20/15min prod. */
 export const enumerationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 20 : 200,
+  max: isProd ? 20 : 200,
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
 });
 
-/**
- * MFA verification rate limiter - prevent brute force
- * 5 attempts per 15 minutes in production
- */
+/** MFA code verify. 5/15min prod. */
 export const mfaVerifyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 5 : 50,
+  max: isProd ? 5 : 50,
   message: { error: 'Too many verification attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
 });
 
-/**
- * MFA send rate limiter - prevent email spam
- * 3 sends per 15 minutes in production
- */
+/** MFA code send. 3/15min prod. */
 export const mfaSendLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 3 : 50,
+  max: isProd ? 3 : 50,
   message: { error: 'Too many code requests. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKey,
+});
+
+/** Waitlist join. 5/hour prod. */
+export const waitlistJoinLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: isProd ? 5 : 50,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+});
+
+// ---------------------------------------------------------------------------
+// Authenticated endpoint limiters (keyed by user ID, fallback to IP)
+// ---------------------------------------------------------------------------
+
+/** Generic mutations (POST/PUT/DELETE). 30/min per user. */
+export const mutationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+});
+
+/** Billing mutations. 10/min prod per user. */
+export const billingMutationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 10 : 50,
+  message: { error: 'Too many billing requests. Please try again shortly.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+});
+
+/** Heavy reads (charts, portfolio data, news). 120/min prod per user. */
+export const heavyReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 120 : 1000,
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+});
+
+// ---------------------------------------------------------------------------
+// AI endpoint limiters (keyed by user ID — these cost real money)
+// ---------------------------------------------------------------------------
+
+/**
+ * AI calls (Perplexity sonar/sonar-pro). 10/min per user.
+ * Covers: daily report, briefing, ask, explain, earnings preview, tax harvest.
+ */
+export const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 10 : 100,
+  message: { error: 'AI request limit reached. Please wait a moment before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
 });
 
 /**
- * Webhook rate limiter - protect inbound webhook endpoint from abuse
- * Generous threshold (60/min) since Plaid controls delivery cadence
- * and the handler already verifies JWT + body SHA-256 before any mutation
+ * Deep research (Gemini, $2-5 per run). 3/hour per user.
  */
+export const deepResearchLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: isProd ? 3 : 20,
+  message: { error: 'Deep research limit reached. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+});
+
+// ---------------------------------------------------------------------------
+// Webhook limiters (keyed by IP, trusted sources whitelisted)
+// ---------------------------------------------------------------------------
+
+/** Plaid webhooks. 60/min. */
 export const webhookLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000,
   max: 60,
   message: { error: 'Too many requests.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: isTrustedTraffic,
 });
 
-/**
- * Billing webhook limiter - separate profile for Stripe webhook traffic.
- */
+/** Stripe webhooks. 120/min prod. */
 export const billingWebhookLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 120 : 300,
+  windowMs: 60 * 1000,
+  max: isProd ? 120 : 300,
   message: { error: 'Too many requests.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: isTrustedTraffic,
 });
 
-/**
- * Waitlist join rate limiter - prevent spam signups
- * 5 attempts per hour per IP in production
- */
-export const waitlistJoinLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 5 : 50,
-  message: { error: 'Too many requests. Please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// ---------------------------------------------------------------------------
+// Global limiter (keyed by IP, trusted traffic whitelisted)
+// ---------------------------------------------------------------------------
 
-/**
- * Global API rate limiter - general protection
- * Higher limits in dev to support pre-fetching and background tasks
- */
+/** Global safety net. 600/min prod per IP. */
 export const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'production' ? 600 : 1000, // Higher for real-time dashboard
+  windowMs: 60 * 1000,
+  max: isProd ? 600 : 1000,
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks only
-    if (req.path === '/health') return true;
-    return false;
-  },
+  skip: isTrustedTraffic,
 });
