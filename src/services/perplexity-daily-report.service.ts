@@ -1,10 +1,11 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
 import { getEarningsSummary } from './earnings-summary.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
+import { JobExecutionError, type JobFailureCategory } from './job-runner.service';
 
 // Cache daily reports for 8 hours (28800s) — news doesn't shift fast enough to justify 4h
 const reportCache = new NodeCache({ stdTTL: 28800 });
@@ -37,6 +38,10 @@ export interface DailyReportResponse {
   }[];
   watchToday: string[];
   cached: boolean;
+}
+
+interface DailyReportOptions {
+  strictFailures?: boolean;
 }
 
 const SYSTEM_PROMPT = `Portfolio analyst. Return valid JSON only:
@@ -111,10 +116,33 @@ function buildFallbackReport(
 }
 
 export async function getDailyReport(userId: string): Promise<DailyReportResponse> {
+  return getDailyReportInternal(userId, {});
+}
+
+function classifyDailyReportError(error: unknown): JobFailureCategory {
+  if (error instanceof JobExecutionError) return error.category;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const lower = message.toLowerCase();
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('deadline')) {
+    return 'TRANSIENT';
+  }
+  if (
+    lower.includes('json parse') ||
+    lower.includes('invalid json') ||
+    lower.includes('unexpected token') ||
+    lower.includes('parse failure')
+  ) {
+    return 'DATA_QUALITY';
+  }
+  return 'UNKNOWN';
+}
+
+async function getDailyReportInternal(userId: string, options: DailyReportOptions): Promise<DailyReportResponse> {
   await ensureEmailVerifiedForAi(userId);
   const cacheKey = `daily-report:${userId}`;
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
+  const strictFailures = options.strictFailures === true;
 
   // Single hard deadline wrapping EVERYTHING — data gathering + AI call.
   // User never waits more than 12 seconds.
@@ -221,8 +249,15 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
       return buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
     }
 
-    const jsonStr = extractJson(resp.content);
-    const parsed = JSON.parse(jsonStr);
+    const parseResult = parsePerplexityJson(resp.content);
+    if (!parseResult.ok) {
+      if (strictFailures) {
+        throw new JobExecutionError(`[Daily Report] Parse failure: ${parseResult.reason}`, 'DATA_QUALITY');
+      }
+      console.warn(`[Daily Report] JSON parse failed (${parseResult.reason}), using fallback`);
+      return buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
+    }
+    const parsed = parseResult.data as any;
 
     return {
       generatedAt: new Date().toISOString(),
@@ -250,6 +285,9 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
     const raceResult = await Promise.race([fullPipeline, deadlinePromise]);
 
     if (raceResult === null) {
+      if (strictFailures) {
+        throw new JobExecutionError(`[Daily Report] Hard deadline exceeded (${HARD_DEADLINE_MS}ms)`, 'TRANSIENT');
+      }
       console.warn(`[Daily Report] Hard deadline (${HARD_DEADLINE_MS}ms) hit, returning fallback`);
       const fallback = buildQuickFallback(weekend);
       // Let pipeline finish in background and cache
@@ -269,6 +307,13 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
     console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms`);
     return result;
   } catch (_error) {
+    if (strictFailures) {
+      if (_error instanceof JobExecutionError) throw _error;
+      throw new JobExecutionError(
+        _error instanceof Error ? _error.message : String(_error ?? 'Unknown daily report generation error'),
+        classifyDailyReportError(_error),
+      );
+    }
     console.error('[Daily Report] Error:', _error);
     return buildQuickFallback(weekend);
   }
@@ -276,7 +321,7 @@ export async function getDailyReport(userId: string): Promise<DailyReportRespons
 
 export async function regenerateDailyReport(userId: string): Promise<DailyReportResponse> {
   reportCache.del(`daily-report:${userId}`);
-  return getDailyReport(userId);
+  return getDailyReportInternal(userId, {});
 }
 
 /**
@@ -292,21 +337,40 @@ export async function preGenerateDailyReports(): Promise<void> {
     where: { shares: { gt: 0 }, userId: { not: null } },
   });
 
-  let generated = 0;
+  let successCount = 0;
+  let failureCount = 0;
+  let skippedCached = 0;
+  const failureByCategory: Record<JobFailureCategory, number> = {
+    TRANSIENT: 0,
+    PERMANENT: 0,
+    RATE_LIMITED: 0,
+    DATA_QUALITY: 0,
+    UNKNOWN: 0,
+  };
+
   for (const { userId } of users) {
     if (!userId) continue;
     const cacheKey = `daily-report:${userId}`;
-    if (reportCache.has(cacheKey)) continue; // Already cached, skip
+    if (reportCache.has(cacheKey)) {
+      skippedCached++;
+      continue; // Already cached, skip
+    }
 
     try {
-      await getDailyReport(userId);
-      generated++;
+      await getDailyReportInternal(userId, { strictFailures: true });
+      successCount++;
     } catch (err: any) {
-      console.warn(`[Daily Report Pre-Gen] Failed for user ${userId.slice(0, 8)}: ${err.message}`);
+      failureCount++;
+      const category = classifyDailyReportError(err);
+      failureByCategory[category] += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[Daily Report Pre-Gen] Failed userId=${userId} category=${category} error="${message}"`);
+      continue;
     }
   }
 
-  if (generated > 0) {
-    console.log(`[Daily Report Pre-Gen] Pre-generated ${generated} reports for ${users.length} users`);
-  }
+  console.log(
+    `[Daily Report Pre-Gen] Summary users=${users.length} success=${successCount} failed=${failureCount} skippedCached=${skippedCached} ` +
+    `failuresByCategory=${JSON.stringify(failureByCategory)}`,
+  );
 }
