@@ -6,6 +6,7 @@
 import { getPortfolio } from './portfolio.service';
 import { getDividendSummary, getDividendCredits } from './dividend-post.service';
 import { insightsCache } from '../utils/finnhub';
+import { ETF_REFERENCE_DATA } from './market.service';
 import prisma from '../utils/prisma';
 
 
@@ -325,7 +326,8 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   const totalDividendsTTM = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
 
   for (const [ticker, data] of ttmTickerMap) {
-    const holding = holdings.find((h: any) => h.ticker === ticker);
+    const tickerUpper = ticker.toUpperCase();
+    const holding = holdings.find((h: any) => h.ticker.toUpperCase() === tickerUpper);
     let yieldPct: number | null = null;
 
     if (holding && holding.currentValue > 0) {
@@ -502,6 +504,14 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
             }
           } catch { /* ignore parse errors */ }
         }
+      }
+    }
+    // Fallback: check ETF reference data for ETFs not in screener/fundamentals
+    const stillMissingAfterFund = tickersToCheck.filter((t: string) => !marketDividendTickers.has(t));
+    for (const t of stillMissingAfterFund) {
+      const etfRef = ETF_REFERENCE_DATA[t];
+      if (etfRef?.dividendYield && etfRef.dividendYield > 0) {
+        marketDividendTickers.add(t);
       }
     }
   }
