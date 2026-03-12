@@ -1,6 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
-import { getJobStats, getDeadLetterEntries, resolveDeadLetterEntry, pruneOldJobRuns, healOrphanedJobs, detectStuckJobs, getJobRunnerAlertSummary } from '../services/job-runner.service';
+import {
+  getJobStats,
+  getDeadLetterEntries,
+  resolveDeadLetterEntry,
+  pruneOldJobRuns,
+  healOrphanedJobs,
+  detectStuckJobs,
+  getJobRunnerAlertSummary,
+  getJobRunHistory,
+  getDeadLetterEntriesPaginated,
+  retryDeadLetterEntry,
+} from '../services/job-runner.service';
 import { getSnapshotHealth } from '../services/snapshot.service';
 import { healSnapshot } from '../services/snapshot-heal.service';
 import { config } from '../config';
@@ -12,6 +23,58 @@ function isAdmin(userId?: string): boolean {
   return config.waitlistAdminUserIds.includes(userId) ||
     config.creatorAdminUserIds.includes(userId);
 }
+
+// GET /admin/jobs/summary - Dashboard job summary per job
+router.get('/jobs/summary', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const stats = await getJobStats();
+    const jobs = stats.map(s => ({
+      jobName: s.jobName,
+      runCount: s.total,
+      successCount: s.success,
+      failureCount: s.failed + s.deadLettered,
+      failRatePercent: s.failureRate,
+      lastRun: s.lastRun,
+      alertStatus: s.alertSeverity,
+      alertThresholds: s.alertThresholds,
+      avgDurationMs: s.avgDurationMs,
+      lastError: s.lastError,
+    }));
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      totalJobs: jobs.length,
+      jobs,
+    });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] summary error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to fetch job summary' });
+  }
+});
+
+// GET /admin/jobs/:jobName/history - Recent runs for a specific job (max 50)
+router.get('/jobs/:jobName/history', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const jobName = req.params.jobName;
+    const runs = await getJobRunHistory(jobName, 50);
+    res.json({ jobName, count: runs.length, runs });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] history error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to fetch job history' });
+  }
+});
 
 // GET /admin/jobs/stats - Job run statistics (last 24h)
 router.get('/jobs/stats', requireAuth, async (req: Request, res: Response) => {
@@ -57,13 +120,56 @@ router.get('/jobs/dead-letter', requireAuth, async (req: Request, res: Response)
     }
 
     const showResolved = req.query.resolved === 'true';
-    const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 50, 200));
-    const entries = await getDeadLetterEntries(showResolved, limit);
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const pageSize = Math.max(1, Math.min(parseInt(req.query.pageSize as string) || 25, 200));
+    const result = await getDeadLetterEntriesPaginated({
+      resolved: showResolved,
+      page,
+      pageSize,
+    });
 
-    res.json({ entries, count: entries.length });
+    res.json(result);
   } catch (error: unknown) {
     console.error('[JobAdmin] dead-letter error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch dead letter entries' });
+  }
+});
+
+// POST /admin/jobs/dead-letter/:id/retry - Retry a dead-lettered job
+router.post('/jobs/dead-letter/:id/retry', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!isAdmin(userId)) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const result = await retryDeadLetterEntry(req.params.id, userId);
+    if (!result.ok) {
+      if (result.code === 'NOT_FOUND') {
+        res.status(404).json({ error: 'Dead letter entry not found' });
+        return;
+      }
+      if (result.code === 'ALREADY_RESOLVED') {
+        res.status(409).json({ error: 'Dead letter entry is already resolved', entry: result.entry });
+        return;
+      }
+      if (result.code === 'HANDLER_NOT_REGISTERED') {
+        res.status(409).json({ error: `Retry handler not registered for job ${result.entry.jobName}`, entry: result.entry });
+        return;
+      }
+      if (result.code === 'RETRY_FAILED') {
+        res.status(500).json({ error: 'Dead letter retry failed', category: result.category, details: result.error, entry: result.entry });
+        return;
+      }
+      res.status(500).json({ error: 'Dead letter retry unavailable' });
+      return;
+    }
+
+    res.json({ retried: true, entry: result.entry });
+  } catch (error: unknown) {
+    console.error('[JobAdmin] retry error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to retry dead letter entry' });
   }
 });
 

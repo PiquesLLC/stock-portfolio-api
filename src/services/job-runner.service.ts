@@ -58,6 +58,8 @@ interface JobOptions {
   throwOnFailure?: boolean;
 }
 
+type RegisteredJobHandler = () => Promise<unknown>;
+
 interface JobStats {
   jobName: string;
   total: number;
@@ -121,6 +123,7 @@ function safeStringify(obj: unknown): string {
 
 // Track in-flight jobs to prevent overlapping runs of the same job
 const inFlightJobs = new Set<string>();
+const jobHandlerRegistry = new Map<string, RegisteredJobHandler>();
 
 interface JobAlertThreshold {
   warning: number;
@@ -479,6 +482,148 @@ export async function runJob(options: JobOptions): Promise<void> {
     await updateIdempotencyStatus(prismaClient, idempotencyKey, 'failed');
   } finally {
     inFlightJobs.delete(name);
+  }
+}
+
+export function registerJobHandler(name: string, handler: RegisteredJobHandler): void {
+  if (!name || typeof handler !== 'function') return;
+  jobHandlerRegistry.set(name, handler);
+}
+
+export function getActiveBackgroundJobCount(): number {
+  return inFlightJobs.size;
+}
+
+export async function getJobRunHistory(jobName: string, limit = 50) {
+  const safeLimit = Math.max(1, Math.min(Math.floor(limit), 50));
+  return prisma.backgroundJobRun.findMany({
+    where: { jobName },
+    orderBy: { startedAt: 'desc' },
+    take: safeLimit,
+    select: {
+      id: true,
+      jobName: true,
+      status: true,
+      attempt: true,
+      maxAttempts: true,
+      durationMs: true,
+      error: true,
+      startedAt: true,
+      completedAt: true,
+    },
+  });
+}
+
+export async function getDeadLetterEntriesPaginated(options?: {
+  resolved?: boolean;
+  page?: number;
+  pageSize?: number;
+}) {
+  const resolved = options?.resolved ?? false;
+  const page = Math.max(1, Math.floor(options?.page ?? 1));
+  const pageSize = Math.max(1, Math.min(Math.floor(options?.pageSize ?? 25), 200));
+  const skip = (page - 1) * pageSize;
+
+  const [entries, total] = await Promise.all([
+    prisma.deadLetterEntry.findMany({
+      where: { resolved },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize,
+    }),
+    prisma.deadLetterEntry.count({ where: { resolved } }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return {
+    entries,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasMore: page < totalPages,
+    },
+  };
+}
+
+function safeParseContext(context: string | null | undefined): Record<string, unknown> | undefined {
+  if (!context) return undefined;
+  try {
+    const parsed = JSON.parse(context);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Ignore malformed dead-letter context and continue retry
+  }
+  return undefined;
+}
+
+export async function retryDeadLetterEntry(id: string, resolvedBy?: string) {
+  const deadLetterStore = (prisma as PrismaLike).deadLetterEntry;
+  if (typeof deadLetterStore?.findMany !== 'function' || typeof deadLetterStore?.update !== 'function') {
+    return { ok: false as const, code: 'UNSUPPORTED' as const };
+  }
+
+  const matches = await deadLetterStore.findMany({
+    where: { id },
+    take: 1,
+  }) as Array<{
+    id: string;
+    jobName: string;
+    context?: string | null;
+    resolved: boolean;
+  }>;
+
+  const entry = matches[0];
+  if (!entry) {
+    return { ok: false as const, code: 'NOT_FOUND' as const };
+  }
+
+  if (entry.resolved) {
+    return { ok: false as const, code: 'ALREADY_RESOLVED' as const, entry };
+  }
+
+  const handler = jobHandlerRegistry.get(entry.jobName);
+  if (!handler) {
+    return { ok: false as const, code: 'HANDLER_NOT_REGISTERED' as const, entry };
+  }
+
+  const retryContext = {
+    ...(safeParseContext(entry.context) ?? {}),
+    retryDeadLetterId: entry.id,
+    retryRequestedBy: resolvedBy ?? null,
+  };
+
+  try {
+    await runJob({
+      name: entry.jobName,
+      fn: handler,
+      context: retryContext,
+      throwOnFailure: true,
+    });
+
+    const resolvedEntry = await deadLetterStore.update({
+      where: { id: entry.id },
+      data: {
+        resolved: true,
+        resolvedAt: new Date(),
+        resolvedBy: resolvedBy ?? null,
+      },
+    });
+
+    return { ok: true as const, entry: resolvedEntry };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const category = error instanceof JobExecutionError ? error.category : 'UNKNOWN';
+    return {
+      ok: false as const,
+      code: 'RETRY_FAILED' as const,
+      error: message,
+      category,
+      entry,
+    };
   }
 }
 
