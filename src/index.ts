@@ -23,7 +23,7 @@ import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
 import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
-import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys } from './services/job-runner.service';
+import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
@@ -122,6 +122,111 @@ function buildTimeBucketIdempotencyKey(jobName: string, windowMs: number): strin
   return `${jobName}:${bucket}`;
 }
 
+async function runSnapshotSchedulerForAllUsers() {
+  const userIds = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+  for (const { userId } of userIds) {
+    if (userId) {
+      await createSnapshotIfNeeded(userId).catch(err => {
+        if (err?.message && !err.message.includes('quotes')) {
+          console.error(`[Snapshot Scheduler] Error for user ${userId.slice(0, 8)}:`, err.message);
+        }
+      });
+    }
+  }
+}
+
+async function runAnalystUpdatesJob() {
+  const tickers = await getAllHeldTickers();
+  await checkAnalystUpdates(tickers);
+}
+
+async function runPolygonFundamentalsJob() {
+  const tickers = await getAllHeldTickers();
+  for (const t of tickers) {
+    await refreshFundamentalsForTicker(t).catch(err =>
+      console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
+    );
+  }
+  console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
+}
+
+async function runAnomalyDetectionForAllUsers() {
+  const session = getMarketSession();
+  if (session !== 'PRE' && session !== 'REG' && session !== 'POST') return;
+  const users = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+  for (const { userId } of users) {
+    if (userId) {
+      await detectAnomalies(userId).catch(err =>
+        console.error(`[Anomaly Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
+      );
+    }
+  }
+}
+
+async function runDividendChangeDetectionForAllUsers() {
+  if (isWeekendET()) return;
+  const users = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+  for (const { userId } of users) {
+    if (userId) {
+      await detectDividendChanges(userId).catch(err =>
+        console.error(`[Dividend Change Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
+      );
+    }
+  }
+}
+
+async function runWebhookThresholdEvalJob() {
+  evaluateWebhookThresholds();
+}
+
+async function runJobRunPruneJob() {
+  const count = await pruneOldJobRuns();
+  if (count > 0) console.log(`[JobRunner] Pruned ${count} old job runs`);
+}
+
+async function runIdempotencyKeyPruneJob() {
+  const count = await pruneExpiredIdempotencyKeys();
+  if (count > 0) console.log(`[JobRunner] Pruned ${count} expired idempotency key(s)`);
+}
+
+function registerBackgroundJobHandlers(): void {
+  registerJobHandler('benchmark_cache', ensureBenchmarksCached);
+  registerJobHandler('snapshot_scheduler', runSnapshotSchedulerForAllUsers);
+  registerJobHandler('demo_leaderboard_backfill', backfillLeaderboardDemoData);
+  registerJobHandler('leaderboard_refresh', refreshLeaderboardSnapshots);
+  registerJobHandler('dividend_sync', syncAllHeldTickers);
+  registerJobHandler('dividend_post', postDividendsForDate);
+  registerJobHandler('price_alert_eval', evaluatePriceAlerts);
+  registerJobHandler('analyst_updates', runAnalystUpdatesJob);
+  registerJobHandler('economic_indicators', refreshEconomicIndicators);
+  registerJobHandler('international_indicators', refreshInternationalIndicators);
+  registerJobHandler('polygon_fundamentals', runPolygonFundamentalsJob);
+  registerJobHandler('heatmap_fundamentals', backfillHeatmapFundamentals);
+  registerJobHandler('polygon_screener', backfillPolygonScreenerData);
+  registerJobHandler('earnings_alerts', sendEarningsAlerts);
+  registerJobHandler('milestone_check', checkMilestoneAlerts);
+  registerJobHandler('anomaly_detection', runAnomalyDetectionForAllUsers);
+  registerJobHandler('dividend_change_detection', runDividendChangeDetectionForAllUsers);
+  registerJobHandler('creator_reconciliation', runCreatorLedgerReconciliation);
+  registerJobHandler('deep_research_poller', pollActiveResearchJobs);
+  registerJobHandler('webhook_threshold_eval', runWebhookThresholdEvalJob);
+  registerJobHandler('job_run_prune', runJobRunPruneJob);
+  registerJobHandler('idempotency_key_prune', runIdempotencyKeyPruneJob);
+  registerJobHandler('daily_report_pregen', preGenerateDailyReports);
+}
+
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
@@ -145,6 +250,7 @@ const server = app.listen(config.port, async () => {
   // Ensure default system user exists before any schedulers run
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
+  registerBackgroundJobHandlers();
 
   // Auto-verify users created before email verification was required (one-time, cutoff date).
   // Only applies to pre-existing users; new users must complete OTP verification.
@@ -181,22 +287,7 @@ const server = app.listen(config.port, async () => {
   const SNAPSHOT_INTERVAL_MS = config.snapshotIntervalSeconds * 1000;
   console.log(`[Snapshot Scheduler] Running every ${config.snapshotIntervalSeconds}s`);
   setInterval(() => {
-    runJob({ name: 'snapshot_scheduler', fn: async () => {
-      const userIds = await prisma.holding.findMany({
-        select: { userId: true },
-        distinct: ['userId'],
-        where: { shares: { gt: 0 }, userId: { not: null } },
-      });
-      for (const { userId } of userIds) {
-        if (userId) {
-          await createSnapshotIfNeeded(userId).catch(err => {
-            if (err?.message && !err.message.includes('quotes')) {
-              console.error(`[Snapshot Scheduler] Error for user ${userId.slice(0, 8)}:`, err.message);
-            }
-          });
-        }
-      }
-    }, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('snapshot_scheduler', SNAPSHOT_INTERVAL_MS), idempotencyTtlMs: SNAPSHOT_INTERVAL_MS + 10000 }); // maxAttempts: 1 — runs every ~60s, no point retrying
+    runJob({ name: 'snapshot_scheduler', fn: runSnapshotSchedulerForAllUsers, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('snapshot_scheduler', SNAPSHOT_INTERVAL_MS), idempotencyTtlMs: SNAPSHOT_INTERVAL_MS + 10000 }); // maxAttempts: 1 — runs every ~60s, no point retrying
   }, SNAPSHOT_INTERVAL_MS);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
@@ -274,16 +365,10 @@ const server = app.listen(config.port, async () => {
   // Analyst updates â€” check once per day (every 24 hours)
   console.log('[Analyst Scheduler] Running every 24 hours');
   setTimeout(() => {
-    runJob({ name: 'analyst_updates', fn: async () => {
-      const tickers = await getAllHeldTickers();
-      await checkAnalystUpdates(tickers);
-    }});
+    runJob({ name: 'analyst_updates', fn: runAnalystUpdatesJob });
   }, 30000);
   setInterval(() => {
-    runJob({ name: 'analyst_updates', fn: async () => {
-      const tickers = await getAllHeldTickers();
-      await checkAnalystUpdates(tickers);
-    }});
+    runJob({ name: 'analyst_updates', fn: runAnalystUpdatesJob });
   }, 24 * 60 * 60 * 1000);
 
   // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls)
@@ -307,26 +392,10 @@ const server = app.listen(config.port, async () => {
   // Polygon Fundamentals: refresh all held tickers every 12 hours (unlimited API calls)
   console.log('[Polygon Fundamentals] Rotating every 12 hours');
   setTimeout(() => {
-    runJob({ name: 'polygon_fundamentals', fn: async () => {
-      const tickers = await getAllHeldTickers();
-      for (const t of tickers) {
-        await refreshFundamentalsForTicker(t).catch(err =>
-          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
-        );
-      }
-      console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
-    }});
+    runJob({ name: 'polygon_fundamentals', fn: runPolygonFundamentalsJob });
   }, 120000);
   setInterval(() => {
-    runJob({ name: 'polygon_fundamentals', fn: async () => {
-      const tickers = await getAllHeldTickers();
-      for (const t of tickers) {
-        await refreshFundamentalsForTicker(t).catch(err =>
-          console.error(`[Polygon Fundamentals] Refresh failed for ${t}:`, err.message)
-        );
-      }
-      console.log(`[Polygon Fundamentals] Rotation complete: ${tickers.length} tickers`);
-    }});
+    runJob({ name: 'polygon_fundamentals', fn: runPolygonFundamentalsJob });
   }, 12 * 60 * 60 * 1000);
 
   // Heatmap fundamentals backfill â€” refresh heatmap tickers (missing/stale) on startup + daily
@@ -369,22 +438,6 @@ const server = app.listen(config.port, async () => {
 
   // AI Anomaly Detection — check every 30 minutes during market hours (all users)
   console.log('[Anomaly Detection] Running every 30 minutes (market hours only)');
-  async function runAnomalyDetectionForAllUsers() {
-    const session = getMarketSession();
-    if (session !== 'PRE' && session !== 'REG' && session !== 'POST') return;
-    const users = await prisma.holding.findMany({
-      select: { userId: true },
-      distinct: ['userId'],
-      where: { shares: { gt: 0 }, userId: { not: null } },
-    });
-    for (const { userId } of users) {
-      if (userId) {
-        await detectAnomalies(userId).catch(err =>
-          console.error(`[Anomaly Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
-        );
-      }
-    }
-  }
   setTimeout(() => {
     runJob({ name: 'anomaly_detection', fn: runAnomalyDetectionForAllUsers });
   }, 120000);
@@ -394,21 +447,6 @@ const server = app.listen(config.port, async () => {
 
   // Dividend change detection — every 6 hours (skip weekends — no new dividend data, all users)
   console.log('[Dividend Change Detection] Running every 6 hours');
-  async function runDividendChangeDetectionForAllUsers() {
-    if (isWeekendET()) return;
-    const users = await prisma.holding.findMany({
-      select: { userId: true },
-      distinct: ['userId'],
-      where: { shares: { gt: 0 }, userId: { not: null } },
-    });
-    for (const { userId } of users) {
-      if (userId) {
-        await detectDividendChanges(userId).catch(err =>
-          console.error(`[Dividend Change Detection] Error for user ${userId.slice(0, 8)}:`, err.message)
-        );
-      }
-    }
-  }
   setTimeout(() => {
     runJob({ name: 'dividend_change_detection', fn: runDividendChangeDetectionForAllUsers });
   }, 60000);
@@ -453,23 +491,17 @@ const server = app.listen(config.port, async () => {
 
   // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
   setInterval(() => {
-    runJob({ name: 'webhook_threshold_eval', fn: async () => { evaluateWebhookThresholds(); }, maxAttempts: 1 });
+    runJob({ name: 'webhook_threshold_eval', fn: runWebhookThresholdEvalJob, maxAttempts: 1 });
   }, 5 * 60 * 1000);
 
   // Prune old job run records daily (keeps last 7 days)
   setInterval(() => {
-    runJob({ name: 'job_run_prune', fn: async () => {
-      const count = await pruneOldJobRuns();
-      if (count > 0) console.log(`[JobRunner] Pruned ${count} old job runs`);
-    }, maxAttempts: 2 });
+    runJob({ name: 'job_run_prune', fn: runJobRunPruneJob, maxAttempts: 2 });
   }, 24 * 60 * 60 * 1000);
 
   // Prune expired idempotency keys daily
   setInterval(() => {
-    runJob({ name: 'idempotency_key_prune', fn: async () => {
-      const count = await pruneExpiredIdempotencyKeys();
-      if (count > 0) console.log(`[JobRunner] Pruned ${count} expired idempotency key(s)`);
-    }, maxAttempts: 2 });
+    runJob({ name: 'idempotency_key_prune', fn: runIdempotencyKeyPruneJob, maxAttempts: 2 });
   }, 24 * 60 * 60 * 1000);
 
   // Daily Report pre-generation — warm cache so reports load instantly
