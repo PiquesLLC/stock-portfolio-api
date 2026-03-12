@@ -1,7 +1,7 @@
 import prisma from '../utils/prisma';
 import { Prisma } from '../generated/prisma/client';
 
-export type JobFailureCategory = 'TRANSIENT' | 'PERMANENT' | 'RATE_LIMITED' | 'DATA_QUALITY';
+export type JobFailureCategory = 'TRANSIENT' | 'PERMANENT' | 'RATE_LIMITED' | 'DATA_QUALITY' | 'UNKNOWN';
 export type JobAlertSeverity = 'none' | 'warning' | 'critical';
 
 type PrismaLike = typeof prisma & {
@@ -25,6 +25,7 @@ interface ClassifiedFailure {
   category: JobFailureCategory;
   retryable: boolean;
   backoffMultiplier: number;
+  maxAttempts?: number;
 }
 
 export class JobExecutionError extends Error {
@@ -65,6 +66,10 @@ interface JobStats {
   deadLettered: number;
   failureRate: number;
   alertSeverity: JobAlertSeverity;
+  alertThresholds: {
+    warning: number;
+    critical: number;
+  };
   failureCategories: Record<JobFailureCategory, number>;
   avgDurationMs: number;
   lastRun: string | null;
@@ -94,6 +99,19 @@ export interface JobRunnerMetrics {
   deadLetters: {
     unresolved: number;
   };
+  jobs: Array<{
+    jobName: string;
+    total: number;
+    success: number;
+    failed: number;
+    deadLettered: number;
+    failureRate: number;
+    alertSeverity: JobAlertSeverity;
+    alertThresholds: {
+      warning: number;
+      critical: number;
+    };
+  }>;
 }
 
 function safeStringify(obj: unknown): string {
@@ -104,12 +122,30 @@ function safeStringify(obj: unknown): string {
 // Track in-flight jobs to prevent overlapping runs of the same job
 const inFlightJobs = new Set<string>();
 
-const WARNING_FAILURE_RATE = 0.05;
-const CRITICAL_FAILURE_RATE = 0.15;
+interface JobAlertThreshold {
+  warning: number;
+  critical: number;
+}
 
-function getAlertSeverity(failureRate: number): JobAlertSeverity {
-  if (failureRate > CRITICAL_FAILURE_RATE) return 'critical';
-  if (failureRate > WARNING_FAILURE_RATE) return 'warning';
+const DEFAULT_ALERT_THRESHOLD: JobAlertThreshold = { warning: 0.05, critical: 0.15 };
+const JOB_ALERT_THRESHOLDS: Record<string, JobAlertThreshold> = {
+  snapshot_scheduler: { warning: 0.03, critical: 0.10 },
+  dividend_sync: { warning: 0.10, critical: 0.25 },
+  dividend_post: { warning: 0.10, critical: 0.25 },
+  deep_research_poller: { warning: 0.15, critical: 0.30 },
+  anomaly_detection: { warning: 0.10, critical: 0.20 },
+  milestone_check: { warning: 0.10, critical: 0.20 },
+};
+
+function getAlertThresholdForJob(jobName?: string): JobAlertThreshold {
+  if (!jobName) return DEFAULT_ALERT_THRESHOLD;
+  return JOB_ALERT_THRESHOLDS[jobName] || DEFAULT_ALERT_THRESHOLD;
+}
+
+function getAlertSeverity(failureRate: number, jobName?: string): JobAlertSeverity {
+  const threshold = getAlertThresholdForJob(jobName);
+  if (failureRate > threshold.critical) return 'critical';
+  if (failureRate > threshold.warning) return 'warning';
   return 'none';
 }
 
@@ -118,6 +154,7 @@ function classifyJobFailure(err: unknown): ClassifiedFailure {
     if (err.category === 'PERMANENT') return { category: 'PERMANENT', retryable: false, backoffMultiplier: 1 };
     if (err.category === 'DATA_QUALITY') return { category: 'DATA_QUALITY', retryable: false, backoffMultiplier: 1 };
     if (err.category === 'RATE_LIMITED') return { category: 'RATE_LIMITED', retryable: true, backoffMultiplier: 3 };
+    if (err.category === 'UNKNOWN') return { category: 'UNKNOWN', retryable: true, backoffMultiplier: 1, maxAttempts: 2 };
     return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
   }
 
@@ -135,11 +172,17 @@ function classifyJobFailure(err: unknown): ClassifiedFailure {
   if (explicit === 'PERMANENT') return { category: 'PERMANENT', retryable: false, backoffMultiplier: 1 };
   if (explicit === 'DATA_QUALITY') return { category: 'DATA_QUALITY', retryable: false, backoffMultiplier: 1 };
   if (explicit === 'RATE_LIMITED') return { category: 'RATE_LIMITED', retryable: true, backoffMultiplier: 3 };
+  if (explicit === 'UNKNOWN') return { category: 'UNKNOWN', retryable: true, backoffMultiplier: 1, maxAttempts: 2 };
   if (explicit === 'TRANSIENT') return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
 
   const status = e?.status ?? e?.statusCode ?? e?.response?.status;
   if (status === 429) return { category: 'RATE_LIMITED', retryable: true, backoffMultiplier: 3 };
-  if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408) {
+  if (status === 401 || status === 403) return { category: 'PERMANENT', retryable: false, backoffMultiplier: 1 };
+  if (status === 408) return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
+  if (typeof status === 'number' && status >= 500 && status <= 599) {
+    return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
+  }
+  if (typeof status === 'number' && status >= 400 && status < 500) {
     return { category: 'PERMANENT', retryable: false, backoffMultiplier: 1 };
   }
 
@@ -159,13 +202,39 @@ function classifyJobFailure(err: unknown): ClassifiedFailure {
     return { category: 'RATE_LIMITED', retryable: true, backoffMultiplier: 3 };
   }
   if (
-    msg.includes('invalid') ||
-    msg.includes('validation') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('network error') ||
+    msg.includes('eai_again') ||
+    msg.includes('enotfound') ||
+    msg.includes('503') ||
+    msg.includes('502') ||
+    msg.includes('504') ||
+    msg.includes('5xx')
+  ) {
+    return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
+  }
+  if (
     msg.includes('unauthorized') ||
     msg.includes('forbidden') ||
-    msg.includes('not found')
+    msg.includes('invalid api key') ||
+    msg.includes('auth failed') ||
+    msg.includes('access denied')
   ) {
     return { category: 'PERMANENT', retryable: false, backoffMultiplier: 1 };
+  }
+  if (
+    msg.includes('malformed') ||
+    msg.includes('invalid') ||
+    msg.includes('validation') ||
+    msg.includes('invalid json') ||
+    msg.includes('json parse') ||
+    msg.includes('unexpected token') ||
+    msg.includes('missing required')
+  ) {
+    return { category: 'DATA_QUALITY', retryable: false, backoffMultiplier: 1 };
   }
   if (
     msg.includes('quote unavailable') ||
@@ -177,12 +246,12 @@ function classifyJobFailure(err: unknown): ClassifiedFailure {
     return { category: 'DATA_QUALITY', retryable: false, backoffMultiplier: 1 };
   }
 
-  return { category: 'TRANSIENT', retryable: true, backoffMultiplier: 1 };
+  return { category: 'UNKNOWN', retryable: true, backoffMultiplier: 1, maxAttempts: 2 };
 }
 
 function parseFailureCategory(error: string | null): JobFailureCategory | null {
   if (!error) return null;
-  const m = error.match(/^\[(TRANSIENT|PERMANENT|RATE_LIMITED|DATA_QUALITY)\]\s+/);
+  const m = error.match(/^\[(TRANSIENT|PERMANENT|RATE_LIMITED|DATA_QUALITY|UNKNOWN)\]\s+/);
   return (m?.[1] as JobFailureCategory | undefined) ?? null;
 }
 
@@ -353,7 +422,10 @@ export async function runJob(options: JobOptions): Promise<void> {
         const errorMsg = err instanceof Error ? err.message : String(err);
         const classified = classifyJobFailure(err);
         const errorWithCategory = `[${classified.category}] ${errorMsg}`;
-        const canRetry = classified.retryable && attempt < maxAttempts;
+        const effectiveMaxAttempts = classified.maxAttempts
+          ? Math.min(maxAttempts, classified.maxAttempts)
+          : maxAttempts;
+        const canRetry = classified.retryable && attempt < effectiveMaxAttempts;
 
         // Update run record with failure
         if (runId) {
@@ -452,6 +524,7 @@ export async function getJobStats(jobName?: string): Promise<JobStats[]> {
       PERMANENT: 0,
       RATE_LIMITED: 0,
       DATA_QUALITY: 0,
+      UNKNOWN: 0,
     };
     for (const run of jobRuns) {
       const c = parseFailureCategory(run.error);
@@ -461,6 +534,7 @@ export async function getJobStats(jobName?: string): Promise<JobStats[]> {
     const avgDurationMs = durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
     const lastRun = jobRuns[0]?.startedAt?.toISOString() ?? null;
     const lastFailed = jobRuns.find(r => r.error);
+    const thresholds = getAlertThresholdForJob(name);
 
     stats.push({
       jobName: name,
@@ -469,7 +543,11 @@ export async function getJobStats(jobName?: string): Promise<JobStats[]> {
       failed,
       deadLettered,
       failureRate: Math.round(failureRate * 1000) / 10,
-      alertSeverity: getAlertSeverity(failureRate),
+      alertSeverity: getAlertSeverity(failureRate, name),
+      alertThresholds: {
+        warning: thresholds.warning * 100,
+        critical: thresholds.critical * 100,
+      },
       failureCategories,
       avgDurationMs,
       lastRun,
@@ -501,6 +579,7 @@ export async function getJobRunnerMetrics(hours = 24): Promise<JobRunnerMetrics>
   const runs = await prisma.backgroundJobRun.findMany({
     where: { startedAt: { gte: since } },
     select: {
+      jobName: true,
       status: true,
       durationMs: true,
     },
@@ -518,6 +597,33 @@ export async function getJobRunnerMetrics(hours = 24): Promise<JobRunnerMetrics>
   const p95DurationMs = Math.round(percentile(durationSamples, 95));
   const successRate = total > 0 ? success / total : 1;
   const failureRate = total > 0 ? (failed + deadLettered) / total : 0;
+  const runsByJob = new Map<string, typeof runs>();
+  for (const run of runs) {
+    const list = runsByJob.get(run.jobName) || [];
+    list.push(run);
+    runsByJob.set(run.jobName, list);
+  }
+  const jobMetrics = [...runsByJob.entries()].map(([jobName, jobRuns]) => {
+    const jobSuccess = jobRuns.filter(r => r.status === 'success').length;
+    const jobFailed = jobRuns.filter(r => r.status === 'failed').length;
+    const jobDeadLettered = jobRuns.filter(r => r.status === 'dead_lettered').length;
+    const jobFailureRate = jobRuns.length > 0 ? (jobFailed + jobDeadLettered) / jobRuns.length : 0;
+    const thresholds = getAlertThresholdForJob(jobName);
+
+    return {
+      jobName,
+      total: jobRuns.length,
+      success: jobSuccess,
+      failed: jobFailed,
+      deadLettered: jobDeadLettered,
+      failureRate: Math.round(jobFailureRate * 1000) / 10,
+      alertSeverity: getAlertSeverity(jobFailureRate, jobName),
+      alertThresholds: {
+        warning: thresholds.warning * 100,
+        critical: thresholds.critical * 100,
+      },
+    };
+  }).sort((a, b) => a.jobName.localeCompare(b.jobName));
 
   const deadLetters = await prisma.deadLetterEntry.count({
     where: { resolved: false },
@@ -563,6 +669,7 @@ export async function getJobRunnerMetrics(hours = 24): Promise<JobRunnerMetrics>
     deadLetters: {
       unresolved: deadLetters,
     },
+    jobs: jobMetrics,
   };
 }
 
@@ -652,8 +759,8 @@ export function getJobRunnerAlertSummary(stats: JobStats[]) {
   const failureRate = totalRuns > 0 ? totalFailures / totalRuns : 0;
   return {
     failureRate: Math.round(failureRate * 1000) / 10,
-    warningThreshold: WARNING_FAILURE_RATE * 100,
-    criticalThreshold: CRITICAL_FAILURE_RATE * 100,
+    warningThreshold: DEFAULT_ALERT_THRESHOLD.warning * 100,
+    criticalThreshold: DEFAULT_ALERT_THRESHOLD.critical * 100,
     severity: getAlertSeverity(failureRate),
   };
 }
