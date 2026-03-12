@@ -42,12 +42,12 @@ export interface TaxHarvestResponse {
   cached: boolean;
 }
 
-export async function getTaxHarvestSuggestions(userId: string): Promise<TaxHarvestResponse> {
-  const cacheKey = `tax-harvest:${userId}`;
+export async function getTaxHarvestSuggestions(userId: string, portfolioId?: string): Promise<TaxHarvestResponse> {
+  const cacheKey = `tax-harvest:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached_result = cache.get<TaxHarvestResponse>(cacheKey);
   if (cached_result) return { ...cached_result, cached: true };
 
-  const holdings = await getHoldings(userId);
+  const holdings = await getHoldings(userId, portfolioId);
   if (holdings.length === 0) {
     return emptyResponse();
   }

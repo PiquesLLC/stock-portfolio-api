@@ -45,15 +45,15 @@ Rules:
 - Do NOT recommend buying or selling
 - CRITICAL: Never invent or estimate portfolio dollar values. Use ONLY the exact total value provided in the user message. If you mention the portfolio value, use the exact number given.`;
 
-export async function getPortfolioBriefing(userId: string): Promise<PortfolioBriefingResponse> {
+export async function getPortfolioBriefing(userId: string, portfolioId?: string): Promise<PortfolioBriefingResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = `portfolio-briefing:${userId}`;
+  const cacheKey = `portfolio-briefing:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
   let portfolio;
   try {
-    portfolio = await getPortfolio(userId);
+    portfolio = await getPortfolio(userId, { portfolioId });
   } catch (err) {
     console.error('[Perplexity Briefing] Failed to load portfolio:', err);
     return {

@@ -4,7 +4,8 @@ import { AuthRequest } from '../types/auth';
 
 export async function getTaxHarvestHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const result = await getTaxHarvestSuggestions(req.user!.userId);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const result = await getTaxHarvestSuggestions(req.user!.userId, portfolioId);
     res.json(result);
   } catch (error: unknown) {
     console.error('[Tax Harvest] Error:');

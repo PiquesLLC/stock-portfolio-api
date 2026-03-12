@@ -29,10 +29,11 @@ function timeoutResponse(window: IntelligenceWindow) {
 
 async function fetchWithTimeout(
   userId: string,
-  window: IntelligenceWindow
+  window: IntelligenceWindow,
+  portfolioId?: string
 ): Promise<PortfolioIntelligenceResponse> {
   const result = await Promise.race([
-    getPortfolioIntelligence(userId, window),
+    getPortfolioIntelligence(userId, window, portfolioId),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('intelligence_timeout')), INTELLIGENCE_TIMEOUT_MS)
     ),
@@ -41,6 +42,7 @@ async function fetchWithTimeout(
 }
 
 export async function getIntelligenceHandler(req: AuthRequest, res: Response): Promise<void> {
+  const portfolioId = req.query.portfolioId as string | undefined;
   const windowParam = req.query.window as string | undefined;
   let window: IntelligenceWindow = '1d';
 
@@ -49,7 +51,7 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
   }
 
   try {
-    const intelligence = await fetchWithTimeout(req.user!.userId, window);
+    const intelligence = await fetchWithTimeout(req.user!.userId, window, portfolioId);
     res.json(intelligence);
   } catch (err) {
     if (err instanceof Error && err.message === 'intelligence_timeout') {

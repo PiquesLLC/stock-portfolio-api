@@ -737,9 +737,10 @@ function getStaleTtlMs(window: IntelligenceWindow, isIncomplete: boolean): numbe
 
 async function computeIntelligence(
   userId: string,
-  window: IntelligenceWindow
+  window: IntelligenceWindow,
+  portfolioId?: string
 ): Promise<PortfolioIntelligenceResponse> {
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const holdings = portfolio.holdings;
 
   if (holdings.length === 0) {
@@ -825,11 +826,11 @@ function cacheResult(cacheKey: string, result: PortfolioIntelligenceResponse, wi
   insightsCache.set(cacheKey, result, ttl);
 }
 
-function refreshInBackground(userId: string, window: IntelligenceWindow, cacheKey: string): void {
+function refreshInBackground(userId: string, window: IntelligenceWindow, cacheKey: string, portfolioId?: string): void {
   // Deduplicate: if a refresh is already in flight for this key, skip
   if (refreshInFlight.has(cacheKey)) return;
 
-  const promise = computeIntelligence(userId, window)
+  const promise = computeIntelligence(userId, window, portfolioId)
     .then(result => {
       cacheResult(cacheKey, result, window);
       return result;
@@ -847,9 +848,10 @@ function refreshInBackground(userId: string, window: IntelligenceWindow, cacheKe
 
 export async function getPortfolioIntelligence(
   userId: string,
-  window: IntelligenceWindow = '1d'
+  window: IntelligenceWindow = '1d',
+  portfolioId?: string
 ): Promise<PortfolioIntelligenceResponse> {
-  const cacheKey = `intelligence:${userId}:${window}`;
+  const cacheKey = `intelligence:${userId}:${window}${portfolioId ? `:${portfolioId}` : ''}`;
   const now = Date.now();
 
   // Check our SWR cache first
@@ -861,7 +863,7 @@ export async function getPortfolioIntelligence(
     }
     if (now < cached.staleUntil) {
       // Stale but within grace period — serve immediately, refresh in background
-      refreshInBackground(userId, window, cacheKey);
+      refreshInBackground(userId, window, cacheKey, portfolioId);
       return cached.data;
     }
     // Expired past stale window — fall through to full compute
@@ -872,7 +874,7 @@ export async function getPortfolioIntelligence(
   if (legacyCached) return legacyCached;
 
   // Cold miss — compute synchronously
-  const result = await computeIntelligence(userId, window);
+  const result = await computeIntelligence(userId, window, portfolioId);
   cacheResult(cacheKey, result, window);
   return result;
 }

@@ -42,6 +42,7 @@ export interface DailyReportResponse {
 
 interface DailyReportOptions {
   strictFailures?: boolean;
+  portfolioId?: string;
 }
 
 const SYSTEM_PROMPT = `Portfolio analyst. Return valid JSON only:
@@ -115,8 +116,8 @@ function buildFallbackReport(
   };
 }
 
-export async function getDailyReport(userId: string): Promise<DailyReportResponse> {
-  return getDailyReportInternal(userId, {});
+export async function getDailyReport(userId: string, portfolioId?: string): Promise<DailyReportResponse> {
+  return getDailyReportInternal(userId, { portfolioId });
 }
 
 function classifyDailyReportError(error: unknown): JobFailureCategory {
@@ -139,7 +140,8 @@ function classifyDailyReportError(error: unknown): JobFailureCategory {
 
 async function getDailyReportInternal(userId: string, options: DailyReportOptions): Promise<DailyReportResponse> {
   await ensureEmailVerifiedForAi(userId);
-  const cacheKey = `daily-report:${userId}`;
+  const portfolioId = options.portfolioId;
+  const cacheKey = `daily-report:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
   const strictFailures = options.strictFailures === true;
@@ -159,10 +161,10 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       ]);
 
     const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
-      withDataTimeout(getPortfolio(userId), 'portfolio'),
+      withDataTimeout(getPortfolio(userId, { portfolioId }), 'portfolio'),
       withDataTimeout(fetchMarketNews(10), 'news'),
       withDataTimeout(getEconomicDashboard(), 'economic'),
-      withDataTimeout(getEarningsSummary(userId), 'earnings'),
+      withDataTimeout(getEarningsSummary(userId, portfolioId), 'earnings'),
     ]);
 
     const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
@@ -319,9 +321,9 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
   }
 }
 
-export async function regenerateDailyReport(userId: string): Promise<DailyReportResponse> {
-  reportCache.del(`daily-report:${userId}`);
-  return getDailyReportInternal(userId, {});
+export async function regenerateDailyReport(userId: string, portfolioId?: string): Promise<DailyReportResponse> {
+  reportCache.del(`daily-report:${userId}${portfolioId ? `:${portfolioId}` : ''}`);
+  return getDailyReportInternal(userId, { portfolioId });
 }
 
 /**

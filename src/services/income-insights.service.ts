@@ -136,14 +136,14 @@ function formatCurrency(amount: number): string {
 // MAIN SERVICE FUNCTION
 // ============================================================================
 
-export async function getIncomeInsights(userId: string, window: IncomeWindow = 'today'): Promise<IncomeInsightsResponse> {
-  const cacheKey = `income-insights:${userId}:${window}`;
+export async function getIncomeInsights(userId: string, window: IncomeWindow = 'today', portfolioId?: string): Promise<IncomeInsightsResponse> {
+  const cacheKey = `income-insights:${userId}:${window}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached = insightsCache.get<IncomeInsightsResponse>(cacheKey);
   if (cached) return cached;
 
   // Get all dividend credits
   const credits = await getDividendCredits(userId);
-  const portfolio = await getPortfolio(userId);
+  const portfolio = await getPortfolio(userId, { portfolioId });
   const holdings = portfolio.holdings;
 
   // Get dividend summary
