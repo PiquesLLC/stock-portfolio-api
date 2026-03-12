@@ -20,10 +20,12 @@ function calcCagr(current: number, base: number, years: number): number | null {
 
 export async function getDividendGrowthRates(
   userId: string,
-  options: { excludeCurrentYear?: boolean } = {}
+  options: { excludeCurrentYear?: boolean; portfolioId?: string } = {}
 ) {
+  const where: any = { userId, shares: { gt: 0 } };
+  if (options.portfolioId) where.portfolioId = options.portfolioId;
   const holdings = await prisma.holding.findMany({
-    where: { userId, shares: { gt: 0 } },
+    where,
     select: { ticker: true, shares: true },
   });
 
