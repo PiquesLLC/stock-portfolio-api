@@ -85,7 +85,7 @@ export async function createPortfolio(
       throw new PlanLimitError(limit, plan);
     }
 
-    return tx.portfolio.create({
+    const created = await tx.portfolio.create({
       data: {
         userId,
         name: input.name,
@@ -93,6 +93,19 @@ export async function createPortfolio(
         isDefault: false,
       },
     });
+
+    return {
+      id: created.id,
+      name: created.name,
+      type: created.type,
+      isDefault: created.isDefault,
+      cashBalance: created.cashBalance,
+      marginDebt: created.marginDebt,
+      dripEnabled: created.dripEnabled,
+      holdingsCount: 0,
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+    };
   });
 }
 
