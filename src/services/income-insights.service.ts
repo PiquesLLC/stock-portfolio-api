@@ -142,12 +142,33 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   if (cached) return cached;
 
   // Get all dividend credits
-  const credits = await getDividendCredits(userId);
+  const allCredits = await getDividendCredits(userId);
   const portfolio = await getPortfolio(userId, { portfolioId });
   const holdings = portfolio.holdings;
 
-  // Get dividend summary
-  const summary = await getDividendSummary(userId);
+  // When viewing a specific portfolio, filter credits to only tickers in that portfolio
+  const portfolioTickers = portfolioId
+    ? new Set(holdings.map((h: any) => h.ticker.toUpperCase()))
+    : null;
+  const credits = portfolioTickers
+    ? allCredits.filter((c: any) => portfolioTickers.has(c.ticker.toUpperCase()))
+    : allCredits;
+
+  // Get dividend summary (filtered to portfolio tickers if scoped)
+  const fullSummary = await getDividendSummary(userId);
+  const summary = portfolioTickers
+    ? (() => {
+        const filtered = fullSummary.byTicker.filter(t => portfolioTickers.has(t.ticker.toUpperCase()));
+        // Recompute YTD from filtered credits
+        const ytdStart = new Date(new Date().getFullYear(), 0, 1);
+        const ytdCredits = credits.filter((c: any) => new Date(c.creditedAt) >= ytdStart);
+        return {
+          totalYTD: Math.round(ytdCredits.reduce((s: number, c: any) => s + c.amountGross, 0) * 100) / 100,
+          totalAllTime: Math.round(filtered.reduce((s, t) => s + t.total, 0) * 100) / 100,
+          byTicker: filtered,
+        };
+      })()
+    : fullSummary;
 
   // Calculate date ranges
   const now = new Date();

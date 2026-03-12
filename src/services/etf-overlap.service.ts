@@ -16,9 +16,11 @@ type OverlapHolding = {
   exposureValue: number;
 };
 
-export async function getEtfOverlap(userId: string) {
+export async function getEtfOverlap(userId: string, portfolioId?: string) {
+  const where: any = { userId, shares: { gt: 0 } };
+  if (portfolioId) where.portfolioId = portfolioId;
   const holdings = await prisma.holding.findMany({
-    where: { userId, shares: { gt: 0 } },
+    where,
     select: { ticker: true, shares: true },
   });
 
