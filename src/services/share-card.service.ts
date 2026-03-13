@@ -295,7 +295,7 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   };
   const intervalMap: Record<string, string> = {
     '1D': '5m',
-    '1W': '15m',
+    '1W': '1h',
     '1M': '1h',
     '3M': '1h',
     '6M': '1h',
