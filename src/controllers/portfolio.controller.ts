@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter, getPortfolioChartData } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -393,199 +393,16 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     const includeDebug = String(req.query.debug) === '1';
 
-    if (period === '1D') {
-      const now = Date.now();
-      const liveValue = portfolio.totalAssets - portfolio.marginDebt;
-      const previousCloseValue = liveValue - portfolio.dayChange;
-      const holdings = await getHoldings(req.user.userId, chartPortfolioId);
-      let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
+    // 1D, 1W, 1M: Use shared getPortfolioChartData for consistent results
+    // (share card also calls this same function, so values are guaranteed identical)
+    if (period === '1D' || period === '1W' || period === '1M') {
+      const chartData = await getPortfolioChartData(req.user.userId, period, chartPortfolioId);
+      const { points, periodStartValue, source } = chartData;
 
-      // Reconstruct 1D from Yahoo 5-min intraday candles (current holdings only).
-      // After hours, Yahoo range=1d still returns the last trading session's data.
-      let points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
-      );
-
-      // If intraday returned insufficient data, fall back to last 24h of snapshots
-      if (points.length < 5) {
-        const cutoff = new Date(now - 24 * 60 * 60 * 1000);
-        const snapshots = await getAllSnapshots(req.user.userId);
-        const recentSnapshots = snapshots.filter(s => s.timestamp.getTime() >= cutoff.getTime());
-        if (recentSnapshots.length >= 2) {
-          points = recentSnapshots.map(s => ({
-            time: s.timestamp.getTime(),
-            value: s.netEquity ?? s.totalValue,
-          }));
-          source = 'snapshot';
-        }
-      }
-
-      // Normalize candle-based chart points to match live portfolio value.
-      // Candle prices (Polygon/Yahoo) can differ from live quotes (Finnhub),
-      // and some tickers may lack candle data entirely. Adding a constant offset
-      // keeps the chart shape intact while aligning with the actual portfolio value.
-      if (points.length > 0 && liveValue > 0) {
-        const lastCandleVal = points[points.length - 1].value;
-        const offset = liveValue - lastCandleVal;
-        if (Math.abs(offset) > 1) {
-          for (const p of points) p.value += offset;
-        }
-      }
-
-      // Fill the gap between last Yahoo candle (~15min delayed) and now
-      // using recent snapshots recorded every 60 seconds.
-      // Cap at 4 hours to avoid bridging across overnight/weekend/holiday gaps —
-      // Yahoo candles already contain the complete last trading session.
-      if (points.length > 0) {
-        const lastCandleTime = points[points.length - 1].time;
-        const lastCandleValue = points[points.length - 1].value;
-        const gapMs = now - lastCandleTime;
-        if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
-          const snapshots = await getSnapshotsAfter(req.user.userId, new Date(lastCandleTime));
-          for (const s of snapshots) {
-            const t = s.timestamp.getTime();
-            const v = s.netEquity ?? s.totalValue;
-            // Skip snapshots that are wildly different from candle data (e.g. $0
-            // snapshots recorded before holdings were added, or stale values from
-            // a previous portfolio composition).
-            if (lastCandleValue > 0 && (v <= 0 || Math.abs(v - lastCandleValue) / lastCandleValue > 0.15)) {
-              continue;
-            }
-            if (t > lastCandleTime && t < now - 5000) {
-              points.push({ time: t, value: v });
-            }
-          }
-        }
-      }
-
-      // Append live value only if we're within the same session (gap < 4 hours).
-      // On weekends/holidays, the Yahoo candles are the complete picture.
-      const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
-      if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
-        points.push({ time: now, value: liveValue });
-      }
-
-      // Smooth intraday outlier spikes — a single point deviating >3% from both
-      // neighbors is likely a bad extended-hours quote or snapshot glitch.
-      if (points.length >= 3) {
-        for (let i = 1; i < points.length - 1; i++) {
-          const prev = points[i - 1].value;
-          const curr = points[i].value;
-          const next = points[i + 1].value;
-          const neighborAvg = (prev + next) / 2;
-          if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
-            points[i].value = neighborAvg;
-          }
-        }
-      }
-
-      // If composition changed within the last day, rebaseline to avoid false jumps.
-      // But don't filter if it would leave too few points for a useful chart,
-      // OR if the filtered set is entirely outside market hours (4 AM–8 PM ET).
-      // After-hours imports produce points that cluster at the chart's right edge
-      // and render as invisible. In that case, the full-day candles (already
-      // offset-normalized to live value) produce a better chart.
-      const pointCountRaw = points.length;
-      let rebaselineApplied = false;
-      const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
-      const latestChange = await getLatestCompositionChangeAfter(req.user.userId, rangeStart);
-      if (latestChange) {
-        const cutoff = latestChange.getTime();
-        const filtered = points.filter(p => p.time >= cutoff);
-        const minUsable = Math.max(20, Math.ceil(points.length * 0.5));
-        // Verify filtered set has data within market hours (4 AM–8 PM ET)
-        const etHourFmt = new Intl.DateTimeFormat('en-US', {
-          timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
-        });
-        const hasMarketHours = filtered.some(p => {
-          const h = parseInt(etHourFmt.format(new Date(p.time)).split(':')[0]);
-          return h >= 4 && h < 20;
-        });
-        if (filtered.length >= minUsable && hasMarketHours) {
-          points = filtered;
-          rebaselineApplied = true;
-        }
-      }
-
-      // previousCloseValue (from live quotes) is always the most accurate baseline.
-      // Only fall back to points[0] when previousCloseValue is missing/invalid
-      // (e.g., brand new portfolio with no dayChange data).
-      const periodStartValue = (previousCloseValue && Number.isFinite(previousCloseValue) && previousCloseValue > 0)
-        ? previousCloseValue
-        : (points.length > 0 ? points[0].value : liveValue);
-
-      console.log(`[Chart] 1D: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
-      const response: Record<string, unknown> = { points, periodStartValue, period: '1D', source };
-      if (includeDebug) {
-        response.rebaselineApplied = rebaselineApplied;
-        response.pointCountRaw = pointCountRaw;
-        response.pointCountFinal = points.length;
-      }
-      res.json(response);
-      return;
-    }
-
-    // 1W/1M: Use hi-res 1h candle reconstruction (like Robinhood) for smooth hover.
-    // Falls back to snapshots if candle data is insufficient.
-    if (period === '1W' || period === '1M') {
-      const now = Date.now();
-      const liveValue = portfolio.totalAssets - portfolio.marginDebt;
-      const holdings = await getHoldings(req.user.userId, chartPortfolioId);
-      let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
-
-      const hiResRange = period === '1W' ? '5d' : '1mo';
-      let points = await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, hiResRange, '1h',
-      );
-
-      // Fall back to snapshots if candle data is insufficient
-      if (points.length < 10) {
-        const snapshotDays = period === '1W' ? 7 : 30;
-        const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, snapshotDays);
-        if (snapshotPoints.length >= 2) {
-          points = snapshotPoints;
-          source = 'snapshot';
-        }
-      }
-
-      // Offset-normalize to match live portfolio value
-      if (points.length > 0 && liveValue > 0) {
-        const lastCandleVal = points[points.length - 1].value;
-        const offset = liveValue - lastCandleVal;
-        if (Math.abs(offset) > 1) {
-          for (const p of points) p.value += offset;
-        }
-      }
-
-      // Append live value if gap < 4 hours
-      const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
-      if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
-        points.push({ time: now, value: liveValue });
-      }
-
-      // Smooth outlier spikes
-      if (points.length >= 3) {
-        for (let i = 1; i < points.length - 1; i++) {
-          const prev = points[i - 1].value;
-          const curr = points[i].value;
-          const next = points[i + 1].value;
-          const neighborAvg = (prev + next) / 2;
-          if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
-            points[i].value = neighborAvg;
-          }
-        }
-      }
-
-      const periodStartValue = points.length > 0 ? points[0].value : liveValue;
-      const pointCountRaw = points.length;
-
-      console.log(`[Chart] ${period}: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
+      console.log(`[Chart] ${period}: periodStart=$${periodStartValue.toFixed(0)} live=${(portfolio.totalAssets - portfolio.marginDebt).toFixed(0)} pts=${points.length} src=${source}`);
       const response: Record<string, unknown> = { points, periodStartValue, period, source };
       if (includeDebug) {
-        response.rebaselineApplied = false;
-        response.pointCountRaw = pointCountRaw;
+        response.pointCountRaw = points.length;
         response.pointCountFinal = points.length;
       }
       res.json(response);
