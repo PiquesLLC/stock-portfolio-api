@@ -266,7 +266,11 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   let { points } = chartData;
   const { periodStartValue } = chartData;
 
-  // Trade delay: filter out recent points so chart doesn't reveal trade timing.
+  // Capture the headline value BEFORE trade delay filtering.
+  // The last chart point = the offset-normalized current value (same as in-app chart).
+  const headlineValue = points.length > 0 ? points[points.length - 1].value : 0;
+
+  // Trade delay: filter out recent points so chart sparkline doesn't reveal trade timing.
   // But never filter so aggressively that we end up with zero points — that
   // produces a broken $0 card.  If the delay would remove everything, skip it.
   const delayed = await hasActiveTradeDelay(userId);
@@ -285,7 +289,8 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   const numValues = points.map(p => p.value);
   const numTimes = points.map(p => p.time);
 
-  const currentValue = numValues.length > 0 ? numValues[numValues.length - 1] : 0;
+  // Use the pre-filter headline value (matches in-app chart's current value).
+  const currentValue = headlineValue;
   const periodChangeValue = currentValue - periodStartValue;
   const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
   const sparklineValues = downsampleValues(numValues.length > 0 ? numValues : [currentValue, currentValue], 128);
