@@ -125,8 +125,37 @@ export async function sendEarningsAlerts(windowDays = 7): Promise<{ sent: number
         if (logged) sent++;
         else skipped++;
       } catch (err) {
-        failed++;
-        console.error(`[Notifications] Earnings alert failed for ${ticker}:`, err);
+        // Retry once after 2s for transient failures (API timeouts, rate limits)
+        console.warn(`[Notifications] Earnings alert first attempt failed for ${ticker}, retrying in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const earnings = await getEarningsData(ticker);
+          const nextDate = getUpcomingEarningsDate(earnings.quarterly, windowEnd);
+          if (!nextDate) {
+            skipped++;
+            continue;
+          }
+
+          const refKey = `${ticker}:${nextDate.toISOString().slice(0, 10)}`;
+
+          const logged = await logNotification({
+            userId,
+            type: 'earnings_alert',
+            status: 'sent',
+            channel: 'in_app',
+            title: `${ticker} earnings coming up`,
+            message: `${ticker} reports earnings on ${nextDate.toISOString().slice(0, 10)}.`,
+            refKey,
+            payload: { ticker, earningsDate: nextDate.toISOString() },
+            sentAt: new Date(),
+          });
+          if (logged) sent++;
+          else skipped++;
+          console.log(`[Notifications] Earnings alert retry succeeded for ${ticker}`);
+        } catch (retryErr) {
+          failed++;
+          console.error(`[Notifications] Earnings alert retry also failed for ${ticker}:`, retryErr);
+        }
       }
     }
   }
