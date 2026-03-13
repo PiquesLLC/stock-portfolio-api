@@ -1,4 +1,5 @@
 import prisma from '../utils/prisma';
+import { config } from '../config';
 
 export interface AnalyticsEventInput {
   sessionId: string;
@@ -76,11 +77,33 @@ export async function createEvents(
 }
 
 /**
+ * Get admin user IDs to exclude from analytics (from env config).
+ */
+function getAdminUserIds(): string[] {
+  return config.waitlistAdminUserIds;
+}
+
+/**
+ * Build a SQL NOT IN clause for excluding admin users.
+ * Returns { clause: string, params: string[] }.
+ */
+function excludeAdminClause(adminIds: string[], column = 'userId'): { clause: string; params: string[] } {
+  if (adminIds.length === 0) return { clause: '', params: [] };
+  const placeholders = adminIds.map(() => '?').join(', ');
+  return { clause: `AND ${column} NOT IN (${placeholders})`, params: adminIds };
+}
+
+/**
  * Get dashboard analytics overview for admin.
+ * Excludes admin users from all event-based metrics so admin activity
+ * doesn't inflate real user numbers.
  */
 export async function getDashboard(period: string = '7d'): Promise<DashboardData> {
   const days = periodToDays(period);
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const adminIds = await getAdminUserIds();
+  const ex = excludeAdminClause(adminIds);
 
   // Overview stats
   const overviewRows = await prisma.$queryRawUnsafe<
@@ -91,8 +114,9 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
        COUNT(DISTINCT userId) as uniqueUsers,
        COUNT(DISTINCT sessionId) as uniqueSessions
      FROM AnalyticsEvent
-     WHERE createdAt >= ?`,
-    since
+     WHERE createdAt >= ? ${ex.clause}`,
+    since,
+    ...ex.params
   );
 
   const overview = {
@@ -109,10 +133,11 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
     `SELECT AVG(sessionTotal) as avgDuration FROM (
        SELECT sessionId, SUM(durationMs) as sessionTotal
        FROM AnalyticsEvent
-       WHERE createdAt >= ? AND durationMs IS NOT NULL
+       WHERE createdAt >= ? AND durationMs IS NOT NULL ${ex.clause}
        GROUP BY sessionId
      )`,
-    since
+    since,
+    ...ex.params
   );
   overview.avgSessionDurationMs = Math.round(Number(avgSessionRows[0]?.avgDuration ?? 0));
 
@@ -127,10 +152,11 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
        COALESCE(SUM(durationMs), 0) as totalDurationMs,
        COALESCE(AVG(durationMs), 0) as avgDurationMs
      FROM AnalyticsEvent
-     WHERE createdAt >= ?
+     WHERE createdAt >= ? ${ex.clause}
      GROUP BY feature
      ORDER BY views DESC`,
-    since
+    since,
+    ...ex.params
   );
 
   const totalViews = featureRows.reduce((sum, r) => sum + Number(r.views), 0);
@@ -143,12 +169,13 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
     pctOfTotal: totalViews > 0 ? Math.round((Number(r.views) / totalViews) * 10000) / 100 : 0,
   }));
 
-  // User engagement stats (from main app tables)
+  // User engagement stats (from main app tables — exclude admin from active users count)
   const [registeredUsers, activeUsers, portfoliosCreated, totalHoldings, watchlists] = await Promise.all([
     prisma.user.count(),
     prisma.$queryRawUnsafe<{ count: number }[]>(
-      `SELECT COUNT(DISTINCT userId) as count FROM AnalyticsEvent WHERE createdAt >= ?`,
-      since
+      `SELECT COUNT(DISTINCT userId) as count FROM AnalyticsEvent WHERE createdAt >= ? ${ex.clause}`,
+      since,
+      ...ex.params
     ),
     prisma.portfolio.count(),
     prisma.holding.count(),
@@ -163,7 +190,7 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
     watchlistsCount: watchlists,
   };
 
-  // DAU trend — daily active unique users
+  // DAU trend — daily active unique users (excluding admins)
   const dauRows = await prisma.$queryRawUnsafe<
     { date: string; count: number }[]
   >(
@@ -171,10 +198,11 @@ export async function getDashboard(period: string = '7d'): Promise<DashboardData
        DATE(createdAt) as date,
        COUNT(DISTINCT userId) as count
      FROM AnalyticsEvent
-     WHERE createdAt >= ?
+     WHERE createdAt >= ? ${ex.clause}
      GROUP BY DATE(createdAt)
      ORDER BY date ASC`,
-    since
+    since,
+    ...ex.params
   );
 
   const dauTrend: DauTrendRow[] = dauRows.map((r) => ({
