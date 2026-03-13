@@ -526,7 +526,71 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // Non-1D periods: snapshot-only approach.
+    // 1W: Use hi-res 1h candle reconstruction (like Robinhood) for smooth hover.
+    // Falls back to snapshots if candle data is insufficient.
+    if (period === '1W') {
+      const now = Date.now();
+      const liveValue = portfolio.totalAssets - portfolio.marginDebt;
+      const holdings = await getHoldings(req.user.userId, chartPortfolioId);
+      let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
+
+      let points = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, '5d', '1h',
+      );
+
+      // Fall back to snapshots if candle data is insufficient
+      if (points.length < 10) {
+        const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 7);
+        if (snapshotPoints.length >= 2) {
+          points = snapshotPoints;
+          source = 'snapshot';
+        }
+      }
+
+      // Offset-normalize to match live portfolio value
+      if (points.length > 0 && liveValue > 0) {
+        const lastCandleVal = points[points.length - 1].value;
+        const offset = liveValue - lastCandleVal;
+        if (Math.abs(offset) > 1) {
+          for (const p of points) p.value += offset;
+        }
+      }
+
+      // Append live value if gap < 4 hours
+      const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+      if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
+        points.push({ time: now, value: liveValue });
+      }
+
+      // Smooth outlier spikes
+      if (points.length >= 3) {
+        for (let i = 1; i < points.length - 1; i++) {
+          const prev = points[i - 1].value;
+          const curr = points[i].value;
+          const next = points[i + 1].value;
+          const neighborAvg = (prev + next) / 2;
+          if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+            points[i].value = neighborAvg;
+          }
+        }
+      }
+
+      const periodStartValue = points.length > 0 ? points[0].value : liveValue;
+      const pointCountRaw = points.length;
+
+      console.log(`[Chart] 1W: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
+      const response: Record<string, unknown> = { points, periodStartValue, period: '1W', source };
+      if (includeDebug) {
+        response.rebaselineApplied = false;
+        response.pointCountRaw = pointCountRaw;
+        response.pointCountFinal = points.length;
+      }
+      res.json(response);
+      return;
+    }
+
+    // Non-1D/1W periods: snapshot-only approach.
     // Use real recorded snapshot data — no reconstruction, no candle fetching.
     // If not enough snapshots, return insufficientData flag for the UI.
     const now = Date.now();
