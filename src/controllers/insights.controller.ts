@@ -10,6 +10,7 @@ import { getPortfolioBriefing, explainBriefingSection } from '../services/perple
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
 import { getDailyReport, regenerateDailyReport } from '../services/perplexity-daily-report.service';
 import { getEarningsSummary } from '../services/earnings-summary.service';
+import { getYtdDividendBreakdown, dismissDividend, restoreDividend } from '../services/ytd-dividend-breakdown.service';
 import { AuthRequest } from '../types/auth';
 import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
 import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
@@ -307,5 +308,55 @@ export async function explainBriefingHandler(req: AuthRequest, res: Response): P
     }
     console.error('[Briefing Explain] Error:', error);
     res.status(500).json({ explanation: 'Unable to load explanation.', citations: [], cached: false });
+  }
+}
+
+// ============================================================================
+// YTD DIVIDEND BREAKDOWN
+// ============================================================================
+
+export async function getYtdBreakdownHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const portfolioId = req.query.portfolioId as string | undefined;
+    await validatePortfolioOwnership(portfolioId, req.user!.userId);
+    const breakdown = await getYtdDividendBreakdown(req.user!.userId, portfolioId);
+    res.json(breakdown);
+  } catch (error: unknown) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Portfolio not found' }); return; }
+    console.error('Error getting YTD breakdown:', error);
+    res.status(500).json({ error: 'Failed to get YTD dividend breakdown' });
+  }
+}
+
+export async function dismissDividendHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { dividendEventId } = req.body;
+    if (!dividendEventId || typeof dividendEventId !== 'string') {
+      res.status(400).json({ error: 'dividendEventId is required' });
+      return;
+    }
+    await dismissDividend(req.user!.userId, dividendEventId);
+    res.json({ ok: true });
+  } catch (error) {
+    const status = (error as any)?.status;
+    if (status === 404) { res.status(404).json({ error: 'Dividend event not found' }); return; }
+    console.error('Error dismissing dividend:', error);
+    res.status(500).json({ error: 'Failed to dismiss dividend' });
+  }
+}
+
+export async function restoreDividendHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { dividendEventId } = req.body;
+    if (!dividendEventId || typeof dividendEventId !== 'string') {
+      res.status(400).json({ error: 'dividendEventId is required' });
+      return;
+    }
+    await restoreDividend(req.user!.userId, dividendEventId);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error restoring dividend:', error);
+    res.status(500).json({ error: 'Failed to restore dividend' });
   }
 }

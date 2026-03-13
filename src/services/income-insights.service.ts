@@ -217,15 +217,23 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   for (const h of holdings) {
     holdingSharesMap.set((h as any).ticker.toUpperCase(), (h as any).shares);
   }
-  const ytdEvents = await prisma.dividendEvent.findMany({
-    where: {
-      ticker: { in: allHoldingTickers },
-      payDate: { gte: ytdStart, lt: now },
-    },
-    select: { ticker: true, amountPerShare: true, payDate: true },
-  });
+  const [ytdEvents, dismissedRows] = await Promise.all([
+    prisma.dividendEvent.findMany({
+      where: {
+        ticker: { in: allHoldingTickers },
+        payDate: { gte: ytdStart, lt: now },
+      },
+      select: { id: true, ticker: true, amountPerShare: true, payDate: true },
+    }),
+    prisma.dismissedDividend.findMany({
+      where: { userId },
+      select: { dividendEventId: true },
+    }),
+  ]);
+  const dismissedYtdSet = new Set(dismissedRows.map(d => d.dividendEventId));
   let totalYTD = 0;
   for (const ev of ytdEvents) {
+    if (dismissedYtdSet.has(ev.id)) continue; // User dismissed this dividend
     const shares = holdingSharesMap.get(ev.ticker.toUpperCase()) ?? 0;
     totalYTD += ev.amountPerShare * shares;
   }
