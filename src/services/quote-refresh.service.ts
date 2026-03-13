@@ -107,11 +107,11 @@ async function runRefreshCycle(): Promise<void> {
       }
     }
 
-    // Yahoo overlay: Polygon Developer plan is ~15-min delayed, Yahoo is near-real-time.
-    // Apply during all active sessions (REGULAR, PRE, POST). CLOSED already exited above.
+    // Yahoo overlay: fetch fresh during REG hours (skip cache) so stale
+    // cached Yahoo data doesn't overwrite fresh Polygon real-time prices.
     if (isProviderAvailable('Yahoo')) {
       try {
-        const yahooQuotes = await fetchYahooBatchQuotes(tickers);
+        const yahooQuotes = await fetchYahooBatchQuotes(tickers, { skipCache: session === 'REG' });
         for (const [ticker, yahooQuote] of yahooQuotes.entries()) {
           if (!Number.isFinite(yahooQuote.price) || yahooQuote.price <= 0) continue;
 
