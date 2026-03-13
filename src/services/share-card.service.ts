@@ -266,9 +266,42 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   let { points } = chartData;
   const { periodStartValue } = chartData;
 
-  // Capture the headline value BEFORE trade delay filtering.
+  // Capture the headline value BEFORE any filtering.
   // The last chart point = the offset-normalized current value (same as in-app chart).
   const headlineValue = points.length > 0 ? points[points.length - 1].value : 0;
+
+  // Filter weekends and non-trading hours for non-1D periods (matches in-app chart).
+  // Without this, the sparkline shows flat horizontal lines during weekends.
+  if (period !== '1D' && points.length > 2) {
+    const etHourFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+    });
+    const etDayFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', weekday: 'short',
+    });
+
+    // Detect daily-resolution data (snapshots: ~1 point/day, >12h gap).
+    // For daily data, only filter weekends — time-of-day filter would drop whole days.
+    const gaps: number[] = [];
+    for (let i = 1; i < Math.min(points.length, 10); i++) {
+      gaps.push(points[i].time - points[i - 1].time);
+    }
+    const medianGap = gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    const isDailyResolution = medianGap > 12 * 3600000;
+
+    const tradingFiltered = points.filter(p => {
+      const d = new Date(p.time);
+      const wd = etDayFmt.format(d);
+      if (wd === 'Sat' || wd === 'Sun') return false;
+      if (isDailyResolution) return true;
+      const hm = etHourFmt.format(d);
+      const h = parseInt(hm.split(':')[0]);
+      return h >= 4 && h < 20; // 4 AM – 8 PM ET
+    });
+    if (tradingFiltered.length >= 2) {
+      points = tradingFiltered;
+    }
+  }
 
   // Trade delay: filter out recent points so chart sparkline doesn't reveal trade timing.
   // But never filter so aggressively that we end up with zero points — that
