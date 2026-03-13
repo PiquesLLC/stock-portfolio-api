@@ -26,7 +26,7 @@ export const subSectorGroups: Record<string, Record<string, string[]>> = {
       'CSCO', 'IBM', 'ADSK', 'ADP', 'PAYX', 'CTSH', 'CDW',
     ],
     'Internet & Streaming': [
-      'NFLX', 'UBER', 'ABNB', 'DASH', 'COIN', 'SQ', 'PYPL', 'ANET',
+      'NFLX', 'UBER', 'ABNB', 'DASH', 'COIN', 'XYZ', 'PYPL', 'ANET',
       'RDDT', 'SNAP', 'PINS', 'TTD', 'RBLX', 'SPOT',
     ],
     'China Tech': [
@@ -36,7 +36,7 @@ export const subSectorGroups: Record<string, Record<string, string[]>> = {
   },
   'Finance': {
     'Banks': ['JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'SCHW', 'TFC', 'USB', 'PNC'],
-    'Payments & Fintech': ['V', 'MA', 'AXP', 'COF', 'DFS', 'FIS', 'FISV', 'HOOD', 'SOFI'],
+    'Payments & Fintech': ['V', 'MA', 'AXP', 'COF', 'FIS', 'FISV', 'HOOD', 'SOFI'],
     'Capital Markets': ['BRK.A', 'BRK.B', 'BLK', 'SPGI', 'ICE', 'CME', 'MCO'],
     'Insurance': ['CB', 'MMC', 'AON', 'PGR', 'MET', 'AIG', 'TRV'],
   },
@@ -50,14 +50,14 @@ export const subSectorGroups: Record<string, Record<string, string[]>> = {
     'Health Insurance': ['UNH', 'CVS', 'CI', 'ELV', 'HUM', 'HCA'],
   },
   'Energy': {
-    'Oil & Gas': ['XOM', 'CVX', 'COP', 'EOG', 'OXY', 'DVN', 'FANG', 'HES', 'PXD'],
+    'Oil & Gas': ['XOM', 'CVX', 'COP', 'EOG', 'OXY', 'DVN', 'FANG'],
     'Services & Refining': ['SLB', 'MPC', 'PSX', 'VLO', 'BKR', 'HAL'],
     'Midstream & Power': ['KMI', 'WMB', 'OKE', 'ET', 'CEG'],
   },
   'Consumer': {
     'Consumer Staples': [
       'WMT', 'PG', 'KO', 'PEP', 'COST', 'CL', 'MDLZ', 'MO', 'PM',
-      'EL', 'KHC', 'GIS', 'SYY', 'HSY', 'K', 'STZ', 'KDP', 'MNST',
+      'EL', 'KHC', 'GIS', 'SYY', 'HSY', 'KLG', 'STZ', 'KDP', 'MNST',
     ],
     'Retail': ['HD', 'LOW', 'TGT', 'ROST', 'TJX', 'NKE', 'LULU', 'ETSY', 'EBAY', 'W', 'DECK', 'ORLY', 'DLTR', 'CPRT'],
     'Restaurants & Hospitality': ['MCD', 'SBUX', 'BKNG', 'MAR', 'CMG', 'DPZ', 'YUM'],
@@ -69,7 +69,7 @@ export const subSectorGroups: Record<string, Record<string, string[]>> = {
     'Transport & Logistics': ['UPS', 'UNP', 'CSX', 'NSC', 'FDX', 'WM', 'ODFL'],
   },
   'Communication': {
-    'Media & Entertainment': ['DIS', 'CMCSA', 'WBD', 'PARA', 'ROKU'],
+    'Media & Entertainment': ['DIS', 'CMCSA', 'WBD', 'ROKU'],
     'Telecom': ['T', 'VZ', 'TMUS'],
     'Gaming & Social': ['EA', 'TTWO', 'MTCH'],
   },

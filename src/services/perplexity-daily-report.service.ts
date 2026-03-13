@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
+import { callPerplexity, extractJson, parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
@@ -117,6 +117,101 @@ function buildFallbackReport(
   };
 }
 
+function decodeJsonFragment(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\\\/g, '\\').trim();
+  }
+}
+
+function extractStringField(source: string, key: string): string {
+  const match = source.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, 'i'));
+  return match ? decodeJsonFragment(match[1]).trim() : '';
+}
+
+function extractStringArrayField(source: string, key: string): string[] {
+  const match = source.match(new RegExp(`"${key}"\\s*:\\s*\\[([\\s\\S]*?)\\]`, 'i'));
+  if (!match) return [];
+  return Array.from(match[1].matchAll(/"((?:\\.|[^"\\])*)"/g))
+    .map((entry) => decodeJsonFragment(entry[1]).trim())
+    .filter(Boolean);
+}
+
+function salvageTopStories(source: string): DailyReportResponse['topStories'] {
+  const storiesMatch = source.match(/"topStories"\s*:\s*\[([\s\S]*?)\]\s*(?:,|})/i);
+  if (!storiesMatch) return [];
+
+  const stories: DailyReportResponse['topStories'] = [];
+  const storyRegex = /\{[\s\S]*?"headline"\s*:\s*"((?:\\.|[^"\\])*)"[\s\S]*?"body"\s*:\s*"((?:\\.|[^"\\])*)"[\s\S]*?"sentiment"\s*:\s*"((?:\\.|[^"\\])*)"[\s\S]*?"relatedTickers"\s*:\s*\[([\s\S]*?)\][\s\S]*?\}/g;
+
+  for (const match of storiesMatch[1].matchAll(storyRegex)) {
+    const relatedTickers = Array.from(match[4].matchAll(/"((?:\\.|[^"\\])*)"/g))
+      .map((entry) => decodeJsonFragment(entry[1]).trim().toUpperCase())
+      .filter((ticker) => ticker && !TICKER_BLACKLIST.has(ticker));
+
+    stories.push({
+      headline: stripLeakedTags(decodeJsonFragment(match[1]).slice(0, 100)),
+      body: stripLeakedTags(decodeJsonFragment(match[2]).slice(0, 300)),
+      sentiment: ['positive', 'negative', 'neutral'].includes(match[3]) ? match[3] as 'positive' | 'negative' | 'neutral' : 'neutral',
+      relatedTickers,
+    });
+  }
+
+  return stories.slice(0, 5);
+}
+
+function buildDailyReportFromPayload(
+  payload: any,
+  fallback: DailyReportResponse,
+): DailyReportResponse {
+  const topStories = Array.isArray(payload?.topStories)
+    ? payload.topStories.slice(0, 5).map((s: any) => ({
+      headline: stripLeakedTags(String(s?.headline || '').slice(0, 100)),
+      body: stripLeakedTags(String(s?.body || '').slice(0, 300)),
+      sentiment: ['positive', 'negative', 'neutral'].includes(s?.sentiment) ? s.sentiment : 'neutral',
+      relatedTickers: Array.isArray(s?.relatedTickers)
+        ? s.relatedTickers
+          .filter((t: any) => typeof t === 'string' && t.length >= 1)
+          .map((t: string) => t.toUpperCase())
+          .filter((t: string) => !TICKER_BLACKLIST.has(t))
+        : [],
+    }))
+    : fallback.topStories;
+
+  const watchToday = Array.isArray(payload?.watchToday)
+    ? payload.watchToday.slice(0, 4).map((w: any) => stripLeakedTags(String(w || '').slice(0, 300)))
+    : fallback.watchToday;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    greeting: stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 200)),
+    marketOverview: stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview).slice(0, 500)),
+    portfolioSummary: stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary).slice(0, 500)),
+    topStories: topStories.length > 0 ? topStories : fallback.topStories,
+    watchToday: watchToday.length > 0 ? watchToday : fallback.watchToday,
+    cached: false,
+  };
+}
+
+function salvagePartialDailyReport(content: string, fallback: DailyReportResponse): DailyReportResponse | null {
+  const extracted = extractJson(content) || content;
+  const partial = {
+    greeting: extractStringField(extracted, 'greeting'),
+    marketOverview: extractStringField(extracted, 'marketOverview'),
+    portfolioSummary: extractStringField(extracted, 'portfolioSummary'),
+    topStories: salvageTopStories(extracted),
+    watchToday: extractStringArrayField(extracted, 'watchToday'),
+  };
+
+  const hasUsefulContent =
+    Boolean(partial.greeting || partial.marketOverview || partial.portfolioSummary) ||
+    partial.topStories.length > 0 ||
+    partial.watchToday.length > 0;
+
+  return hasUsefulContent ? buildDailyReportFromPayload(partial, fallback) : null;
+}
+
 export async function getDailyReport(userId: string, portfolioId?: string): Promise<DailyReportResponse> {
   return getDailyReportInternal(userId, { portfolioId });
 }
@@ -148,8 +243,8 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
   const strictFailures = options.strictFailures === true;
 
   // Single hard deadline wrapping EVERYTHING — data gathering + AI call.
-  // User never waits more than 12 seconds.
-  const HARD_DEADLINE_MS = 12000;
+  // Daily reports are longer responses, so give Perplexity enough time to finish.
+  const HARD_DEADLINE_MS = 30000;
   const startTime = Date.now();
   const weekend = isWeekendET();
 
@@ -246,6 +341,8 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       ? `Earnings: ${upcomingEarnings.join(', ')}`
       : '';
 
+    const fallbackReport = buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
+
     const weekendNote = weekend
       ? `Weekend. Recap last week, preview next week.\n`
       : '';
@@ -261,7 +358,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 
     // How much time is left for Perplexity after data gathering?
     const elapsedSoFar = Date.now() - startTime;
-    const perplexityTimeout = Math.max(3000, HARD_DEADLINE_MS - elapsedSoFar - 500);
+    const perplexityTimeout = Math.max(20000, HARD_DEADLINE_MS - elapsedSoFar - 500);
 
     const resp = await callPerplexity([
       { role: 'system', content: SYSTEM_PROMPT },
@@ -269,35 +366,24 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     ], { timeout: perplexityTimeout, feature: 'daily-report', userId, model: 'sonar' });
 
     if (!resp || !resp.content) {
-      return buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
+      return fallbackReport;
     }
 
     const parseResult = parsePerplexityJson(resp.content);
     if (!parseResult.ok) {
+      const salvaged = salvagePartialDailyReport(resp.content, fallbackReport);
+      if (salvaged) {
+        console.warn(`[Daily Report] JSON parse failed (${parseResult.reason}), salvaged partial content`);
+        return salvaged;
+      }
       if (strictFailures) {
         throw new JobExecutionError(`[Daily Report] Parse failure: ${parseResult.reason}`, 'DATA_QUALITY');
       }
       console.warn(`[Daily Report] JSON parse failed (${parseResult.reason}), using fallback`);
-      return buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
+      return fallbackReport;
     }
-    const parsed = parseResult.data as any;
 
-    return {
-      generatedAt: new Date().toISOString(),
-      greeting: stripLeakedTags(String(parsed.greeting || '').slice(0, 200)),
-      marketOverview: stripLeakedTags(String(parsed.marketOverview || '').slice(0, 500)),
-      portfolioSummary: stripLeakedTags(String(parsed.portfolioSummary || '').slice(0, 500)),
-      topStories: (parsed.topStories || []).slice(0, 5).map((s: any) => ({
-        headline: stripLeakedTags(String(s.headline || '').slice(0, 100)),
-        body: stripLeakedTags(String(s.body || '').slice(0, 300)),
-        sentiment: ['positive', 'negative', 'neutral'].includes(s.sentiment) ? s.sentiment : 'neutral',
-        relatedTickers: Array.isArray(s.relatedTickers)
-          ? s.relatedTickers.filter((t: any) => typeof t === 'string' && t.length >= 1 && !TICKER_BLACKLIST.has(t.toUpperCase()))
-          : [],
-      })),
-      watchToday: (parsed.watchToday || []).slice(0, 4).map((w: any) => stripLeakedTags(String(w || '').slice(0, 300))),
-      cached: false,
-    };
+    return buildDailyReportFromPayload(parseResult.data, fallbackReport);
   })();
 
   const deadlinePromise = new Promise<null>((resolve) => {
