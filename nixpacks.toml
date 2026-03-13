@@ -1,3 +1,3 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "npm-10_x", "openssl"]
+nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf"]
 nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"

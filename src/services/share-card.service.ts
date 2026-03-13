@@ -371,7 +371,7 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
   const H = 630;
   const GREEN = '#00c805';
   const RED = '#e8544e';
-  const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
+  const F = 'FreeSans, Liberation Sans, Arial, Helvetica, sans-serif';
   const positive = data.changePercent >= 0;
   const accent = positive ? GREEN : RED;
 
@@ -486,7 +486,7 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
   const H = 630;
   const GREEN = '#00c805';
   const RED = '#e8544e';
-  const F = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif';
+  const F = 'FreeSans, Liberation Sans, Arial, Helvetica, sans-serif';
   const positive = data.periodChangePercent >= 0;
   const accent = positive ? GREEN : RED;
   const changePctText = `(${positive ? '+' : ''}${data.periodChangePercent.toFixed(2)}%)`;
