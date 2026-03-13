@@ -137,14 +137,25 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
 
   const currentPrice = details.quote.currentPrice;
 
+  // Proper ET conversion using Intl (handles EST/EDT automatically)
+  const etFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric', minute: 'numeric', hour12: false,
+    weekday: 'short',
+  });
+  function getEtHourFloat(d: Date): { hourFloat: number; isWeekday: boolean } {
+    const parts = etFormatter.formatToParts(d);
+    const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
+    const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
+    return { hourFloat: hour + minute / 60, isWeekday: !['Sat', 'Sun'].includes(weekday) };
+  }
+
   // Build sparkline from candles — filter to regular market hours only (weekday 9:30 AM–4 PM ET)
   const marketCandles = candles.filter(c => {
     const d = new Date(c.time);
-    const day = d.getUTCDay();
-    if (day === 0 || day === 6) return false;
-    // Convert to ET (UTC-5 for EST, approximate)
-    const etHourFloat = d.getUTCHours() - 5 + d.getUTCMinutes() / 60;
-    return etHourFloat >= 9.5 && etHourFloat < 16;
+    const { hourFloat, isWeekday } = getEtHourFloat(d);
+    return isWeekday && hourFloat >= 9.5 && hourFloat < 16;
   });
   const candleValues = marketCandles
     .map(c => c.close)
@@ -209,13 +220,11 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
 
-  // Market status
-  const hour = now.getUTCHours() - 5; // EST approximation
-  const day = now.getDay();
-  const isWeekend = day === 0 || day === 6;
-  const isPreMarket = hour >= 4 && hour < 9.5;
-  const isAfterHours = hour >= 16 && hour < 20;
-  const isMarketOpen = !isWeekend && hour >= 9.5 && hour < 16;
+  // Market status (proper ET with DST)
+  const { hourFloat: nowEtHour, isWeekday: nowIsWeekday } = getEtHourFloat(now);
+  const isMarketOpen = nowIsWeekday && nowEtHour >= 9.5 && nowEtHour < 16;
+  const isPreMarket = nowIsWeekday && nowEtHour >= 4 && nowEtHour < 9.5;
+  const isAfterHours = nowIsWeekday && nowEtHour >= 16 && nowEtHour < 20;
   const marketStatus = isMarketOpen ? 'OPEN' : isPreMarket ? 'PRE-MARKET' : isAfterHours ? 'AFTER HOURS' : 'CLOSED';
 
   // Fetch company logo
