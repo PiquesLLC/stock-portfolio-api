@@ -161,6 +161,9 @@ model User {
   // Apple IAP
   appleOriginalTransactionId  String?   @unique
   applePurchaseSource         String?   // 'app_store'
+
+  // Dismissed dividends (user opted out of YTD entries they didn't actually receive)
+  dismissedDividends         DismissedDividend[]
 }
 
 model Watchlist {
@@ -385,6 +388,8 @@ model DividendEvent {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   credits         DividendCredit[]
+
+  dismissals      DismissedDividend[]
 
   @@unique([ticker, exDate, amountPerShare])
   @@index([ticker])
@@ -1153,4 +1158,18 @@ model JobIdempotencyKey {
   @@index([jobName])
   @@index([expiresAt])
   @@index([updatedAt])
+}
+
+// ─── Dismissed Dividends (user opts out of YTD entries they didn't receive) ───
+
+model DismissedDividend {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dividendEventId String
+  dividendEvent   DividendEvent @relation(fields: [dividendEventId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([userId, dividendEventId])
+  @@index([userId])
 }

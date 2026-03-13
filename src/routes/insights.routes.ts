@@ -11,6 +11,9 @@ import {
   regenerateDailyReportHandler,
   explainBriefingHandler,
   getEarningsSummaryHandler,
+  getYtdBreakdownHandler,
+  dismissDividendHandler,
+  restoreDividendHandler,
 } from '../controllers/insights.controller';
 import { getEarningsPreviewHandler } from '../controllers/earnings-preview.controller';
 import {
@@ -30,6 +33,9 @@ router.get('/attribution', heavyReadLimiter, requireAuth, getAttributionHandler)
 router.get('/leak-detector', heavyReadLimiter, requireAuth, getLeakDetectorHandler);
 router.get('/risk-forecast', heavyReadLimiter, requireAuth, getRiskForecastHandler);
 router.get('/income', heavyReadLimiter, requireAuth, getIncomeInsightsHandler);
+router.get('/income/ytd-breakdown', heavyReadLimiter, requireAuth, getYtdBreakdownHandler);
+router.post('/income/dismiss-dividend', mutationLimiter, requireAuth, dismissDividendHandler);
+router.post('/income/restore-dividend', mutationLimiter, requireAuth, restoreDividendHandler);
 router.get('/briefing', aiLimiter, requireAuth, requirePlan('premium'), getBriefingHandler);
 router.post('/briefing/explain', aiLimiter, requireAuth, requirePlan('premium'), explainBriefingHandler);
 router.get('/behavior', aiLimiter, requireAuth, requirePlan('premium'), getBehaviorHandler);

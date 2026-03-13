@@ -104,6 +104,33 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// Admin — resend approval email
+router.post('/:id/resend', requireAuth, async (req: Request, res: Response) => {
+  const adminId = (req as any).user?.userId;
+  if (!(await isWaitlistAdmin(adminId))) {
+    res.status(403).json({ error: 'Admin access required' });
+    return;
+  }
+
+  try {
+    const entry = await prisma.waitlist.findUnique({ where: { id: req.params.id } });
+    if (!entry) {
+      res.status(404).json({ error: 'Waitlist entry not found' });
+      return;
+    }
+    if (entry.status !== 'approved') {
+      res.status(400).json({ error: 'Can only resend email for approved entries' });
+      return;
+    }
+    await sendWaitlistApprovalEmail(entry.email);
+    console.log(`[Waitlist] Admin ${adminId} resent approval email to ${entry.email}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to resend approval email:', err);
+    res.status(500).json({ error: 'Failed to resend email' });
+  }
+});
+
 // Admin — reject a waitlist entry
 router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
   if (!(await isWaitlistAdmin((req as any).user?.userId))) {

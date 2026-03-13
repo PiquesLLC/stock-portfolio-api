@@ -38,6 +38,7 @@ export interface DailyReportResponse {
   }[];
   watchToday: string[];
   cached: boolean;
+  sample?: boolean;
 }
 
 interface DailyReportOptions {
@@ -173,14 +174,34 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     const earnings = earningsResult.status === 'fulfilled' ? earningsResult.value : { results: [], partial: true };
 
     if (!portfolio || portfolio.holdings.length === 0) {
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      });
       return {
-        generatedAt: new Date().toISOString(),
-        greeting: 'Good morning!',
-        marketOverview: 'Add holdings to your portfolio to receive a daily briefing.',
-        portfolioSummary: '',
-        topStories: [],
-        watchToday: [],
+        generatedAt: now.toISOString(),
+        greeting: `Good morning — welcome to Nala!`,
+        marketOverview: `Here's what your daily brief will look like once you add holdings. Each morning, NALA will scan the market, analyze your portfolio, and write you a personalized briefing. This is a sample report so you can see the format.`,
+        portfolioSummary: `Once you add stocks, this section will show your portfolio's performance, top movers, and key changes since yesterday. Start by adding a few holdings to your portfolio.`,
+        topStories: [
+          {
+            headline: 'Your personalized market news will appear here',
+            body: 'NALA reads the top financial headlines each morning and highlights the ones that matter to your holdings. Add stocks to your portfolio to get news tailored to what you own.',
+            sentiment: 'neutral',
+            relatedTickers: [],
+          },
+          {
+            headline: 'Earnings, dividends, and analyst calls — all in one place',
+            body: 'When companies in your portfolio report earnings or announce dividends, you\'ll see them right here in your daily brief. No more searching — it all comes to you.',
+            sentiment: 'neutral',
+            relatedTickers: [],
+          },
+        ],
+        watchToday: [
+          'Add your first holding to unlock your personalized daily brief.',
+        ],
         cached: false,
+        sample: true,
       };
     }
 
