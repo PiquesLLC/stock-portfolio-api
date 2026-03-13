@@ -20,7 +20,7 @@ export async function getStockShareCardHandler(req: Request, res: Response): Pro
     }
 
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=1800, s-maxage=3600');
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=600');
     res.send(pngBuffer);
   } catch (err) {
     console.error('Stock share card generation failed:', err);
@@ -49,7 +49,7 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
     }
 
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=1800, s-maxage=3600');
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=600');
     res.send(pngBuffer);
   } catch (err) {
     console.error('Performance share card generation failed:', err);
