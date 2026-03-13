@@ -332,6 +332,7 @@ interface YahooBatchQuote {
  */
 export async function fetchYahooBatchQuotes(
   tickers: string[],
+  options?: { skipCache?: boolean },
 ): Promise<Map<string, YahooBatchQuote>> {
   const results = new Map<string, YahooBatchQuote>();
   if (tickers.length === 0) return results;
@@ -339,13 +340,17 @@ export async function fetchYahooBatchQuotes(
   const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
   const uncached: string[] = [];
 
-  for (const ticker of uniqueTickers) {
-    const cached = yahooQuoteCache.get<YahooBatchQuote>(`yahoo-quote:${ticker}`);
-    if (cached) {
-      results.set(ticker, cached);
-    } else {
-      uncached.push(ticker);
+  if (!options?.skipCache) {
+    for (const ticker of uniqueTickers) {
+      const cached = yahooQuoteCache.get<YahooBatchQuote>(`yahoo-quote:${ticker}`);
+      if (cached) {
+        results.set(ticker, cached);
+      } else {
+        uncached.push(ticker);
+      }
     }
+  } else {
+    uncached.push(...uniqueTickers);
   }
 
   for (let i = 0; i < uncached.length; i += YAHOO_BATCH_SIZE) {
@@ -448,14 +453,14 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     } catch { /* Finnhub also failed */ }
   }
 
-  // Yahoo real-time overlay — Polygon Developer plan has ~15-min delay.
-  // During regular market hours, ALWAYS prefer Yahoo's near-real-time quotes.
-  // During PRE/POST/CLOSED, only override on significant divergence (>0.5%).
+  // Yahoo real-time overlay — during regular hours, always fetch fresh Yahoo
+  // (skip cache) so stale cached prices don't overwrite fresh Polygon data.
+  // During PRE/POST/CLOSED, cache is fine since prices change slowly.
   try {
     const currentSession = getMarketSession();
     const allTickers = [...result.quotes.keys(), ...result.failedTickers];
     if (allTickers.length > 0) {
-      const yahooBatch = await fetchYahooBatchQuotes(allTickers);
+      const yahooBatch = await fetchYahooBatchQuotes(allTickers, { skipCache: currentSession === 'REG' });
       for (const [ticker, yahooData] of yahooBatch) {
         const existing = result.quotes.get(ticker);
         if (!existing) {
