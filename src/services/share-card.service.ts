@@ -3,9 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
-import { reconstructPortfolioHistoryHiRes } from './snapshot.service';
+import { getPortfolioChartData } from './snapshot.service';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
-import { getPortfolio } from './portfolio.service';
 
 // Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
@@ -259,112 +258,31 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
 
   if (!user || !user.profilePublic) return null;
 
-  // Trade delay: filter out recent snapshots so chart doesn't reveal trade timing
+  const period = normalizePeriod(periodInput);
+
+  // Use the EXACT same chart data function that the in-app chart API uses.
+  // This guarantees the share card shows identical values.
+  const chartData = await getPortfolioChartData(userId, period);
+  let { points } = chartData;
+  const { periodStartValue } = chartData;
+
+  // Trade delay: filter out recent points so chart doesn't reveal trade timing
   const delayed = await hasActiveTradeDelay(userId);
-  let delayCutoff = 0;
   if (delayed) {
     const creator = await prisma.creator.findUnique({
       where: { userId },
       select: { visibility: { select: { tradeDelayHours: true } } },
     });
-    delayCutoff = Date.now() - (creator?.visibility?.tradeDelayHours ?? 24) * 60 * 60 * 1000;
+    const delayCutoff = Date.now() - (creator?.visibility?.tradeDelayHours ?? 24) * 60 * 60 * 1000;
+    points = points.filter(p => p.time <= delayCutoff);
   }
 
-  const period = normalizePeriod(periodInput);
+  const numValues = points.map(p => p.value);
+  const numTimes = points.map(p => p.time);
 
-  // Use hi-res hourly candle reconstruction for a dynamic chart
-  const [holdings, latestSnapshot, userSettings] = await Promise.all([
-    prisma.holding.findMany({ where: { userId } }),
-    prisma.portfolioSnapshot.findFirst({ where: { userId }, orderBy: { timestamp: 'desc' } }),
-    prisma.userSettings.findUnique({ where: { userId } }),
-  ]);
-
-  const cashBalance = latestSnapshot?.cashBalance ?? 0;
-  const marginDebt = userSettings?.marginDebt ?? 0;
-
-  // Map period to Yahoo range/interval
-  const rangeMap: Record<string, string> = {
-    '1D': '1d',
-    '1W': '5d',
-    '1M': '1mo',
-    '3M': '3mo',
-    '6M': '6mo',
-    'YTD': 'ytd',
-    '1Y': '1y',
-    'ALL': '5y',
-  };
-  const intervalMap: Record<string, string> = {
-    '1D': '5m',
-    '1W': '1h',
-    '1M': '1h',
-    '3M': '1h',
-    '6M': '1h',
-    'YTD': '1d',
-    '1Y': '1d',
-    'ALL': '1d',
-  };
-
-  let hiResPoints = holdings.length > 0
-    ? await reconstructPortfolioHistoryHiRes(
-        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        cashBalance,
-        marginDebt,
-        rangeMap[period] || '1mo',
-        intervalMap[period] || '1h',
-      ).catch(() => [] as { time: number; value: number }[])
-    : [];
-
-  // Remove points within the delay window
-  if (delayed && delayCutoff > 0) {
-    hiResPoints = hiResPoints.filter(p => p.time <= delayCutoff);
-  }
-
-  // Proper ET conversion using Intl (handles EST/EDT automatically)
-  const perfEtFmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    hour: 'numeric', minute: 'numeric', hour12: false,
-    weekday: 'short',
-  });
-  function getEtInfo(d: Date): { hourFloat: number; isWeekday: boolean } {
-    const parts = perfEtFmt.formatToParts(d);
-    const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
-    const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
-    const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
-    return { hourFloat: hour + minute / 60, isWeekday: !['Sat', 'Sun'].includes(weekday) };
-  }
-
-  // Filter to market hours (weekday 4 AM–8 PM ET)
-  const values = hiResPoints.filter(p => {
-    if (!Number.isFinite(p.value) || p.value <= 0) return false;
-    const { hourFloat, isWeekday } = getEtInfo(new Date(p.time));
-    return isWeekday && hourFloat >= 4 && hourFloat < 20;
-  });
-
-  const numValues = values.map(p => p.value);
-  const numTimes = values.map(p => p.time);
-
-  // Get live portfolio value — candle-reconstructed values can diverge from real quotes
-  let liveValue = 0;
-  try {
-    const portfolio = await getPortfolio(userId);
-    liveValue = portfolio.totalAssets - portfolio.marginDebt;
-  } catch {
-    liveValue = (latestSnapshot as any)?.netEquity ?? latestSnapshot?.totalValue ?? 0;
-  }
-
-  // Offset-normalize chart points to match live value (same as chart API)
-  if (numValues.length > 0 && liveValue > 0) {
-    const lastCandleVal = numValues[numValues.length - 1];
-    const offset = liveValue - lastCandleVal;
-    if (Math.abs(offset) > 1) {
-      for (let i = 0; i < numValues.length; i++) numValues[i] += offset;
-    }
-  }
-
-  const currentValue = liveValue > 0 ? liveValue : (numValues.length > 0 ? numValues[numValues.length - 1] : 0);
-  const startValue = numValues.length > 0 ? numValues[0] : currentValue;
-  const periodChangeValue = currentValue - startValue;
-  const periodChangePercent = startValue > 0 ? (periodChangeValue / startValue) * 100 : 0;
+  const currentValue = numValues.length > 0 ? numValues[numValues.length - 1] : 0;
+  const periodChangeValue = currentValue - periodStartValue;
+  const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
   const sparklineValues = downsampleValues(numValues.length > 0 ? numValues : [currentValue, currentValue], 128);
 
   // Build date labels from timestamps
@@ -376,32 +294,18 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
     const t = numTimes[Math.round(idx)];
     if (!t) return '';
     const date = new Date(t);
+    if (period === '1D') {
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+    }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
 
-  // Compute an accurate period label based on actual data range
   const idealLabels: Record<string, string> = {
     '1D': 'Today', '1W': 'Past Week', '1M': 'Past Month',
     '3M': 'Past 3 Months', '6M': 'Past 6 Months', 'YTD': 'Year to Date',
     '1Y': 'Past Year', 'ALL': 'All Time',
   };
-  let periodLabel = idealLabels[period] || period;
-
-  // If actual data range is shorter than the requested period, show real range
-  if (numTimes.length >= 2) {
-    const firstTime = numTimes[0];
-    const lastTime = numTimes[numTimes.length - 1];
-    const actualDays = Math.round((lastTime - firstTime) / (24 * 60 * 60 * 1000));
-    const expectedDays: Record<string, number> = {
-      '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365,
-    };
-    const expected = expectedDays[period];
-    // If data covers less than 70% of the requested period, show actual range
-    if (expected && actualDays < expected * 0.7) {
-      const startDate = new Date(firstTime);
-      periodLabel = `Since ${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-    }
-  }
+  const periodLabel = idealLabels[period] || period;
 
   return {
     username: user.username,

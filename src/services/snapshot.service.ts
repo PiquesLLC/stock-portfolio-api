@@ -1,6 +1,6 @@
 ﻿import prisma from '../utils/prisma';
 import { PortfolioSnapshot } from '../types';
-import { getPortfolio } from './portfolio.service';
+import { getPortfolio, getHoldings } from './portfolio.service';
 import { config } from '../config';
 import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
@@ -2289,4 +2289,198 @@ export async function getSnapshotHealth(): Promise<SnapshotHealthReport[]> {
   reports.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
 
   return reports;
+}
+
+/**
+ * Short-lived cache for chart data.  When the user views a chart in the app
+ * and then clicks "Share", the share-card endpoint re-calls this function.
+ * Without a cache each call fetches fresh Polygon data which can differ
+ * (timeouts, slightly different bars).  A 60-second cache guarantees
+ * the share card always shows the exact same numbers as the chart the
+ * user is looking at.
+ */
+const _chartCache = new NodeCache({ stdTTL: 60, checkperiod: 30 });
+
+/**
+ * Shared chart data computation — used by BOTH the chart API and the share card.
+ * This guarantees the share card shows the exact same numbers as the in-app chart.
+ */
+export async function getPortfolioChartData(
+  userId: string,
+  period: string,
+  portfolioId?: string,
+): Promise<{ points: { time: number; value: number }[]; periodStartValue: number; source: string }> {
+  const cacheKey = `chart:${userId}:${period}:${portfolioId ?? 'default'}`;
+  const cached = _chartCache.get<{ points: { time: number; value: number }[]; periodStartValue: number; source: string }>(cacheKey);
+  if (cached) return cached;
+  const portfolio = await getPortfolio(userId, portfolioId ? { portfolioId } : undefined);
+  const liveValue = portfolio.totalAssets - portfolio.marginDebt;
+  const now = Date.now();
+
+  if (period === '1D') {
+    const previousCloseValue = liveValue - portfolio.dayChange;
+    const holdings = await getHoldings(userId, portfolioId);
+    let source = 'hiRes';
+
+    let points = await reconstructPortfolioHistoryHiRes(
+      holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+      portfolio.cashBalance, portfolio.marginDebt, '1d', '5m',
+    );
+
+    if (points.length < 5) {
+      const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+      const snapshots = await getAllSnapshots(userId);
+      const recentSnapshots = snapshots.filter(s => s.timestamp.getTime() >= cutoff.getTime());
+      if (recentSnapshots.length >= 2) {
+        points = recentSnapshots.map(s => ({
+          time: s.timestamp.getTime(),
+          value: (s as any).netEquity ?? s.totalValue,
+        }));
+        source = 'snapshot';
+      }
+    }
+
+    if (points.length > 0 && liveValue > 0) {
+      const lastCandleVal = points[points.length - 1].value;
+      const offset = liveValue - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
+      }
+    }
+
+    if (points.length > 0) {
+      const lastCandleTime = points[points.length - 1].time;
+      const gapMs = now - lastCandleTime;
+      if (gapMs > 5 * 60 * 1000 && gapMs < 4 * 3600000) {
+        const snapshots = await getSnapshotsAfter(userId, new Date(lastCandleTime));
+        const lastCandleValue = points[points.length - 1].value;
+        for (const s of snapshots) {
+          const t = s.timestamp.getTime();
+          const v = (s as any).netEquity ?? s.totalValue;
+          if (lastCandleValue > 0 && (v <= 0 || Math.abs(v - lastCandleValue) / lastCandleValue > 0.15)) continue;
+          if (t > lastCandleTime && t < now - 5000) points.push({ time: t, value: v });
+        }
+      }
+    }
+
+    const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+    if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
+      points.push({ time: now, value: liveValue });
+    }
+
+    if (points.length >= 3) {
+      for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1].value;
+        const curr = points[i].value;
+        const next = points[i + 1].value;
+        const neighborAvg = (prev + next) / 2;
+        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+          points[i].value = neighborAvg;
+        }
+      }
+    }
+
+    const rangeStart = new Date(now - 24 * 60 * 60 * 1000);
+    const latestChange = await getLatestCompositionChangeAfter(userId, rangeStart);
+    if (latestChange) {
+      const cutoff = latestChange.getTime();
+      const filtered = points.filter(p => p.time >= cutoff);
+      const minUsable = Math.max(20, Math.ceil(points.length * 0.5));
+      const etHourFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+      });
+      const hasMarketHours = filtered.some(p => {
+        const h = parseInt(etHourFmt.format(new Date(p.time)).split(':')[0]);
+        return h >= 4 && h < 20;
+      });
+      if (filtered.length >= minUsable && hasMarketHours) {
+        points = filtered;
+      }
+    }
+
+    const periodStartValue = (previousCloseValue && Number.isFinite(previousCloseValue) && previousCloseValue > 0)
+      ? previousCloseValue
+      : (points.length > 0 ? points[0].value : liveValue);
+
+    const result = { points, periodStartValue, source };
+    _chartCache.set(cacheKey, result);
+    return result;
+  }
+
+  if (period === '1W' || period === '1M') {
+    const holdings = await getHoldings(userId, portfolioId);
+    let source = 'hiRes';
+    const hiResRange = period === '1W' ? '5d' : '1mo';
+
+    let points = await reconstructPortfolioHistoryHiRes(
+      holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+      portfolio.cashBalance, portfolio.marginDebt, hiResRange, '1h',
+    );
+
+    if (points.length < 10) {
+      const snapshotDays = period === '1W' ? 7 : 30;
+      const snapshotPoints = await getSnapshotChartPoints(userId, snapshotDays);
+      if (snapshotPoints.length >= 2) {
+        points = snapshotPoints;
+        source = 'snapshot';
+      }
+    }
+
+    if (points.length > 0 && liveValue > 0) {
+      const lastCandleVal = points[points.length - 1].value;
+      const offset = liveValue - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
+      }
+    }
+
+    const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+    if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
+      points.push({ time: now, value: liveValue });
+    }
+
+    if (points.length >= 3) {
+      for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1].value;
+        const curr = points[i].value;
+        const next = points[i + 1].value;
+        const neighborAvg = (prev + next) / 2;
+        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+          points[i].value = neighborAvg;
+        }
+      }
+    }
+
+    const periodStartValue = points.length > 0 ? points[0].value : liveValue;
+    const result1W1M = { points, periodStartValue, source };
+    _chartCache.set(cacheKey, result1W1M);
+    return result1W1M;
+  }
+
+  // 3M, 6M, YTD, 1Y, ALL — snapshot-based
+  const periodDaysMap: Record<string, number> = {
+    '3M': 90, '6M': 180,
+    'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
+    '1Y': 365, 'ALL': 365 * 5,
+  };
+  const periodDays = periodDaysMap[period] ?? 30;
+  let points = await getSnapshotChartPoints(userId, periodDays);
+
+  if (points.length > 0 && liveValue > 0) {
+    const lastVal = points[points.length - 1].value;
+    const offset = liveValue - lastVal;
+    if (Math.abs(offset) > 1) {
+      for (const p of points) p.value += offset;
+    }
+  }
+
+  const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+  if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
+    points.push({ time: now, value: liveValue });
+  }
+
+  const periodStartValue = points.length > 0 ? points[0].value : liveValue;
+  const resultSnapshot = { points, periodStartValue, source: 'snapshot' };
+  _chartCache.set(cacheKey, resultSnapshot);
+  return resultSnapshot;
 }
