@@ -25,6 +25,7 @@ import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
 import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
+import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analytics.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -225,6 +226,10 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('job_run_prune', runJobRunPruneJob);
   registerJobHandler('idempotency_key_prune', runIdempotencyKeyPruneJob);
   registerJobHandler('daily_report_pregen', preGenerateDailyReports);
+  registerJobHandler('analytics_cleanup', async () => {
+    const count = await cleanupOldAnalyticsEvents();
+    if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
+  });
 }
 
 const server = app.listen(config.port, async () => {
@@ -502,6 +507,21 @@ const server = app.listen(config.port, async () => {
   // Prune expired idempotency keys daily
   setInterval(() => {
     runJob({ name: 'idempotency_key_prune', fn: runIdempotencyKeyPruneJob, maxAttempts: 2 });
+  }, 24 * 60 * 60 * 1000);
+
+  // Analytics event cleanup — delete events older than 90 days (daily)
+  console.log('[Analytics] Cleanup scheduled daily');
+  setInterval(() => {
+    runJob({
+      name: 'analytics_cleanup',
+      fn: async () => {
+        const count = await cleanupOldAnalyticsEvents();
+        if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
+      },
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('analytics_cleanup', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 24 * 60 * 60 * 1000);
 
   // Daily Report pre-generation — warm cache so reports load instantly

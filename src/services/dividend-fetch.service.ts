@@ -230,10 +230,22 @@ export async function syncAllHeldTickers(userId?: string): Promise<{ synced: num
       }
       totalSynced += count;
     } catch (err) {
-      console.warn(`[Dividend Sync] Failed for ${ticker}:`, err instanceof Error ? err.message : err);
+      // Retry once after 3s for transient Yahoo Finance rate limits / timeouts
+      console.warn(`[Dividend Sync] First attempt failed for ${ticker}:`, err instanceof Error ? err.message : err);
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const count = await syncDividendEventsForTicker(ticker);
+        if (count > 0) {
+          console.log(`[Dividend Sync] ${ticker}: ${count} events upserted (retry)`);
+        }
+        totalSynced += count;
+        console.log(`[Dividend Sync] Retry succeeded for ${ticker}`);
+      } catch (retryErr) {
+        console.warn(`[Dividend Sync] Retry also failed for ${ticker}:`, retryErr instanceof Error ? retryErr.message : retryErr);
+      }
     }
-    // Rate limit: 1 second between tickers
-    await new Promise(r => setTimeout(r, 1000));
+    // Rate limit: 1.5 seconds between tickers to reduce Yahoo rate limiting
+    await new Promise(r => setTimeout(r, 1500));
   }
 
   console.log(`[Dividend Sync] Complete: ${totalSynced} events across ${tickers.length} tickers`);

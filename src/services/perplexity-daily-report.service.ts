@@ -383,11 +383,21 @@ export async function preGenerateDailyReports(): Promise<void> {
       await getDailyReportInternal(userId, { strictFailures: true });
       successCount++;
     } catch (err: any) {
-      failureCount++;
+      // Retry once after 2s for transient failures (Perplexity timeouts, JSON parse errors)
       const category = classifyDailyReportError(err);
-      failureByCategory[category] += 1;
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[Daily Report Pre-Gen] Failed userId=${userId} category=${category} error="${message}"`);
+      console.warn(`[Daily Report Pre-Gen] First attempt failed userId=${userId} category=${category}, retrying in 2s...`);
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        await getDailyReportInternal(userId, { strictFailures: true });
+        successCount++;
+        console.log(`[Daily Report Pre-Gen] Retry succeeded for userId=${userId}`);
+      } catch (retryErr: any) {
+        failureCount++;
+        const retryCategory = classifyDailyReportError(retryErr);
+        failureByCategory[retryCategory] += 1;
+        const message = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        console.warn(`[Daily Report Pre-Gen] Retry also failed userId=${userId} category=${retryCategory} error="${message}"`);
+      }
       continue;
     }
   }

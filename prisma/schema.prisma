@@ -1173,3 +1173,22 @@ model DismissedDividend {
   @@unique([userId, dividendEventId])
   @@index([userId])
 }
+
+// ─── User Analytics & Telemetry ─────────────────────────────────────
+
+model AnalyticsEvent {
+  id         String   @id @default(uuid())
+  userId     String
+  sessionId  String
+  event      String
+  feature    String
+  subFeature String?
+  metadata   String?
+  durationMs Int?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([feature, createdAt])
+  @@index([event, createdAt])
+  @@index([sessionId])
+}
