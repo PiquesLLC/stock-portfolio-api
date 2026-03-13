@@ -76,6 +76,9 @@ vi.mock('../controllers/insights.controller', () => {
     regenerateDailyReportHandler: ok,
     explainBriefingHandler: ok,
     getEarningsSummaryHandler: ok,
+    getYtdBreakdownHandler: ok,
+    dismissDividendHandler: ok,
+    restoreDividendHandler: ok,
   };
 });
 
