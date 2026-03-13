@@ -2473,7 +2473,7 @@ export async function getPortfolioChartData(
   const snapshotSpanDays = points.length >= 2
     ? (points[points.length - 1].time - points[0].time) / 86400000
     : 0;
-  if (snapshotSpanDays < periodDays * 0.5 && periodDays >= 14) {
+  if (period === 'YTD' && snapshotSpanDays < periodDays * 0.5 && periodDays >= 14) {
     const holdings = await getHoldings(userId, portfolioId);
     if (holdings.length > 0) {
       // Map period to Polygon-compatible range for daily candles
