@@ -2493,12 +2493,19 @@ export async function getPortfolioChartData(
     }
   }
 
-  // Offset normalization for candle-based data (same as 1W/1M)
+  // Offset normalization for candle-based data — only when liveValue is reliable.
+  // If liveValue diverges >10% from candle data, quotes are likely rate-limited
+  // and the candle data (from Polygon historical) is more accurate.
   if (source === 'daily' && points.length > 0 && liveValue > 0) {
     const lastCandleVal = points[points.length - 1].value;
-    const offset = liveValue - lastCandleVal;
-    if (Math.abs(offset) > 1) {
-      for (const p of points) p.value += offset;
+    const divergence = Math.abs(liveValue - lastCandleVal) / lastCandleVal;
+    if (divergence < 0.10) {
+      const offset = liveValue - lastCandleVal;
+      if (Math.abs(offset) > 1) {
+        for (const p of points) p.value += offset;
+      }
+    } else {
+      console.log(`[ChartData] ${period}: skipping offset normalization — liveValue=$${liveValue.toFixed(0)} vs candle=$${lastCandleVal.toFixed(0)} (${(divergence * 100).toFixed(1)}% divergence)`);
     }
   }
 
@@ -2542,10 +2549,13 @@ export async function getPortfolioChartData(
     }
   }
 
-  // Append current live value to connect last snapshot/candle to now
+  // Append current live value to connect last point to now.
+  // For candle-based data, only append if liveValue is reliable (within 10% of last candle).
   const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+  const lastPointVal = points.length > 0 ? points[points.length - 1].value : 0;
+  const liveReliable = lastPointVal === 0 || Math.abs(liveValue - lastPointVal) / lastPointVal < 0.10;
   if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
-    points.push({ time: now, value: liveValue });
+    points.push({ time: now, value: liveReliable ? liveValue : lastPointVal });
   }
 
   // If YTD with baseline, prepend synthetic Jan 1 point and use baseline as periodStartValue
