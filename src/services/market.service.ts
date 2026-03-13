@@ -319,11 +319,44 @@ export const ETF_REFERENCE_DATA: Record<string, ETFRefData> = {
   SPXL: { aumB: 4,   expenseRatio: 0.91,   beta: 3.0 },
 };
 
-interface YahooBatchQuote {
+export interface YahooBatchQuote {
   price: number;
   previousClose: number;
-  regularMarketPrice: number; // today's 4 PM close (or yesterday's during PRE)
+  regularMarketPrice: number;
   marketState: string;
+  dayHigh?: number;
+  dayLow?: number;
+  volume?: number;
+  regularMarketTime?: number;
+}
+
+function getYahooV8MarketState(meta: any): string {
+  const marketTime = Number(meta?.regularMarketTime);
+  const periods = meta?.currentTradingPeriod;
+
+  if (!Number.isFinite(marketTime) || !periods) {
+    return 'REGULAR';
+  }
+
+  const preStart = Number(periods?.pre?.start);
+  const preEnd = Number(periods?.pre?.end);
+  if (Number.isFinite(preStart) && Number.isFinite(preEnd) && marketTime >= preStart && marketTime < preEnd) {
+    return 'PRE';
+  }
+
+  const regularStart = Number(periods?.regular?.start);
+  const regularEnd = Number(periods?.regular?.end);
+  if (Number.isFinite(regularStart) && Number.isFinite(regularEnd) && marketTime >= regularStart && marketTime < regularEnd) {
+    return 'REGULAR';
+  }
+
+  const postStart = Number(periods?.post?.start);
+  const postEnd = Number(periods?.post?.end);
+  if (Number.isFinite(postStart) && Number.isFinite(postEnd) && marketTime >= postStart && marketTime < postEnd) {
+    return 'POST';
+  }
+
+  return 'REGULAR';
 }
 
 /**
@@ -404,6 +437,92 @@ export async function fetchYahooBatchQuotes(
     } catch {
       // Best-effort by batch. Caller handles partial misses.
       continue;
+    }
+  }
+
+  return results;
+}
+
+export async function fetchYahooV8BatchQuotes(
+  tickers: string[],
+  options?: { skipCache?: boolean },
+): Promise<Map<string, YahooBatchQuote>> {
+  const results = new Map<string, YahooBatchQuote>();
+  if (tickers.length === 0) return results;
+
+  const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
+  const uncached: string[] = [];
+
+  if (!options?.skipCache) {
+    for (const ticker of uniqueTickers) {
+      const cached = yahooQuoteCache.get<YahooBatchQuote>(`yahoo-v8-quote:${ticker}`);
+      if (cached) {
+        results.set(ticker, cached);
+      } else {
+        uncached.push(ticker);
+      }
+    }
+  } else {
+    uncached.push(...uniqueTickers);
+  }
+
+  const chunkSize = 10;
+
+  for (let i = 0; i < uncached.length; i += chunkSize) {
+    const chunk = uncached.slice(i, i + chunkSize);
+
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (ticker) => {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
+        const resp = await yahooGet(url, 8000);
+        const chartResult = resp.data?.chart?.result?.[0];
+        const meta = chartResult?.meta;
+
+        const regularMarketPrice = Number(meta?.regularMarketPrice);
+        const previousClose = Number(meta?.chartPreviousClose);
+        if (!Number.isFinite(regularMarketPrice) || regularMarketPrice <= 0 || !Number.isFinite(previousClose) || previousClose <= 0) {
+          return null;
+        }
+
+        // During extended hours, regularMarketPrice = 4PM close.
+        // The actual live price is the last candle in the chart data.
+        const marketState = getYahooV8MarketState(meta);
+        let livePrice = regularMarketPrice;
+
+        if (marketState === 'PRE' || marketState === 'POST') {
+          const closes = chartResult?.indicators?.quote?.[0]?.close as number[] | undefined;
+          if (closes && closes.length > 0) {
+            // Walk backwards to find last non-null close
+            for (let ci = closes.length - 1; ci >= 0; ci--) {
+              if (Number.isFinite(closes[ci]) && closes[ci] > 0) {
+                livePrice = closes[ci];
+                break;
+              }
+            }
+          }
+        }
+
+        const parsed: YahooBatchQuote = {
+          price: livePrice,
+          previousClose,
+          regularMarketPrice,
+          marketState,
+          dayHigh: Number.isFinite(Number(meta?.regularMarketDayHigh)) ? Number(meta.regularMarketDayHigh) : undefined,
+          dayLow: Number.isFinite(Number(meta?.regularMarketDayLow)) ? Number(meta.regularMarketDayLow) : undefined,
+          volume: Number.isFinite(Number(meta?.regularMarketVolume)) ? Number(meta.regularMarketVolume) : undefined,
+          regularMarketTime: Number.isFinite(Number(meta?.regularMarketTime)) ? Number(meta.regularMarketTime) : undefined,
+        };
+
+        return { ticker, quote: parsed };
+      }),
+    );
+
+    for (const result of chunkResults) {
+      if (result.status !== 'fulfilled' || !result.value) continue;
+
+      const { ticker, quote } = result.value;
+      results.set(ticker, quote);
+      yahooQuoteCache.set(`yahoo-v8-quote:${ticker}`, quote);
     }
   }
 

@@ -3,7 +3,7 @@ import prisma from '../utils/prisma';
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import { Quote } from '../types';
 import { getPolygonQuotes, upsertPolygonQuoteCache } from '../utils/polygon';
-import { fetchYahooBatchQuotes } from './market.service';
+import { fetchYahooV8BatchQuotes } from './market.service';
 import { JobExecutionError, runJob } from './job-runner.service';
 
 type ProviderName = 'Polygon' | 'Yahoo';
@@ -107,12 +107,13 @@ async function runRefreshCycle(): Promise<void> {
       }
     }
 
-    // Yahoo overlay: fetch fresh during REG hours (skip cache) so stale
-    // cached Yahoo data doesn't overwrite fresh Polygon real-time prices.
     if (isProviderAvailable('Yahoo')) {
       try {
-        const yahooQuotes = await fetchYahooBatchQuotes(tickers, { skipCache: session === 'REG' });
-        for (const [ticker, yahooQuote] of yahooQuotes.entries()) {
+        const yahooBatch = await fetchYahooV8BatchQuotes(tickers, {
+          skipCache: session === 'REG',
+        });
+
+        for (const [ticker, yahooQuote] of yahooBatch.entries()) {
           if (!Number.isFinite(yahooQuote.price) || yahooQuote.price <= 0) continue;
 
           const base = polygonQuotes.get(ticker);
@@ -122,13 +123,14 @@ async function runRefreshCycle(): Promise<void> {
           const currentPrice = yahooQuote.price;
           const change = currentPrice - previousClose;
           const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
-          const updatedAt = Date.now();
-
-          // regularClose = most recent completed regular-session close.
-          // During POST: regularMarketPrice = today's 4 PM close.
-          // During PRE: regularMarketPrice = yesterday's 4 PM close.
-          // previousClose = regularMarketPreviousClose from Yahoo = the day BEFORE regularMarketPrice.
-          const regularClose = yahooQuote.regularMarketPrice || base?.currentPrice || previousClose;
+          const updatedAt = yahooQuote.regularMarketTime
+            ? yahooQuote.regularMarketTime * 1000
+            : Date.now();
+          // regularClose = today's 4PM close. Yahoo v8 meta.regularMarketPrice is always the
+          // regular session close, even during extended hours. Use it directly.
+          const regularClose = yahooQuote.regularMarketPrice > 0
+            ? yahooQuote.regularMarketPrice
+            : base?.regularClose || previousClose;
           const extendedChange = currentPrice - regularClose;
           const extendedChangePercent = regularClose > 0 ? (extendedChange / regularClose) * 100 : 0;
 
@@ -137,8 +139,8 @@ async function runRefreshCycle(): Promise<void> {
             currentPrice,
             change,
             changePercent,
-            high: base?.high || currentPrice,
-            low: base?.low || currentPrice,
+            high: yahooQuote.dayHigh && yahooQuote.dayHigh > 0 ? yahooQuote.dayHigh : (base?.high || currentPrice),
+            low: yahooQuote.dayLow && yahooQuote.dayLow > 0 ? yahooQuote.dayLow : (base?.low || currentPrice),
             open: base?.open || previousClose,
             previousClose,
             timestamp: Math.floor(updatedAt / 1000),
@@ -157,11 +159,16 @@ async function runRefreshCycle(): Promise<void> {
           yahooOverlayCount += 1;
         }
 
-        markProviderSuccess('Yahoo');
+        if (yahooOverlayCount > 0) {
+          markProviderSuccess('Yahoo');
+        } else {
+          markProviderFailure('Yahoo');
+          yahooError = new Error('Yahoo v8 overlay returned no fresh quotes');
+        }
       } catch (error) {
         markProviderFailure('Yahoo');
         yahooError = error instanceof Error ? error : new Error(String(error));
-        console.warn('[QuoteRefresh] Yahoo overlay failed:', yahooError.message);
+        console.warn('[QuoteRefresh] Yahoo v8 overlay failed:', yahooError.message);
       }
     }
 
@@ -175,7 +182,7 @@ async function runRefreshCycle(): Promise<void> {
 
     const elapsedSeconds = ((Date.now() - startMs) / 1000).toFixed(1);
     console.log(
-      `[QuoteRefresh] Refreshed ${tickers.length} tickers in ${elapsedSeconds}s (Polygon: ${polygonRefreshed}, Yahoo overlay: ${yahooOverlayCount})`,
+      `[QuoteRefresh] Refreshed ${tickers.length} tickers in ${elapsedSeconds}s (Polygon: ${polygonRefreshed}, Yahoo v8 overlay: ${yahooOverlayCount})`,
     );
   } finally {
     cycleInProgress = false;
