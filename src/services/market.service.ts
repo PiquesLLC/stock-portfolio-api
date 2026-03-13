@@ -463,7 +463,7 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
           const change = yahooData.price - yahooData.previousClose;
           const changePercent = yahooData.previousClose > 0 ? (change / yahooData.previousClose) * 100 : 0;
           const session = getMarketSessionForTicker(ticker);
-          result.quotes.set(ticker, {
+          const newQuote: Quote = {
             ticker,
             currentPrice: yahooData.price,
             change,
@@ -478,7 +478,13 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
             isRepricing: false,
             quoteAgeSeconds: 0,
             session,
-          });
+          };
+          // Set regularClose/extendedPrice for PRE/POST portfolio split
+          if (session === 'PRE' || session === 'POST') {
+            newQuote.regularClose = yahooData.regularMarketPrice || yahooData.previousClose;
+            newQuote.extendedPrice = yahooData.price;
+          }
+          result.quotes.set(ticker, newQuote);
           result.failedTickers = result.failedTickers.filter(t => t !== ticker);
         } else if (yahooData.price > 0 && existing.currentPrice > 0) {
           // During REGULAR hours: always prefer Yahoo (near-real-time) over Polygon (~15-min delayed).
@@ -495,6 +501,12 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
             existing.timestamp = Math.floor(Date.now() / 1000);
             existing.quoteAgeSeconds = 0;
             existing.isStale = false;
+            // Set regularClose/extendedPrice for PRE/POST portfolio split
+            const tickerSession = getMarketSessionForTicker(ticker);
+            if (tickerSession === 'PRE' || tickerSession === 'POST') {
+              existing.regularClose = yahooData.regularMarketPrice || existing.previousClose;
+              existing.extendedPrice = yahooData.price;
+            }
           }
         }
       }
@@ -552,11 +564,11 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
       quote.quoteAgeSeconds = 0;
 
       // Set extended hours fields for consistent portfolio regular/extended split.
-      // During POST: regularClose = today's 4PM close (regularMarketPrice).
-      // During PRE: regularClose = yesterday's close (previousClose — no "today" close yet).
-      quote.regularClose = session === 'POST'
-        ? (yahooExtended.regularMarketPrice || polygonPrice)
-        : quote.previousClose;
+      // regularClose = most recent completed regular-session close.
+      // During POST: regularMarketPrice = today's 4 PM close.
+      // During PRE: regularMarketPrice = yesterday's 4 PM close.
+      // previousClose = regularMarketPreviousClose from Yahoo = the day BEFORE regularMarketPrice.
+      quote.regularClose = yahooExtended.regularMarketPrice || polygonPrice || quote.previousClose;
       quote.extendedPrice = yahooExtended.price;
       quote.extendedChange = quote.extendedPrice - (quote.regularClose || quote.previousClose);
       quote.extendedChangePercent = (quote.regularClose || quote.previousClose) > 0

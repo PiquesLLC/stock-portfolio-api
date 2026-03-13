@@ -131,79 +131,126 @@ async function logApiUsage(data: {
   await prisma.apiUsageLog.create({ data });
 }
 
-/**
- * Extract JSON from Perplexity response content.
- * Handles markdown fences, surrounding prose, and nested brackets.
- */
-export function extractJson(content: string): string {
-  let jsonStr = content.trim();
-  if (!jsonStr) return '';
+function normalizeJsonLikeText(content: string): string {
+  return content
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, '\'')
+    .trim();
+}
 
-  // Strip markdown fences if present
-  const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenceMatch) {
-    jsonStr = fenceMatch[1].trim();
-  }
+function stripMarkdownFences(content: string): string {
+  const trimmed = content.trim();
+  const fullFenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fullFenceMatch) return fullFenceMatch[1].trim();
+  return trimmed.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+}
 
-  // If not starting with [ or {, find the first one
-  if (!jsonStr.startsWith('[') && !jsonStr.startsWith('{')) {
-    const arrStart = jsonStr.indexOf('[');
-    const objStart = jsonStr.indexOf('{');
-    const start = arrStart >= 0 && objStart >= 0
-      ? Math.min(arrStart, objStart)
-      : Math.max(arrStart, objStart);
-    if (start >= 0) {
-      jsonStr = jsonStr.slice(start);
-    }
-  }
-
-  // Trim trailing text after JSON by finding the matching closing bracket
+function trimToBalancedJson(content: string): string {
   let bracketDepth = 0;
   let inString = false;
   let escape = false;
   let jsonEnd = -1;
-  for (let i = 0; i < jsonStr.length; i++) {
-    const ch = jsonStr[i];
-    if (escape) { escape = false; continue; }
-    if (inString) {
-      if (ch === '\\') { escape = true; continue; }
-      if (ch === '"') { inString = false; }
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (escape) {
+      escape = false;
       continue;
     }
-    if (ch === '"') { inString = true; continue; }
-    if (inString) continue;
+    if (inString) {
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if (ch === '[' || ch === '{') bracketDepth++;
     if (ch === ']' || ch === '}') {
       bracketDepth--;
-      if (bracketDepth === 0) { jsonEnd = i + 1; break; }
+      if (bracketDepth === 0) {
+        jsonEnd = i + 1;
+        break;
+      }
     }
   }
-  if (jsonEnd > 0) {
-    jsonStr = jsonStr.slice(0, jsonEnd);
-  }
 
-  return jsonStr;
+  return jsonEnd > 0 ? content.slice(0, jsonEnd).trim() : content.trim();
+}
+
+function findFirstJsonStart(content: string): string {
+  if (content.startsWith('[') || content.startsWith('{')) return content;
+
+  const arrStart = content.indexOf('[');
+  const objStart = content.indexOf('{');
+  const start = arrStart >= 0 && objStart >= 0
+    ? Math.min(arrStart, objStart)
+    : Math.max(arrStart, objStart);
+
+  return start >= 0 ? content.slice(start).trim() : '';
+}
+
+function removeTrailingCommas(content: string): string {
+  return content.replace(/,\s*([}\]])/g, '$1').trim();
+}
+
+function buildJsonCandidates(content: string): string[] {
+  const normalized = normalizeJsonLikeText(content);
+  if (!normalized) return [];
+
+  const stripped = stripMarkdownFences(normalized);
+  const candidates = [
+    stripped,
+    findFirstJsonStart(stripped),
+    trimToBalancedJson(findFirstJsonStart(stripped)),
+    removeTrailingCommas(trimToBalancedJson(findFirstJsonStart(stripped))),
+    removeTrailingCommas(findFirstJsonStart(stripped)),
+  ];
+
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+/**
+ * Extract JSON from Perplexity response content.
+ * Handles markdown fences, surrounding prose, trailing text, and simple JSON cleanup.
+ */
+export function extractJson(content: string): string {
+  const candidates = buildJsonCandidates(content);
+  return candidates[0] ?? '';
 }
 
 export function parsePerplexityJson<T = unknown>(content: string): PerplexityJsonParseResult<T> {
-  const extracted = extractJson(content);
   if (!content || !content.trim()) {
     return { ok: false, reason: 'empty_response', extracted: '' };
   }
+  const candidates = buildJsonCandidates(content);
+  const extracted = candidates[0] ?? '';
   if (!extracted) {
     return { ok: false, reason: 'no_json_found', extracted: '' };
   }
 
-  try {
-    return { ok: true, data: JSON.parse(extracted) as T, extracted };
-  } catch (error) {
-    const cleaned = extracted.replace(/,\s*([}\]])/g, '$1').trim();
+  for (const candidate of candidates) {
     try {
-      return { ok: true, data: JSON.parse(cleaned) as T, extracted: cleaned };
-    } catch (retryError) {
-      const parseErr = retryError instanceof Error ? retryError.message : String(retryError);
-      return { ok: false, reason: 'invalid_json', error: parseErr, extracted };
+      return { ok: true, data: JSON.parse(candidate) as T, extracted: candidate };
+    } catch {
+      // Try the next cleaned candidate.
     }
+  }
+
+  try {
+    const cleaned = removeTrailingCommas(trimToBalancedJson(findFirstJsonStart(stripMarkdownFences(normalizeJsonLikeText(content)))));
+    return { ok: true, data: JSON.parse(cleaned) as T, extracted: cleaned };
+  } catch (retryError) {
+    const parseErr = retryError instanceof Error ? retryError.message : String(retryError);
+    return { ok: false, reason: 'invalid_json', error: parseErr, extracted };
   }
 }
 

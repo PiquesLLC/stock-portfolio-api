@@ -148,8 +148,12 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
       return;
     }
     const { ticker } = parsed.data;
-    const candles = await fetchIntradayCandles(ticker);
-    res.json({ ticker, candles });
+    const [candles, quote] = await Promise.all([
+      fetchIntradayCandles(ticker),
+      fetchQuote(ticker).catch(() => null),
+    ]);
+    const previousClose = quote?.regularClose || quote?.previousClose || null;
+    res.json({ ticker, candles, previousClose });
   } catch (error: unknown) {
     console.error('[Market] getIntraday error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch intraday data' });

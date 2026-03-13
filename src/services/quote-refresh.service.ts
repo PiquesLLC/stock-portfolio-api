@@ -124,11 +124,11 @@ async function runRefreshCycle(): Promise<void> {
           const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
           const updatedAt = Date.now();
 
-          // During POST: regularClose = today's 4PM close (regularMarketPrice).
-          // During PRE: regularClose = yesterday's close (previousClose — no "today" close yet).
-          const regularClose = session === 'POST'
-            ? (yahooQuote.regularMarketPrice || base?.currentPrice || previousClose)
-            : previousClose;
+          // regularClose = most recent completed regular-session close.
+          // During POST: regularMarketPrice = today's 4 PM close.
+          // During PRE: regularMarketPrice = yesterday's 4 PM close.
+          // previousClose = regularMarketPreviousClose from Yahoo = the day BEFORE regularMarketPrice.
+          const regularClose = yahooQuote.regularMarketPrice || base?.currentPrice || previousClose;
           const extendedChange = currentPrice - regularClose;
           const extendedChangePercent = regularClose > 0 ? (extendedChange / regularClose) * 100 : 0;
 

@@ -270,6 +270,24 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   // The last chart point = the offset-normalized current value (same as in-app chart).
   const headlineValue = points.length > 0 ? points[points.length - 1].value : 0;
 
+  // 1D: filter to current trading day only (4 AM ET today → now).
+  // Without this, the 2-day candle range shows overnight flat lines on the share card.
+  if (period === '1D' && points.length > 2) {
+    const etDayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+    const etOffNoon = new Date(`${etDayParts}T12:00:00Z`);
+    const etNoonH = parseInt(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).format(etOffNoon).split(':')[0]);
+    const etOffsetMs = (etNoonH - 12) * 3600000;
+    const today4amET = new Date(`${etDayParts}T04:00:00Z`).getTime() - etOffsetMs;
+    const nowMs = Date.now();
+
+    const todayPoints = points.filter(p => p.time >= today4amET && p.time <= nowMs);
+    if (todayPoints.length >= 2) {
+      points = todayPoints;
+    }
+  }
+
   // Filter weekends and non-trading hours for non-1D periods (matches in-app chart).
   // Without this, the sparkline shows flat horizontal lines during weekends.
   if (period !== '1D' && points.length > 2) {
