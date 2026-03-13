@@ -250,6 +250,21 @@ function getBestPrice(snapshot: PolygonTickerSnapshot): { price: number; timesta
   };
 }
 
+function getPolygonRegularClose(snapshot: PolygonTickerSnapshot, session: MarketSession, currentPrice: number): number | undefined {
+  if (session === 'POST') {
+    if (snapshot.day?.c && snapshot.day.c > 0) return snapshot.day.c;
+    if (snapshot.prevDay?.c && snapshot.prevDay.c > 0) return snapshot.prevDay.c;
+    return currentPrice > 0 ? currentPrice : undefined;
+  }
+
+  if (session === 'PRE') {
+    if (snapshot.prevDay?.c && snapshot.prevDay.c > 0) return snapshot.prevDay.c;
+    return currentPrice > 0 ? currentPrice : undefined;
+  }
+
+  return undefined;
+}
+
 /**
  * Fetch a single ticker using the free tier previous day endpoint.
  * Returns the previous day's close price.
@@ -481,6 +496,16 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
             quoteAgeSeconds: quoteAge,
             session,
           };
+
+          const regularClose = getPolygonRegularClose(snapshot, session, price);
+          if (regularClose && (session === 'PRE' || session === 'POST')) {
+            quote.regularClose = regularClose;
+            quote.extendedPrice = price;
+            quote.extendedChange = price - regularClose;
+            quote.extendedChangePercent = regularClose > 0
+              ? (quote.extendedChange / regularClose) * 100
+              : 0;
+          }
 
           quotes.set(ticker, quote);
           cache.set(`polygon:${ticker}`, quote);
