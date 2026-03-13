@@ -2457,7 +2457,7 @@ export async function getPortfolioChartData(
     return result1W1M;
   }
 
-  // 3M, 6M, YTD, 1Y, ALL — snapshot-based
+  // 3M, 6M, YTD, 1Y, ALL — snapshot-based (with candle fallback)
   const periodDaysMap: Record<string, number> = {
     '3M': 90, '6M': 180,
     'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
@@ -2465,6 +2465,55 @@ export async function getPortfolioChartData(
   };
   const periodDays = periodDaysMap[period] ?? 30;
   let points = await getSnapshotChartPoints(userId, periodDays);
+  let source = 'snapshot';
+
+  // Check if snapshots cover enough of the period. If not, try daily candles.
+  // This handles cases where the DB was re-baselined or snapshots only go back
+  // a few days — common for YTD when we need data back to Jan 1.
+  const snapshotSpanDays = points.length >= 2
+    ? (points[points.length - 1].time - points[0].time) / 86400000
+    : 0;
+  if (snapshotSpanDays < periodDays * 0.5 && periodDays >= 14) {
+    const holdings = await getHoldings(userId, portfolioId);
+    if (holdings.length > 0) {
+      // Map period to Polygon-compatible range for daily candles
+      const hiResRangeMap: Record<string, string> = {
+        '3M': '3mo', '6M': '6mo', 'YTD': 'ytd', '1Y': '1y', 'ALL': '5y',
+      };
+      const hiResRange = hiResRangeMap[period] ?? '3mo';
+      const candlePoints = await reconstructPortfolioHistoryHiRes(
+        holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
+        portfolio.cashBalance, portfolio.marginDebt, hiResRange, '1d',
+      );
+      if (candlePoints.length > points.length) {
+        points = candlePoints;
+        source = 'daily';
+        console.log(`[ChartData] ${period}: candle fallback ${candlePoints.length} pts (snapshots only covered ${snapshotSpanDays.toFixed(0)}d of ${periodDays}d)`);
+      }
+    }
+  }
+
+  // Offset normalization for candle-based data (same as 1W/1M)
+  if (source === 'daily' && points.length > 0 && liveValue > 0) {
+    const lastCandleVal = points[points.length - 1].value;
+    const offset = liveValue - lastCandleVal;
+    if (Math.abs(offset) > 1) {
+      for (const p of points) p.value += offset;
+    }
+  }
+
+  // Spike smoothing for candle-based data
+  if (source === 'daily' && points.length >= 3) {
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1].value;
+      const curr = points[i].value;
+      const next = points[i + 1].value;
+      const neighborAvg = (prev + next) / 2;
+      if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+        points[i].value = neighborAvg;
+      }
+    }
+  }
 
   // YTD baseline: if user set a Jan 1 portfolio value, use it to anchor YTD returns
   let ytdBaselineValue: number | null = null;
@@ -2493,10 +2542,9 @@ export async function getPortfolioChartData(
     }
   }
 
-  // Append current live value to connect last snapshot to now
-  if (points.length > 0 && now - points[points.length - 1].time > 5000) {
-    points.push({ time: now, value: liveValue });
-  } else if (points.length === 0) {
+  // Append current live value to connect last snapshot/candle to now
+  const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
+  if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
     points.push({ time: now, value: liveValue });
   }
 
@@ -2512,7 +2560,7 @@ export async function getPortfolioChartData(
     periodStartValue = points.length > 0 ? points[0].value : liveValue;
   }
 
-  const resultSnapshot = { points, periodStartValue, source: 'snapshot' as string };
+  const resultSnapshot = { points, periodStartValue, source };
   _chartCache.set(cacheKey, resultSnapshot);
   return resultSnapshot;
 }
