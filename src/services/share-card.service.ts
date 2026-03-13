@@ -4,7 +4,7 @@ import * as path from 'path';
 import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
 import { reconstructPortfolioHistoryHiRes } from './snapshot.service';
-import { fetchHourlyCandles, fetchStockDetails } from './market.service';
+import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
 
 // Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
@@ -124,24 +124,27 @@ function normalizePeriod(period?: string): ShareCardPeriod {
 async function getStockShareCardData(inputTicker: string, periodInput?: string): Promise<StockShareCardData | null> {
   const ticker = inputTicker.toUpperCase();
   const period = normalizePeriod(periodInput || '1W');
+  const candleFetcher = period === '1D'
+    ? fetchIntradayCandles(ticker).catch(() => [])
+    : (['1W', '1M', '6M', 'YTD'].includes(period) ? fetchHourlyCandles(ticker, period as '1W' | '1M' | '6M' | 'YTD') : Promise.resolve([])).catch(() => []);
+
   const [details, candles] = await Promise.all([
     fetchStockDetails(ticker).catch(() => null),
-    (['1W', '1M', '6M', 'YTD'].includes(period) ? fetchHourlyCandles(ticker, period as '1W' | '1M' | '6M' | 'YTD') : Promise.resolve([])).catch(() => []),
+    candleFetcher,
   ]);
 
   if (!details?.quote) return null;
 
-  const currentPrice = details.quote.extendedPrice && details.quote.extendedPrice > 0
-    ? details.quote.extendedPrice
-    : details.quote.currentPrice;
+  const currentPrice = details.quote.currentPrice;
 
-  // Build sparkline from candles or daily closes — filter to market hours (weekday 4 AM–8 PM ET)
+  // Build sparkline from candles — filter to regular market hours only (weekday 9:30 AM–4 PM ET)
   const marketCandles = candles.filter(c => {
     const d = new Date(c.time);
     const day = d.getUTCDay();
     if (day === 0 || day === 6) return false;
-    const etHour = d.getUTCHours() - 5;
-    return etHour >= 4 && etHour < 20;
+    // Convert to ET (UTC-5 for EST, approximate)
+    const etHourFloat = d.getUTCHours() - 5 + d.getUTCMinutes() / 60;
+    return etHourFloat >= 9.5 && etHourFloat < 16;
   });
   const candleValues = marketCandles
     .map(c => c.close)
@@ -177,8 +180,12 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
     }
   }
 
-  const changeValue = currentPrice - startPrice;
-  const changePercent = startPrice > 0 ? (changeValue / startPrice) * 100 : 0;
+  // For 1D, use previousClose as the baseline (matches how the app shows daily change)
+  const periodStartPrice = period === '1D'
+    ? (details.quote.previousClose ?? startPrice)
+    : startPrice;
+  const changeValue = currentPrice - periodStartPrice;
+  const changePercent = periodStartPrice > 0 ? (changeValue / periodStartPrice) * 100 : 0;
 
   // Use hourly candles if available, otherwise daily
   const rawValues = candleValues.length > 0 ? candleValues : (filteredCloses.length > 0 ? filteredCloses : [currentPrice, currentPrice]);
@@ -195,6 +202,10 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
     const d = rawDates[Math.round(idx)];
     if (!d) return '';
     const date = new Date(d);
+    if (period === '1D') {
+      // Show time for intraday
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+    }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
 
