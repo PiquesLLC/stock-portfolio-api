@@ -526,22 +526,24 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // 1W: Use hi-res 1h candle reconstruction (like Robinhood) for smooth hover.
+    // 1W/1M: Use hi-res 1h candle reconstruction (like Robinhood) for smooth hover.
     // Falls back to snapshots if candle data is insufficient.
-    if (period === '1W') {
+    if (period === '1W' || period === '1M') {
       const now = Date.now();
       const liveValue = portfolio.totalAssets - portfolio.marginDebt;
       const holdings = await getHoldings(req.user.userId, chartPortfolioId);
       let source: 'snapshot' | 'model' | 'hiRes' | 'daily' = 'hiRes';
 
+      const hiResRange = period === '1W' ? '5d' : '1mo';
       let points = await reconstructPortfolioHistoryHiRes(
         holdings.map(h => ({ ticker: h.ticker, shares: h.shares })),
-        portfolio.cashBalance, portfolio.marginDebt, '5d', '1h',
+        portfolio.cashBalance, portfolio.marginDebt, hiResRange, '1h',
       );
 
       // Fall back to snapshots if candle data is insufficient
       if (points.length < 10) {
-        const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, 7);
+        const snapshotDays = period === '1W' ? 7 : 30;
+        const snapshotPoints = await getSnapshotChartPoints(req.user!.userId, snapshotDays);
         if (snapshotPoints.length >= 2) {
           points = snapshotPoints;
           source = 'snapshot';
@@ -579,8 +581,8 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       const periodStartValue = points.length > 0 ? points[0].value : liveValue;
       const pointCountRaw = points.length;
 
-      console.log(`[Chart] 1W: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
-      const response: Record<string, unknown> = { points, periodStartValue, period: '1W', source };
+      console.log(`[Chart] ${period}: periodStart=$${periodStartValue.toFixed(0)} live=$${liveValue.toFixed(0)} pts=${points.length} src=${source}`);
+      const response: Record<string, unknown> = { points, periodStartValue, period, source };
       if (includeDebug) {
         response.rebaselineApplied = false;
         response.pointCountRaw = pointCountRaw;
@@ -590,7 +592,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    // Non-1D/1W periods: snapshot-only approach.
+    // Non-1D/1W/1M periods: snapshot-only approach.
     // Use real recorded snapshot data — no reconstruction, no candle fetching.
     // If not enough snapshots, return insufficientData flag for the UI.
     const now = Date.now();
