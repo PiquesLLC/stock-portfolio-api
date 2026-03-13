@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
 import { reconstructPortfolioHistoryHiRes } from './snapshot.service';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
+import { getPortfolio } from './portfolio.service';
 
 // Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
@@ -318,20 +319,49 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
     hiResPoints = hiResPoints.filter(p => p.time <= delayCutoff);
   }
 
+  // Proper ET conversion using Intl (handles EST/EDT automatically)
+  const perfEtFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric', minute: 'numeric', hour12: false,
+    weekday: 'short',
+  });
+  function getEtInfo(d: Date): { hourFloat: number; isWeekday: boolean } {
+    const parts = perfEtFmt.formatToParts(d);
+    const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
+    const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
+    return { hourFloat: hour + minute / 60, isWeekday: !['Sat', 'Sun'].includes(weekday) };
+  }
+
   // Filter to market hours (weekday 4 AM–8 PM ET)
   const values = hiResPoints.filter(p => {
     if (!Number.isFinite(p.value) || p.value <= 0) return false;
-    const d = new Date(p.time);
-    const day = d.getUTCDay();
-    if (day === 0 || day === 6) return false;
-    const etHour = d.getUTCHours() - 5;
-    return etHour >= 4 && etHour < 20;
+    const { hourFloat, isWeekday } = getEtInfo(new Date(p.time));
+    return isWeekday && hourFloat >= 4 && hourFloat < 20;
   });
 
   const numValues = values.map(p => p.value);
   const numTimes = values.map(p => p.time);
 
-  const currentValue = numValues.length > 0 ? numValues[numValues.length - 1] : 0;
+  // Get live portfolio value — candle-reconstructed values can diverge from real quotes
+  let liveValue = 0;
+  try {
+    const portfolio = await getPortfolio(userId);
+    liveValue = portfolio.totalAssets - portfolio.marginDebt;
+  } catch {
+    liveValue = (latestSnapshot as any)?.netEquity ?? latestSnapshot?.totalValue ?? 0;
+  }
+
+  // Offset-normalize chart points to match live value (same as chart API)
+  if (numValues.length > 0 && liveValue > 0) {
+    const lastCandleVal = numValues[numValues.length - 1];
+    const offset = liveValue - lastCandleVal;
+    if (Math.abs(offset) > 1) {
+      for (let i = 0; i < numValues.length; i++) numValues[i] += offset;
+    }
+  }
+
+  const currentValue = liveValue > 0 ? liveValue : (numValues.length > 0 ? numValues[numValues.length - 1] : 0);
   const startValue = numValues.length > 0 ? numValues[0] : currentValue;
   const periodChangeValue = currentValue - startValue;
   const periodChangePercent = startValue > 0 ? (periodChangeValue / startValue) * 100 : 0;

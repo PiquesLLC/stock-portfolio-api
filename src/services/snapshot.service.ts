@@ -262,14 +262,19 @@ export async function getSnapshotChartPoints(
 
   if (allPoints.length < 2) return [];
 
-  // Step 1: Deduplicate to 1 point per calendar day (last snapshot wins).
-  // This reduces thousands of per-minute snapshots to a manageable set.
-  const byDay = new Map<string, { time: number; value: number }>();
+  // Step 1: Deduplicate snapshots to a manageable resolution.
+  // For short periods (<=7 days), keep 1 point per hour for a smooth chart.
+  // For longer periods, keep 1 point per calendar day.
+  const useHourlyResolution = periodDays <= 7;
+  const byBucket = new Map<string, { time: number; value: number }>();
   for (const p of allPoints) {
-    const day = new Date(p.time).toISOString().slice(0, 10);
-    byDay.set(day, p);
+    const d = new Date(p.time);
+    const bucket = useHourlyResolution
+      ? `${d.toISOString().slice(0, 13)}` // YYYY-MM-DDTHH (hourly)
+      : d.toISOString().slice(0, 10);     // YYYY-MM-DD (daily)
+    byBucket.set(bucket, p);
   }
-  const dailyPoints = Array.from(byDay.values()).sort((a, b) => a.time - b.time);
+  const dailyPoints = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
 
   if (dailyPoints.length < 2) return [];
 
@@ -299,7 +304,7 @@ export async function getSnapshotChartPoints(
     console.log(`[SnapshotChart] Removed ${removed} outlier days`);
   }
 
-  console.log(`[SnapshotChart] ${allPoints.length} raw → ${byDay.size} days → ${points.length} clean daily points (period=${periodDays}d)`);
+  console.log(`[SnapshotChart] ${allPoints.length} raw → ${byBucket.size} buckets → ${points.length} clean points (period=${periodDays}d, ${useHourlyResolution ? 'hourly' : 'daily'})`);
   return points;
 }
 
