@@ -49,7 +49,10 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
     }
 
     res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="nala-performance-${periodRaw}.png"`);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.send(pngBuffer);
   } catch (err) {
     console.error('Performance share card generation failed:', err);

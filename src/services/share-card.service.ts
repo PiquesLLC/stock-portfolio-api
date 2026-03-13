@@ -266,7 +266,9 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   let { points } = chartData;
   const { periodStartValue } = chartData;
 
-  // Trade delay: filter out recent points so chart doesn't reveal trade timing
+  // Trade delay: filter out recent points so chart doesn't reveal trade timing.
+  // But never filter so aggressively that we end up with zero points — that
+  // produces a broken $0 card.  If the delay would remove everything, skip it.
   const delayed = await hasActiveTradeDelay(userId);
   if (delayed) {
     const creator = await prisma.creator.findUnique({
@@ -274,7 +276,10 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
       select: { visibility: { select: { tradeDelayHours: true } } },
     });
     const delayCutoff = Date.now() - (creator?.visibility?.tradeDelayHours ?? 24) * 60 * 60 * 1000;
-    points = points.filter(p => p.time <= delayCutoff);
+    const filtered = points.filter(p => p.time <= delayCutoff);
+    if (filtered.length >= 2) {
+      points = filtered;
+    }
   }
 
   const numValues = points.map(p => p.value);
