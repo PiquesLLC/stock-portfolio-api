@@ -2486,9 +2486,15 @@ export async function getPortfolioChartData(
         portfolio.cashBalance, portfolio.marginDebt, hiResRange, '1d',
       );
       if (candlePoints.length > points.length) {
-        points = candlePoints;
+        // For YTD, trim any candles from last year (Polygon ytd range includes a few extra days)
+        if (period === 'YTD') {
+          const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+          points = candlePoints.filter(p => p.time >= jan1);
+        } else {
+          points = candlePoints;
+        }
         source = 'daily';
-        console.log(`[ChartData] ${period}: candle fallback ${candlePoints.length} pts (snapshots only covered ${snapshotSpanDays.toFixed(0)}d of ${periodDays}d)`);
+        console.log(`[ChartData] ${period}: candle fallback ${points.length} pts (snapshots only covered ${snapshotSpanDays.toFixed(0)}d of ${periodDays}d)`);
       }
     }
   }
