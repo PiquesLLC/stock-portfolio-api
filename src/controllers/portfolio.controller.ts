@@ -8,7 +8,7 @@ import {
 } from '../services/portfolio.service';
 import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
-import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getSnapshotsAfter, getSnapshotChartPoints, reconstructPortfolioHistoryHiRes, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getLatestCompositionChangeAfter, getPortfolioChartData } from '../services/snapshot.service';
+import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getPortfolioChartData } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
@@ -393,103 +393,36 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
 
     const includeDebug = String(req.query.debug) === '1';
 
-    // 1D, 1W, 1M: Use shared getPortfolioChartData for consistent results
-    // (share card also calls this same function, so values are guaranteed identical)
-    if (period === '1D' || period === '1W' || period === '1M') {
-      const chartData = await getPortfolioChartData(req.user.userId, period, chartPortfolioId);
-      const { points, periodStartValue, source } = chartData;
+    // All periods use shared getPortfolioChartData for consistent results.
+    // Share card calls the same function, so values are guaranteed identical.
+    const chartData = await getPortfolioChartData(req.user.userId, period, chartPortfolioId);
+    const { points, periodStartValue, source } = chartData;
 
-      console.log(`[Chart] ${period}: periodStart=$${periodStartValue.toFixed(0)} live=${(portfolio.totalAssets - portfolio.marginDebt).toFixed(0)} pts=${points.length} src=${source}`);
-      const response: Record<string, unknown> = { points, periodStartValue, period, source };
-      if (includeDebug) {
-        response.pointCountRaw = points.length;
-        response.pointCountFinal = points.length;
-      }
-      res.json(response);
-      return;
-    }
-
-    // Non-1D/1W/1M periods: snapshot-only approach.
-    // Use real recorded snapshot data — no reconstruction, no candle fetching.
-    // If not enough snapshots, return insufficientData flag for the UI.
-    const now = Date.now();
-    const periodDaysMap: Record<string, number> = {
-      '1W': 7, '1M': 30, '3M': 90, '6M': 180,
-      'YTD': Math.floor((now - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000),
-      '1Y': 365, 'ALL': 365 * 5,
-    };
-    const periodDays = periodDaysMap[period] ?? 30;
-    let points = await getSnapshotChartPoints(req.user!.userId, periodDays);
-
-    // YTD baseline: if user set a Jan 1 portfolio value, use it to anchor YTD returns
-    let ytdBaselineValue: number | null = null;
-    if (period === 'YTD') {
-      const userSettings = await prisma.userSettings.findUnique({
-        where: { userId: req.user!.userId },
-        select: { ytdBaselineValue: true },
-      });
-      ytdBaselineValue = userSettings?.ytdBaselineValue ?? null;
-
-      // getSnapshotChartPoints enforces >=2 points internally, so with only 1 snapshot
-      // it returns []. For YTD baseline we only need 1 snapshot — fetch directly.
-      if (points.length === 0 && ytdBaselineValue != null) {
-        const since = new Date(now - periodDays * 86400000);
-        const rawSnaps = await prisma.portfolioSnapshot.findMany({
-          where: { userId: req.user!.userId, timestamp: { gte: since } },
-          orderBy: { timestamp: 'asc' },
-          select: { timestamp: true, totalValue: true, netEquity: true },
-        });
-        for (const s of rawSnaps) {
-          const v = s.netEquity ?? s.totalValue;
-          if (Number.isFinite(v) && v > 0) {
-            points.push({ time: s.timestamp.getTime(), value: v });
-          }
-        }
-      }
-    }
-
-    // Progressive unlock: each period requires a minimum number of days of snapshot data.
+    // Progressive unlock for snapshot-based periods (3M+):
     // Prevents showing e.g. 6 days of data on a 1Y chart with misleading returns.
-    // YTD with baseline bypasses progressive unlock (minDays=0, minPoints=1).
-    const minDaysRequired: Record<string, number> = {
-      '1W': 2, '1M': 7, '3M': 30, '6M': 60, 'YTD': 30, '1Y': 90, 'ALL': 90,
-    };
-    const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
-    const spanDays = spanMs / 86400000;
-    const minDays = (period === 'YTD' && ytdBaselineValue != null) ? 0 : (minDaysRequired[period] ?? 2);
-    const minPoints = (period === 'YTD' && ytdBaselineValue != null) ? 1 : 2;
-    console.log(`[Chart] ${period} snapshot-only points=${points.length} span=${spanDays.toFixed(1)}d required=${minDays}d minPts=${minPoints} ytdBaseline=${ytdBaselineValue}`);
+    if (!['1D', '1W', '1M'].includes(period)) {
+      const minDaysRequired: Record<string, number> = {
+        '3M': 30, '6M': 60, 'YTD': 30, '1Y': 90, 'ALL': 90,
+      };
+      const spanMs = points.length >= 2 ? points[points.length - 1].time - points[0].time : 0;
+      const spanDays = spanMs / 86400000;
+      // YTD with baseline bypasses progressive unlock
+      const hasYtdBaseline = period === 'YTD' && periodStartValue !== (points.length > 1 ? points[1]?.value : points[0]?.value);
+      const minDays = hasYtdBaseline ? 0 : (minDaysRequired[period] ?? 2);
+      const minPoints = hasYtdBaseline ? 1 : 2;
 
-    if (points.length < minPoints || spanDays < minDays) {
-      res.json({ points: [], insufficientData: true, period, periodStartValue: 0, source: 'snapshot' });
-      return;
-    }
+      console.log(`[Chart] ${period} points=${points.length} span=${spanDays.toFixed(1)}d required=${minDays}d minPts=${minPoints}`);
 
-    const pointCountRaw = points.length;
-
-    // Append current live value to connect last snapshot to now
-    const liveVal = portfolio.totalAssets - portfolio.marginDebt;
-    if (now - points[points.length - 1].time > 5000) {
-      points.push({ time: now, value: liveVal });
-    }
-
-    // If YTD with baseline, prepend synthetic Jan 1 point and use baseline as periodStartValue
-    let periodStartValue: number;
-    if (period === 'YTD' && ytdBaselineValue != null) {
-      const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
-      // Only prepend if first real point is after Jan 1
-      if (points[0].time > jan1) {
-        points = [{ time: jan1, value: ytdBaselineValue }, ...points];
+      if (points.length < minPoints || spanDays < minDays) {
+        res.json({ points: [], insufficientData: true, period, periodStartValue: 0, source: 'snapshot' });
+        return;
       }
-      periodStartValue = ytdBaselineValue;
-    } else {
-      periodStartValue = points[0].value;
     }
 
-    const response: Record<string, unknown> = { points, periodStartValue, period, source: 'snapshot' };
+    console.log(`[Chart] ${period}: periodStart=$${periodStartValue.toFixed(0)} live=${(portfolio.totalAssets - portfolio.marginDebt).toFixed(0)} pts=${points.length} src=${source}`);
+    const response: Record<string, unknown> = { points, periodStartValue, period, source };
     if (includeDebug) {
-      response.rebaselineApplied = false;
-      response.pointCountRaw = pointCountRaw;
+      response.pointCountRaw = points.length;
       response.pointCountFinal = points.length;
     }
     res.json(response);
