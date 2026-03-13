@@ -2466,21 +2466,53 @@ export async function getPortfolioChartData(
   const periodDays = periodDaysMap[period] ?? 30;
   let points = await getSnapshotChartPoints(userId, periodDays);
 
-  if (points.length > 0 && liveValue > 0) {
-    const lastVal = points[points.length - 1].value;
-    const offset = liveValue - lastVal;
-    if (Math.abs(offset) > 1) {
-      for (const p of points) p.value += offset;
+  // YTD baseline: if user set a Jan 1 portfolio value, use it to anchor YTD returns
+  let ytdBaselineValue: number | null = null;
+  if (period === 'YTD') {
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { ytdBaselineValue: true },
+    });
+    ytdBaselineValue = userSettings?.ytdBaselineValue ?? null;
+
+    // getSnapshotChartPoints enforces >=2 points internally, so with only 1 snapshot
+    // it returns []. For YTD baseline we only need 1 snapshot — fetch directly.
+    if (points.length === 0 && ytdBaselineValue != null) {
+      const since = new Date(now - periodDays * 86400000);
+      const rawSnaps = await prisma.portfolioSnapshot.findMany({
+        where: { userId, timestamp: { gte: since } },
+        orderBy: { timestamp: 'asc' },
+        select: { timestamp: true, totalValue: true, netEquity: true },
+      });
+      for (const s of rawSnaps) {
+        const v = (s as any).netEquity ?? s.totalValue;
+        if (Number.isFinite(v) && v > 0) {
+          points.push({ time: s.timestamp.getTime(), value: v });
+        }
+      }
     }
   }
 
-  const lastPointTime = points.length > 0 ? points[points.length - 1].time : 0;
-  if (points.length === 0 || (now - lastPointTime > 5000 && now - lastPointTime < 4 * 3600000)) {
+  // Append current live value to connect last snapshot to now
+  if (points.length > 0 && now - points[points.length - 1].time > 5000) {
+    points.push({ time: now, value: liveValue });
+  } else if (points.length === 0) {
     points.push({ time: now, value: liveValue });
   }
 
-  const periodStartValue = points.length > 0 ? points[0].value : liveValue;
-  const resultSnapshot = { points, periodStartValue, source: 'snapshot' };
+  // If YTD with baseline, prepend synthetic Jan 1 point and use baseline as periodStartValue
+  let periodStartValue: number;
+  if (period === 'YTD' && ytdBaselineValue != null) {
+    const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+    if (points[0].time > jan1) {
+      points = [{ time: jan1, value: ytdBaselineValue }, ...points];
+    }
+    periodStartValue = ytdBaselineValue;
+  } else {
+    periodStartValue = points.length > 0 ? points[0].value : liveValue;
+  }
+
+  const resultSnapshot = { points, periodStartValue, source: 'snapshot' as string };
   _chartCache.set(cacheKey, resultSnapshot);
   return resultSnapshot;
 }
