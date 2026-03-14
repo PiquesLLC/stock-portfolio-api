@@ -15,6 +15,7 @@ import {
   verifyEmailCode,
   resendVerificationEmail,
   requestPasswordReset,
+  requestUsernameReminder,
   resetPasswordWithCode,
   generateAccessToken,
   generateRefreshToken,
@@ -29,6 +30,7 @@ import {
   deleteAccountSchema,
   resendVerificationSchema,
   forgotPasswordSchema,
+  forgotUsernameSchema,
   resetPasswordSchema,
   formatZodError,
 } from '../validators/auth.validators';
@@ -379,6 +381,25 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
   } catch (error: unknown) {
     console.error('Forgot password error:');
     res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+}
+
+/**
+ * POST /auth/forgot-username
+ */
+export async function forgotUsernameHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = forgotUsernameSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    await requestUsernameReminder(parsed.data.email);
+    res.json({ message: 'If this email is registered, your username was sent.' });
+  } catch (error: unknown) {
+    console.error('Forgot username error:');
+    res.status(500).json({ error: 'Failed to process username reminder request' });
   }
 }
 

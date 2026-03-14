@@ -13,6 +13,7 @@ import {
   verifyEmailHandler,
   resendVerificationHandler,
   forgotPasswordHandler,
+  forgotUsernameHandler,
   resetPasswordHandler,
   testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
@@ -58,6 +59,9 @@ router.post('/resend-verification', mutationLimiter, resendVerificationHandler);
 
 // POST /auth/forgot-password - Request password reset OTP
 router.post('/forgot-password', mfaSendLimiter, forgotPasswordHandler);
+
+// POST /auth/forgot-username - Email the username associated with an address
+router.post('/forgot-username', mfaSendLimiter, forgotUsernameHandler);
 
 // POST /auth/reset-password - Reset password with OTP
 router.post('/reset-password', mfaVerifyLimiter, resetPasswordHandler);
