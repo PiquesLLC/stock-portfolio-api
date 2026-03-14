@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
-import { sendEmailVerification, sendPasswordResetEmail } from './email.service';
+import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail } from './email.service';
 
 
 
@@ -732,6 +732,42 @@ export async function requestPasswordReset(email: string): Promise<{ success: tr
       data: {
         userId: user.id,
         type: 'password_reset_requested',
+        status: 'sent',
+        channel: 'email',
+        refKey: crypto.randomUUID(),
+      },
+    });
+  }
+
+  return { success: true };
+}
+
+export async function requestUsernameReminder(email: string): Promise<{ success: true }> {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true, email: true, username: true },
+  });
+
+  if (!user?.email || !user.username) {
+    return { success: true };
+  }
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const requestCount = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'username_reminder_requested',
+      sentAt: { gte: oneHourAgo },
+    },
+  });
+
+  if (requestCount < PASSWORD_RESET_REQUEST_LIMIT_PER_HOUR) {
+    await sendUsernameReminderEmail(user.email, user.username);
+    await prisma.notificationAuditLog.create({
+      data: {
+        userId: user.id,
+        type: 'username_reminder_requested',
         status: 'sent',
         channel: 'email',
         refKey: crypto.randomUUID(),
