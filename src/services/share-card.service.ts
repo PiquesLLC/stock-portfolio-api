@@ -93,6 +93,11 @@ interface PerformanceShareCardData {
   sparklineDates: string[];
 }
 
+interface ChartPoint {
+  time: number;
+  value: number;
+}
+
 async function fetchLogoAsBase64(url: string): Promise<string> {
   if (!url) return '';
   try {
@@ -119,6 +124,61 @@ function normalizePeriod(period?: string): ShareCardPeriod {
   const normalized = (period ?? '1M').toUpperCase() as ShareCardPeriod;
   const valid: ShareCardPeriod[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
   return valid.includes(normalized) ? normalized : '1M';
+}
+
+export function filterPerformanceShareCardPoints(points: ChartPoint[], period: ShareCardPeriod, now = new Date()): ChartPoint[] {
+  if (period !== '1D' || points.length <= 2) {
+    return points;
+  }
+
+  const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+  const etFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    weekday: 'short',
+  });
+
+  function getEtHourFloat(d: Date): { hourFloat: number; isWeekday: boolean; etDate: string } {
+    const parts = etFormatter.formatToParts(d);
+    const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
+    const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
+    return {
+      hourFloat: hour + minute / 60,
+      isWeekday: !['Sat', 'Sun'].includes(weekday),
+      etDate: etDateFmt.format(d),
+    };
+  }
+
+  const nowDate = new Date(now);
+  const todayEt = etDateFmt.format(nowDate);
+  const nowMs = nowDate.getTime();
+
+  const sameDayRegularHours = points.filter(point => {
+    const { hourFloat, isWeekday, etDate } = getEtHourFloat(new Date(point.time));
+    return isWeekday && etDate === todayEt && hourFloat >= 9.5 && hourFloat < 16;
+  });
+
+  if (sameDayRegularHours.length >= 2) {
+    return sameDayRegularHours;
+  }
+
+  // Fallback to the broader same-day session if a thin trading day or provider issue
+  // would otherwise leave the card with too few points.
+  const etOffNoon = new Date(`${todayEt}T12:00:00Z`);
+  const etNoonHour = parseInt(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(etOffNoon).split(':')[0], 10);
+  const etOffsetMs = (etNoonHour - 12) * 3600000;
+  const today4amEt = new Date(`${todayEt}T04:00:00Z`).getTime() - etOffsetMs;
+  const sameDayExpanded = points.filter(point => point.time >= today4amEt && point.time <= nowMs);
+
+  return sameDayExpanded.length >= 2 ? sameDayExpanded : points;
 }
 
 async function getStockShareCardData(inputTicker: string, periodInput?: string): Promise<StockShareCardData | null> {
@@ -270,23 +330,7 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   // The last chart point = the offset-normalized current value (same as in-app chart).
   const headlineValue = points.length > 0 ? points[points.length - 1].value : 0;
 
-  // 1D: filter to current trading day only (4 AM ET today → now).
-  // Without this, the 2-day candle range shows overnight flat lines on the share card.
-  if (period === '1D' && points.length > 2) {
-    const etDayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
-    const etOffNoon = new Date(`${etDayParts}T12:00:00Z`);
-    const etNoonH = parseInt(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
-    }).format(etOffNoon).split(':')[0]);
-    const etOffsetMs = (etNoonH - 12) * 3600000;
-    const today4amET = new Date(`${etDayParts}T04:00:00Z`).getTime() - etOffsetMs;
-    const nowMs = Date.now();
-
-    const todayPoints = points.filter(p => p.time >= today4amET && p.time <= nowMs);
-    if (todayPoints.length >= 2) {
-      points = todayPoints;
-    }
-  }
+  points = filterPerformanceShareCardPoints(points, period);
 
   // Filter weekends and non-trading hours for non-1D periods (matches in-app chart).
   // Without this, the sparkline shows flat horizontal lines during weekends.
