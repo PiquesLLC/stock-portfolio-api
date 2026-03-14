@@ -18,8 +18,9 @@
 import { insightsCache } from '../utils/finnhub';
 import { getCompanyFundamentals, FundamentalsResponse, ParsedOverview } from './polygon-fundamentals.service';
 import { getAnalystSnapshot } from './analyst.service';
-import { fetchDailyCandles, fetchStockDetails } from './market.service';
+import { fetchDailyCandles, fetchFastQuote } from './market.service';
 import { getAssetAbout } from '../utils/yahoo-finance';
+import { getStockMetrics } from '../utils/finnhub';
 import { StockMetrics, AssetAbout } from '../types';
 import prisma from '../utils/prisma';
 
@@ -58,6 +59,23 @@ export interface NalaScoreResponse {
 // ── Helpers ────────────────────────────────────────────────────
 
 const NEUTRAL = 12.5;
+const NALA_SCORE_OPTIONAL_TIMEOUT_MS = 1200;
+
+async function withSoftTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>(resolve => {
+        timeout = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return fallback;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function bracket(value: number | null | undefined, thresholds: [number, number][]): number {
   if (value == null) return NEUTRAL;
@@ -580,15 +598,27 @@ export async function getNalaScore(ticker: string): Promise<NalaScoreResponse> {
 
   // Fetch Yahoo data first (fast); AV fundamentals in parallel
   // Pre-fetch daily candles once to avoid duplicate API calls in scoring functions
-  const [fundamentals, details, about, dailyCandles] = await Promise.all([
+  const [fundamentals, fastQuote, metricsRaw, about, dailyCandles] = await Promise.all([
     getCompanyFundamentals(upper),
-    fetchStockDetails(upper).catch(() => null),
+    fetchFastQuote(upper).catch(() => null),
+    withSoftTimeout(getStockMetrics(upper), NALA_SCORE_OPTIONAL_TIMEOUT_MS, null),
     getAssetAbout(upper).catch(() => null),
     fetchDailyCandles(upper, 180).catch(() => []),
   ]);
 
-  const metrics = details?.metrics ?? null;
-  const currentPrice = details?.quote?.currentPrice ?? 0;
+  const metrics: StockMetrics | null = metricsRaw?.metric ? {
+    ticker: upper,
+    peRatio: metricsRaw.metric.peBasicExclExtraTTM ?? null,
+    week52High: metricsRaw.metric['52WeekHigh'] ?? null,
+    week52Low: metricsRaw.metric['52WeekLow'] ?? null,
+    dividendYield: metricsRaw.metric.dividendYieldIndicatedAnnual ?? null,
+    avgVolume10D: metricsRaw.metric['10DayAverageTradingVolume'] ?? null,
+    beta: metricsRaw.metric.beta ?? null,
+    eps: metricsRaw.metric.epsBasicExclExtraItemsTTM ?? null,
+    expenseRatio: null,
+    aumB: null,
+  } : null;
+  const currentPrice = fastQuote?.currentPrice ?? 0;
 
   // Create enriched overview (AV data + Yahoo fallback)
   const enriched = enrichOverview(fundamentals.overview, metrics);
