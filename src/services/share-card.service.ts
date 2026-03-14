@@ -153,21 +153,52 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
   }
 
   const nowDate = new Date(now);
-  const todayEt = etDateFmt.format(nowDate);
   const nowMs = nowDate.getTime();
 
-  const sameDayRegularHours = points.filter(point => {
-    const { hourFloat, isWeekday, etDate } = getEtHourFloat(new Date(point.time));
-    return isWeekday && etDate === todayEt && hourFloat >= 9.5 && hourFloat < 16;
+  const datedPoints = points.map(point => {
+    const etMeta = getEtHourFloat(new Date(point.time));
+    return { point, ...etMeta };
   });
+
+  // Use the most recent trading day represented in the data, not necessarily "today".
+  // This keeps Friday's regular session on evenings/weekends instead of falling back
+  // to the full 2-day window with overnight flat lines.
+  const latestTradingDay = [...datedPoints]
+    .reverse()
+    .find(entry => entry.isWeekday)?.etDate;
+
+  if (!latestTradingDay) {
+    return points;
+  }
+
+  const sameDayRegularHours = datedPoints
+    .filter(entry => entry.isWeekday && entry.etDate === latestTradingDay && entry.hourFloat >= 9.5 && entry.hourFloat < 16)
+    .map(entry => entry.point);
 
   if (sameDayRegularHours.length >= 2) {
     return sameDayRegularHours;
   }
 
+  const latestTradingDayPoints = datedPoints
+    .filter(entry => entry.isWeekday && entry.etDate === latestTradingDay)
+    .map(entry => entry.point);
+
+  if (latestTradingDayPoints.length >= 2) {
+    return latestTradingDayPoints;
+  }
+
+  const nowEt = etDateFmt.format(nowDate);
+  const sameCalendarDayRegularHours = datedPoints
+    .filter(entry => entry.isWeekday && entry.etDate === nowEt && entry.hourFloat >= 9.5 && entry.hourFloat < 16)
+    .map(entry => entry.point);
+
+  if (sameCalendarDayRegularHours.length >= 2) {
+    return sameCalendarDayRegularHours;
+  }
+
   // Fallback to the broader same-day session if a thin trading day or provider issue
   // would otherwise leave the card with too few points.
-  const etOffNoon = new Date(`${todayEt}T12:00:00Z`);
+  const etOffNoon = new Date(`${latestTradingDay}T12:00:00Z`);
   const etNoonHour = parseInt(new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     hour12: false,
@@ -175,10 +206,18 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     minute: '2-digit',
   }).format(etOffNoon).split(':')[0], 10);
   const etOffsetMs = (etNoonHour - 12) * 3600000;
-  const today4amEt = new Date(`${todayEt}T04:00:00Z`).getTime() - etOffsetMs;
-  const sameDayExpanded = points.filter(point => point.time >= today4amEt && point.time <= nowMs);
+  const latestTradingDay4amEt = new Date(`${latestTradingDay}T04:00:00Z`).getTime() - etOffsetMs;
+  const sameTradingDayExpanded = points.filter(point => point.time >= latestTradingDay4amEt && point.time <= nowMs);
 
-  return sameDayExpanded.length >= 2 ? sameDayExpanded : points;
+  if (sameTradingDayExpanded.length >= 2) {
+    return sameTradingDayExpanded;
+  }
+
+  const todayExpanded = points.filter(point => {
+    const { etDate } = getEtHourFloat(new Date(point.time));
+    return etDate === nowEt;
+  });
+  return todayExpanded.length >= 2 ? todayExpanded : points;
 }
 
 async function getStockShareCardData(inputTicker: string, periodInput?: string): Promise<StockShareCardData | null> {
