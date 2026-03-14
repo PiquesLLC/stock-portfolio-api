@@ -7,6 +7,27 @@ import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
+export const STOCK_DETAILS_OPTIONAL_TIMEOUT_MS = 1200;
+
+async function withSoftTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T, label: string): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>(resolve => {
+        timeout = setTimeout(() => {
+          console.warn(`[Market] ${label} timed out after ${timeoutMs}ms`);
+          resolve(fallback);
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    console.warn(`[Market] ${label} failed:`, error instanceof Error ? error.message : String(error));
+    return fallback;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 async function fetchStockDetailCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
   const cacheKey = `detail-daily:${ticker}`;
@@ -784,12 +805,12 @@ export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 
-  // Polygon for candles, Finnhub for quote/profile/metrics, Yahoo as fallback for quote
+  // Return the required quote fast, and treat fundamentals/history as best-effort.
   const [quote, profileRaw, metricsRaw, candles] = await Promise.all([
-    fetchQuote(upperTicker).catch(() => fetchYahooQuote(upperTicker).catch(() => null)),
-    getStockProfile(upperTicker).catch(() => null),
-    getStockMetrics(upperTicker).catch(() => null),
-    fetchStockDetailCandles(upperTicker).catch(() => null),
+    fetchFastQuote(upperTicker),
+    withSoftTimeout(getStockProfile(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} profile`),
+    withSoftTimeout(getStockMetrics(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} metrics`),
+    withSoftTimeout(fetchStockDetailCandles(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} detail candles`),
   ]);
 
   if (!quote) {
