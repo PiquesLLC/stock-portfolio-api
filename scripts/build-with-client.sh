@@ -1,6 +1,6 @@
 #!/bin/bash
 # Railway build script: builds the API and the UI client
-# UI build rev: 42
+# UI build rev: 43
 set -e
 
 echo "=== Building API ==="
@@ -21,6 +21,7 @@ echo "VITE_API_URL=" > .env.production
 [ -n "$VITE_WAITLIST_ENABLED" ] && echo "VITE_WAITLIST_ENABLED=$VITE_WAITLIST_ENABLED" >> .env.production
 [ -n "$VITE_GOOGLE_CLIENT_ID" ] && echo "VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID" >> .env.production
 [ -n "$VITE_APPLE_CLIENT_ID" ] && echo "VITE_APPLE_CLIENT_ID=$VITE_APPLE_CLIENT_ID" >> .env.production
+[ -n "$VITE_APPLE_REDIRECT_URI" ] && echo "VITE_APPLE_REDIRECT_URI=$VITE_APPLE_REDIRECT_URI" >> .env.production
 npm install
 npx vite build
 
