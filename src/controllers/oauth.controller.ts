@@ -122,11 +122,12 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    const googleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAdmin }, isNewUser };
-    if (isCapacitorRequest(req)) {
-      googleBody.accessToken = loginResponse.token;
-      googleBody.refreshToken = loginResponse.refreshToken;
-    }
+    const googleBody: any = {
+      user: { ...loginResponse.user, isWaitlistAdmin: isAdmin },
+      isNewUser,
+      accessToken: loginResponse.token,
+      refreshToken: loginResponse.refreshToken,
+    };
     res.json(googleBody);
   } catch (error: unknown) {
     trackOAuthFail('google');
@@ -200,11 +201,12 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAppleAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    const appleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin }, isNewUser };
-    if (isCapacitorRequest(req)) {
-      appleBody.accessToken = loginResponse.token;
-      appleBody.refreshToken = loginResponse.refreshToken;
-    }
+    const appleBody: any = {
+      user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin },
+      isNewUser,
+      accessToken: loginResponse.token,
+      refreshToken: loginResponse.refreshToken,
+    };
     res.json(appleBody);
   } catch (error: unknown) {
     trackOAuthFail('apple');
