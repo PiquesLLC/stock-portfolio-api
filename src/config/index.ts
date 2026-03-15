@@ -161,6 +161,11 @@ export const config = {
     'http://127.0.0.1:5173',
     'http://127.0.0.1:5174',
     'capacitor://localhost',
+    'ionic://localhost',
+    'app://localhost',
+    'https://localhost',
+    'http://localhost:8080',
+    'null',
     'http://localhost',
     ...((process.env.ALLOWED_ORIGINS || '')
       .split(',')
