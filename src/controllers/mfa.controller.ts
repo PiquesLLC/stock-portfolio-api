@@ -93,12 +93,11 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', token, accessOptions);
     res.cookie('refreshToken', refreshToken, refreshOptions);
-    const mfaBody: any = { user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin } };
-    // Include refreshToken in response body for native apps (biometric Keychain storage)
-    if (isCapacitorRequest(req)) {
-      mfaBody.accessToken = token;
-      mfaBody.refreshToken = refreshToken;
-    }
+    const mfaBody: any = {
+      user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin },
+      accessToken: token,
+      refreshToken,
+    };
     res.json(mfaBody);
   } catch (error: unknown) {
     console.error('MFA verify error:');

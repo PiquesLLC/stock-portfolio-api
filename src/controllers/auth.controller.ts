@@ -136,15 +136,14 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    const isNativeReq = isCapacitorRequest(req);
-    const body: any = { user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } };
-    // Include tokens in response body for native apps (cookies don't work cross-origin in WKWebView)
-    if (isNativeReq) {
-      body.accessToken = result.token;
-      body.refreshToken = result.refreshToken;
-    }
-    // Temporary debug: log native detection for login requests
-    console.log(`[Auth] login: origin=${req.headers.origin}, x-nala-native=${req.headers['x-nala-native']}, isCapacitor=${isNativeReq}, includesTokens=${isNativeReq}`);
+    // Always include tokens in response body. Web clients ignore them (use httpOnly cookies).
+    // Native clients need them because WKWebView blocks cross-origin cookies entirely.
+    const body: any = {
+      user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
+      accessToken: result.token,
+      refreshToken: result.refreshToken,
+    };
+    console.log(`[Auth] login: origin=${req.headers.origin}, accessTokenLen=${result.token.length}, refreshTokenLen=${result.refreshToken.length}`);
     res.json(body);
   } catch (error: unknown) {
     console.error('Login error:');
@@ -286,11 +285,9 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const signupBody: any = {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       emailVerificationRequired: !result.user.emailVerified,
+      accessToken: result.token,
+      refreshToken: result.refreshToken,
     };
-    if (isCapacitorRequest(req)) {
-      signupBody.accessToken = result.token;
-      signupBody.refreshToken = result.refreshToken;
-    }
     res.status(201).json(signupBody);
   } catch (error: unknown) {
     console.error('Signup error:');
