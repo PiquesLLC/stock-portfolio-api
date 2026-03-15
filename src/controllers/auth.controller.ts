@@ -145,7 +145,13 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       token: result.token,
       debugAuthVersion: 'auth-body-v2',
     };
-    console.log(`[Auth] login: origin=${req.headers.origin}, accessTokenLen=${result.token.length}, refreshTokenLen=${result.refreshToken.length}`);
+    console.error('[AuthRuntime] login response', {
+      origin: req.headers.origin,
+      nativeHeader: req.headers['x-nala-native'],
+      bodyKeys: Object.keys(body),
+      accessTokenLen: result.token.length,
+      refreshTokenLen: result.refreshToken.length,
+    });
     res.json(body);
   } catch (error: unknown) {
     console.error('Login error:');
@@ -681,7 +687,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
       token: accessToken,
       debugAuthVersion: 'auth-body-v2',
     };
-    console.log('[Auth] refresh response', {
+    console.error('[AuthRuntime] refresh response', {
       origin: req.headers.origin,
       nativeHeader: req.headers['x-nala-native'],
       nativeRefreshBody,
