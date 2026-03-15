@@ -669,14 +669,15 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    const accessToken = result.accessToken || generateAccessToken(result.payload);
     const { accessOptions, refreshOptions } = getCookieOptions(req);
-    res.cookie('authToken', result.accessToken, accessOptions);
+    res.cookie('authToken', accessToken, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     const refreshBody: any = { message: 'Token refreshed successfully' };
     // Return tokens in body for native flows. Also allow the explicit body-refresh path
     // used by the native app even if origin/header detection is imperfect.
     if (isCapacitorRequest(req) || nativeRefreshBody) {
-      refreshBody.accessToken = result.accessToken;
+      refreshBody.accessToken = accessToken;
       refreshBody.refreshToken = result.refreshToken;
     }
     res.json(refreshBody);
