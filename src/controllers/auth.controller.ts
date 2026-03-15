@@ -673,13 +673,21 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', accessToken, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    const refreshBody: any = { message: 'Token refreshed successfully' };
-    // Return tokens in body for native flows. Also allow the explicit body-refresh path
-    // used by the native app even if origin/header detection is imperfect.
-    if (isCapacitorRequest(req) || nativeRefreshBody) {
-      refreshBody.accessToken = accessToken;
-      refreshBody.refreshToken = result.refreshToken;
-    }
+    const refreshBody: any = {
+      message: 'Token refreshed successfully',
+      accessToken,
+      refreshToken: result.refreshToken,
+      token: accessToken,
+    };
+    console.log('[Auth] refresh response', {
+      origin: req.headers.origin,
+      nativeHeader: req.headers['x-nala-native'],
+      nativeRefreshBody,
+      isCapacitor: isCapacitorRequest(req),
+      bodyKeys: Object.keys(refreshBody),
+      accessTokenLen: accessToken.length,
+      refreshTokenLen: result.refreshToken.length,
+    });
     res.json(refreshBody);
   } catch (error: unknown) {
     console.error('Refresh token error:');
