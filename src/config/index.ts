@@ -154,8 +154,19 @@ export const config = {
   appleKeyId: process.env.APPLE_KEY_ID || '',
   applePrivateKey: (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
 
-  // CORS - allowed origins for API requests
-  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,capacitor://localhost,http://localhost').split(','),
+  // CORS - always preserve native/local defaults even when ALLOWED_ORIGINS is set in production
+  allowedOrigins: Array.from(new Set([
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'capacitor://localhost',
+    'http://localhost',
+    ...((process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean)),
+  ])),
 
   // Rate limiting
   rateLimit: {
