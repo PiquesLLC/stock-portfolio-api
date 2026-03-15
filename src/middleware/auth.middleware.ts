@@ -6,10 +6,11 @@ import { isCapacitorRequest } from '../controllers/auth.controller';
 
 function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);
+  const isProduction = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || capacitor,
-    sameSite: capacitor ? ('none' as const) : ('lax' as const),
+    secure: isProduction || capacitor,
+    sameSite: isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const)),
     path: '/',
   };
 }
