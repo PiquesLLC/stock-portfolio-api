@@ -5,7 +5,7 @@ import {
   getDeadLetterEntries,
   resolveDeadLetterEntry,
   pruneOldJobRuns,
-  healOrphanedJobs,
+  healStuckJobs,
   detectStuckJobs,
   getJobRunnerAlertSummary,
   getJobRunHistory,
@@ -212,7 +212,7 @@ router.post('/jobs/prune', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /admin/jobs/heal - Snapshot heal (supports dry-run) or orphaned job heal via target
+// POST /admin/jobs/heal - Snapshot heal (supports dry-run) or stuck job heal via target
 router.post('/jobs/heal', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
@@ -224,9 +224,34 @@ router.post('/jobs/heal', requireAuth, async (req: Request, res: Response) => {
     const target = typeof req.body?.target === 'string' ? req.body.target : 'snapshots';
     const dryRun = req.body?.dryRun === true;
 
-    if (target === 'orphaned_jobs') {
-      const healed = await healOrphanedJobs();
-      res.json({ target, healed, message: `Healed ${healed} orphaned job(s)` });
+    if (target === 'orphaned_jobs' || target === 'stuck_jobs') {
+      const thresholdMinutes = Math.max(1, parseInt(req.body?.thresholdMinutes) || 30);
+      if (dryRun) {
+        const stuck = await detectStuckJobs(thresholdMinutes);
+        res.json({
+          target: 'stuck_jobs',
+          dryRun: true,
+          thresholdMinutes,
+          wouldHeal: stuck.length,
+          details: stuck.map(job => ({
+            id: job.id,
+            jobName: job.jobName,
+            action: 'would_mark_failed',
+          })),
+          message: `Dry run: ${stuck.length} stuck job(s) would be healed`,
+        });
+        return;
+      }
+
+      const healed = await healStuckJobs(thresholdMinutes);
+      res.json({
+        target: 'stuck_jobs',
+        dryRun: false,
+        thresholdMinutes,
+        healed: healed.length,
+        details: healed,
+        message: `Healed ${healed.length} stuck job(s)`,
+      });
       return;
     }
 

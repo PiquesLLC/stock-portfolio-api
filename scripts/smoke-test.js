@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
-const BASE_URL = process.env.SMOKE_BASE_URL || 'https://stock-portfolio-api-production.up.railway.app';
-const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
+const BASE_URL = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:3001';
+const isLocalBaseUrl = /^(https?:\/\/)?(127\.0\.0\.1|localhost)(:\d+)?$/i.test(BASE_URL);
+const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? (isLocalBaseUrl ? 'false' : 'true')).toLowerCase() !== 'false';
 const RUN_SIGNUP_FLOW = String(process.env.SMOKE_RUN_SIGNUP_FLOW ?? 'false').toLowerCase() === 'true';
 const SIGNUP_EMAIL = process.env.SMOKE_SIGNUP_EMAIL || '';
 const VERIFY_CODE = process.env.SMOKE_VERIFY_CODE || '';
@@ -191,6 +192,12 @@ async function main() {
 
   const checks = [
     {
+      name: 'Health check',
+      method: 'GET',
+      path: '/health',
+      acceptedStatus: [200],
+    },
+    {
       name: 'Auth middleware',
       method: 'GET',
       path: '/auth/me',
@@ -217,10 +224,10 @@ async function main() {
       acceptedStatus: BILLING_ENABLED ? [400] : [404],
     },
     {
-      name: 'Portfolio holdings route',
+      name: 'Portfolio route auth gate',
       method: 'GET',
-      path: '/portfolio/holdings',
-      acceptedStatus: [200],
+      path: '/portfolio',
+      acceptedStatus: [401],
     },
     {
       name: 'Insights plan/auth gate',
@@ -245,10 +252,10 @@ async function main() {
   console.log('');
   if (failures > 0) {
     console.log(`Smoke test FAILED: ${failures} check(s) did not match expected status.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   console.log('Smoke test PASSED: all checks matched expected status.');
-  process.exit(0);
 }
 
 main();

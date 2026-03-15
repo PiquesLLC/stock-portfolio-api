@@ -1,33 +1,50 @@
 #!/usr/bin/env node
-// Kills any process listening on port 3001 before starting the dev server
-// Prevents zombie nodemon/ts-node processes from accumulating
+// Kills any process listening on the configured port before starting the dev server.
+// Prevents zombie nodemon/ts-node processes from accumulating across restarts.
 
 const { execSync } = require('child_process');
+
 const PORT = process.env.PORT || 3001;
+const MAX_WAIT_MS = 5000;
 
-try {
-  const result = execSync(`netstat -ano | findstr ":${PORT}" | findstr "LISTENING"`, { encoding: 'utf8' });
-  const lines = result.trim().split('\n');
-  const pids = new Set();
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
-  for (const line of lines) {
-    const parts = line.trim().split(/\s+/);
-    const pid = parts[parts.length - 1];
-    if (pid && pid !== '0') pids.add(pid);
+function getListeningPids(port) {
+  try {
+    const result = execSync(`netstat -ano | findstr ":${port}" | findstr "LISTENING"`, { encoding: 'utf8' });
+    return Array.from(new Set(
+      result
+        .trim()
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/).pop())
+        .filter((pid) => pid && pid !== '0')
+    ));
+  } catch {
+    return [];
   }
+}
 
-  for (const pid of pids) {
-    try {
-      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-      console.log(`Killed process ${pid} on port ${PORT}`);
-    } catch {
-      // Process may have already exited
+const pids = getListeningPids(PORT);
+
+for (const pid of pids) {
+  try {
+    execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+    console.log(`Killed process ${pid} on port ${PORT}`);
+  } catch {
+    // Process may have already exited.
+  }
+}
+
+if (pids.length > 0) {
+  const deadline = Date.now() + MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (getListeningPids(PORT).length === 0) {
+      console.log(`Cleaned up ${pids.length} process(es) on port ${PORT}`);
+      process.exit(0);
     }
+    sleep(250);
   }
-
-  if (pids.size > 0) {
-    console.log(`Cleaned up ${pids.size} process(es) on port ${PORT}`);
-  }
-} catch {
-  // No process on port — nothing to kill
+  console.warn(`Port ${PORT} is still busy after ${MAX_WAIT_MS}ms; continuing anyway`);
 }

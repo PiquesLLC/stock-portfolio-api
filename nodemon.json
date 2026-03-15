@@ -1,0 +1,25 @@
+{
+  "watch": [
+    "src",
+    "prisma/schema.prisma",
+    "package.json",
+    ".env"
+  ],
+  "ext": "ts,json",
+  "ignore": [
+    ".git",
+    "dist",
+    "client",
+    "node_modules",
+    "prisma/dev.db",
+    "prisma/dev.db-shm",
+    "prisma/dev.db-wal",
+    "dev.db",
+    "*.log",
+    "startup.log",
+    "test-output.txt",
+    "portfolio_smoke.json"
+  ],
+  "delay": 300,
+  "exec": "ts-node src/index.ts"
+}

@@ -22,6 +22,15 @@ export interface ActivityEventResponse {
   createdAt: string;
 }
 
+function parseActivityPayload(raw: string, eventId: string): ActivityPayload | null {
+  try {
+    return JSON.parse(raw) as ActivityPayload;
+  } catch {
+    console.warn(`[Activity] Skipping malformed payload for event ${eventId}`);
+    return null;
+  }
+}
+
 export async function createActivityEvent(
   userId: string,
   type: ActivityType,
@@ -86,16 +95,20 @@ export async function getFeed(
       }
       return true;
     })
-    .slice(0, limit)
-    .map((e) => ({
-      id: e.id,
-      userId: e.userId,
-      username: e.user.username,
-      displayName: e.user.displayName,
-      type: e.type as ActivityType,
-      payload: JSON.parse(e.payload) as ActivityPayload,
-      createdAt: e.createdAt.toISOString(),
-    }));
+    .flatMap((e) => {
+      const payload = parseActivityPayload(e.payload, e.id);
+      if (!payload) return [];
+      return [{
+        id: e.id,
+        userId: e.userId,
+        username: e.user.username,
+        displayName: e.user.displayName,
+        type: e.type as ActivityType,
+        payload,
+        createdAt: e.createdAt.toISOString(),
+      }];
+    })
+    .slice(0, limit);
 }
 
 export async function getUserActivityByTicker(
@@ -120,15 +133,19 @@ export async function getUserActivityByTicker(
     LIMIT ${limit}
   `;
 
-  return events.map((e) => ({
-    id: e.id,
-    userId,
-    username: user.username,
-    displayName: user.displayName,
-    type: e.type as ActivityType,
-    payload: JSON.parse(e.payload) as ActivityPayload,
-    createdAt: new Date(e.createdAt).toISOString(),
-  }));
+  return events.flatMap((e) => {
+    const payload = parseActivityPayload(e.payload, e.id);
+    if (!payload) return [];
+    return [{
+      id: e.id,
+      userId,
+      username: user.username,
+      displayName: user.displayName,
+      type: e.type as ActivityType,
+      payload,
+      createdAt: new Date(e.createdAt).toISOString(),
+    }];
+  });
 }
 
 export async function deleteActivityEvent(
@@ -157,14 +174,18 @@ export async function getUserActivity(
     take: limit,
   });
 
-  return events.map((e) => ({
-    id: e.id,
-    userId,
-    username: user.username,
-    displayName: user.displayName,
-    type: e.type as ActivityType,
-    payload: JSON.parse(e.payload) as ActivityPayload,
-    createdAt: e.createdAt.toISOString(),
-  }));
+  return events.flatMap((e) => {
+    const payload = parseActivityPayload(e.payload, e.id);
+    if (!payload) return [];
+    return [{
+      id: e.id,
+      userId,
+      username: user.username,
+      displayName: user.displayName,
+      type: e.type as ActivityType,
+      payload,
+      createdAt: e.createdAt.toISOString(),
+    }];
+  });
 }
 

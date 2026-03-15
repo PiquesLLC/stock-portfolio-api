@@ -55,6 +55,106 @@ async function fetchFromFinnhub(ticker: string): Promise<FinnhubQuote> {
   return response.data;
 }
 
+interface FetchQuoteOptions {
+  allowBackupOnFailure?: boolean;
+}
+
+async function fetchAndCacheQuote(
+  upperTicker: string,
+  options: FetchQuoteOptions = {},
+): Promise<Quote> {
+  const cacheKey = `quote:${upperTicker}`;
+  const now = Date.now();
+  const allowBackupOnFailure = options.allowBackupOnFailure !== false;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        await sleep(RETRY_DELAY_MS * Math.pow(2, attempt - 1));
+      }
+
+      const data = await fetchFromFinnhub(upperTicker);
+
+      if (data.c === 0 && data.pc === 0) {
+        throw new Error(`No data found for ticker: ${upperTicker}`);
+      }
+
+      const currentPrice = data.c > 0 ? data.c : data.pc;
+      const quote: Quote = {
+        ticker: upperTicker,
+        currentPrice,
+        change: data.d || 0,
+        changePercent: data.dp || 0,
+        high: data.h || currentPrice,
+        low: data.l || currentPrice,
+        open: data.o || currentPrice,
+        previousClose: data.pc || currentPrice,
+        timestamp: data.t,
+        updatedAt: now,
+        isStale: false,
+        isRepricing: false,
+        quoteAgeSeconds: 0,
+        session: getMarketSession(),
+      };
+
+      cache.set(cacheKey, quote);
+      backupCache.set(cacheKey, quote);
+
+      return quote;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (error instanceof AxiosError && error.response?.status === 429) {
+        console.warn(`Finnhub rate limited for ${upperTicker}`);
+        rateLimitedUntil = Date.now() + 60000;
+
+        if (allowBackupOnFailure) {
+          const backup = backupCache.get<Quote>(cacheKey);
+          if (backup) {
+            console.log(`Using backup cache for ${upperTicker} due to rate limit`);
+            const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+            return {
+              ...backup,
+              isStale: true,
+              isRepricing: true,
+              quoteAgeSeconds: quoteAge,
+            };
+          }
+        }
+
+        break;
+      }
+
+      if (error instanceof AxiosError && error.response) {
+        const status = error.response.status;
+        if (status === 401 || status === 403) {
+          console.error(`Finnhub auth error (${status}) for ${upperTicker}`);
+          break;
+        }
+      }
+
+      console.warn(`Attempt ${attempt + 1} failed for ${upperTicker}:`, lastError.message);
+    }
+  }
+
+  if (allowBackupOnFailure) {
+    const backup = backupCache.get<Quote>(cacheKey);
+    if (backup) {
+      console.log(`All retries failed, using backup cache for ${upperTicker}`);
+      const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+      return {
+        ...backup,
+        isStale: true,
+        isRepricing: true,
+        quoteAgeSeconds: quoteAge,
+      };
+    }
+  }
+
+  throw lastError || new Error(`Failed to fetch quote for ${upperTicker}`);
+}
+
 export async function getQuote(ticker: string): Promise<Quote> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `quote:${upperTicker}`;
@@ -90,99 +190,7 @@ export async function getQuote(ticker: string): Promise<Quote> {
     throw new Error(`Rate limited and no cached data for ${upperTicker}`);
   }
 
-  let lastError: Error | null = null;
-
-  // Retry loop with exponential backoff
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      if (attempt > 0) {
-        await sleep(RETRY_DELAY_MS * Math.pow(2, attempt - 1));
-      }
-
-      const data = await fetchFromFinnhub(upperTicker);
-
-      // Validate the response - both current and previous close being 0 means no data
-      if (data.c === 0 && data.pc === 0) {
-        throw new Error(`No data found for ticker: ${upperTicker}`);
-      }
-
-      // CRITICAL: Never use 0 as a valid price
-      // If current price is 0 but previous close isn't, use previous close
-      const currentPrice = data.c > 0 ? data.c : data.pc;
-
-      const quoteTimestamp = now;
-      const quote: Quote = {
-        ticker: upperTicker,
-        currentPrice,
-        change: data.d || 0,
-        changePercent: data.dp || 0,
-        high: data.h || currentPrice,
-        low: data.l || currentPrice,
-        open: data.o || currentPrice,
-        previousClose: data.pc || currentPrice,
-        timestamp: data.t,
-        updatedAt: quoteTimestamp,
-        isStale: false,
-        isRepricing: false,
-        quoteAgeSeconds: 0,
-        session: getMarketSession(),
-      };
-
-      // Store in both caches
-      cache.set(cacheKey, quote);
-      backupCache.set(cacheKey, quote);
-
-      return quote;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-
-      // Handle rate limiting (429)
-      if (error instanceof AxiosError && error.response?.status === 429) {
-        console.warn(`Finnhub rate limited for ${upperTicker}`);
-        rateLimitedUntil = now + 60000; // Wait 1 minute
-
-        const backup = backupCache.get<Quote>(cacheKey);
-        if (backup) {
-          console.log(`Using backup cache for ${upperTicker} due to rate limit`);
-          const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
-          return {
-            ...backup,
-            isStale: true,
-            isRepricing: true,
-            quoteAgeSeconds: quoteAge,
-          };
-        }
-        break; // Don't retry on rate limit
-      }
-
-      // Handle other API errors (401, 403, 5xx)
-      if (error instanceof AxiosError && error.response) {
-        const status = error.response.status;
-        if (status === 401 || status === 403) {
-          console.error(`Finnhub auth error (${status}) for ${upperTicker}`);
-          break; // Don't retry auth errors
-        }
-      }
-
-      console.warn(`Attempt ${attempt + 1} failed for ${upperTicker}:`, lastError.message);
-    }
-  }
-
-  // All retries failed - try backup cache
-  const backup = backupCache.get<Quote>(cacheKey);
-  if (backup) {
-    console.log(`All retries failed, using backup cache for ${upperTicker}`);
-    const quoteAge = Math.floor((now - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
-    return {
-      ...backup,
-      isStale: true,
-      isRepricing: true,
-      quoteAgeSeconds: quoteAge,
-    };
-  }
-
-  // No backup available
-  throw lastError || new Error(`Failed to fetch quote for ${upperTicker}`);
+  return fetchAndCacheQuote(upperTicker, { allowBackupOnFailure: true });
 }
 
 export interface QuotesResult {
@@ -214,6 +222,68 @@ export async function getQuotes(tickers: string[]): Promise<QuotesResult> {
   }
 
   return { quotes, staleCount, repricingCount, failedTickers, provider: 'finnhub' };
+}
+
+export interface FreshQuotesBatchOptions {
+  maxTickers?: number;
+  minDelayMs?: number;
+}
+
+export interface FreshQuotesBatchResult extends QuotesResult {
+  rateLimited: boolean;
+}
+
+export async function getFreshQuotesBatch(
+  tickers: string[],
+  options: FreshQuotesBatchOptions = {},
+): Promise<FreshQuotesBatchResult> {
+  const uniqueTickers = Array.from(new Set(tickers.map(t => t.toUpperCase())));
+  const limitedTickers = uniqueTickers.slice(0, options.maxTickers ?? uniqueTickers.length);
+  const minDelayMs = Math.max(0, options.minDelayMs ?? 0);
+
+  const quotes = new Map<string, Quote>();
+  const failedTickers: string[] = [];
+  let staleCount = 0;
+  let repricingCount = 0;
+  let rateLimited = false;
+  let lastRequestStartedAt = 0;
+
+  for (const ticker of limitedTickers) {
+    if (lastRequestStartedAt > 0 && minDelayMs > 0) {
+      const elapsedMs = Date.now() - lastRequestStartedAt;
+      if (elapsedMs < minDelayMs) {
+        await sleep(minDelayMs - elapsedMs);
+      }
+    }
+
+    lastRequestStartedAt = Date.now();
+
+    try {
+      const quote = await fetchAndCacheQuote(ticker, { allowBackupOnFailure: false });
+      quotes.set(ticker, quote);
+      if (quote.isStale) staleCount++;
+      if (quote.isRepricing) repricingCount++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedTickers.push(ticker);
+
+      if (message.toLowerCase().includes('rate limit') || message.includes('429')) {
+        rateLimited = true;
+        break;
+      }
+
+      console.error(`Failed to fetch fresh Finnhub quote for ${ticker}:`, message);
+    }
+  }
+
+  return {
+    quotes,
+    staleCount,
+    repricingCount,
+    failedTickers,
+    provider: 'finnhub',
+    rateLimited,
+  };
 }
 
 export function clearCache(): void {

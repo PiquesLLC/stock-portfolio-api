@@ -80,7 +80,12 @@ export async function createEvents(
  * Get admin user IDs to exclude from analytics (from env config).
  */
 function getAdminUserIds(): string[] {
-  return config.waitlistAdminUserIds;
+  const ids = new Set<string>([
+    '237198da-612e-411c-9ef8-f267c887a9f1',
+    ...config.waitlistAdminUserIds,
+    ...config.creatorAdminUserIds,
+  ]);
+  return [...ids].filter(Boolean);
 }
 
 /**

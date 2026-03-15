@@ -88,6 +88,16 @@ export interface FundamentalsResponse {
   dataAge: 'fresh' | 'cached' | 'stale';
 }
 
+function safeParseCachedJson<T>(ticker: string, label: string, raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    console.warn(`[AV Fundamentals] Ignoring malformed cached ${label} for ${ticker}`);
+    return fallback;
+  }
+}
+
 // â”€â”€ Parsers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function parseOverview(raw: AVCompanyOverview): ParsedOverview {
@@ -217,10 +227,25 @@ function deserializeCache(
   cached: { overviewJson: string | null; incomeJson: string | null; balanceJson: string | null; cashFlowJson: string | null; lastFetchedAt: Date },
   dataAge: 'fresh' | 'cached' | 'stale',
 ): FundamentalsResponse {
-  const overview = cached.overviewJson ? JSON.parse(cached.overviewJson) : null;
-  const income = cached.incomeJson ? JSON.parse(cached.incomeJson) : { annual: [], quarterly: [] };
-  const balance = cached.balanceJson ? JSON.parse(cached.balanceJson) : { annual: [], quarterly: [] };
-  const cashFlow = cached.cashFlowJson ? JSON.parse(cached.cashFlowJson) : { annual: [], quarterly: [] };
+  const overview = safeParseCachedJson<ParsedOverview | null>(ticker, 'overview', cached.overviewJson, null);
+  const income = safeParseCachedJson<{ annual: ParsedIncomeStatement[]; quarterly: ParsedIncomeStatement[] }>(
+    ticker,
+    'income statements',
+    cached.incomeJson,
+    { annual: [], quarterly: [] },
+  );
+  const balance = safeParseCachedJson<{ annual: ParsedBalanceSheet[]; quarterly: ParsedBalanceSheet[] }>(
+    ticker,
+    'balance sheets',
+    cached.balanceJson,
+    { annual: [], quarterly: [] },
+  );
+  const cashFlow = safeParseCachedJson<{ annual: ParsedCashFlow[]; quarterly: ParsedCashFlow[] }>(
+    ticker,
+    'cash flows',
+    cached.cashFlowJson,
+    { annual: [], quarterly: [] },
+  );
 
   return {
     ticker,
