@@ -122,6 +122,10 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   appFrontendUrl: process.env.APP_FRONTEND_URL || process.env.STRIPE_RETURN_URL || 'https://nalaai.com',
+  testerFeatureAccessUsernames: (process.env.TESTER_FEATURE_ACCESS_USERNAMES || '')
+    .split(',')
+    .map((u) => u.trim().toLowerCase())
+    .filter(Boolean),
 
   // NALA AI Deep Research (Gemini)
   googleGeminiApiKey: process.env.GOOGLE_GEMINI_API_KEY || '',

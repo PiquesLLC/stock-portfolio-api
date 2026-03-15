@@ -99,6 +99,32 @@ async function cleanupMigratedHoldings(): Promise<void> {
   }
 }
 
+async function ensureTesterFeatureAccess(): Promise<void> {
+  const usernames = config.testerFeatureAccessUsernames;
+  if (usernames.length === 0) return;
+
+  const expiresAt = new Date('2100-01-01T00:00:00.000Z');
+  const users = await prisma.user.findMany({
+    where: { username: { in: usernames } },
+    select: { id: true, username: true, plan: true, planExpiresAt: true },
+  });
+
+  for (const user of users) {
+    const isExpired = user.planExpiresAt ? user.planExpiresAt < new Date() : false;
+    if (user.plan !== 'elite' || isExpired || !user.planExpiresAt || user.planExpiresAt.getTime() !== expiresAt.getTime()) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          plan: 'elite',
+          planStartedAt: new Date(),
+          planExpiresAt: expiresAt,
+        },
+      });
+      console.log(`[Init] Granted tester feature access to @${user.username}`);
+    }
+  }
+}
+
 // Helper to get all unique tickers from holdings + watchlists
 async function getAllHeldTickers(): Promise<string[]> {
   const [holdings, watchlistHoldings] = await Promise.all([
@@ -258,6 +284,7 @@ const server = app.listen(config.port, async () => {
   // Ensure default system user exists before any schedulers run
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
+  await ensureTesterFeatureAccess().catch(err => console.error('[Init] Failed to grant tester feature access:', err.message));
   registerBackgroundJobHandlers();
 
   // Auto-verify users created before email verification was required (one-time, cutoff date).
