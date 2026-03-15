@@ -124,6 +124,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
     const googleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAdmin }, isNewUser };
     if (isCapacitorRequest(req)) {
+      googleBody.accessToken = loginResponse.token;
       googleBody.refreshToken = loginResponse.refreshToken;
     }
     res.json(googleBody);
@@ -201,6 +202,7 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
     const appleBody: any = { user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin }, isNewUser };
     if (isCapacitorRequest(req)) {
+      appleBody.accessToken = loginResponse.token;
       appleBody.refreshToken = loginResponse.refreshToken;
     }
     res.json(appleBody);

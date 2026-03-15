@@ -130,6 +130,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const body: any = { user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } };
     // Include refreshToken in response body for native apps (biometric Keychain storage)
     if (isCapacitorRequest(req)) {
+      body.accessToken = result.token;
       body.refreshToken = result.refreshToken;
     }
     res.json(body);
@@ -275,6 +276,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       emailVerificationRequired: !result.user.emailVerified,
     };
     if (isCapacitorRequest(req)) {
+      signupBody.accessToken = result.token;
       signupBody.refreshToken = result.refreshToken;
     }
     res.status(201).json(signupBody);
@@ -658,6 +660,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     const refreshBody: any = { message: 'Token refreshed successfully' };
     // On native, return the new refresh token so biometric Keychain can be updated
     if (isCapacitorRequest(req)) {
+      refreshBody.accessToken = result.accessToken;
       refreshBody.refreshToken = result.refreshToken;
     }
     res.json(refreshBody);

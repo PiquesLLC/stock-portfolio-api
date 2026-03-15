@@ -96,6 +96,7 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const mfaBody: any = { user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin } };
     // Include refreshToken in response body for native apps (biometric Keychain storage)
     if (isCapacitorRequest(req)) {
+      mfaBody.accessToken = token;
       mfaBody.refreshToken = refreshToken;
     }
     res.json(mfaBody);
