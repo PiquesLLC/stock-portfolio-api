@@ -651,6 +651,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
  */
 export async function refreshHandler(req: Request, res: Response): Promise<void> {
   try {
+    const nativeRefreshBody = typeof req.body?.refreshToken === 'string' && req.body.refreshToken.length > 0;
     const token = isCapacitorRequest(req)
       ? (req.body?.refreshToken || req.cookies?.refreshToken)
       : (req.cookies?.refreshToken || req.body?.refreshToken);
@@ -672,8 +673,9 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.cookie('authToken', result.accessToken, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     const refreshBody: any = { message: 'Token refreshed successfully' };
-    // On native, return the new refresh token so biometric Keychain can be updated
-    if (isCapacitorRequest(req)) {
+    // Return tokens in body for native flows. Also allow the explicit body-refresh path
+    // used by the native app even if origin/header detection is imperfect.
+    if (isCapacitorRequest(req) || nativeRefreshBody) {
       refreshBody.accessToken = result.accessToken;
       refreshBody.refreshToken = result.refreshToken;
     }
