@@ -48,25 +48,34 @@ function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: 
 }
 
 // Detect Capacitor (native app) requests.
-// Defense-in-depth: require BOTH the Capacitor origin AND an explicit opt-in header.
+// Accepts EITHER a native origin OR the explicit opt-in header.
 // - Origin 'capacitor://localhost' is set by WKWebView and cannot be spoofed from a browser.
-// - 'X-Nala-Native: 1' is sent by the native app only and acts as a second signal.
-// - A plain curl/Postman request CAN set both headers, but the attacker already has
-//   valid credentials at that point (they just authenticated), and the refresh token
-//   is the same value already set as an httpOnly cookie. The cookie is the primary
-//   credential; the body copy just enables Keychain storage on-device.
+// - 'X-Nala-Native: 1' is sent by the native app as a second signal.
+// - With CapacitorHttp.enabled=false, WKWebView handles fetch() directly and CORS
+//   preflight may strip custom headers. So origin-only detection is the primary path;
+//   the header is a fallback for environments where origin is missing.
+// - Security: the response body tokens duplicate what's already in httpOnly cookies.
+//   A native origin cannot be spoofed from a web browser.
+
+const NATIVE_ORIGINS = [
+  'capacitor://localhost',
+  'ionic://localhost',
+  'app://localhost',
+  'http://localhost',
+  'https://localhost',
+];
+
 export function isCapacitorRequest(req: Request): boolean {
   const origin = req.headers.origin;
   const nativeHeader = req.headers['x-nala-native'];
-  if (nativeHeader !== '1') return false;
-  if (!origin) return true;
-  return [
-    'capacitor://localhost',
-    'ionic://localhost',
-    'app://localhost',
-    'http://localhost',
-    'https://localhost',
-  ].includes(origin);
+
+  // Primary: native origin is unforgeable from a browser
+  if (origin && NATIVE_ORIGINS.includes(origin)) return true;
+
+  // Fallback: explicit header (e.g. origin missing on same-origin or non-browser clients)
+  if (nativeHeader === '1') return true;
+
+  return false;
 }
 
 export function getCookieOptions(req: Request) {
@@ -127,12 +136,15 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
+    const isNativeReq = isCapacitorRequest(req);
     const body: any = { user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) } };
-    // Include refreshToken in response body for native apps (biometric Keychain storage)
-    if (isCapacitorRequest(req)) {
+    // Include tokens in response body for native apps (cookies don't work cross-origin in WKWebView)
+    if (isNativeReq) {
       body.accessToken = result.token;
       body.refreshToken = result.refreshToken;
     }
+    // Temporary debug: log native detection for login requests
+    console.log(`[Auth] login: origin=${req.headers.origin}, x-nala-native=${req.headers['x-nala-native']}, isCapacitor=${isNativeReq}, includesTokens=${isNativeReq}`);
     res.json(body);
   } catch (error: unknown) {
     console.error('Login error:');
