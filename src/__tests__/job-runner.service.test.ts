@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
-import { JobExecutionError, runJob } from '../services/job-runner.service';
+import { JobExecutionError, detectStuckJobs, healStuckJobs, runJob } from '../services/job-runner.service';
 
 describe('job-runner throwOnFailure behavior', () => {
   beforeEach(() => {
@@ -8,6 +8,8 @@ describe('job-runner throwOnFailure behavior', () => {
     (prismaMock as any).backgroundJobRun = {
       create: vi.fn().mockResolvedValue({ id: 'run-1' }),
       update: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     };
     (prismaMock as any).deadLetterEntry = {
       create: vi.fn().mockResolvedValue({ id: 'dl-1' }),
@@ -92,5 +94,46 @@ describe('job-runner throwOnFailure behavior', () => {
     const delays = timeoutSpy.mock.calls.map(call => Number(call[1]));
     expect(delays).toContain(2000);
     timeoutSpy.mockRestore();
+  });
+
+  it('detects stuck jobs older than the requested threshold', async () => {
+    const stuck = [{ id: 'run-1', jobName: 'snapshot_scheduler', status: 'running', attempt: 1, maxAttempts: 3, startedAt: new Date('2026-03-14T10:00:00.000Z') }];
+    (prismaMock as any).backgroundJobRun.findMany = vi.fn().mockResolvedValue(stuck);
+
+    const result = await detectStuckJobs(45);
+
+    expect(result).toEqual(stuck);
+    expect((prismaMock as any).backgroundJobRun.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: 'running',
+        startedAt: expect.objectContaining({ lt: expect.any(Date) }),
+      }),
+    }));
+  });
+
+  it('heals only the detected stuck jobs', async () => {
+    (prismaMock as any).backgroundJobRun.findMany = vi.fn().mockResolvedValue([
+      { id: 'run-1', jobName: 'snapshot_scheduler', attempt: 1, maxAttempts: 3, startedAt: new Date('2026-03-14T10:00:00.000Z'), durationMs: null },
+      { id: 'run-2', jobName: 'dividend_sync', attempt: 2, maxAttempts: 3, startedAt: new Date('2026-03-14T09:00:00.000Z'), durationMs: null },
+    ]);
+    (prismaMock as any).backgroundJobRun.updateMany = vi.fn().mockResolvedValue({ count: 2 });
+
+    const healed = await healStuckJobs(30);
+
+    expect((prismaMock as any).backgroundJobRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['run-1', 'run-2'] },
+        status: 'running',
+      },
+      data: {
+        status: 'failed',
+        error: 'Stuck job healed by admin after exceeding 30 minute threshold',
+        completedAt: expect.any(Date),
+      },
+    });
+    expect(healed).toEqual([
+      { id: 'run-1', jobName: 'snapshot_scheduler', action: 'marked_failed' },
+      { id: 'run-2', jobName: 'dividend_sync', action: 'marked_failed' },
+    ]);
   });
 });

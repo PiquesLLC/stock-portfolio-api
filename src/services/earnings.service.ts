@@ -38,6 +38,18 @@ export interface EarningsResponse {
   dataAge: 'fresh' | 'cached' | 'stale';
 }
 
+function parseCachedEarnings(
+  ticker: string,
+  earningsJson: string,
+): { quarterly: ParsedQuarterlyEarning[]; annual: ParsedAnnualEarning[] } | null {
+  try {
+    return JSON.parse(earningsJson) as { quarterly: ParsedQuarterlyEarning[]; annual: ParsedAnnualEarning[] };
+  } catch {
+    console.warn(`[AV Earnings] Ignoring malformed cached earnings for ${ticker}`);
+    return null;
+  }
+}
+
 function parseQuarterly(raw: AVQuarterlyEarning[]): ParsedQuarterlyEarning[] {
   return raw.map(q => {
     const reported = parseAVNumber(q.reportedEPS);
@@ -69,9 +81,9 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       ageMs < 24 * 60 * 60 * 1000 ? 'fresh' :
       ageMs < CACHE_MAX_AGE_MS ? 'cached' : 'stale';
 
-    const data = JSON.parse(cached.earningsJson);
+    const data = parseCachedEarnings(upper, cached.earningsJson);
 
-    if (dataAge !== 'stale') {
+    if (data && dataAge !== 'stale') {
       return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge };
     }
   }
@@ -81,8 +93,10 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
   if (remaining < 1) {
     // Return whatever we have cached, even if stale
     if (cached?.earningsJson) {
-      const data = JSON.parse(cached.earningsJson);
-      return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      const data = parseCachedEarnings(upper, cached.earningsJson);
+      if (data) {
+        return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      }
     }
     // AV budget exhausted and no cache â€” fall back to Yahoo Finance
     return fetchFinnhubFallback(upper);
@@ -92,7 +106,10 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
     const raw = await fetchEarnings(upper);
     if (!raw) {
       if (cached?.earningsJson) {
-        return { ticker: upper, ...JSON.parse(cached.earningsJson), lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+        const data = parseCachedEarnings(upper, cached.earningsJson);
+        if (data) {
+          return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+        }
       }
       // AV returned nothing â€” fall back to Yahoo Finance
       return fetchFinnhubFallback(upper);
@@ -117,8 +134,10 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
   } catch (err) {
     console.error(`[AV Earnings] Fetch failed for ${upper}:`, (err as Error).message);
     if (cached?.earningsJson) {
-      const data = JSON.parse(cached.earningsJson);
-      return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      const data = parseCachedEarnings(upper, cached.earningsJson);
+      if (data) {
+        return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      }
     }
     // AV failed completely â€” fall back to Yahoo Finance
     return fetchFinnhubFallback(upper);

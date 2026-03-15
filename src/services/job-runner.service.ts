@@ -880,6 +880,31 @@ export async function healOrphanedJobs(): Promise<number> {
   return result.count;
 }
 
+export async function healStuckJobs(thresholdMinutes = 30) {
+  const stuckJobs = await detectStuckJobs(thresholdMinutes);
+  if (stuckJobs.length === 0) return [];
+
+  const ids = stuckJobs.map(job => job.id);
+  const healedAt = new Date();
+  await prisma.backgroundJobRun.updateMany({
+    where: {
+      id: { in: ids },
+      status: 'running',
+    },
+    data: {
+      status: 'failed',
+      error: `Stuck job healed by admin after exceeding ${thresholdMinutes} minute threshold`,
+      completedAt: healedAt,
+    },
+  });
+
+  return stuckJobs.map(job => ({
+    id: job.id,
+    jobName: job.jobName,
+    action: 'marked_failed',
+  }));
+}
+
 /**
  * Detect stuck jobs — find BackgroundJobRun records still marked as "running"
  * that started more than `thresholdMinutes` ago. Returns them for admin review.

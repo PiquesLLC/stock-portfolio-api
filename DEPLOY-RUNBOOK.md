@@ -67,10 +67,13 @@ Set in Railway: `railway variables set BILLING_ENABLED=false`
 # Check env vars against .env.example
 npm run check:env
 
-# Post-deploy smoke test (hits Railway endpoints)
+# Local smoke test
 npm run smoke:test
 
-# Override smoke test target URL
+# Post-deploy smoke test (hits Railway endpoints)
+npm run smoke:test:prod
+
+# Override smoke test target URL manually
 SMOKE_BASE_URL=http://localhost:3001 npm run smoke:test
 
 # Run full signup -> verify -> AI gate flow

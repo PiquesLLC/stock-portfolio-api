@@ -252,12 +252,25 @@ export async function checkAnalystUpdates(tickers: string[]): Promise<void> {
   console.log(`[Analyst] Finished checking analyst updates`);
 }
 
-export async function getAnalystEvents(limit = 50, ticker?: string): Promise<any[]> {
-  return prisma.analystEvent.findMany({
+export async function getAnalystEvents(limit = 50, ticker?: string, userId?: string): Promise<any[]> {
+  const events = await prisma.analystEvent.findMany({
     where: ticker ? { ticker: ticker.toUpperCase() } : undefined,
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
+
+  if (!userId) return events;
+
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { analystLastReadAt: true },
+  });
+  const lastReadAt = settings?.analystLastReadAt;
+
+  return events.map((event) => ({
+    ...event,
+    read: lastReadAt ? event.createdAt <= lastReadAt : false,
+  }));
 }
 
 export async function getUnreadAnalystCount(userId: string): Promise<number> {

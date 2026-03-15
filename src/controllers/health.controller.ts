@@ -5,6 +5,7 @@ import { getPolygonStatus } from '../utils/polygon';
 import { getYahooStatus } from '../utils/yahoo-http';
 import { getAuthMetrics } from '../utils/auth-metrics';
 import { getWebhookMetrics } from '../utils/webhook-metrics';
+import { getProviderMetrics } from '../utils/provider-metrics';
 import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount } from '../services/job-runner.service';
 
@@ -136,6 +137,10 @@ export async function apiUsage(req: Request, res: Response): Promise<void> {
 
 export async function webhookMetrics(req: Request, res: Response): Promise<void> {
   res.json(getWebhookMetrics());
+}
+
+export async function providerMetrics(req: Request, res: Response): Promise<void> {
+  res.json(getProviderMetrics());
 }
 
 export async function jobMetrics(req: Request, res: Response): Promise<void> {

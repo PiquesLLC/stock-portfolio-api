@@ -102,9 +102,13 @@ cp .env.example .env          # Fill in API keys
 npx prisma migrate deploy     # Run migrations
 npx prisma generate           # Generate Prisma client
 npm run dev                   # Starts on http://localhost:3001
+npm run smoke:test            # Local API smoke test
+npm run smoke:test:prod       # Production API smoke test (Railway)
 ```
 
 See `.env.example` for all required environment variables.
+
+Local dev pairs with the UI on `http://localhost:5173`.
 
 ## Deployment
 

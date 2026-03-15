@@ -10,7 +10,7 @@ import { checkAnalystUpdates } from './services/analyst.service';
 import { checkMilestoneAlerts } from './services/milestone.service';
 import { detectAnomalies, detectDividendChanges } from './services/anomaly-detection.service';
 import { getMarketSession } from './utils/market-hours';
-import prisma from './utils/prisma';
+import prisma, { initSqlitePragmas } from './utils/prisma';
 import { refreshEconomicIndicators, refreshInternationalIndicators } from './services/economic.service';
 import { refreshFundamentalsForTicker } from './services/polygon-fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
@@ -235,6 +235,9 @@ function registerBackgroundJobHandlers(): void {
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
+
+  // Must run before any DB operations — enables concurrent reads + write queuing
+  await initSqlitePragmas();
 
   try {
     await assertBillingDeploySafety();

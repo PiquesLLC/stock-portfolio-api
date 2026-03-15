@@ -12,7 +12,7 @@ export async function getAnalystEventsHandler(req: AuthRequest, res: Response): 
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 200);
     const ticker = req.query.ticker as string | undefined;
-    const events = await getAnalystEvents(limit, ticker);
+    const events = await getAnalystEvents(limit, ticker, req.user!.userId);
     res.json(events);
   } catch (error: unknown) {
     console.error('Error getting analyst events:');

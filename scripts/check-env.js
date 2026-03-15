@@ -23,6 +23,47 @@ function readEnvFile(filePath) {
   return result;
 }
 
+function inspectEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return { malformed: [], duplicates: [] };
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  const seen = new Map();
+  const malformed = [];
+  const duplicates = [];
+
+  lines.forEach((raw, index) => {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+
+    const idx = raw.indexOf('=');
+    if (idx <= 0) {
+      malformed.push({ line: index + 1, reason: 'missing "=" separator' });
+      return;
+    }
+
+    const rawKey = raw.slice(0, idx);
+    const key = rawKey.trim();
+    const value = raw.slice(idx + 1);
+
+    if (rawKey !== key) {
+      malformed.push({ line: index + 1, reason: `key "${key}" has leading/trailing whitespace` });
+    }
+    if (!/^[A-Z0-9_]+$/.test(key)) {
+      malformed.push({ line: index + 1, reason: `key "${key}" contains unexpected characters` });
+    }
+    if (/[A-Z0-9_]+\s*=/.test(value)) {
+      malformed.push({ line: index + 1, reason: 'value appears to contain another env assignment' });
+    }
+
+    if (seen.has(key)) {
+      duplicates.push({ key, firstLine: seen.get(key), line: index + 1 });
+    } else {
+      seen.set(key, index + 1);
+    }
+  });
+
+  return { malformed, duplicates };
+}
+
 function parseExampleKeys(filePath) {
   if (!fs.existsSync(filePath)) {
     console.error('FAIL: .env.example not found at repo root');
@@ -43,6 +84,7 @@ function parseExampleKeys(filePath) {
 
 const exampleKeys = parseExampleKeys(envExamplePath);
 const envVars = { ...readEnvFile(envPath), ...process.env };
+const envFileIssues = inspectEnvFile(envPath);
 const billingEnabled = String(envVars.BILLING_ENABLED ?? 'true').toLowerCase() !== 'false';
 const plaidEnabled = String(envVars.PLAID_ENABLED ?? 'true').toLowerCase() !== 'false';
 
@@ -132,7 +174,25 @@ if (extraInEnv.length > 0) {
   console.log(`INFO: ${extraInEnv.length} additional env vars exist beyond .env.example.`);
 }
 
-if (missingCritical.length > 0) {
+if (envFileIssues.malformed.length === 0) {
+  console.log('PASS: .env file has no obvious malformed assignments.');
+} else {
+  console.log(`FAIL: Found ${envFileIssues.malformed.length} malformed .env line(s):`);
+  for (const issue of envFileIssues.malformed) {
+    console.log(`  - line ${issue.line}: ${issue.reason}`);
+  }
+}
+
+if (envFileIssues.duplicates.length === 0) {
+  console.log('PASS: .env file has no duplicate keys.');
+} else {
+  console.log(`FAIL: Found ${envFileIssues.duplicates.length} duplicate .env key(s):`);
+  for (const issue of envFileIssues.duplicates) {
+    console.log(`  - ${issue.key}: first declared on line ${issue.firstLine}, duplicated on line ${issue.line}`);
+  }
+}
+
+if (missingCritical.length > 0 || envFileIssues.malformed.length > 0 || envFileIssues.duplicates.length > 0) {
   process.exit(1);
 }
 

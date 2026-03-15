@@ -19,4 +19,14 @@ const adapter = new PrismaLibSql({
 
 const prisma = new PrismaClient({ adapter });
 
+// Enable WAL mode + busy timeout for SQLite concurrency.
+// WAL allows concurrent reads during writes (default journal mode blocks all).
+// busy_timeout makes writers wait up to 5s instead of immediately throwing SQLITE_BUSY.
+// Must be awaited before app.listen() and background jobs start.
+export async function initSqlitePragmas(): Promise<void> {
+  await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
+  await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 5000');
+  console.log('[DB] SQLite WAL mode + busy_timeout=5000ms enabled');
+}
+
 export default prisma;
