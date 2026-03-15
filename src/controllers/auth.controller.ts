@@ -58,7 +58,15 @@ function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: 
 export function isCapacitorRequest(req: Request): boolean {
   const origin = req.headers.origin;
   const nativeHeader = req.headers['x-nala-native'];
-  return origin === 'capacitor://localhost' && nativeHeader === '1';
+  if (nativeHeader !== '1') return false;
+  if (!origin) return true;
+  return [
+    'capacitor://localhost',
+    'ionic://localhost',
+    'app://localhost',
+    'http://localhost',
+    'https://localhost',
+  ].includes(origin);
 }
 
 export function getCookieOptions(req: Request) {
