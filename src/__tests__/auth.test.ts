@@ -781,6 +781,11 @@ describe('Auth Routes (Integration)', () => {
       expect(res.status).toBe(200);
       expect(res.body.user).toBeDefined();
       expect(res.body.user.username).toBe('alice');
+      expect(typeof res.body.accessToken).toBe('string');
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(typeof res.body.token).toBe('string');
+      expect(res.body.token).toBe(res.body.accessToken);
+      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
       // Check that cookies are set
       const cookies = res.headers['set-cookie'];
       expect(cookies).toBeDefined();
@@ -894,6 +899,11 @@ describe('Auth Routes (Integration)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.user.username).toBe('newuser');
+      expect(typeof res.body.accessToken).toBe('string');
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(typeof res.body.token).toBe('string');
+      expect(res.body.token).toBe(res.body.accessToken);
+      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
     });
 
     it('should return 400 for invalid username format', async () => {
@@ -1162,6 +1172,11 @@ describe('Auth Routes (Integration)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('refreshed');
+      expect(typeof res.body.accessToken).toBe('string');
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(typeof res.body.token).toBe('string');
+      expect(res.body.token).toBe(res.body.accessToken);
+      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
       const cookies = res.headers['set-cookie'];
       expect(cookies).toBeDefined();
       const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
