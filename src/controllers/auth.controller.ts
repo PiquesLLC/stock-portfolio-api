@@ -71,18 +71,18 @@ export function isCapacitorRequest(req: Request): boolean {
 
 export function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);
-  // Use 'lax' for same-origin (works reliably on iOS Safari/PWA), 'none' for Capacitor cross-origin
-  const sameSite = capacitor ? 'none' as const : 'lax' as const;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const sameSite = isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const));
   const accessOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || capacitor,
+    secure: isProduction || capacitor,
     sameSite,
     maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT access token expiry
     path: '/',
   };
   const refreshOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || capacitor,
+    secure: isProduction || capacitor,
     sameSite,
     maxAge: config.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
     path: '/',
@@ -92,8 +92,9 @@ export function getCookieOptions(req: Request) {
 
 function clearAllAuthCookies(res: Response, req?: Request): void {
   const capacitor = req ? isCapacitorRequest(req) : false;
-  const sameSite = capacitor ? 'none' as const : 'lax' as const;
-  const secure = process.env.NODE_ENV === 'production' || capacitor;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const sameSite = isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const));
+  const secure = isProduction || capacitor;
   res.clearCookie('authToken', { httpOnly: true, secure, sameSite, path: '/' });
   res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
 }
