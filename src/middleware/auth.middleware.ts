@@ -19,6 +19,13 @@ function getCookieOptions(req: Request) {
  * Extract access token from httpOnly cookie (primary) or Authorization header (fallback)
  */
 function extractAccessToken(req: AuthRequest): string | null {
+  if (isCapacitorRequest(req)) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+  }
+
   if (req.cookies?.authToken) {
     return req.cookies.authToken;
   }

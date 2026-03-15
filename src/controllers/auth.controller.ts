@@ -639,7 +639,9 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
  */
 export async function refreshHandler(req: Request, res: Response): Promise<void> {
   try {
-    const token = req.cookies?.refreshToken || req.body?.refreshToken;
+    const token = isCapacitorRequest(req)
+      ? (req.body?.refreshToken || req.cookies?.refreshToken)
+      : (req.cookies?.refreshToken || req.body?.refreshToken);
 
     if (!token || typeof token !== 'string') {
       res.status(401).json({ error: 'Refresh token is required', code: 'NO_TOKEN' });
