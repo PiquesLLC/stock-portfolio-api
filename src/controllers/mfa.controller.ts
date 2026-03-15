@@ -97,6 +97,8 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
       user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin },
       accessToken: token,
       refreshToken,
+      token,
+      debugAuthVersion: 'auth-body-v2',
     };
     res.json(mfaBody);
   } catch (error: unknown) {

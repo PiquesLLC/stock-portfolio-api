@@ -127,6 +127,8 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       isNewUser,
       accessToken: loginResponse.token,
       refreshToken: loginResponse.refreshToken,
+      token: loginResponse.token,
+      debugAuthVersion: 'auth-body-v2',
     };
     res.json(googleBody);
   } catch (error: unknown) {
@@ -206,6 +208,8 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       isNewUser,
       accessToken: loginResponse.token,
       refreshToken: loginResponse.refreshToken,
+      token: loginResponse.token,
+      debugAuthVersion: 'auth-body-v2',
     };
     res.json(appleBody);
   } catch (error: unknown) {

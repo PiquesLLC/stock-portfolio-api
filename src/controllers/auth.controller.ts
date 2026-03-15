@@ -142,6 +142,8 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       accessToken: result.token,
       refreshToken: result.refreshToken,
+      token: result.token,
+      debugAuthVersion: 'auth-body-v2',
     };
     console.log(`[Auth] login: origin=${req.headers.origin}, accessTokenLen=${result.token.length}, refreshTokenLen=${result.refreshToken.length}`);
     res.json(body);
@@ -287,6 +289,8 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       emailVerificationRequired: !result.user.emailVerified,
       accessToken: result.token,
       refreshToken: result.refreshToken,
+      token: result.token,
+      debugAuthVersion: 'auth-body-v2',
     };
     res.status(201).json(signupBody);
   } catch (error: unknown) {
@@ -675,6 +679,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
       accessToken,
       refreshToken: result.refreshToken,
       token: accessToken,
+      debugAuthVersion: 'auth-body-v2',
     };
     console.log('[Auth] refresh response', {
       origin: req.headers.origin,
