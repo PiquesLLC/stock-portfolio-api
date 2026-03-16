@@ -4,10 +4,10 @@ import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
 import { yahooGet } from '../utils/yahoo-http';
 import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
-import { getPolygonSnapshotVolumes, getPolygonMarketCaps } from '../utils/polygon';
+import { getPolygonSnapshotVolumes } from '../utils/polygon';
 
-// 1D cache: 20s for live polling, longer periods: 5min (historical data doesn't change fast)
-const heatmapCache = new NodeCache({ stdTTL: 20 });
+// 1D cache: 120s, longer periods: 5min (historical data doesn't change fast)
+const heatmapCache = new NodeCache({ stdTTL: 120 });
 const yahooFundamentalsCache = new NodeCache({ stdTTL: 6 * 60 * 60 }); // 6h
 
 export type HeatmapPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
@@ -121,7 +121,7 @@ async function fetchYahooFundamentalsBatch(tickers: string[]): Promise<Map<strin
   const result = new Map<string, { name: string; marketCapB: number }>();
   if (tickers.length === 0) return result;
 
-  const BATCH_SIZE = 20;
+  const BATCH_SIZE = 30;
   for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
     const batch = tickers.slice(i, i + BATCH_SIZE);
     const settled = await Promise.allSettled(batch.map(t => fetchYahooFundamentals(t)));
@@ -146,8 +146,8 @@ async function fetchPeriodChanges(
 ): Promise<Map<string, number>> {
   const changes = new Map<string, number>();
 
-  // Process in batches of 20 concurrent requests
-  const BATCH_SIZE = 20;
+  // Process in batches of 50 concurrent requests (Polygon paid plan allows high concurrency)
+  const BATCH_SIZE = 50;
   for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
     const batch = tickers.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
@@ -191,43 +191,53 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   }
   const uniqueTickers = Array.from(new Set(allTickers));
 
-  // Always fetch current prices + fundamentals + screener cache
-  const [{ quotes }, fundamentals, polygonVolumes, polygonMarketCaps, screenerRows] = await Promise.all([
+  // ── Phase 1: Fire ALL slow fetches in parallel ──
+  // Key optimization: run prices, volumes, DB queries, AND period changes concurrently.
+  // Removed getPolygonMarketCaps (328 individual API calls, ~20s cold) — fundamentalsCache
+  // and screenerCache already have market cap for almost all S&P 500 tickers.
+  //
+  // For 1D: skip both period candle fetch and week changes on cold start.
+  //   - Polygon snapshot gives us changePercent for every ticker (paid plan).
+  //   - 2-day candle fallback is only for edge case after midnight; not worth 10s penalty.
+  //   - weekChangePercent is tooltip-only data; fine to show 0 on first load.
+  // For non-1D: period changes are essential (the main changePercent), run in parallel.
+  const candleDays = PERIOD_DAYS[period];
+  const needsPeriodChanges = period !== '1D' && candleDays > 0;
+  const needsWeekChanges = period !== '1D';
+
+  const parallelFetches: [
+    Promise<{ quotes: Map<string, any> }>,
+    Promise<any[]>,
+    Promise<Map<string, number>>,
+    Promise<any[]>,
+    Promise<Map<string, number> | null>,
+    Promise<Map<string, number> | null>,
+  ] = [
     fetchPrices(uniqueTickers),
     prisma.fundamentalsCache.findMany({
       where: { ticker: { in: uniqueTickers } },
       select: { ticker: true, overviewJson: true },
     }),
     getPolygonSnapshotVolumes(uniqueTickers),
-    getPolygonMarketCaps(uniqueTickers),
     prisma.screenerCache.findMany({
       where: { ticker: { in: uniqueTickers } },
     }),
-  ]);
+    // Period changes — only for non-1D (1D uses live quote changePercent)
+    needsPeriodChanges ? fetchPeriodChanges(uniqueTickers, candleDays) : Promise.resolve(null),
+    // Week changes — only for non-1D (tooltip-only for 1D, skip on cold start)
+    needsWeekChanges ? fetchPeriodChanges(uniqueTickers, 7) : Promise.resolve(null),
+  ];
+
+  const [{ quotes }, fundamentals, polygonVolumes, screenerRows, periodChanges, weekChanges] =
+    await Promise.all(parallelFetches);
 
   // Build screener lookup map
-  const screenerMap = new Map(screenerRows.map(r => [r.ticker, r]));
+  const screenerMap = new Map(screenerRows.map((r: any) => [r.ticker, r]));
 
   // Best-effort ADV refresh (non-blocking). Heatmap response uses currently cached values.
   void queueAdvFetches(uniqueTickers).catch(() => {
     // Ignore ADV queue failures; avgVolume defaults to 0.
   });
-
-  // Fetch historical change % from candle data for all periods.
-  // For 1D: use 2-day lookback as fallback when live quotes show 0%
-  // (Finnhub resets dp to 0 after midnight; Polygon free tier hardcodes 0%).
-  // Also fetch 7-day changes for weekChangePercent (in parallel).
-  let periodChanges: Map<string, number> | null = null;
-  let weekChanges: Map<string, number> | null = null;
-  const candleDays = period === '1D' ? 2 : PERIOD_DAYS[period];
-  const weekFetch = fetchPeriodChanges(uniqueTickers, 7);
-  if (candleDays > 0) {
-    const [pc, wc] = await Promise.all([fetchPeriodChanges(uniqueTickers, candleDays), weekFetch]);
-    periodChanges = pc;
-    weekChanges = wc;
-  } else {
-    weekChanges = await weekFetch;
-  }
 
   const fundamentalsMap = new Map<string, any>();
   for (const row of fundamentals) {
@@ -239,11 +249,18 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     }
   }
 
-  // Yahoo fallback for missing fundamentals (name + market cap)
+  // Yahoo fallback for missing fundamentals — fire-and-forget on cold start.
+  // Name/market cap will be filled on next cached hit (120s later).
+  // Only block on Yahoo if we have very few missing tickers (< 30).
   const missingTickers = uniqueTickers.filter(t => !fundamentalsMap.has(t));
-  const yahooFallbacks = await fetchYahooFundamentalsBatch(missingTickers);
-  for (const [ticker, data] of yahooFallbacks) {
-    fundamentalsMap.set(ticker, { companyName: data.name, marketCapB: data.marketCapB });
+  if (missingTickers.length > 0 && missingTickers.length < 30) {
+    const yahooFallbacks = await fetchYahooFundamentalsBatch(missingTickers);
+    for (const [ticker, data] of yahooFallbacks) {
+      fundamentalsMap.set(ticker, { companyName: data.name, marketCapB: data.marketCapB });
+    }
+  } else if (missingTickers.length >= 30) {
+    // Too many missing — fetch in background without blocking response
+    void fetchYahooFundamentalsBatch(missingTickers).catch(() => {});
   }
 
   const sectors: HeatmapSector[] = Object.entries(subSectorGroups).map(([sectorName, subSectors]) => {
@@ -262,7 +279,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const quote = quotes.get(upper);
         const overview = fundamentalsMap.get(upper);
         const marketCapFromOverview = resolveMarketCapB(overview);
-        const marketCapB = marketCapFromOverview ?? polygonMarketCaps.get(upper) ?? 1;
+        const marketCapB = marketCapFromOverview ?? 1;
 
         // For 1D: prefer live quote changePercent when non-zero, fall back to candle data.
         // After midnight or with Polygon free tier, live changePercent is 0 — candle data is reliable.
