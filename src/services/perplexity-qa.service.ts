@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { callPerplexity } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 export interface StockQAResponse {
@@ -39,7 +39,7 @@ export async function askStockQuestion(
   if (cached) return cached;
 
   try {
-    const resp = await callPerplexity([
+    const resp = await callAI([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `Stock: ${upperTicker}\n\nQuestion: ${question}` },
     ], { timeout: 30000, feature: 'stock-qa', userId, ticker: upperTicker });

@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
+import { parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 import { getHoldingPeriodReturns } from './period-returns.service';
@@ -305,7 +306,7 @@ export async function getPortfolioBriefing(
   };
 
   try {
-    const resp = await callPerplexity([
+    const resp = await callAI([
       { role: 'system', content: getSystemPrompt(normalizedPeriod) },
       { role: 'user', content: userMessage },
     ], { timeout: 30000, feature: 'portfolio-briefing', userId });
@@ -383,7 +384,7 @@ export async function explainBriefingSection(title: string, body: string, userId
   const cached = explainCache.get<BriefingExplainResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
-  const resp = await callPerplexity([
+  const resp = await callAI([
     { role: 'system', content: EXPLAIN_SYSTEM_PROMPT },
     { role: 'user', content: `Briefing section: "${title}"\n\nSummary: ${body}\n\nPlease provide the full detailed context and explanation.` },
   ], { timeout: 30000, feature: 'briefing-explain', userId });

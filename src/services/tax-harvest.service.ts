@@ -8,7 +8,7 @@ import prisma from '../utils/prisma';
 import { getHoldings } from './portfolio.service';
 import { fetchPrices } from './market.service';
 import { getSector } from '../utils/sectors';
-import { callPerplexity } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
 
 const cache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — tax situation only changes on trades
 
@@ -160,7 +160,7 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
         `${c.ticker} (${c.sector}): $${Math.abs(c.unrealizedLoss).toFixed(0)} loss (${c.unrealizedLossPct.toFixed(1)}%), ${c.holdingPeriod}, held ${c.daysHeld ?? '?'} days`
       ).join('\n');
 
-      const result = await callPerplexity(
+      const result = await callAI(
         [
           { role: 'system', content: 'You are a tax planning advisor. Provide brief, practical tax-loss harvesting recommendations. Focus on wash sale rules, sector diversification impact, and whether now is a good time to harvest each position. Respond in 2-3 concise paragraphs.' },
           { role: 'user', content: `Analyze these unrealized losses for tax-loss harvesting opportunities:\n\n${candidateSummary}\n\nTotal unrealized gains: $${totalUnrealizedGain.toFixed(0)}\nTotal unrealized losses: $${totalUnrealizedLoss.toFixed(0)}\nNet: $${(totalUnrealizedGain - totalUnrealizedLoss).toFixed(0)}` },

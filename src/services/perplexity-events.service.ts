@@ -1,6 +1,7 @@
 import NodeCache from 'node-cache';
 import { AxiosError } from 'axios';
-import { callPerplexity, normalizeSentiment, normalizeType, parsePerplexityJson } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
+import { normalizeSentiment, normalizeType, parsePerplexityJson } from '../utils/perplexity';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache AI events for 30 minutes per ticker+days combo
@@ -45,7 +46,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     : `Find up to ${eventCount} earnings reports, analyst rating changes (upgrades/downgrades/price targets), and dividend events for ${upper} from ${startDate} to ${endDate} (today). IMPORTANT: Only include events that actually occurred or were announced AFTER ${startDate}. Do NOT include any events from before ${startDate}. Spread events across the entire date range, not just the most recent months. Today's date is ${endDate}. Include analyst firm names for rating changes, EPS beat/miss amounts for earnings, and dollar amounts for dividends.`;
 
   try {
-    const resp = await callPerplexity([
+    const resp = await callAI([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
     ], { feature: 'ai-events', userId, ticker: upper });

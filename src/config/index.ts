@@ -83,6 +83,9 @@ export const config = {
   // Perplexity API
   perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
 
+  // AI provider toggle: 'perplexity' | 'gemini' — controls which provider briefing/daily-report/behavior/events/qa use
+  aiProvider: (process.env.AI_PROVIDER || 'perplexity') as 'perplexity' | 'gemini',
+
   // MFA
   mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM
   resendApiKey: process.env.RESEND_API_KEY || '',

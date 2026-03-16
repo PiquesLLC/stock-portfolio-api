@@ -1,6 +1,7 @@
 ﻿import NodeCache from 'node-cache';
 import prisma from '../utils/prisma';
-import { callPerplexity, extractJson } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
+import { extractJson } from '../utils/perplexity';
 import { matchPersona, StrategyPersona } from '../data/strategy-personas';
 import { getPortfolio } from './portfolio.service';
 
@@ -372,7 +373,7 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
   console.log(`[Nala AI] Question: "${question}" â†’ Persona: ${persona?.name || 'General Research'}`);
 
   try {
-    const resp = await callPerplexity([
+    const resp = await callAI([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserMessage(question, persona) },
     ], { timeout: 60000, feature: 'nala-research', userId });
