@@ -360,10 +360,20 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     const elapsedSoFar = Date.now() - startTime;
     const perplexityTimeout = Math.max(20000, HARD_DEADLINE_MS - elapsedSoFar - 500);
 
-    const resp = await callPerplexity([
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userMessage },
-    ], { timeout: perplexityTimeout, feature: 'daily-report', userId, model: 'sonar' });
+    let resp;
+    try {
+      resp = await callPerplexity([
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ], { timeout: perplexityTimeout, feature: 'daily-report', userId });
+    } catch (perplexityError: unknown) {
+      const msg = perplexityError instanceof Error ? perplexityError.message : String(perplexityError);
+      if (strictFailures) {
+        throw new JobExecutionError(`[Daily Report] Perplexity call failed: ${msg}`, classifyDailyReportError(perplexityError));
+      }
+      console.warn(`[Daily Report] Perplexity call failed (${msg}), using data-only fallback`);
+      return fallbackReport;
+    }
 
     if (!resp || !resp.content) {
       return fallbackReport;
