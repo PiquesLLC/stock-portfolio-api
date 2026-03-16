@@ -1,5 +1,4 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
 import { getEarningsSummary, EarningsSummaryItem } from './earnings-summary.service';
 import { getEarningsTrack, EarningsTrackResult } from './earnings-track.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -37,13 +36,56 @@ export interface EarningsPreviewResponse {
   partial: boolean;
 }
 
-const SYSTEM_PROMPT = `Return ONLY valid JSON:
-{
-  "whatToWatch": "2-3 sentences on what matters for this earnings report",
-  "analystSentiment": "short neutral sentence on sentiment trend",
-  "catalysts": ["1 short catalyst", "1 short catalyst"],
-  "riskFactors": ["1 short risk", "1 short risk"]
-}`;
+// Build preview from data — no AI calls needed
+function buildDataPreview(item: EarningsPreviewItem): AiPreviewPayload {
+  const { ticker, beatRate, avgSurprisePct, currentStreak, consistencyScore, estimatedEPS, recentQuarters } = item;
+
+  // What to watch
+  const streakText = currentStreak.type === 'beat' && currentStreak.count >= 2
+    ? `${ticker} has beaten estimates ${currentStreak.count} quarters in a row.`
+    : currentStreak.type === 'miss' && currentStreak.count >= 2
+    ? `${ticker} has missed estimates ${currentStreak.count} consecutive quarters.`
+    : '';
+
+  const epsText = estimatedEPS != null
+    ? `Analysts expect EPS of $${estimatedEPS.toFixed(2)}.`
+    : '';
+
+  const beatText = beatRate > 0
+    ? `Historical beat rate is ${beatRate}% with an average surprise of ${avgSurprisePct >= 0 ? '+' : ''}${avgSurprisePct.toFixed(1)}%.`
+    : '';
+
+  const whatToWatch = [streakText, epsText, beatText].filter(Boolean).join(' ')
+    || `${ticker} reports earnings soon. Watch for revenue growth and forward guidance.`;
+
+  // Analyst sentiment
+  const analystSentiment = consistencyScore >= 75
+    ? `${ticker} has strong earnings consistency (${consistencyScore}/100), suggesting predictable results.`
+    : consistencyScore >= 50
+    ? `${ticker} shows moderate earnings consistency (${consistencyScore}/100).`
+    : `${ticker} has volatile earnings history (${consistencyScore}/100) — expect wider outcome range.`;
+
+  // Catalysts
+  const catalysts: string[] = [];
+  if (beatRate >= 75) catalysts.push(`Strong beat rate (${beatRate}%) suggests upside potential`);
+  if (currentStreak.type === 'beat' && currentStreak.count >= 3) catalysts.push(`${currentStreak.count}-quarter beat streak could continue`);
+  if (avgSurprisePct > 5) catalysts.push(`Historically large positive surprises (avg +${avgSurprisePct.toFixed(1)}%)`);
+  if (recentQuarters.length > 0) {
+    const lastQ = recentQuarters[0];
+    if (lastQ.surprisePct != null && lastQ.surprisePct > 5) catalysts.push(`Last quarter surprised by +${lastQ.surprisePct.toFixed(1)}%`);
+  }
+  if (catalysts.length === 0) catalysts.push('Watch for forward guidance and revenue growth commentary');
+
+  // Risk factors
+  const riskFactors: string[] = [];
+  if (beatRate < 50) riskFactors.push(`Below-average beat rate (${beatRate}%) increases miss risk`);
+  if (currentStreak.type === 'miss' && currentStreak.count >= 2) riskFactors.push(`${currentStreak.count}-quarter miss streak is concerning`);
+  if (consistencyScore < 40) riskFactors.push(`Low consistency score (${consistencyScore}/100) means unpredictable results`);
+  if (avgSurprisePct < -2) riskFactors.push(`Historically negative surprises (avg ${avgSurprisePct.toFixed(1)}%)`);
+  if (riskFactors.length === 0) riskFactors.push('Post-earnings volatility could impact short-term price action');
+
+  return { whatToWatch, analystSentiment, catalysts: catalysts.slice(0, 3), riskFactors: riskFactors.slice(0, 3) };
+}
 
 function buildBaseItem(summary: EarningsSummaryItem, track: EarningsTrackResult): EarningsPreviewItem {
   return {
@@ -62,91 +104,30 @@ function buildBaseItem(summary: EarningsSummaryItem, track: EarningsTrackResult)
   };
 }
 
-async function getAiPreview(
-  item: EarningsPreviewItem,
-  userId: string
-): Promise<{ preview: AiPreviewPayload | null; citations: string[] }> {
-  const cacheKey = `earnings-preview:${item.ticker}`;
-  const cached = previewCache.get<{ preview: AiPreviewPayload | null; citations: string[] }>(cacheKey);
-  if (cached) return cached;
-
-  const recent = item.recentQuarters.slice(0, 4)
-    .map(q => `${q.reportedDate}: est ${q.estimatedEPS ?? 'n/a'}, rep ${q.reportedEPS ?? 'n/a'}, surprise% ${q.surprisePct ?? 'n/a'}`)
-    .join('\n');
-
-  const userMessage =
-    `Feature: earnings-preview\n` +
-    `Ticker: ${item.ticker}\n` +
-    `Report date: ${item.reportDate} (${item.daysUntil} days)\n` +
-    `Estimated EPS: ${item.estimatedEPS ?? 'n/a'}\n` +
-    `Beat rate: ${item.beatRate}%\n` +
-    `Average surprise: ${item.avgSurprisePct}%\n` +
-    `Current streak: ${item.currentStreak.type} x${item.currentStreak.count}\n` +
-    `Consistency score: ${item.consistencyScore}/100\n` +
-    `Recent quarters:\n${recent}\n\n` +
-    `What should investors watch for this earnings report?`;
-
-  const resp = await callPerplexity(
-    [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userMessage },
-    ],
-    { timeout: 45000, feature: 'earnings-preview', userId, ticker: item.ticker }
-  );
-
-  if (!resp || !resp.content) {
-    const fallback = { preview: null, citations: [] as string[] };
-    previewCache.set(cacheKey, fallback, 300); // 5 min TTL for failures
-    return fallback;
-  }
-
-  const parseResult = parsePerplexityJson<Partial<AiPreviewPayload>>(resp.content);
-  if (parseResult.ok) {
-    const parsed = parseResult.data;
-    const normalized: AiPreviewPayload = {
-      whatToWatch: String(parsed.whatToWatch || '').slice(0, 400),
-      analystSentiment: String(parsed.analystSentiment || '').slice(0, 250),
-      catalysts: Array.isArray(parsed.catalysts) ? parsed.catalysts.map(v => String(v).slice(0, 160)).slice(0, 5) : [],
-      riskFactors: Array.isArray(parsed.riskFactors) ? parsed.riskFactors.map(v => String(v).slice(0, 160)).slice(0, 5) : [],
-    };
-    const payload = { preview: normalized, citations: resp.citations || [] };
-    previewCache.set(cacheKey, payload);
-    return payload;
-  } else {
-    console.warn(`[Earnings Preview] parse_failed ticker=${item.ticker} reason=${parseResult.reason}`);
-    const fallback = { preview: null, citations: [] as string[] };
-    previewCache.set(cacheKey, fallback, 300); // 5 min TTL for failures
-    return fallback;
-  }
-}
-
 export async function getEarningsPreviews(userId: string, portfolioId?: string): Promise<EarningsPreviewResponse> {
   await ensureEmailVerifiedForAi(userId);
+
+  const cacheKey = `earnings-previews:${userId}:${portfolioId ?? 'default'}`;
+  const cached = previewCache.get<EarningsPreviewResponse>(cacheKey);
+  if (cached) return cached;
+
   const summary = await getEarningsSummary(userId, portfolioId);
   const upcoming = summary.results.filter(item => item.daysUntil >= 0 && item.daysUntil <= UPCOMING_WINDOW_DAYS);
   if (upcoming.length === 0) return { results: [], partial: summary.partial };
 
-  // Process in batches of 3 to limit concurrent Perplexity calls
-  const BATCH_SIZE = 3;
-  const results: PromiseSettledResult<EarningsPreviewItem>[] = [];
-  for (let i = 0; i < upcoming.length; i += BATCH_SIZE) {
-    const batch = upcoming.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.allSettled(batch.map(async (item) => {
+  // Fetch all earnings tracks in parallel — no sequential batching needed without AI calls
+  const trackResults = await Promise.allSettled(
+    upcoming.map(async (item) => {
       const track = await getEarningsTrack(item.ticker);
       const base = buildBaseItem(item, track);
-      try {
-        const ai = await getAiPreview(base, userId);
-        return { ...base, preview: ai.preview, citations: ai.citations, generatedAt: new Date().toISOString() };
-      } catch {
-        return base;
-      }
-    }));
-    results.push(...batchResults);
-  }
+      const preview = buildDataPreview(base);
+      return { ...base, preview, generatedAt: new Date().toISOString() };
+    })
+  );
 
   const previews: EarningsPreviewItem[] = [];
   let partial = summary.partial;
-  for (const result of results) {
+  for (const result of trackResults) {
     if (result.status === 'fulfilled') {
       previews.push(result.value);
     } else {
@@ -159,5 +140,7 @@ export async function getEarningsPreviews(userId: string, portfolioId?: string):
     return a.reportDate.localeCompare(b.reportDate);
   });
 
-  return { results: previews, partial };
+  const response = { results: previews, partial };
+  previewCache.set(cacheKey, response);
+  return response;
 }
