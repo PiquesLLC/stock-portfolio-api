@@ -596,6 +596,32 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
       }
 
+      case 'account.updated': {
+        const account = event.data.object as Stripe.Account;
+        if (account.charges_enabled && account.payouts_enabled && account.id) {
+          const creator = await prisma.creator.findFirst({
+            where: { stripeConnectId: account.id },
+            select: { userId: true, stripeConnectOnboarded: true },
+          });
+          if (creator && !creator.stripeConnectOnboarded) {
+            await prisma.creator.update({
+              where: { userId: creator.userId },
+              data: { stripeConnectOnboarded: true },
+            });
+            logCreatorBilling({
+              outcome: 'processed',
+              eventId: event.id,
+              eventType: event.type,
+              stripeConnectId: account.id,
+              creatorUserId: creator.userId,
+              action: 'onboarded',
+            });
+          }
+        }
+        bumpCounter('processed');
+        return;
+      }
+
       case 'payout.paid': {
         const payout = event.data.object as Stripe.Payout;
         await prisma.creatorPayout.updateMany({
@@ -693,6 +719,38 @@ export async function createStripeConnectOnboardingLink(userId: string): Promise
     type: 'account_onboarding',
   });
   return link.url;
+}
+
+/**
+ * Fallback: checks Stripe account status directly and updates stripeConnectOnboarded
+ * if charges_enabled && payouts_enabled. Used when the webhook hasn't arrived yet
+ * (e.g., on Connect return redirect or profile fetch).
+ * Returns true if the creator is now onboarded.
+ */
+export async function checkAndUpdateStripeConnectStatus(userId: string): Promise<boolean> {
+  const creator = await prisma.creator.findUnique({
+    where: { userId },
+    select: { stripeConnectId: true, stripeConnectOnboarded: true },
+  });
+  if (!creator) return false;
+  if (creator.stripeConnectOnboarded) return true;
+  if (!creator.stripeConnectId) return false;
+
+  try {
+    const stripe = getStripeClient();
+    const account = await stripe.accounts.retrieve(creator.stripeConnectId);
+    if (account.charges_enabled && account.payouts_enabled) {
+      await prisma.creator.update({
+        where: { userId },
+        data: { stripeConnectOnboarded: true },
+      });
+      console.info(`[CreatorBilling] Fallback: marked creator ${userId} as onboarded (stripeConnectId=${creator.stripeConnectId})`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`[CreatorBilling] Fallback Stripe account check failed for ${userId}:`, error instanceof Error ? error.message : error);
+  }
+  return false;
 }
 
 function computeReservedBalanceCents(entries: Array<{ type: string; amountCents: number; createdAt: Date }>): number {
