@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, parsePerplexityJson } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
+import { parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { getUserActivity } from './activity.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -137,7 +138,7 @@ export async function getBehaviorInsights(userId: string, portfolioId?: string):
   };
 
   try {
-    const resp = await callPerplexity([
+    const resp = await callAI([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userMessage },
     ], { timeout: 60000, feature: 'behavior-insights', userId });

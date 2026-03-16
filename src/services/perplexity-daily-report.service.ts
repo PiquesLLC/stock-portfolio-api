@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
-import { callPerplexity, extractJson, parsePerplexityJson } from '../utils/perplexity';
+import { callAI } from '../utils/ai-provider';
+import { extractJson, parsePerplexityJson } from '../utils/perplexity';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
@@ -362,7 +363,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 
     let resp;
     try {
-      resp = await callPerplexity([
+      resp = await callAI([
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
       ], { timeout: perplexityTimeout, feature: 'daily-report', userId });
