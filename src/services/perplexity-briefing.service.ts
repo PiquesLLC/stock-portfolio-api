@@ -22,6 +22,7 @@ export interface PortfolioBriefingResponse {
   headline: string;
   sections: BriefingSection[];
   holdingCount: number;
+  holdingReturns?: Record<string, number>;
   cached: boolean;
 }
 
@@ -158,6 +159,7 @@ export async function getPortfolioBriefing(
       headline: 'Unable to load portfolio data.',
       sections: [],
       holdingCount: 0,
+      holdingReturns: {},
       cached: false,
     };
   }
@@ -169,16 +171,25 @@ export async function getPortfolioBriefing(
       headline: periodConfig.emptyHeadline,
       sections: [],
       holdingCount: 0,
+      holdingReturns: {},
       cached: false,
     };
   }
 
-  const holdingPeriodReturns = periodConfig.returnsPeriod
-    ? await getHoldingPeriodReturns(
-      portfolio.holdings.map(holding => holding.ticker),
-      periodConfig.returnsPeriod,
-    )
-    : new Map<string, number>();
+  const tickers = portfolio.holdings.map(holding => holding.ticker);
+  let holdingPeriodReturns = new Map<string, number>();
+  if (periodConfig.returnsPeriod) {
+    try {
+      holdingPeriodReturns = await getHoldingPeriodReturns(tickers, periodConfig.returnsPeriod);
+    } catch (error) {
+      console.error('[Perplexity Briefing] Failed to load holding period returns:', error);
+    }
+  } else {
+    holdingPeriodReturns = new Map(
+      portfolio.holdings.map(holding => [holding.ticker, holding.dayChangePercent ?? 0]),
+    );
+  }
+  const holdingReturns = Object.fromEntries(holdingPeriodReturns);
 
   const getHoldingMetric = (holding: typeof portfolio.holdings[number]) =>
     periodConfig.useDayChange
@@ -288,6 +299,7 @@ export async function getPortfolioBriefing(
         : `${periodConfig.headline} at $${Math.round(equity).toLocaleString()}.`,
       sections,
       holdingCount: portfolio.holdings.length,
+      holdingReturns,
       cached: false,
     };
   };
@@ -320,6 +332,7 @@ export async function getPortfolioBriefing(
         sentiment: ['positive', 'neutral', 'negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
       })).filter((s: BriefingSection) => s.title.length > 0 && s.body.length > 0),
       holdingCount: portfolio.holdings.length,
+      holdingReturns,
       cached: false,
     };
 
