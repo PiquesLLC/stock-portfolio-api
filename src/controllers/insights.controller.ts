@@ -17,6 +17,8 @@ import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership'
 
 const VALID_WINDOWS = ['1d', '5d', '1m'] as const;
 type AttributionWindow = typeof VALID_WINDOWS[number];
+const VALID_BRIEFING_PERIODS = ['daily', 'weekly', 'monthly', 'ytd', '1y'] as const;
+type BriefingPeriod = typeof VALID_BRIEFING_PERIODS[number];
 const AI_PREMIUM_ENABLED = process.env.AI_PREMIUM_ENABLED === 'true';
 
 function requirePremium(res: Response): boolean {
@@ -154,8 +156,13 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
       return;
     }
     const portfolioId = req.query.portfolioId as string | undefined;
+    const periodParam = req.query.period as string | undefined;
+    const period: BriefingPeriod =
+      periodParam && VALID_BRIEFING_PERIODS.includes(periodParam as BriefingPeriod)
+        ? periodParam as BriefingPeriod
+        : 'daily';
     await validatePortfolioOwnership(portfolioId, req.user.userId);
-    const briefing = await getPortfolioBriefing(req.user.userId, portfolioId);
+    const briefing = await getPortfolioBriefing(req.user.userId, portfolioId, period);
     res.json(briefing);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {
