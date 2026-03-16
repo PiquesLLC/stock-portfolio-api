@@ -458,6 +458,7 @@ model Goal {
   userId              String
   name                String
   targetValue         Float
+  currentValue        Float?
   monthlyContribution Float     @default(0)
   deadline            DateTime?
   createdAt           DateTime  @default(now())

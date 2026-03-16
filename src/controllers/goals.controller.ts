@@ -63,12 +63,13 @@ export async function createGoalHandler(req: AuthRequest, res: Response): Promis
       return;
     }
 
-    const { name, targetValue, monthlyContribution, deadline } = parsed.data;
+    const { name, targetValue, monthlyContribution, deadline, currentValue } = parsed.data;
     const goal = await createGoal({
       name,
       targetValue,
       monthlyContribution,
       deadline,
+      currentValue,
     }, req.user!.userId);
 
     res.status(201).json(goal);
@@ -91,12 +92,13 @@ export async function updateGoalHandler(req: AuthRequest, res: Response): Promis
     }
 
     const { id } = parsedParams.data;
-    const { name, targetValue, monthlyContribution, deadline } = parsedBody.data;
+    const { name, targetValue, monthlyContribution, deadline, currentValue } = parsedBody.data;
     const goal = await updateGoal(id, {
       name,
       targetValue,
       monthlyContribution,
       deadline,
+      currentValue,
     }, req.user!.userId);
 
     res.json(goal);

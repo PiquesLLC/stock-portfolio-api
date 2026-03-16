@@ -590,6 +590,7 @@ export interface Goal {
   id: string;
   name: string;
   targetValue: number;
+  currentValue: number | null;
   monthlyContribution: number;
   deadline: Date | null;
   createdAt: Date;
@@ -599,6 +600,7 @@ export interface Goal {
 export interface GoalInput {
   name: string;
   targetValue: number;
+  currentValue?: number | null;
   monthlyContribution?: number;
   deadline?: string | null;
 }

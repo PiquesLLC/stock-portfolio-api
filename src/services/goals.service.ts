@@ -35,6 +35,7 @@ export async function createGoal(input: GoalInput, userId: string): Promise<Goal
       userId,
       name: input.name,
       targetValue: input.targetValue,
+      currentValue: input.currentValue ?? null,
       monthlyContribution: input.monthlyContribution ?? 0,
       deadline: input.deadline ? new Date(input.deadline) : null,
     },
@@ -61,6 +62,9 @@ export async function updateGoal(id: string, input: Partial<GoalInput>, userId: 
   }
   if (input.targetValue !== undefined) {
     updateData.targetValue = input.targetValue;
+  }
+  if (input.currentValue !== undefined) {
+    updateData.currentValue = input.currentValue;
   }
   if (input.monthlyContribution !== undefined) {
     updateData.monthlyContribution = input.monthlyContribution;
@@ -216,9 +220,10 @@ export async function getAllGoalsWithProgress(userId: string, portfolioId?: stri
   const currentValue = portfolio.netEquity;
 
   return goals.map((goal) => {
-    const progress = Math.min(100, (currentValue / goal.targetValue) * 100);
+    const goalCurrentValue = goal.currentValue != null ? goal.currentValue : currentValue;
+    const progress = Math.min(100, (goalCurrentValue / goal.targetValue) * 100);
     const timeToGoal = calculateTimeToGoalRange(
-      currentValue,
+      goalCurrentValue,
       goal.targetValue,
       goal.monthlyContribution
     );
@@ -226,7 +231,7 @@ export async function getAllGoalsWithProgress(userId: string, portfolioId?: stri
     return {
       ...goal,
       currentProgress: Math.round(progress * 100) / 100,
-      currentPortfolioValue: currentValue,
+      currentPortfolioValue: goalCurrentValue,
       timeToGoal,
       projectedDate: {
         optimistic: monthsToDate(timeToGoal.optimistic),
@@ -247,9 +252,10 @@ export async function getGoalWithProgress(id: string, userId: string, portfolioI
   const portfolio = await getPortfolio(userId, { portfolioId });
   const currentValue = portfolio.netEquity;
 
-  const progress = Math.min(100, (currentValue / goal.targetValue) * 100);
+  const goalCurrentValue = goal.currentValue != null ? goal.currentValue : currentValue;
+  const progress = Math.min(100, (goalCurrentValue / goal.targetValue) * 100);
   const timeToGoal = calculateTimeToGoalRange(
-    currentValue,
+    goalCurrentValue,
     goal.targetValue,
     goal.monthlyContribution
   );
@@ -257,7 +263,7 @@ export async function getGoalWithProgress(id: string, userId: string, portfolioI
   return {
     ...goal,
     currentProgress: Math.round(progress * 100) / 100,
-    currentPortfolioValue: currentValue,
+    currentPortfolioValue: goalCurrentValue,
     timeToGoal,
     projectedDate: {
       optimistic: monthsToDate(timeToGoal.optimistic),
