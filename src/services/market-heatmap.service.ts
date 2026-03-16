@@ -363,8 +363,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     generated: Date.now(),
   };
 
-  // Cache: 1D=20s, longer periods=300s
-  const ttl = period === '1D' ? 20 : 300;
+  // Cache: 1D=120s (prices don't change meaningfully in 2min), longer periods=300s
+  const ttl = period === '1D' ? 120 : 300;
   heatmapCache.set(cacheKey, response, ttl);
   return response;
 }
