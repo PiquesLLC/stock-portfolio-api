@@ -1,6 +1,6 @@
 #!/bin/bash
 # Railway build script: builds the API and the UI client
-# UI build rev: 64
+# UI build rev: 65
 set -e
 
 echo "=== Building API ==="
