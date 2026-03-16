@@ -48,8 +48,8 @@ let cacheUpdatedAt: number | null = null;
 let refreshInProgress = false;
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-const BATCH_SIZE = 80;
-const BATCH_DELAY = 2000; // 2s between batches
+const BATCH_SIZE = 100;
+const BATCH_DELAY = 500; // 500ms between batches
 
 const PERIOD_DAYS: Record<HeatmapPeriod, number> = {
   '1D': 0, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365,
@@ -180,6 +180,17 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
   const cacheKey = `themes-${period}`;
   const cached = periodChangesCache.get<HeatmapResponse>(cacheKey);
   if (cached) return cached;
+
+  // If quotes cache is empty (cold start / post-deploy), wait for background refresh
+  if (quotesCache.size === 0 && !isTestEnv) {
+    console.log('[ThemesHeatmap] Quotes cache empty, waiting for background refresh...');
+    const maxWait = 45000; // 45s max
+    const start = Date.now();
+    while (quotesCache.size === 0 && Date.now() - start < maxWait) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+    console.log(`[ThemesHeatmap] Cache warmed: ${quotesCache.size} quotes in ${Date.now() - start}ms`);
+  }
 
   // For non-1D periods, fetch historical changes
   let periodChangeMap: Map<string, number> | null = null;
