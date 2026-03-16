@@ -1,4 +1,5 @@
 import prisma from '../utils/prisma';
+import { checkAndUpdateStripeConnectStatus } from './creator-billing.service';
 
 export type CreatorAccessLevel = 'public' | 'follower' | 'paid';
 export type CreatorSection =
@@ -188,6 +189,13 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
   // Hide non-active profiles from external viewers; let creators see their own
   if (creator.status !== 'active' && viewerId !== creatorUserId) return null;
 
+  // Fallback: if not yet marked onboarded but has a stripeConnectId, check Stripe directly
+  // Only do this for self-view to avoid unnecessary Stripe API calls for external viewers
+  let stripeConnectOnboarded = creator.stripeConnectOnboarded;
+  if (!stripeConnectOnboarded && creator.stripeConnectId && viewerId === creatorUserId) {
+    stripeConnectOnboarded = await checkAndUpdateStripeConnectStatus(creatorUserId);
+  }
+
   const [entitlement, subscriberCount] = await Promise.all([
     getEntitlement(creatorUserId, viewerId),
     prisma.creatorSubscription.count({
@@ -210,7 +218,7 @@ export async function getCreatorProfile(creatorUserId: string, viewerId?: string
     pricingCents: creator.pricingCents,
     trialDays: 0,
     pitch: creator.pitch,
-    stripeConnectOnboarded: creator.stripeConnectOnboarded,
+    stripeConnectOnboarded,
     complianceAcceptedAt: creator.complianceAcceptedAt?.toISOString() ?? null,
     createdAt: creator.createdAt.toISOString(),
     visibility: creator.visibility ? {
@@ -570,6 +578,12 @@ export async function getCreatorSetupStatus(userId: string): Promise<CreatorSetu
     return { hasApplied: false, hasSetPrice: false, hasConnectedStripe: false, hasConfiguredVisibility: false, status: null };
   }
 
+  // Fallback: if not yet marked onboarded but has a stripeConnectId, check Stripe directly
+  let hasConnectedStripe = creator.stripeConnectOnboarded;
+  if (!hasConnectedStripe && creator.stripeConnectId) {
+    hasConnectedStripe = await checkAndUpdateStripeConnectStatus(userId);
+  }
+
   const v = creator.visibility;
   const hasConfiguredVisibility = v != null && (
     v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || !v.showHoldings || !v.showSectors
@@ -578,7 +592,7 @@ export async function getCreatorSetupStatus(userId: string): Promise<CreatorSetu
   return {
     hasApplied: true,
     hasSetPrice: creator.pricingCents !== DEFAULT_PRICING_CENTS,
-    hasConnectedStripe: creator.stripeConnectOnboarded,
+    hasConnectedStripe,
     hasConfiguredVisibility,
     status: creator.status,
   };

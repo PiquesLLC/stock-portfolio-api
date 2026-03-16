@@ -145,6 +145,11 @@ function fixtureFactory(seed = '1') {
         type: 'customer.subscription.deleted',
         data: { object: { id: stripeSubscriptionId } },
       }),
+      accountUpdated: (eventId = `evt_acct_updated_${seed}`, accountId = 'acct_connect_123', chargesEnabled = true, payoutsEnabled = true) => ({
+        id: eventId,
+        type: 'account.updated',
+        data: { object: { id: accountId, charges_enabled: chargesEnabled, payouts_enabled: payoutsEnabled } },
+      }),
     },
   };
 }
@@ -180,6 +185,7 @@ function ensureCreatorMockShape(): void {
 
   p.creator ??= {};
   p.creator.findUnique ??= vi.fn();
+  p.creator.findFirst ??= vi.fn();
   p.creator.update ??= vi.fn();
 
   p.user ??= {};
@@ -675,5 +681,61 @@ describe('creator billing webhooks', () => {
     // checkout arrives late — creates subscription
     await handleCreatorWebhookEvent(fx.event.checkoutCompleted('evt_checkout_after'));
     expect((prismaMock as any).creatorSubscription.upsert).toHaveBeenCalled();
+  });
+
+  // ── account.updated (Stripe Connect onboarding) ────────────────
+
+  it('sets stripeConnectOnboarded=true on account.updated when charges_enabled && payouts_enabled', async () => {
+    const fx = fixtureFactory('connect_ok');
+    (prismaMock as any).creator.findFirst.mockResolvedValue({
+      userId: fx.ids.creatorUserId,
+      stripeConnectOnboarded: false,
+    });
+    (prismaMock as any).creator.update.mockResolvedValue({});
+
+    await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_onboarded', 'acct_connect_123', true, true));
+
+    expect((prismaMock as any).creator.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeConnectId: 'acct_connect_123' },
+      })
+    );
+    expect((prismaMock as any).creator.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: fx.ids.creatorUserId },
+        data: { stripeConnectOnboarded: true },
+      })
+    );
+  });
+
+  it('does NOT update stripeConnectOnboarded when charges_enabled is false', async () => {
+    const fx = fixtureFactory('connect_partial');
+    (prismaMock as any).creator.findFirst.mockResolvedValue(null);
+
+    await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_partial', 'acct_connect_456', false, true));
+
+    expect((prismaMock as any).creator.findFirst).not.toHaveBeenCalled();
+    expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+  });
+
+  it('skips update if creator is already onboarded', async () => {
+    const fx = fixtureFactory('connect_already');
+    (prismaMock as any).creator.findFirst.mockResolvedValue({
+      userId: fx.ids.creatorUserId,
+      stripeConnectOnboarded: true,
+    });
+
+    await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_already', 'acct_connect_789', true, true));
+
+    expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+  });
+
+  it('skips update if no creator found for stripeConnectId', async () => {
+    const fx = fixtureFactory('connect_unknown');
+    (prismaMock as any).creator.findFirst.mockResolvedValue(null);
+
+    await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_unknown', 'acct_connect_unknown', true, true));
+
+    expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
   });
 });

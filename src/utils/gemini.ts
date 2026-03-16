@@ -71,9 +71,14 @@ export async function callGemini(
   const durationMs = Date.now() - startMs;
 
   // Extract content from Gemini response
+  // Gemini 2.5 models include "thought" parts (internal reasoning) alongside
+  // actual text parts. Filter out thought parts to get only the real response,
+  // otherwise thinking text gets prepended to JSON and breaks parsing.
   const candidates = resp.data?.candidates;
-  const content = candidates?.[0]?.content?.parts
-    ?.map((p: any) => p.text || '')
+  const allParts: any[] = candidates?.[0]?.content?.parts || [];
+  const content = allParts
+    .filter((p: any) => !p.thought)
+    .map((p: any) => p.text || '')
     .join('') || '';
 
   // Extract search citations if available
