@@ -114,6 +114,153 @@ interface PolygonTickerDetailsResponse {
   };
 }
 
+interface PolygonEarningsValueField {
+  value?: number | string | null;
+}
+
+interface PolygonEarningsResult {
+  fiscal_period?: string | null;
+  fiscal_date?: string | null;
+  fiscal_date_ending?: string | null;
+  fiscalDateEnding?: string | null;
+  filing_date?: string | null;
+  report_date?: string | null;
+  reported_date?: string | null;
+  reportedDate?: string | null;
+  reported_eps?: number | string | null | PolygonEarningsValueField;
+  actual_eps?: number | string | null | PolygonEarningsValueField;
+  estimated_eps?: number | string | null | PolygonEarningsValueField;
+  estimate_eps?: number | string | null | PolygonEarningsValueField;
+  surprise?: number | string | null | PolygonEarningsValueField;
+  surprise_percent?: number | string | null | PolygonEarningsValueField;
+  surprise_percentage?: number | string | null | PolygonEarningsValueField;
+  report_time?: string | null;
+  time_of_day?: string | null;
+  [key: string]: unknown;
+}
+
+interface PolygonEarningsResponse {
+  status?: string;
+  results?: PolygonEarningsResult[];
+}
+
+export interface PolygonParsedQuarterlyEarning {
+  fiscalDateEnding: string;
+  reportedDate: string;
+  reportedEPS: number | null;
+  estimatedEPS: number | null;
+  surprise: number | null;
+  surprisePercentage: number | null;
+  reportTime: string;
+  beat: boolean | null;
+}
+
+function parsePolygonNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (value && typeof value === 'object' && 'value' in value) {
+    return parsePolygonNumber((value as PolygonEarningsValueField).value);
+  }
+  return null;
+}
+
+function normalizePolygonReportTime(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'bmo' || normalized === 'before market open') return 'Before Market Open';
+  if (normalized === 'amc' || normalized === 'after market close') return 'After Market Close';
+  return '';
+}
+
+function mapPolygonEarningsResult(result: PolygonEarningsResult): PolygonParsedQuarterlyEarning | null {
+  const fiscalDateEnding =
+    result.fiscal_date ||
+    result.fiscal_date_ending ||
+    result.fiscalDateEnding ||
+    result.fiscal_period ||
+    '';
+  const reportedDate =
+    result.report_date ||
+    result.reported_date ||
+    result.reportedDate ||
+    result.filing_date ||
+    fiscalDateEnding;
+
+  if (!fiscalDateEnding && !reportedDate) return null;
+
+  const reportedEPS = parsePolygonNumber(result.reported_eps ?? result.actual_eps);
+  const estimatedEPS = parsePolygonNumber(result.estimated_eps ?? result.estimate_eps);
+  let surprise = parsePolygonNumber(result.surprise);
+  let surprisePercentage = parsePolygonNumber(result.surprise_percent ?? result.surprise_percentage);
+
+  if (surprise == null && reportedEPS != null && estimatedEPS != null) {
+    surprise = reportedEPS - estimatedEPS;
+  }
+  if (surprisePercentage == null && surprise != null && estimatedEPS != null && estimatedEPS !== 0) {
+    surprisePercentage = (surprise / Math.abs(estimatedEPS)) * 100;
+  }
+
+  return {
+    fiscalDateEnding,
+    reportedDate,
+    reportedEPS,
+    estimatedEPS,
+    surprise,
+    surprisePercentage,
+    reportTime: normalizePolygonReportTime(result.report_time ?? result.time_of_day),
+    beat: surprise != null ? surprise > 0 : null,
+  };
+}
+
+export async function fetchPolygonEarnings(ticker: string): Promise<PolygonParsedQuarterlyEarning[] | null> {
+  const upperTicker = ticker.toUpperCase();
+  if (!config.polygonApiKey) return null;
+
+  try {
+    const response = await axios.get<PolygonEarningsResponse>(
+      `${POLYGON_BASE_URL}/vX/reference/tickers/${encodeURIComponent(upperTicker)}/earnings`,
+      {
+        params: {
+          apiKey: config.polygonApiKey,
+          limit: 20,
+        },
+        timeout: 10000,
+      }
+    );
+
+    if (!Array.isArray(response.data.results)) {
+      return null;
+    }
+
+    markPolygonSuccess();
+
+    const parsed = response.data.results
+      .map(mapPolygonEarningsResult)
+      .filter((item): item is PolygonParsedQuarterlyEarning => Boolean(item))
+      .sort((a, b) => b.fiscalDateEnding.localeCompare(a.fiscalDateEnding));
+
+    return parsed;
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    const status = axiosError.response?.status;
+    const message = axiosError.message || 'Unknown Polygon earnings error';
+
+    if (status === 429) {
+      console.warn(`[Polygon Earnings] Rate limited for ${upperTicker}`);
+    } else {
+      console.warn(`[Polygon Earnings] Fetch failed for ${upperTicker}: ${message}`);
+    }
+
+    return null;
+  }
+}
+
 /**
  * Fetches per-ticker volume from Polygon snapshot endpoint.
  * Returns day volume when available, otherwise prevDay volume, otherwise 0.

@@ -1,7 +1,8 @@
 ﻿/**
  * Earnings Service
  *
- * Fetches quarterly and annual EPS data from Alpha Vantage.
+ * Fetches quarterly and annual EPS data with Polygon primary,
+ * Finnhub fallback, and Alpha Vantage as the last fallback.
  * Shares the FundamentalsCache table (earningsJson column).
  */
 
@@ -9,6 +10,7 @@ import prisma from '../utils/prisma';
 import axios from 'axios';
 import { fetchEarnings, parseAVNumber, getDailyCallsRemaining, AVQuarterlyEarning } from '../utils/alpha-vantage';
 import { config } from '../config';
+import { fetchPolygonEarnings } from '../utils/polygon';
 
 
 
@@ -68,6 +70,66 @@ function parseQuarterly(raw: AVQuarterlyEarning[]): ParsedQuarterlyEarning[] {
   });
 }
 
+async function saveEarningsToCache(
+  ticker: string,
+  earningsData: { quarterly: ParsedQuarterlyEarning[]; annual: ParsedAnnualEarning[] },
+): Promise<void> {
+  await prisma.fundamentalsCache.upsert({
+    where: { ticker },
+    update: { earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
+    create: { ticker, earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
+  });
+}
+
+async function fetchAlphaVantageFallback(
+  ticker: string,
+  cached?: { earningsJson: string | null; lastFetchedAt: Date } | null,
+): Promise<EarningsResponse> {
+  const remaining = await getDailyCallsRemaining();
+  if (remaining < 1) {
+    if (cached?.earningsJson) {
+      const data = parseCachedEarnings(ticker, cached.earningsJson);
+      if (data) {
+        return { ticker, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      }
+    }
+    return { ticker, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
+  }
+
+  try {
+    const raw = await fetchEarnings(ticker);
+    if (!raw) {
+      if (cached?.earningsJson) {
+        const data = parseCachedEarnings(ticker, cached.earningsJson);
+        if (data) {
+          return { ticker, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+        }
+      }
+      return { ticker, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
+    }
+
+    const quarterly = parseQuarterly(raw.quarterlyEarnings || []);
+    const annual: ParsedAnnualEarning[] = (raw.annualEarnings || []).map(a => ({
+      fiscalDateEnding: a.fiscalDateEnding,
+      reportedEPS: parseAVNumber(a.reportedEPS),
+    }));
+
+    const earningsData = { quarterly, annual };
+    await saveEarningsToCache(ticker, earningsData);
+
+    return { ticker, ...earningsData, lastUpdated: new Date().toISOString(), dataAge: 'fresh' };
+  } catch (err) {
+    console.error(`[AV Earnings] Fetch failed for ${ticker}:`, (err as Error).message);
+    if (cached?.earningsJson) {
+      const data = parseCachedEarnings(ticker, cached.earningsJson);
+      if (data) {
+        return { ticker, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+      }
+    }
+    return { ticker, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
+  }
+}
+
 /** Get earnings data from cache, fetching if stale. Uses 1 API call. */
 export async function getEarningsData(ticker: string): Promise<EarningsResponse> {
   const upper = ticker.toUpperCase();
@@ -88,65 +150,40 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
     }
   }
 
-  // Try to fetch from AV
-  const remaining = await getDailyCallsRemaining();
-  if (remaining < 1) {
-    // Return whatever we have cached, even if stale
-    if (cached?.earningsJson) {
-      const data = parseCachedEarnings(upper, cached.earningsJson);
-      if (data) {
-        return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
-      }
-    }
-    // AV budget exhausted and no cache â€” fall back to Yahoo Finance
-    return fetchFinnhubFallback(upper);
-  }
-
   try {
-    const raw = await fetchEarnings(upper);
-    if (!raw) {
-      if (cached?.earningsJson) {
-        const data = parseCachedEarnings(upper, cached.earningsJson);
-        if (data) {
-          return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
-        }
-      }
-      // AV returned nothing â€” fall back to Yahoo Finance
-      return fetchFinnhubFallback(upper);
+    const polygonQuarterly = await fetchPolygonEarnings(upper);
+    if (polygonQuarterly && polygonQuarterly.length > 0) {
+      const earningsData = { quarterly: polygonQuarterly, annual: [] as ParsedAnnualEarning[] };
+      await saveEarningsToCache(upper, earningsData);
+      return { ticker: upper, ...earningsData, lastUpdated: new Date().toISOString(), dataAge: 'fresh' };
     }
-
-    const quarterly = parseQuarterly(raw.quarterlyEarnings || []);
-    const annual: ParsedAnnualEarning[] = (raw.annualEarnings || []).map(a => ({
-      fiscalDateEnding: a.fiscalDateEnding,
-      reportedEPS: parseAVNumber(a.reportedEPS),
-    }));
-
-    const earningsData = { quarterly, annual };
-
-    // Save to cache
-    await prisma.fundamentalsCache.upsert({
-      where: { ticker: upper },
-      update: { earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
-      create: { ticker: upper, earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
-    });
-
-    return { ticker: upper, ...earningsData, lastUpdated: new Date().toISOString(), dataAge: 'fresh' };
   } catch (err) {
-    console.error(`[AV Earnings] Fetch failed for ${upper}:`, (err as Error).message);
-    if (cached?.earningsJson) {
-      const data = parseCachedEarnings(upper, cached.earningsJson);
-      if (data) {
-        return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
-      }
-    }
-    // AV failed completely â€” fall back to Yahoo Finance
-    return fetchFinnhubFallback(upper);
+    console.warn(`[Polygon Earnings] Falling back for ${upper}:`, (err as Error).message);
   }
+
+  const finnhub = await fetchFinnhubFallback(upper);
+  if (finnhub.quarterly.length > 0) {
+    return finnhub;
+  }
+
+  const alphaVantage = await fetchAlphaVantageFallback(upper, cached);
+  if (alphaVantage.quarterly.length > 0 || alphaVantage.annual.length > 0) {
+    return alphaVantage;
+  }
+
+  if (cached?.earningsJson) {
+    const data = parseCachedEarnings(upper, cached.earningsJson);
+    if (data) {
+      return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+    }
+  }
+
+  return { ticker: upper, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
 }
 
 /**
  * Finnhub fallback for earnings data.
- * Used when Alpha Vantage budget is exhausted or returns no data.
+ * Used when Polygon returns no usable data.
  * Finnhub provides ~4 quarters of history + upcoming earnings dates.
  */
 async function fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
@@ -216,11 +253,7 @@ async function fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
     const earningsData = { quarterly: historical, annual: [] as ParsedAnnualEarning[] };
 
     // Cache Finnhub results
-    await prisma.fundamentalsCache.upsert({
-      where: { ticker },
-      update: { earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
-      create: { ticker, earningsJson: JSON.stringify(earningsData), lastFetchedAt: new Date() },
-    });
+    await saveEarningsToCache(ticker, earningsData);
 
     console.log(`[Finnhub Earnings Fallback] ${ticker}: ${historical.length} quarters`);
     return { ticker, ...earningsData, lastUpdated: new Date().toISOString(), dataAge: 'cached' };
