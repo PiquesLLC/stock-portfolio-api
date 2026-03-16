@@ -53,15 +53,17 @@ export async function getFeed(
   const followingIds = await getFollowingIds(userId);
   if (followingIds.length === 0) return [];
 
-  // Look up trade delay settings for followed creators
+  // Platform-wide minimum 24hr trade delay for ALL users.
+  // Creators may have a higher delay (48/72hr) — use the greater of the two.
+  const MINIMUM_DELAY_HOURS = 24;
   const creators = await prisma.creator.findMany({
     where: { userId: { in: followingIds }, status: 'active' },
     select: { userId: true, visibility: { select: { tradeDelayHours: true } } },
   });
-  const delayByUser = new Map<string, number>();
+  const creatorDelayMap = new Map<string, number>();
   for (const c of creators) {
     const delay = c.visibility?.tradeDelayHours ?? 0;
-    if (delay > 0) delayByUser.set(c.userId, delay);
+    if (delay > MINIMUM_DELAY_HOURS) creatorDelayMap.set(c.userId, delay);
   }
 
   const where: Record<string, unknown> = {
@@ -80,19 +82,17 @@ export async function getFeed(
       },
     },
     orderBy: { createdAt: 'desc' },
-    take: delayByUser.size > 0 ? limit * 2 : limit,
+    take: limit * 2, // Always fetch extra since all events are delay-filtered
   });
 
   const now = Date.now();
   return events
     .filter((e) => {
       if (!e.user.profilePublic) return false;
-      // Apply trade delay: hide events newer than the creator's delay cutoff
-      const delay = delayByUser.get(e.userId);
-      if (delay) {
-        const cutoff = now - delay * 60 * 60 * 1000;
-        if (e.createdAt.getTime() > cutoff) return false;
-      }
+      // Apply trade delay: minimum 24hr for all users, creator delay if higher
+      const delay = creatorDelayMap.get(e.userId) ?? MINIMUM_DELAY_HOURS;
+      const cutoff = now - delay * 60 * 60 * 1000;
+      if (e.createdAt.getTime() > cutoff) return false;
       return true;
     })
     .flatMap((e) => {
