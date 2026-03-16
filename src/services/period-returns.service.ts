@@ -2,8 +2,8 @@ import NodeCache from 'node-cache';
 import { fetchDailyCandles, fetchPrices } from './market.service';
 
 const periodReturnsCache = new NodeCache({ stdTTL: 1800 });
-const POLYGON_BATCH_SIZE = 5;
-const POLYGON_BATCH_DELAY_MS = 1000;
+const POLYGON_BATCH_SIZE = 10;
+const POLYGON_BATCH_DELAY_MS = 200;
 
 type HoldingReturnPeriod = 'daily' | 'weekly' | 'monthly' | 'ytd' | '1y';
 

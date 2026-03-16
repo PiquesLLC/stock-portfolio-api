@@ -308,7 +308,7 @@ export async function getPortfolioBriefing(
     const resp = await callPerplexity([
       { role: 'system', content: getSystemPrompt(normalizedPeriod) },
       { role: 'user', content: userMessage },
-    ], { timeout: 60000, feature: 'portfolio-briefing', userId });
+    ], { timeout: 30000, feature: 'portfolio-briefing', userId });
 
     if (!resp || !resp.content) {
       return buildFallback();
