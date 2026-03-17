@@ -3,6 +3,7 @@ import { config } from '../config';
 import prisma from '../utils/prisma';
 import { getDecryptedAccessToken } from './plaid.service';
 import { parseOccSymbol, isExpired } from '../utils/occ-parser';
+import { getOrCreateDefaultPortfolio } from './portfolio-management.service';
 
 export interface SkippedHolding {
   ticker: string | null;
@@ -45,6 +46,8 @@ export async function syncHoldingsFromPlaid(plaidItemId: string, userId: string)
   if (!accessToken) {
     throw new Error('Plaid item not found or inactive');
   }
+
+  const defaultPortfolio = await getOrCreateDefaultPortfolio(userId);
 
   const response = await plaidClient.investmentsHoldingsGet({ access_token: accessToken });
   const securitiesById = new Map(response.data.securities.map((security) => [security.security_id, security]));
@@ -166,6 +169,7 @@ export async function syncHoldingsFromPlaid(plaidItemId: string, userId: string)
       await prisma.holding.create({
         data: {
           userId,
+          portfolioId: defaultPortfolio.id,
           ticker,
           shares: aggregate.quantity,
           averageCost,
