@@ -9,6 +9,9 @@ import { PlanLimitError } from '../utils/plan-limit.error';
 
 
 export async function getHoldings(userId: string, portfolioId?: string): Promise<Holding[]> {
+  const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
+  await getOrCreateDefaultPortfolio(userId);
+
   if (portfolioId) {
     return prisma.holding.findMany({
       where: { portfolioId },
