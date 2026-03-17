@@ -23,12 +23,39 @@ async function attachOrphanedHoldingsToPortfolio(userId: string, portfolioId: st
   return Number(attachedCount ?? 0);
 }
 
+async function deleteDuplicateOrphanedHoldings(userId: string): Promise<number> {
+  const scopedHoldings = await prisma.holding.findMany({
+    where: { userId, portfolioId: { not: null } },
+    select: { ticker: true },
+    distinct: ['ticker'],
+  });
+
+  if (scopedHoldings.length === 0) return 0;
+
+  const duplicateTickers = scopedHoldings.map((holding) => holding.ticker);
+  const result = await prisma.holding.deleteMany({
+    where: {
+      userId,
+      portfolioId: null,
+      ticker: { in: duplicateTickers },
+    },
+  });
+
+  if (result.count > 0) {
+    console.warn(`[PortfolioIntegrity] Deleted ${result.count} duplicate orphaned holding(s) for user ${userId.slice(0, 8)}`);
+  }
+
+  return result.count;
+}
+
 /**
  * Get or lazily create the user's default portfolio.
  * If no default portfolio exists (pre-migration users or fresh accounts),
  * creates one copying cash/margin from UserSettings.
  */
 export async function getOrCreateDefaultPortfolio(userId: string) {
+  await deleteDuplicateOrphanedHoldings(userId);
+
   const existing = await prisma.portfolio.findFirst({
     where: { userId, isDefault: true },
   });
