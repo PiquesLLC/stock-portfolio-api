@@ -8,6 +8,19 @@ const PORTFOLIO_LIMITS: Record<string, number> = {
   elite: 999,
 };
 
+async function attachOrphanedHoldingsToPortfolio(userId: string, portfolioId: string): Promise<number> {
+  const result = await prisma.holding.updateMany({
+    where: { userId, portfolioId: null },
+    data: { portfolioId },
+  });
+
+  if (result.count > 0) {
+    console.warn(`[PortfolioIntegrity] Attached ${result.count} orphaned holding(s) to default portfolio for user ${userId.slice(0, 8)}`);
+  }
+
+  return result.count;
+}
+
 /**
  * Get or lazily create the user's default portfolio.
  * If no default portfolio exists (pre-migration users or fresh accounts),
@@ -17,7 +30,10 @@ export async function getOrCreateDefaultPortfolio(userId: string) {
   const existing = await prisma.portfolio.findFirst({
     where: { userId, isDefault: true },
   });
-  if (existing) return existing;
+  if (existing) {
+    await attachOrphanedHoldingsToPortfolio(userId, existing.id);
+    return existing;
+  }
 
   // Copy cash/margin from UserSettings if available
   const settings = await prisma.userSettings.findUnique({
@@ -25,7 +41,7 @@ export async function getOrCreateDefaultPortfolio(userId: string) {
     select: { cashBalance: true, marginDebt: true, dripEnabled: true },
   });
 
-  return prisma.portfolio.create({
+  const created = await prisma.portfolio.create({
     data: {
       userId,
       name: 'Default',
@@ -36,6 +52,10 @@ export async function getOrCreateDefaultPortfolio(userId: string) {
       dripEnabled: settings?.dripEnabled ?? false,
     },
   });
+
+  console.warn(`[PortfolioIntegrity] Created missing default portfolio for user ${userId.slice(0, 8)}`);
+  await attachOrphanedHoldingsToPortfolio(userId, created.id);
+  return created;
 }
 
 /**
@@ -43,6 +63,17 @@ export async function getOrCreateDefaultPortfolio(userId: string) {
  * Default portfolio first, then ordered by createdAt.
  */
 export async function listPortfolios(userId: string) {
+  const orphanedHoldingsCount = await prisma.holding.count({
+    where: { userId, portfolioId: null },
+  });
+  const hasAnyPortfolio = await prisma.portfolio.count({
+    where: { userId },
+  });
+
+  if (orphanedHoldingsCount > 0 || hasAnyPortfolio > 0) {
+    await getOrCreateDefaultPortfolio(userId);
+  }
+
   const portfolios = await prisma.portfolio.findMany({
     where: { userId },
     include: {
