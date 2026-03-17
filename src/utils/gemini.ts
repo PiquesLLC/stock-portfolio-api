@@ -46,12 +46,17 @@ export async function callGemini(
     body.tools = [{ googleSearch: {} }];
   }
 
-  const url = `${GEMINI_API_BASE}/models/${model}:generateContent?key=${config.googleGeminiApiKey}`;
+  // Use header-based auth instead of query string to prevent API key leaking
+  // into Axios error objects (config.url, request.path), server logs, and Sentry.
+  const url = `${GEMINI_API_BASE}/models/${model}:generateContent`;
 
   let resp;
   try {
     resp = await axios.post(url, body, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': config.googleGeminiApiKey,
+      },
       timeout: options?.timeout ?? 30000,
     });
   } catch (error: unknown) {
@@ -65,6 +70,14 @@ export async function callGemini(
       : status && status >= 500 ? 'upstream_5xx'
       : 'request_failed';
     console.warn(`[Gemini] call_failed feature=${options?.feature || 'unknown'} category=${category} status=${status || 'n/a'} durationMs=${durationMs} ticker=${options?.ticker || 'n/a'} message=${err.message || 'unknown'}`);
+    // Sanitize the error: strip config.headers which contains the API key
+    // before re-throwing so Sentry/callers don't capture it.
+    if (err && typeof err === 'object' && 'config' in err) {
+      const axiosErr = err as { config?: { headers?: Record<string, unknown> } };
+      if (axiosErr.config?.headers) {
+        delete axiosErr.config.headers['x-goog-api-key'];
+      }
+    }
     throw error;
   }
 

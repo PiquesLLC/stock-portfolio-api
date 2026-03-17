@@ -17,10 +17,31 @@ if (config.sentryDsn) {
     environment: config.nodeEnv,
     tracesSampleRate: config.nodeEnv === 'production' ? 0.1 : 1.0,
     beforeSend(event) {
-      // Strip sensitive headers
+      // Strip sensitive headers from request context
       if (event.request?.headers) {
         delete event.request.headers['authorization'];
         delete event.request.headers['cookie'];
+        delete event.request.headers['x-goog-api-key'];
+      }
+      // Strip API keys from exception stack frames and breadcrumb data
+      // that Axios may embed in error objects (config.url, request.path)
+      if (event.exception?.values) {
+        for (const ex of event.exception.values) {
+          if (ex.value) {
+            ex.value = ex.value.replace(/[?&]key=[^&\s]+/gi, '?key=[REDACTED]');
+          }
+        }
+      }
+      if (event.breadcrumbs) {
+        for (const bc of event.breadcrumbs) {
+          if (bc.data && typeof bc.data === 'object') {
+            for (const key of Object.keys(bc.data)) {
+              if (typeof bc.data[key] === 'string' && /[?&]key=[^&\s]+/i.test(bc.data[key])) {
+                bc.data[key] = bc.data[key].replace(/[?&]key=[^&\s]+/gi, '?key=[REDACTED]');
+              }
+            }
+          }
+        }
       }
       return event;
     },
