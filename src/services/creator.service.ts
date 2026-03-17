@@ -745,11 +745,11 @@ export async function discoverCreators(params: {
 
   // Build base where clause — all public, leaderboard-eligible users
   // Exclude system/seed user and test accounts
-  const EXCLUDED_USERNAMES = ['_system', 'nalainvestor'];
+  // Note: SQLite notIn is case-sensitive; the in-memory filter below handles case-insensitive exclusion
+  const EXCLUDED_USERNAMES_LOWER = new Set(['_system', 'nalainvestor']);
   const where: Record<string, unknown> = {
     profilePublic: true,
     leaderboardEligible: true,
-    username: { notIn: EXCLUDED_USERNAMES },
     id: { not: '515d3ef4-2b46-4133-8c08-84327b420eba' }, // system seed user
   };
 
@@ -820,6 +820,8 @@ export async function discoverCreators(params: {
   // Build enriched entries
   let entries: DiscoverCreatorEntry[] = allUsers
     .filter((u) => {
+      // Case-insensitive exclusion of system/test accounts (SQLite notIn is case-sensitive)
+      if (EXCLUDED_USERNAMES_LOWER.has(u.username.toLowerCase())) return false;
       // Exclude creators who opted out of discovery
       if (u.creator?.status === 'active' && u.creator.visibility?.discoverable === false) {
         return false;
