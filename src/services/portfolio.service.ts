@@ -18,7 +18,17 @@ export async function getHoldings(userId: string, portfolioId?: string): Promise
       orderBy: { ticker: 'asc' },
     });
   }
-  // Aggregate: all holdings for this user across all portfolios
+
+  // Aggregate: prefer properly scoped holdings once a user has any portfolio-assigned rows.
+  const scopedHoldings = await prisma.holding.findMany({
+    where: { userId, portfolioId: { not: null } },
+    orderBy: { ticker: 'asc' },
+  });
+
+  if (scopedHoldings.length > 0) {
+    return scopedHoldings;
+  }
+
   return prisma.holding.findMany({
     where: { userId },
     orderBy: { ticker: 'asc' },
