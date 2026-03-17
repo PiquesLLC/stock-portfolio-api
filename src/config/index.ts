@@ -172,7 +172,6 @@ export const config = {
     'app://localhost',
     'https://localhost',
     'http://localhost:8080',
-    'null',
     'http://localhost',
     ...((process.env.ALLOWED_ORIGINS || '')
       .split(',')
