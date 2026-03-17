@@ -92,9 +92,10 @@ describe('trade delay filtering', () => {
       expect(feed[0].payload.ticker).toBe('AAPL');
     });
 
-    it('does not filter events for non-creator followed users', async () => {
+    it('enforces 24hr minimum delay for non-creator users too', async () => {
       const now = Date.now();
       const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000);
+      const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000);
 
       // No creators found among followed users
       (prismaMock as any).creator.findMany.mockResolvedValue([]);
@@ -108,13 +109,21 @@ describe('trade delay filtering', () => {
           createdAt: twoHoursAgo,
           user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true },
         },
+        {
+          id: 'evt_old',
+          userId: 'creator_user_1',
+          type: 'holding_added',
+          payload: JSON.stringify({ ticker: 'KO', shares: 50, averageCost: 25 }),
+          createdAt: twoDaysAgo,
+          user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true },
+        },
       ]);
 
       const feed = await getFeed('follower_user_1', 50);
 
-      // Non-creator events should not be filtered
+      // Platform-wide 24hr minimum: 2hr-old event filtered, 2-day-old event passes
       expect(feed).toHaveLength(1);
-      expect(feed[0].id).toBe('evt_recent');
+      expect(feed[0].id).toBe('evt_old');
     });
   });
 
