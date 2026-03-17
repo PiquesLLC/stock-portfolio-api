@@ -2,8 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
+// Must be set before config module loads
 process.env.GOOGLE_CLIENT_ID = 'test-google-client-id';
 process.env.APPLE_CLIENT_ID = 'test-apple-client-id';
+process.env.APPLE_SERVICES_ID = 'test-apple-services-id';
+
+vi.mock('../config', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  const origConfig = actual.config as Record<string, unknown>;
+  return {
+    ...actual,
+    config: {
+      ...origConfig,
+      googleClientId: 'test-google-client-id',
+      appleClientId: 'test-apple-client-id',
+      appleServicesId: 'test-apple-services-id',
+    },
+  };
+});
 
 vi.mock('../middleware/rateLimiter', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
