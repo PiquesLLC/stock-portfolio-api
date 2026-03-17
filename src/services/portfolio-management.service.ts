@@ -9,16 +9,18 @@ const PORTFOLIO_LIMITS: Record<string, number> = {
 };
 
 async function attachOrphanedHoldingsToPortfolio(userId: string, portfolioId: string): Promise<number> {
-  const result = await prisma.holding.updateMany({
-    where: { userId, portfolioId: null },
-    data: { portfolioId },
-  });
+  const attachedCount = await prisma.$executeRaw`
+    UPDATE "Holding"
+    SET "portfolioId" = ${portfolioId}
+    WHERE "userId" = ${userId}
+      AND "portfolioId" IS NULL
+  `;
 
-  if (result.count > 0) {
-    console.warn(`[PortfolioIntegrity] Attached ${result.count} orphaned holding(s) to default portfolio for user ${userId.slice(0, 8)}`);
+  if (attachedCount > 0) {
+    console.warn(`[PortfolioIntegrity] Attached ${attachedCount} orphaned holding(s) to default portfolio for user ${userId.slice(0, 8)}`);
   }
 
-  return result.count;
+  return Number(attachedCount ?? 0);
 }
 
 /**
