@@ -14,10 +14,17 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
 
   if (!user) return null;
 
-  const holdings = await prisma.holding.findMany({
-    where: { userId },
+  const scopedHoldings = await prisma.holding.findMany({
+    where: { userId, portfolioId: { not: null } },
     orderBy: { ticker: 'asc' },
   });
+
+  const holdings = scopedHoldings.length > 0
+    ? scopedHoldings
+    : await prisma.holding.findMany({
+        where: { userId },
+        orderBy: { ticker: 'asc' },
+      });
 
   const cashBalance = user.settings?.cashBalance ?? 0;
   const marginDebt = user.settings?.marginDebt ?? 0;
