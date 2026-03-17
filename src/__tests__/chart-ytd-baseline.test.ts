@@ -9,9 +9,11 @@ import { __mockPrisma as prismaMock } from '../utils/prisma';
 const {
   getPortfolioMock,
   getSnapshotChartPointsMock,
+  getPortfolioChartDataMock,
 } = vi.hoisted(() => ({
   getPortfolioMock: vi.fn(),
   getSnapshotChartPointsMock: vi.fn(),
+  getPortfolioChartDataMock: vi.fn(),
 }));
 
 vi.mock('../services/portfolio.service', async () => {
@@ -28,6 +30,7 @@ vi.mock('../services/snapshot.service', async () => {
   return {
     ...actual,
     getSnapshotChartPoints: getSnapshotChartPointsMock,
+    getPortfolioChartData: getPortfolioChartDataMock,
     reconstructPortfolioHistoryHiRes: vi.fn().mockResolvedValue([]),
     getAllSnapshots: vi.fn().mockResolvedValue([]),
     getSnapshotsAfter: vi.fn().mockResolvedValue([]),
@@ -114,18 +117,14 @@ describe('YTD chart with baseline', () => {
   it('returns synthetic Jan 1 point when baseline is set and only 1 snapshot exists', async () => {
     const app = (await import('../app')).default;
 
-    // getSnapshotChartPoints returns [] because it enforces >= 2 internally
-    getSnapshotChartPointsMock.mockResolvedValue([]);
-
-    // Direct snapshot query fallback returns 1 snapshot
-    const snapshotTime = jan1 + 10 * 86400000; // 10 days after Jan 1
-    (prismaMock as any).portfolioSnapshot.findMany.mockResolvedValue([
-      { timestamp: new Date(snapshotTime), totalValue: 52000, netEquity: 52000 },
-    ]);
-
-    // User has baseline set
-    (prismaMock as any).userSettings.findUnique.mockResolvedValue({
-      ytdBaselineValue: 50000,
+    // getPortfolioChartData returns baseline-injected data
+    getPortfolioChartDataMock.mockResolvedValue({
+      points: [
+        { time: jan1, value: 50000 },
+        { time: jan1 + 10 * 86400000, value: 52000 },
+      ],
+      periodStartValue: 50000,
+      source: 'snapshot',
     });
 
     const res = await request(app)
@@ -136,7 +135,6 @@ describe('YTD chart with baseline', () => {
     expect(res.body.insufficientData).toBeFalsy();
     expect(res.body.periodStartValue).toBe(50000);
     expect(res.body.points.length).toBeGreaterThanOrEqual(2);
-    // First point should be synthetic Jan 1
     expect(res.body.points[0].time).toBe(jan1);
     expect(res.body.points[0].value).toBe(50000);
   });
@@ -145,15 +143,15 @@ describe('YTD chart with baseline', () => {
     const app = (await import('../app')).default;
 
     // Only 5 days of data — not enough for YTD without baseline
+    // periodStartValue = first data point value (no baseline set)
     const baseTime = Date.now() - 5 * 86400000;
-    getSnapshotChartPointsMock.mockResolvedValue([
-      { time: baseTime, value: 50000 },
-      { time: baseTime + 86400000, value: 50500 },
-    ]);
-
-    // No baseline
-    (prismaMock as any).userSettings.findUnique.mockResolvedValue({
-      ytdBaselineValue: null,
+    getPortfolioChartDataMock.mockResolvedValue({
+      points: [
+        { time: baseTime, value: 50000 },
+        { time: baseTime + 86400000, value: 50500 },
+      ],
+      periodStartValue: 50500,
+      source: 'snapshot',
     });
 
     const res = await request(app)
@@ -161,6 +159,7 @@ describe('YTD chart with baseline', () => {
       .set('Cookie', `authToken=${token}`);
 
     expect(res.status).toBe(200);
+    // With < 30 days span, progressive unlock returns insufficientData
     expect(res.body.insufficientData).toBe(true);
   });
 
@@ -172,10 +171,10 @@ describe('YTD chart with baseline', () => {
       time: baseTime + i * 86400000,
       value: 51000 + i * 100,
     }));
-    getSnapshotChartPointsMock.mockResolvedValue(points);
-
-    (prismaMock as any).userSettings.findUnique.mockResolvedValue({
-      ytdBaselineValue: 48000,
+    getPortfolioChartDataMock.mockResolvedValue({
+      points: [{ time: jan1, value: 48000 }, ...points],
+      periodStartValue: 48000,
+      source: 'snapshot',
     });
 
     const res = await request(app)
@@ -184,7 +183,6 @@ describe('YTD chart with baseline', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.periodStartValue).toBe(48000);
-    // First point should be synthetic Jan 1
     expect(res.body.points[0].time).toBe(jan1);
     expect(res.body.points[0].value).toBe(48000);
   });
