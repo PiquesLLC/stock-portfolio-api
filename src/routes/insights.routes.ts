@@ -42,7 +42,7 @@ router.get('/behavior', aiLimiter, requireAuth, requirePlan('premium'), getBehav
 router.get('/daily-report', aiLimiter, requireAuth, requirePlan('premium'), getDailyReportHandler);
 router.post('/daily-report/regenerate', aiLimiter, requireAuth, requirePlan('premium'), regenerateDailyReportHandler);
 router.get('/earnings-summary', heavyReadLimiter, requireAuth, getEarningsSummaryHandler);
-router.get('/earnings-preview', aiLimiter, requireAuth, requirePlan('elite'), getEarningsPreviewHandler);
+router.get('/earnings-preview', heavyReadLimiter, requireAuth, requirePlan('premium'), getEarningsPreviewHandler);
 
 // Tax-Loss Harvesting
 router.get('/tax-harvest', aiLimiter, requireAuth, requirePlan('premium'), getTaxHarvestHandler);

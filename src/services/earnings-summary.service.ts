@@ -30,7 +30,12 @@ export async function getEarningsSummary(userId: string, portfolioId?: string): 
   if (cached) return cached;
 
   const portfolio = await getPortfolio(userId, { portfolioId });
-  const tickers = portfolio.holdings.map(h => h.ticker.toUpperCase());
+
+  // Skip ETFs/funds that don't have earnings — avoids expensive fallback chains
+  const ETF_PATTERNS = /^(SPY|QQQ|DIA|IWM|EEM|VTI|VOO|VEA|VWO|BND|AGG|TLT|GLD|SLV|XL[A-Z]|IGV|FEZ|ARKK|ARKG|HYG|LQD|IVV|IEFA|IEMG|VNQ|SCHD)$/;
+  const tickers = portfolio.holdings
+    .map(h => h.ticker.toUpperCase())
+    .filter(t => !ETF_PATTERNS.test(t));
   if (tickers.length === 0) {
     const empty = { results: [], partial: false };
     insightsCache.set(cacheKey, empty, CACHE_TTL_SECONDS);
