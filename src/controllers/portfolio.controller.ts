@@ -92,6 +92,12 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       await validatePortfolioOwnership(portfolioId, req.user.userId);
       await createSnapshotIfNeeded(req.user.userId);
       portfolio = await getPortfolio(req.user.userId, { portfolioId });
+
+      if (portfolioId) {
+        console.log(
+          `[Portfolio] user=${req.user.userId.slice(0, 8)} fetched scoped portfolio=${portfolioId.slice(0, 8)} holdings=${portfolio.holdings.length}`
+        );
+      }
     }
 
     // Calculate pace projections (uses totalAssets - assets only, no margin)
@@ -105,6 +111,12 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
   } catch (error) {
     const status = (error as any)?.status;
     if (status === 404) {
+      if (req.user?.userId) {
+        const portfolioId = req.query.portfolioId as string | undefined;
+        console.warn(
+          `[Portfolio] 404 fetch user=${req.user.userId.slice(0, 8)} portfolioId=${portfolioId ?? 'none'}`
+        );
+      }
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
@@ -123,6 +135,12 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     const { ticker, shares, averageCost, skipTransaction, skipActivity } = parsed.data;
     const portfolioId = req.query.portfolioId as string | undefined;
     await validatePortfolioOwnership(portfolioId, req.user!.userId);
+
+    if (portfolioId) {
+      console.log(
+        `[Portfolio] addHolding user=${req.user!.userId.slice(0, 8)} portfolio=${portfolioId.slice(0, 8)} ticker=${ticker.toUpperCase()}`
+      );
+    }
 
     // Check if this is an update vs new add
     // Always use system/default portfolio â€” auth is for access control only
@@ -186,6 +204,9 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     }
     const status = (error as any)?.status;
     if (status === 404) {
+      console.warn(
+        `[Portfolio] addHolding 404 user=${req.user?.userId?.slice(0, 8) ?? 'unknown'} portfolioId=${String(req.query.portfolioId ?? 'none')} ticker=${String(req.body?.ticker ?? '')}`
+      );
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
@@ -2306,4 +2327,3 @@ export async function getAccountHistoryHandler(req: AuthRequest, res: Response):
     res.status(500).json({ error: 'Failed to fetch account history' });
   }
 }
-
