@@ -57,6 +57,9 @@ vi.mock('stripe', () => {
   return { default: StripeMock };
 });
 
+// Billing routes only mount when BILLING_ENABLED=true
+process.env.BILLING_ENABLED = 'true';
+
 describe('billing routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
