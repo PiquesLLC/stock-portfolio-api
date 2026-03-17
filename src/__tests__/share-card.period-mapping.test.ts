@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
-const { reconstructPortfolioHistoryHiResMock } = vi.hoisted(() => ({
+const { reconstructPortfolioHistoryHiResMock, getPortfolioChartDataMock } = vi.hoisted(() => ({
   reconstructPortfolioHistoryHiResMock: vi.fn(),
+  getPortfolioChartDataMock: vi.fn(),
 }));
 
 vi.mock('../services/snapshot.service', () => ({
   reconstructPortfolioHistoryHiRes: reconstructPortfolioHistoryHiResMock,
+  getPortfolioChartData: getPortfolioChartDataMock,
 }));
 
 vi.mock('sharp', () => {
@@ -57,23 +59,26 @@ describe('performance share card period mapping', () => {
       { time: new Date('2025-01-01T16:00:00.000Z').getTime(), value: 10000 },
       { time: new Date('2026-03-01T16:00:00.000Z').getTime(), value: 11000 },
     ]);
+
+    getPortfolioChartDataMock.mockResolvedValue({
+      points: [
+        { time: new Date('2025-01-01T16:00:00.000Z').getTime(), value: 10000 },
+        { time: new Date('2026-03-01T16:00:00.000Z').getTime(), value: 11000 },
+      ],
+      periodStartValue: 10000,
+    });
   });
 
   it.each([
     { period: 'YTD', expectedRange: 'ytd', expectedInterval: '1d' },
     { period: '1Y', expectedRange: '1y', expectedInterval: '1d' },
     { period: 'ALL', expectedRange: '5y', expectedInterval: '1d' },
-  ])('maps $period to $expectedRange/$expectedInterval', async ({ period, expectedRange, expectedInterval }) => {
+  ])('maps $period and generates a card', async ({ period }) => {
     const card = await generatePerformanceCard('user-1', period);
     expect(card).toBeTruthy();
 
-    expect(reconstructPortfolioHistoryHiResMock).toHaveBeenCalledTimes(1);
-    expect(reconstructPortfolioHistoryHiResMock).toHaveBeenCalledWith(
-      [{ ticker: 'AAPL', shares: 10 }],
-      500,
-      100,
-      expectedRange,
-      expectedInterval,
-    );
+    // Service now uses getPortfolioChartData instead of reconstructPortfolioHistoryHiRes
+    expect(getPortfolioChartDataMock).toHaveBeenCalledTimes(1);
+    expect(getPortfolioChartDataMock).toHaveBeenCalledWith('user-1', period);
   });
 });
