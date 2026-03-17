@@ -329,6 +329,80 @@ export async function getLockedContent(
         where: { userId: creatorUserId },
         orderBy: { ticker: 'asc' },
       });
+
+      // Apply trade delay: hide holdings added within the delay window
+      // and revert holdings that were updated within the delay window.
+      // This mirrors the reverse-apply logic in getUserPortfolioHandler.
+      if (creator.visibility.tradeDelayHours > 0 && viewerId !== creatorUserId) {
+        const recentEvents = await prisma.activityEvent.findMany({
+          where: { userId: creatorUserId, createdAt: { gt: tradeDelayCutoff } },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (recentEvents.length > 0) {
+          const addedTickers = new Set<string>();
+          const revertedState = new Map<string, { shares: number; averageCost: number }>();
+          const removedHoldings: { ticker: string; shares: number; averageCost: number; createdAt: Date }[] = [];
+
+          for (const evt of recentEvents) {
+            let payload: { ticker?: string; shares?: number; previousShares?: number; averageCost?: number; previousAverageCost?: number };
+            try { payload = JSON.parse(evt.payload); } catch { continue; }
+            const t = payload.ticker?.toUpperCase();
+            if (!t) continue;
+
+            if (evt.type === 'holding_added') {
+              addedTickers.add(t);
+            } else if (evt.type === 'holding_updated') {
+              if (payload.previousShares != null && !revertedState.has(t)) {
+                const h = holdings.find(h2 => h2.ticker.toUpperCase() === t);
+                revertedState.set(t, {
+                  shares: payload.previousShares,
+                  averageCost: payload.previousAverageCost ?? (h?.averageCost ?? payload.averageCost ?? 0),
+                });
+              }
+            } else if (evt.type === 'holding_removed') {
+              if (payload.shares != null && payload.averageCost != null) {
+                const reverted = revertedState.get(t);
+                removedHoldings.push(reverted
+                  ? { ticker: t, shares: reverted.shares, averageCost: reverted.averageCost, createdAt: new Date(0) }
+                  : { ticker: t, shares: payload.shares, averageCost: payload.averageCost, createdAt: new Date(0) }
+                );
+              }
+            }
+          }
+
+          // Build the delayed view of holdings
+          let delayedHoldings = holdings
+            .filter(h => !addedTickers.has(h.ticker.toUpperCase()))
+            .map(h => {
+              const reverted = revertedState.get(h.ticker.toUpperCase());
+              if (reverted) {
+                return { ...h, shares: reverted.shares, averageCost: reverted.averageCost };
+              }
+              return h;
+            });
+
+          // Re-add holdings that were removed within the delay window
+          for (const removed of removedHoldings) {
+            if (!addedTickers.has(removed.ticker)) {
+              delayedHoldings.push({
+                ticker: removed.ticker,
+                shares: removed.shares,
+                averageCost: removed.averageCost,
+                createdAt: removed.createdAt,
+              } as typeof holdings[number]);
+            }
+          }
+
+          return delayedHoldings.map((h) => ({
+            ticker: h.ticker,
+            shares: hideShareCount ? 0 : h.shares,
+            averageCost: hideShareCount ? 0 : h.averageCost,
+            createdAt: h.createdAt,
+          }));
+        }
+      }
+
       return holdings.map((h) => ({
         ticker: h.ticker,
         shares: hideShareCount ? 0 : h.shares,
