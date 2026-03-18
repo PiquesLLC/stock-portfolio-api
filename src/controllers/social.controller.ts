@@ -190,7 +190,8 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     // Fetch performance stats for the profile (1M window, SPY benchmark)
     let performance = null;
-    if (user.profilePublic || isOwner) {
+    const holdingsHidden = !isOwner && user.holdingsVisibility !== 'all';
+    if ((user.profilePublic || isOwner) && !holdingsHidden) {
       try {
         performance = await getPerformanceComparison('1M', 'SPY', userId);
       } catch {
@@ -202,6 +203,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     res.json({
       ...user,
+      holdingsVisibility: isOwner ? user.holdingsVisibility : (user.holdingsVisibility !== 'all'),
       createdAt: user.createdAt.toISOString(),
       followerCount: counts.followers,
       followingCount: counts.following,

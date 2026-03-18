@@ -316,7 +316,16 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
     if (!isOwner) {
       const targetUser = await prisma.user.findUnique({
         where: { id: userId },
-        select: { profilePublic: true },
+        select: {
+          profilePublic: true,
+          holdingsVisibility: true,
+          creator: {
+            select: {
+              status: true,
+              visibility: { select: { showHoldings: true } },
+            },
+          },
+        },
       });
       if (!targetUser) {
         res.status(404).json({ error: 'User not found' });
@@ -325,6 +334,21 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
       if (!targetUser.profilePublic) {
         res.status(404).json({ error: 'Not found' });
         return;
+      }
+
+      // Gate chart behind holdingsVisibility
+      if (targetUser.holdingsVisibility !== 'all') {
+        res.json({ points: [], periodStartValue: 0, period });
+        return;
+      }
+
+      // Gate chart behind creator paywall
+      if (targetUser.creator?.status === 'active' && targetUser.creator.visibility?.showHoldings) {
+        const accessLevel = await resolveAccessLevel(userId, viewerId);
+        if (accessLevel !== 'paid') {
+          res.json({ points: [], periodStartValue: 0, period });
+          return;
+        }
       }
     }
 

@@ -92,6 +92,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
+      holdingsVisibility: 'all',  // Exclude users who hide their holdings
       holdings: { some: { shares: { gt: 0 } } },
       ...(regionFilter ? { region: regionFilter, showRegion: true } : {}),
     },

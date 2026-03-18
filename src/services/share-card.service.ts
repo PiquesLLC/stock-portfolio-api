@@ -352,10 +352,14 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
       username: true,
       displayName: true,
       profilePublic: true,
+      holdingsVisibility: true,
     },
   });
 
   if (!user || !user.profilePublic) return null;
+
+  // Don't generate performance cards for users who hide their holdings
+  if (user.holdingsVisibility !== 'all') return null;
 
   const period = normalizePeriod(periodInput);
 
