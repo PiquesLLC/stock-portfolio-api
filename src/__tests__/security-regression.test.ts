@@ -425,6 +425,9 @@ describe('deleteHolding — cascade cleanup in transaction', () => {
     if (!(__mockPrisma as any).holding.delete) {
       (__mockPrisma as any).holding.delete = vi.fn();
     }
+    // Re-establish mocks cleared by vi.clearAllMocks()
+    (__mockPrisma as any).holding.findMany.mockResolvedValue([]);
+    (__mockPrisma as any).portfolio.findFirst.mockResolvedValue({ id: 'default-portfolio-id', name: 'Default', isDefault: true, userId: 'test-user-1' });
   });
 
   it('deletes lots, trades, dividendCredits, dividendReinvestments, then holding in $transaction', async () => {

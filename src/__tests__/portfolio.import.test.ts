@@ -369,7 +369,12 @@ GOOG,3,0,ok`;
         });
 
       expect(res.status).toBe(200);
-      expect(prismaMock.holding.deleteMany).not.toHaveBeenCalled();
+      // Merge mode must NOT wipe the portfolio (deleteMany with portfolioId).
+      // Note: deleteDuplicateOrphanedHoldings may call deleteMany for orphan cleanup,
+      // so we check it wasn't called with the portfolio-wipe args specifically.
+      expect(prismaMock.holding.deleteMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { portfolioId: MOCK_PORTFOLIO_ID } }),
+      );
       expect(prismaMock.portfolioTrade.deleteMany).not.toHaveBeenCalled();
       expect(prismaMock.ledgerEvent.deleteMany).not.toHaveBeenCalled();
       // AAPL: findFirst returns existing → update; MSFT: findFirst returns null → create
