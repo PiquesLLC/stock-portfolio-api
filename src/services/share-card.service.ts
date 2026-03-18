@@ -4,6 +4,7 @@ import * as path from 'path';
 import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
 import { getPortfolioChartData } from './snapshot.service';
+import { getPortfolio } from './portfolio.service';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
 
 // Load and cache logos as base64 at startup
@@ -363,15 +364,19 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
 
   const period = normalizePeriod(periodInput);
 
-  // Use the EXACT same chart data function that the in-app chart API uses.
-  // This guarantees the share card shows identical values.
-  const chartData = await getPortfolioChartData(userId, period);
+  // Fetch chart data and live portfolio in parallel
+  const [chartData, livePortfolio] = await Promise.all([
+    getPortfolioChartData(userId, period),
+    getPortfolio(userId).catch(() => null),
+  ]);
   let { points } = chartData;
   const { periodStartValue } = chartData;
 
-  // Capture the headline value BEFORE any filtering.
-  // The last chart point = the offset-normalized current value (same as in-app chart).
-  const headlineValue = points.length > 0 ? points[points.length - 1].value : 0;
+  // Use live portfolio value for the headline so it matches the in-app display exactly.
+  // Fall back to last chart point if live portfolio fetch fails.
+  const headlineValue = livePortfolio
+    ? livePortfolio.netEquity
+    : (points.length > 0 ? points[points.length - 1].value : 0);
 
   points = filterPerformanceShareCardPoints(points, period);
 
@@ -427,10 +432,16 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
   const numValues = points.map(p => p.value);
   const numTimes = points.map(p => p.time);
 
-  // Use the pre-filter headline value (matches in-app chart's current value).
+  // Use live portfolio value and day change to match in-app display exactly.
+  // For 1D, use the portfolio's own dayChange (price-based, immune to margin timing).
+  // For other periods, compute from chart data as before.
   const currentValue = headlineValue;
-  const periodChangeValue = currentValue - periodStartValue;
-  const periodChangePercent = periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0;
+  const periodChangeValue = (period === '1D' && livePortfolio)
+    ? livePortfolio.dayChange
+    : currentValue - periodStartValue;
+  const periodChangePercent = (period === '1D' && livePortfolio)
+    ? livePortfolio.dayChangePercent
+    : (periodStartValue > 0 ? (periodChangeValue / periodStartValue) * 100 : 0);
   const sparklineValues = downsampleValues(numValues.length > 0 ? numValues : [currentValue, currentValue], 128);
 
   // Build date labels from timestamps
