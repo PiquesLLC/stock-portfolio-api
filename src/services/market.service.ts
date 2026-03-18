@@ -205,10 +205,14 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
   try {
     const params = period === '1W'
       ? 'interval=15m&range=5d&includePrePost=true'
+      : period === '3M'
+      ? 'interval=60m&range=3mo&includePrePost=true'
       : period === '6M'
       ? 'interval=60m&range=6mo&includePrePost=true'
       : period === 'YTD'
       ? 'interval=60m&range=ytd&includePrePost=true'
+      : period === '1Y'
+      ? 'interval=60m&range=1y&includePrePost=true'
       : 'interval=60m&range=1mo&includePrePost=true';
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?${params}`;
     const resp = await yahooGet(url);
