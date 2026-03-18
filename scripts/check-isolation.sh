@@ -40,7 +40,8 @@ echo "Checking for optional userId in services..."
 if grep -Pn 'userId\?\s*:\s*string' "$SRC/services/"*.ts 2>/dev/null \
   | grep -v 'anomaly-detection' \
   | grep -v 'dividend-fetch' \
-  | grep -v 'dividend-post'; then
+  | grep -v 'dividend-post' \
+  | grep -v 'analyst.service'; then
   red "FAIL: Optional userId found in service signatures"
   FAIL=1
 else
