@@ -1193,3 +1193,24 @@ model AnalyticsEvent {
   @@index([event, createdAt])
   @@index([sessionId])
 }
+
+model CongressTrade {
+  id              String   @id @default(uuid())
+  politician      String
+  chamber         String   // Senate, House
+  ticker          String
+  transactionType String   // Purchase, Sale, Sale (Partial), Exchange
+  amountFrom      Float
+  amountTo        Float
+  tradeDate       DateTime
+  filingDate      DateTime
+  assetName       String?
+  ownerType       String?  // Self, Spouse, Joint, Child, etc.
+  source          String   @default("finnhub") // finnhub, quiverquant
+  fetchedAt       DateTime @default(now())
+
+  @@unique([politician, ticker, tradeDate, transactionType])
+  @@index([ticker])
+  @@index([tradeDate])
+  @@index([fetchedAt])
+}

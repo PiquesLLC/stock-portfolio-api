@@ -31,6 +31,7 @@ import waitlistRoutes from './waitlist.routes';
 import pushRoutes from './push.routes';
 import appleIapRoutes from './apple-iap.routes';
 import analyticsRoutes from './analytics.routes';
+import congressRoutes from './congress.routes';
 import adminRoutes from './admin.routes';
 import jobAdminRoutes from './job-admin.routes';
 import { config } from '../config';
@@ -70,6 +71,7 @@ if (config.billingEnabled) {
   router.use('/billing', billingRoutes);
 }
 router.use('/billing', appleIapRoutes);
+router.use('/signals/congress', congressRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/admin/analytics', analyticsRoutes);
 router.use('/admin', adminRoutes);
