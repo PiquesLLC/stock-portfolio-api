@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import NodeCache from 'node-cache';
-import { fetchHourlyCandles, fetchIntradayCandles, fetchQuote, IntradayCandle } from '../services/market.service';
+import { fetchDailyCandles, fetchHourlyCandles, fetchIntradayCandles, fetchQuote, IntradayCandle } from '../services/market.service';
 
 type SectorPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y';
 
@@ -121,14 +121,38 @@ async function fetchCandlesForPeriod(ticker: string, period: SectorPeriod): Prom
   return fetchHourlyCandles(ticker, period);
 }
 
+/** Get daily close at the period start for accurate base price (matches stock chart) */
+async function getPeriodStartClose(ticker: string, period: SectorPeriod): Promise<number | null> {
+  if (period === '1D') return null; // 1D uses previousClose from quote
+  const rangeDays = period === '1W' ? 10 : period === '1M' ? 35 : period === '3M' ? 95
+    : period === '6M' ? 185 : period === '1Y' ? 370
+    : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 10;
+  const dailyCandles = await fetchDailyCandles(ticker, rangeDays);
+  if (!dailyCandles.length) return null;
+  // Find the daily candle closest to the period start
+  const periodStartMs = period === 'YTD'
+    ? new Date(`${new Date().getFullYear()}-01-01`).getTime()
+    : Date.now() - (rangeDays - (period === '1W' ? 3 : period === '1M' ? 5 : period === '3M' ? 5 : period === '6M' ? 5 : 5)) * 86400000;
+  let best = dailyCandles[0];
+  for (const c of dailyCandles) {
+    const ms = new Date(c.time).getTime();
+    if (ms <= periodStartMs) best = c;
+  }
+  return isValidNumber(best.close) && best.close > 0 ? best.close : null;
+}
+
 async function buildSectorItem(def: SectorDefinition, period: SectorPeriod): Promise<SectorPerformanceItem> {
-  const [candles, quote] = await Promise.all([fetchCandlesForPeriod(def.ticker, period), fetchQuote(def.ticker)]);
+  const [candles, quote, dailyClose] = await Promise.all([
+    fetchCandlesForPeriod(def.ticker, period),
+    fetchQuote(def.ticker),
+    getPeriodStartClose(def.ticker, period),
+  ]);
   const filteredCandles = period !== '1D' ? filterTradingHours(cleanCandles(candles)) : cleanCandles(candles);
   if (filteredCandles.length === 0) {
     throw new Error(`No candles available for ${def.ticker}`);
   }
 
-  const basePrice = period === '1D' ? quote.previousClose : filteredCandles[0].open;
+  const basePrice = period === '1D' ? quote.previousClose : (dailyClose ?? filteredCandles[0].close);
   if (!isValidNumber(basePrice) || basePrice <= 0) {
     throw new Error(`Invalid base price for ${def.ticker}`);
   }
@@ -158,13 +182,17 @@ async function buildSectorItem(def: SectorDefinition, period: SectorPeriod): Pro
 }
 
 async function buildBenchmark(period: SectorPeriod): Promise<BenchmarkPerformance> {
-  const [candles, quote] = await Promise.all([fetchCandlesForPeriod(BENCHMARK_TICKER, period), fetchQuote(BENCHMARK_TICKER)]);
+  const [candles, quote, dailyClose] = await Promise.all([
+    fetchCandlesForPeriod(BENCHMARK_TICKER, period),
+    fetchQuote(BENCHMARK_TICKER),
+    getPeriodStartClose(BENCHMARK_TICKER, period),
+  ]);
   const filteredCandles = period !== '1D' ? filterTradingHours(cleanCandles(candles)) : cleanCandles(candles);
   if (filteredCandles.length === 0) {
     throw new Error('No benchmark candles available');
   }
 
-  const basePrice = period === '1D' ? quote.previousClose : filteredCandles[0].open;
+  const basePrice = period === '1D' ? quote.previousClose : (dailyClose ?? filteredCandles[0].close);
   if (!isValidNumber(basePrice) || basePrice <= 0) {
     throw new Error('Invalid benchmark base price');
   }
