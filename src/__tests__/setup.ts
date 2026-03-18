@@ -91,6 +91,7 @@ vi.mock('../utils/prisma', () => {
       findMany: vi.fn().mockResolvedValue([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    $executeRaw: vi.fn().mockResolvedValue(0),
     $transaction: vi.fn((arg: any) => {
       // Support both Prisma transaction styles:
       // 1) prisma.$transaction(async tx => ...)
