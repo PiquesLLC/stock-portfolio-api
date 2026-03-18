@@ -54,11 +54,6 @@ router.get('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, 
 // POST /admin/cleanup-db — prune old snapshots, expired tokens, old job runs
 // TEMPORARY endpoint for production disk cleanup. Remove after use.
 router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
-  if (config.nodeEnv === 'production') {
-    res.status(404).json({ error: 'Not found' });
-    return;
-  }
-
   if (req.body?.confirm !== 'cleanup-db') {
     res.status(400).json({ error: 'Missing confirmation token' });
     return;
