@@ -57,6 +57,7 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   finnhubApiKey: process.env.FINNHUB_API_KEY || '',
+  fmpApiKey: process.env.FMP_API_KEY || '',
   priceCacheTtl: parseInt(process.env.PRICE_CACHE_TTL || '5', 10),
   snapshotIntervalSeconds: parseInt(process.env.SNAPSHOT_INTERVAL_SECONDS || '60', 10),
 
