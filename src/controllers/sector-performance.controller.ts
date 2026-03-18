@@ -170,6 +170,16 @@ async function buildSectorItem(def: SectorDefinition, period: SectorPeriod): Pro
     : basePrice;
   const changePercent = round2(((lastPrice - basePrice) / basePrice) * 100);
 
+  // Append live quote as final sparkline point so the sparkline reaches the current price
+  // (hourly candles often lag by hours/days, causing sparkline to diverge from changePercent)
+  if (isValidNumber(lastPrice) && lastPrice > 0) {
+    const livePct = round2(((lastPrice - basePrice) / basePrice) * 100);
+    if (livePct !== sparkline[sparkline.length - 1]) {
+      sparkline.push(livePct);
+      timestamps.push(new Date().toISOString());
+    }
+  }
+
   return {
     ticker: def.ticker,
     name: def.name,
@@ -206,6 +216,15 @@ async function buildBenchmark(period: SectorPeriod): Promise<BenchmarkPerformanc
     ? quote.currentPrice
     : filteredCandles[filteredCandles.length - 1].close;
   const changePercent = round2(((lastPrice - basePrice) / basePrice) * 100);
+
+  // Append live quote as final sparkline point
+  if (isValidNumber(lastPrice) && lastPrice > 0) {
+    const livePct = round2(((lastPrice - basePrice) / basePrice) * 100);
+    if (livePct !== sparkline[sparkline.length - 1]) {
+      sparkline.push(livePct);
+      timestamps.push(new Date().toISOString());
+    }
+  }
 
   return {
     ticker: BENCHMARK_TICKER,
