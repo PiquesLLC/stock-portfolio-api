@@ -35,6 +35,7 @@ describe('performance share card period mapping', () => {
       username: 'nala_user',
       displayName: 'Nala User',
       profilePublic: true,
+      holdingsVisibility: 'all',
     } as any);
 
     prismaMock.creator.findUnique.mockResolvedValue({
