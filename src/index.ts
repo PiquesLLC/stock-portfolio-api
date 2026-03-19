@@ -640,10 +640,11 @@ const server = app.listen(config.port, async () => {
   }, 24 * 60 * 60 * 1000);
 
   // Billionaire net worth refresh — every 60s during market hours
+  // Delay initial run to avoid overwhelming quote pipeline during startup
   console.log('[Billionaire] Refresh every 60s (market hours), snapshot every 30min');
   setTimeout(() => {
     runJob({ name: 'billionaire_refresh', fn: refreshAllBillionaires, maxAttempts: 1 });
-  }, 30000);
+  }, 120000); // 2 min delay — let quote cache warm first
   setInterval(() => {
     const session = getMarketSession();
     if (session === 'CLOSED') return;
