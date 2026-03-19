@@ -153,8 +153,8 @@ async function computeContributions(
     if (candles && !candles.partial && candles.closes.length >= daysBack + 1) {
       closes = candles.closes;
     }
-    // Fallback to Yahoo if Finnhub doesn't have data
-    else if (!finnhubHasData) {
+    // Fallback to Yahoo for this ticker if Finnhub doesn't have enough data
+    else {
       const yahooData = await fetchYahooCandlesFallback(h.ticker);
       if (yahooData && yahooData.closes.length >= daysBack + 1) {
         closes = yahooData.closes;

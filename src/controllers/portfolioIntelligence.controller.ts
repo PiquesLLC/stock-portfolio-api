@@ -47,8 +47,9 @@ export async function getIntelligenceHandler(req: AuthRequest, res: Response): P
   const windowParam = req.query.window as string | undefined;
   let window: IntelligenceWindow = '1d';
 
-  if (windowParam && VALID_WINDOWS.includes(windowParam as IntelligenceWindow)) {
-    window = windowParam as IntelligenceWindow;
+  const normalizedWindow = windowParam?.toLowerCase();
+  if (normalizedWindow && VALID_WINDOWS.includes(normalizedWindow as IntelligenceWindow)) {
+    window = normalizedWindow as IntelligenceWindow;
   }
 
   try {
