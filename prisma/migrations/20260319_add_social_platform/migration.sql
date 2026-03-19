@@ -28,6 +28,8 @@ CREATE TABLE "Post" (
     "content" TEXT NOT NULL,
     "ticker" TEXT,
     "type" TEXT NOT NULL DEFAULT 'thought',
+    "attachmentType" TEXT,
+    "attachmentData" TEXT,
     "deleted" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
