@@ -397,3 +397,35 @@ export async function getTrendingTickers(hours = 24, limit = 10) {
     GROUP BY ticker ORDER BY count DESC LIMIT ${limit}`;
   return results;
 }
+
+// ── Community Trade Activity ─────────────────────────────────
+
+export async function getCommunityTradeActivity(hours = 168, limit = 6) {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  const events = await prisma.activityEvent.findMany({
+    where: { createdAt: { gte: since } },
+    select: { type: true, payload: true },
+  });
+
+  const buys = new Map<string, number>();
+  const sells = new Map<string, number>();
+
+  for (const e of events) {
+    let payload: { ticker?: string };
+    try { payload = JSON.parse(e.payload); } catch { continue; }
+    if (!payload.ticker || /^[0-9a-f]{8}-/i.test(payload.ticker)) continue;
+
+    const ticker = payload.ticker.toUpperCase();
+    if (e.type === 'holding_added') {
+      buys.set(ticker, (buys.get(ticker) || 0) + 1);
+    } else if (e.type === 'holding_removed') {
+      sells.set(ticker, (sells.get(ticker) || 0) + 1);
+    }
+  }
+
+  const sortedBuys = [...buys.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([ticker, count]) => ({ ticker, count }));
+  const sortedSells = [...sells.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([ticker, count]) => ({ ticker, count }));
+
+  return { mostBought: sortedBuys, mostSold: sortedSells };
+}

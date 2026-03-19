@@ -8,6 +8,7 @@ const router = Router();
 router.post('/', requireAuth, mutationLimiter, ctrl.createPostHandler);
 router.get('/feed', requireAuth, ctrl.getEnhancedFeedHandler);
 router.get('/trending-tickers', requireAuth, ctrl.getTrendingTickersHandler);
+router.get('/community-trades', requireAuth, ctrl.getCommunityTradesHandler);
 router.get('/notifications', requireAuth, ctrl.getSocialNotificationsHandler);
 router.get('/notifications/unread', requireAuth, ctrl.getUnreadSocialNotifCountHandler);
 router.post('/notifications/:id/read', requireAuth, ctrl.markSocialNotifReadHandler);
