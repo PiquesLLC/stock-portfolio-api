@@ -17,6 +17,7 @@ import {
   markSocialNotifRead,
   markAllSocialNotifsRead,
   getTrendingTickers,
+  getCommunityTradeActivity,
 } from '../services/post.service';
 
 function isValidDateParam(value: string | undefined): boolean {
@@ -243,5 +244,16 @@ export async function getTrendingTickersHandler(req: AuthRequest, res: Response)
   } catch (error: unknown) {
     console.error('Error getting trending tickers:');
     res.status(500).json({ error: 'Failed to get trending tickers' });
+  }
+}
+
+export async function getCommunityTradesHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const hours = Math.min(parseInt(req.query.hours as string) || 24, 168);
+    const data = await getCommunityTradeActivity(hours);
+    res.json(data);
+  } catch (error: unknown) {
+    console.error('Error getting community trades:');
+    res.status(500).json({ error: 'Failed to get community trades' });
   }
 }
