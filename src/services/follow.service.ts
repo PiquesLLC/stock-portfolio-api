@@ -1,4 +1,5 @@
 ﻿import prisma from '../utils/prisma';
+import { createSocialNotification } from './post.service';
 
 
 
@@ -22,6 +23,15 @@ export async function followUser(followerId: string, followingId: string): Promi
     update: {},
     create: { followerId, followingId },
   });
+
+  const actor = await prisma.user.findUnique({ where: { id: followerId }, select: { displayName: true } });
+  createSocialNotification(
+    followingId,
+    followerId,
+    'new_follower',
+    null,
+    `${actor?.displayName || 'Someone'} started following you`
+  ).catch(err => console.error('[Follow] Notification failed:', err?.message || err));
 }
 
 export async function unfollowUser(followerId: string, followingId: string): Promise<void> {

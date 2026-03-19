@@ -164,6 +164,19 @@ model User {
 
   // Dismissed dividends (user opted out of YTD entries they didn't actually receive)
   dismissedDividends         DismissedDividend[]
+
+  // Verified performance profile (Phase 2)
+  kycVerified                Boolean                @default(false)
+  kycVerifiedAt              DateTime?
+  performanceBadges          PerformanceBadge[]
+  profileStatsCache          ProfileStatsCache?
+
+  // Social engagement (Phase 3)
+  posts                      Post[]
+  comments                   Comment[]
+  likes                      Like[]
+  socialNotifsReceived       SocialNotification[]   @relation("socialNotifRecipient")
+  socialNotifsActed          SocialNotification[]   @relation("socialNotifActor")
 }
 
 model Watchlist {
@@ -1213,4 +1226,97 @@ model CongressTrade {
   @@index([ticker])
   @@index([tradeDate])
   @@index([fetchedAt])
+}
+
+// ─── Verified Performance Profiles (Phase 2) ─────────────────────────
+
+model PerformanceBadge {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge     String    // top_10_pct | consistent_alpha | low_volatility | high_win_rate | diamond_hands | diversified
+  window    String    // 1M | 3M | 6M | 1Y | ALL
+  earnedAt  DateTime  @default(now())
+  expiresAt DateTime?
+
+  @@unique([userId, badge, window])
+  @@index([userId])
+}
+
+model ProfileStatsCache {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  winRate      Float?
+  totalTrades  Int?
+  avgHoldDays  Float?
+  profitFactor Float?
+  computedAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─── Social Engagement Layer (Phase 3) ───────────────────────────────
+
+model Post {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         String    // max 1000 chars (app-enforced)
+  ticker          String?   // optional ticker reference
+  type            String    @default("thought") // thought | analysis | trade_idea
+  attachmentType  String?   // stock_chart | portfolio_chart | trade
+  attachmentData  String?   // JSON: { ticker, period } | { period } | { ticker, action, shares, price }
+  deleted         Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  comments        Comment[]
+  likes           Like[]
+
+  @@index([userId, createdAt])
+  @@index([ticker, createdAt])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String   // max 500 chars
+  deleted   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([postId, createdAt])
+  @@index([userId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model SocialNotification {
+  id        String   @id @default(uuid())
+  userId    String   // recipient
+  user      User     @relation("socialNotifRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation("socialNotifActor", fields: [actorId], references: [id], onDelete: Cascade)
+  type      String   // new_follower | comment | like | mention
+  postId    String?
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+  @@index([userId, createdAt])
 }

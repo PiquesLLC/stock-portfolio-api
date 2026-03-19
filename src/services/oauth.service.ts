@@ -228,6 +228,9 @@ export async function findOrCreateOAuthUser(
       return user;
     });
 
+    // Create default alert preferences (non-blocking — includes congress_trade)
+    import('./alert.service').then(m => m.ensureDefaultAlerts(newUser.id)).catch(() => {});
+
     return { user: newUser, isNewUser: true };
   } catch (err: any) {
     // P2002 = unique constraint violation (concurrent first-login race)

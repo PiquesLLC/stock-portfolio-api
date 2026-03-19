@@ -550,6 +550,9 @@ export async function signup(
     }).catch(() => { /* non-critical */ });
   }
 
+  // Create default alert preferences (non-blocking — includes congress_trade)
+  import('./alert.service').then(m => m.ensureDefaultAlerts(user.id)).catch(() => {});
+
   // Process referral (non-blocking — don't fail signup if referral fails)
   if (referralCode) {
     try {
