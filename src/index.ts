@@ -29,6 +29,7 @@ import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analyt
 import { checkCongressTradeAlerts } from './services/alert.service';
 import { syncLatestCongressTrades } from './services/congress.service';
 import { refreshProfileStats } from './services/profile-stats.service';
+import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -269,6 +270,8 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('congress_sync', syncLatestCongressTrades);
   registerJobHandler('congress_alert_eval', checkCongressTradeAlerts);
   registerJobHandler('profile_stats_refresh', runProfileStatsRefreshForAllUsers);
+  registerJobHandler('billionaire_refresh', refreshAllBillionaires);
+  registerJobHandler('billionaire_snapshot', snapshotBillionaires);
   registerJobHandler('webhook_threshold_eval', runWebhookThresholdEvalJob);
   registerJobHandler('job_run_prune', runJobRunPruneJob);
   registerJobHandler('idempotency_key_prune', runIdempotencyKeyPruneJob);
@@ -635,6 +638,28 @@ const server = app.listen(config.port, async () => {
       idempotencyTtlMs: 24 * 60 * 60 * 1000,
     });
   }, 24 * 60 * 60 * 1000);
+
+  // Billionaire net worth refresh — every 60s during market hours
+  console.log('[Billionaire] Refresh every 60s (market hours), snapshot every 30min');
+  setTimeout(() => {
+    runJob({ name: 'billionaire_refresh', fn: refreshAllBillionaires, maxAttempts: 1 });
+  }, 30000);
+  setInterval(() => {
+    const session = getMarketSession();
+    if (session === 'CLOSED') return;
+    runJob({ name: 'billionaire_refresh', fn: refreshAllBillionaires, maxAttempts: 1 });
+  }, 60000);
+
+  // Billionaire snapshot — every 30 minutes for chart history
+  setInterval(() => {
+    runJob({
+      name: 'billionaire_snapshot',
+      fn: snapshotBillionaires,
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('billionaire_snapshot', 30 * 60 * 1000),
+      idempotencyTtlMs: 30 * 60 * 1000,
+    });
+  }, 30 * 60 * 1000);
 
   // Fundamentals prefetch — continuously cycles through stock universe
   // pre-fetching fundamentals + earnings so data is ready before users search
