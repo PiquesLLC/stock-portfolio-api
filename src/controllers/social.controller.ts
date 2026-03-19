@@ -157,7 +157,6 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
         bio: true,
         plan: true,
         planStartedAt: true,
-        kycVerified: true,
       },
     });
 
@@ -233,7 +232,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       performance,
       tradeStats,
       badges,
-      kycVerified: user.kycVerified ?? false,
+      kycVerified: false,
       creator: creatorProfile,
       viewerAccessLevel: creatorProfile?.accessLevel ?? 'public',
     });
