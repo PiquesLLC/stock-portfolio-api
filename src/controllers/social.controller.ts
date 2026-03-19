@@ -14,6 +14,7 @@ import { AuthRequest } from '../types/auth';
 import { getCreatorProfile } from '../services/creator.service';
 import { reportUser } from '../services/report.service';
 import { reportUserBodySchema } from '../validators/report.validators';
+import { getProfileStats } from '../services/profile-stats.service';
 
 
 
@@ -156,6 +157,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
         bio: true,
         plan: true,
         planStartedAt: true,
+        kycVerified: true,
       },
     });
 
@@ -201,8 +203,27 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     const creatorProfile = await getCreatorProfile(userId, viewerId).catch(() => null);
 
+    // Trade stats + badges: only show if holdings are visible (same gate as performance)
+    let tradeStats = null;
+    let badges: { badge: string; window: string; earnedAt: Date }[] = [];
+    if (!holdingsHidden || isOwner) {
+      try {
+        const profileData = await getProfileStats(userId);
+        if (profileData.stats && (profileData.stats.totalTrades ?? 0) > 0) {
+          tradeStats = {
+            winRate: profileData.stats.winRate,
+            totalTrades: profileData.stats.totalTrades,
+            avgHoldDays: profileData.stats.avgHoldDays,
+            profitFactor: profileData.stats.profitFactor,
+          };
+        }
+        badges = profileData.badges;
+      } catch {}
+    }
+
     res.json({
       ...user,
+      planStartedAt: isOwner ? user.planStartedAt : undefined,
       holdingsVisibility: isOwner ? user.holdingsVisibility : (user.holdingsVisibility !== 'all'),
       createdAt: user.createdAt.toISOString(),
       followerCount: counts.followers,
@@ -210,6 +231,9 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       viewerIsFollowing: viewerFollowing,
       recentActivity: activity,
       performance,
+      tradeStats,
+      badges,
+      kycVerified: user.kycVerified ?? false,
       creator: creatorProfile,
       viewerAccessLevel: creatorProfile?.accessLevel ?? 'public',
     });

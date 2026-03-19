@@ -26,6 +26,9 @@ import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/
 import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
 import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analytics.service';
+import { checkCongressTradeAlerts } from './services/alert.service';
+import { syncLatestCongressTrades } from './services/congress.service';
+import { refreshProfileStats } from './services/profile-stats.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -228,6 +231,21 @@ async function runIdempotencyKeyPruneJob() {
   if (count > 0) console.log(`[JobRunner] Pruned ${count} expired idempotency key(s)`);
 }
 
+async function runProfileStatsRefreshForAllUsers() {
+  const userIds = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+  for (const { userId } of userIds) {
+    if (userId) {
+      await refreshProfileStats(userId).catch(err =>
+        console.error(`[Profile Stats] Error for user ${userId.slice(0, 8)}:`, err.message)
+      );
+    }
+  }
+}
+
 function registerBackgroundJobHandlers(): void {
   registerJobHandler('benchmark_cache', ensureBenchmarksCached);
   registerJobHandler('snapshot_scheduler', runSnapshotSchedulerForAllUsers);
@@ -248,6 +266,9 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('dividend_change_detection', runDividendChangeDetectionForAllUsers);
   registerJobHandler('creator_reconciliation', runCreatorLedgerReconciliation);
   registerJobHandler('deep_research_poller', pollActiveResearchJobs);
+  registerJobHandler('congress_sync', syncLatestCongressTrades);
+  registerJobHandler('congress_alert_eval', checkCongressTradeAlerts);
+  registerJobHandler('profile_stats_refresh', runProfileStatsRefreshForAllUsers);
   registerJobHandler('webhook_threshold_eval', runWebhookThresholdEvalJob);
   registerJobHandler('job_run_prune', runJobRunPruneJob);
   registerJobHandler('idempotency_key_prune', runIdempotencyKeyPruneJob);
@@ -524,6 +545,24 @@ const server = app.listen(config.port, async () => {
     console.log('[Deep Research] Disabled (DEEP_RESEARCH_ENABLED not set)');
   }
 
+  // Congress trade sync — fetch latest trades every 2 hours
+  console.log('[Congress Sync] Running every 2 hours');
+  setTimeout(() => {
+    runJob({ name: 'congress_sync', fn: syncLatestCongressTrades, idempotencyKey: buildTimeBucketIdempotencyKey('congress_sync', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
+  }, 60000);
+  setInterval(() => {
+    runJob({ name: 'congress_sync', fn: syncLatestCongressTrades, idempotencyKey: buildTimeBucketIdempotencyKey('congress_sync', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
+  }, 2 * 60 * 60 * 1000);
+
+  // Congress trade alert evaluation — check every 2 hours (offset 30 min from sync)
+  console.log('[Congress Alert Eval] Running every 2 hours');
+  setTimeout(() => {
+    runJob({ name: 'congress_alert_eval', fn: checkCongressTradeAlerts, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('congress_alert_eval', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
+  }, 30 * 60 * 1000);
+  setInterval(() => {
+    runJob({ name: 'congress_alert_eval', fn: checkCongressTradeAlerts, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('congress_alert_eval', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
+  }, 2 * 60 * 60 * 1000);
+
   // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
   setInterval(() => {
     runJob({ name: 'webhook_threshold_eval', fn: runWebhookThresholdEvalJob, maxAttempts: 1 });
@@ -575,6 +614,27 @@ const server = app.listen(config.port, async () => {
       idempotencyTtlMs: 4 * 60 * 60 * 1000,
     });
   }, 4 * 60 * 60 * 1000);
+
+  // Profile stats refresh — recompute win rate, avg hold, badges daily
+  console.log('[Profile Stats] Refresh scheduled daily');
+  setTimeout(() => {
+    runJob({
+      name: 'profile_stats_refresh',
+      fn: runProfileStatsRefreshForAllUsers,
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('profile_stats_refresh', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
+  }, 180000); // 3 min delay after startup
+  setInterval(() => {
+    runJob({
+      name: 'profile_stats_refresh',
+      fn: runProfileStatsRefreshForAllUsers,
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('profile_stats_refresh', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
+  }, 24 * 60 * 60 * 1000);
 
   // Fundamentals prefetch — continuously cycles through stock universe
   // pre-fetching fundamentals + earnings so data is ready before users search
