@@ -1320,3 +1320,64 @@ model SocialNotification {
   @@index([userId, read, createdAt])
   @@index([userId, createdAt])
 }
+
+// ─── Billionaire Net Worth Tracker ───────────────────────────
+
+model Billionaire {
+  id                String    @id @default(uuid())
+  name              String    @unique
+  slug              String    @unique
+  photoUrl          String?
+  company           String
+  title             String?
+  country           String    @default("US")
+  industry          String?
+
+  // Net worth computation
+  baseNetWorthUsd   Float     // Non-public wealth (private companies, real estate, etc.) in USD
+  holdings          String    // JSON: [{ "ticker": "TSLA", "shares": 411000000, "note": "..." }]
+
+  // Cached computed values (refreshed with quotes)
+  computedNetWorth  Float?
+  dayChange         Float?
+  dayChangePct      Float?
+  weekChange        Float?
+  monthChange       Float?
+  ytdChange         Float?
+  computedAt        DateTime?
+
+  // Rank tracking
+  rank              Int?
+  previousRank      Int?
+
+  // Metadata
+  source            String    @default("manual") // manual | sec_13f | forbes
+  lastVerifiedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  snapshots         BillionaireSnapshot[]
+
+  @@index([rank])
+  @@index([computedNetWorth])
+}
+
+model BillionaireSnapshot {
+  id              String      @id @default(uuid())
+  billionaireId   String
+  billionaire     Billionaire @relation(fields: [billionaireId], references: [id], onDelete: Cascade)
+  netWorth        Float
+  timestamp       DateTime    @default(now())
+
+  @@index([billionaireId, timestamp])
+}
+
+model WealthDistribution {
+  id              String   @id @default(uuid())
+  percentile      String   // "top_0.1" | "top_1" | "top_10" | "bottom_50"
+  netWorthUsd     Float    // in millions
+  date            String   // "2025-Q3"
+  source          String   @default("fred")
+  createdAt       DateTime @default(now())
+
+  @@unique([percentile, date])
+}
