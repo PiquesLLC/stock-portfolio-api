@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "=== Prisma migrate deploy ==="
-npx prisma migrate deploy 2>&1
+npx prisma migrate deploy 2>&1 || echo "WARNING: prisma migrate deploy had issues, continuing..."
 
 echo "=== Configuring fonts for share card rendering ==="
 export FONTCONFIG_FILE=/app/assets/fonts.conf
