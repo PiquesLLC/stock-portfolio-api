@@ -109,4 +109,79 @@ router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, r
   }
 });
 
+// GET /admin/users/privacy — list all non-demo users with privacy settings
+router.get('/users/privacy', requireAuth, requireAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        profilePublic: true,
+        holdingsVisibility: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ count: users.length, users });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// POST /admin/set-privacy { userId, profilePublic } — set a user's profile visibility
+router.post('/set-privacy', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { userId, profilePublic } = req.body;
+
+  if (!userId || typeof profilePublic !== 'boolean') {
+    res.status(400).json({ error: 'Requires userId (string) and profilePublic (boolean)' });
+    return;
+  }
+
+  try {
+    const before = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true, profilePublic: true },
+    });
+
+    if (!before) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { profilePublic },
+      select: { id: true, username: true, profilePublic: true },
+    });
+
+    console.log(`[Admin Privacy] ${req.user!.userId} changed ${userId} (${before.username}) profilePublic: ${before.profilePublic} → ${profilePublic}`);
+    res.json({ success: true, before: before.profilePublic, after: user.profilePublic, user });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// POST /admin/bulk-set-privacy { userIds, profilePublic } — bulk fix privacy for multiple users
+router.post('/bulk-set-privacy', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { userIds, profilePublic } = req.body;
+
+  if (!Array.isArray(userIds) || userIds.length === 0 || typeof profilePublic !== 'boolean') {
+    res.status(400).json({ error: 'Requires userIds (string[]) and profilePublic (boolean)' });
+    return;
+  }
+
+  try {
+    const count = await prisma.user.updateMany({
+      where: { id: { in: userIds } },
+      data: { profilePublic },
+    });
+
+    console.log(`[Admin Privacy] ${req.user!.userId} bulk-set profilePublic=${profilePublic} for ${count.count} users: ${userIds.join(', ')}`);
+    res.json({ success: true, updated: count.count });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 export default router;
