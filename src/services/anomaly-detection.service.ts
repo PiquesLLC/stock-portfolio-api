@@ -119,9 +119,11 @@ async function getNewsAnalysis(ticker: string): Promise<{ analysis: string; cita
 export async function detectAnomalies(userId: string): Promise<void> {
   console.log('[Anomaly Detection] Running scan...');
 
-  const holdings = await getHoldings(userId);
+  const allHoldings = await getHoldings(userId);
+  // Only scan stocks the user currently holds (shares > 0)
+  const holdings = allHoldings.filter(h => h.shares > 0);
   if (holdings.length === 0) {
-    console.log('[Anomaly Detection] No holdings, skipping');
+    console.log('[Anomaly Detection] No active holdings, skipping');
     return;
   }
 
@@ -332,7 +334,8 @@ export async function detectAnomalies(userId: string): Promise<void> {
 export async function detectDividendChanges(userId: string): Promise<void> {
   console.log('[Dividend Change Detection] Running scan...');
 
-  const holdings = await getHoldings(userId);
+  const allHoldings = await getHoldings(userId);
+  const holdings = allHoldings.filter(h => h.shares > 0);
   if (holdings.length === 0) return;
 
   let created = 0;
