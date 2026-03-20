@@ -429,11 +429,37 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       }
       userData.displayName = displayName.trim();
     }
-    if (profilePublic !== undefined) userData.profilePublic = profilePublic;
+    if (profilePublic !== undefined) {
+      if (typeof profilePublic !== 'boolean') {
+        res.status(400).json({ error: 'profilePublic must be a boolean' });
+        return;
+      }
+      userData.profilePublic = profilePublic;
+    }
     if (region !== undefined) userData.region = region;
     if (showRegion !== undefined) userData.showRegion = showRegion;
     if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
     if (bio !== undefined) userData.bio = typeof bio === 'string' ? bio.slice(0, 80) : null;
+
+    // Audit log: capture privacy-sensitive fields BEFORE update
+    if (userData.profilePublic !== undefined || userData.holdingsVisibility !== undefined) {
+      const before = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePublic: true, holdingsVisibility: true },
+      });
+      if (before) {
+        const changes: string[] = [];
+        if (userData.profilePublic !== undefined && before.profilePublic !== userData.profilePublic) {
+          changes.push(`profilePublic: ${before.profilePublic} → ${userData.profilePublic}`);
+        }
+        if (userData.holdingsVisibility !== undefined && before.holdingsVisibility !== userData.holdingsVisibility) {
+          changes.push(`holdingsVisibility: ${before.holdingsVisibility} → ${userData.holdingsVisibility}`);
+        }
+        if (changes.length > 0) {
+          console.log(`[Privacy Audit] user=${userId} changed: ${changes.join(', ')}`);
+        }
+      }
+    }
 
     // Update User
     const user = await prisma.user.update({

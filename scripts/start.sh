@@ -1,9 +1,15 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 echo "=== Prisma migrate deploy ==="
-npx prisma migrate deploy 2>&1 || {
-  echo "WARNING: prisma migrate deploy had issues, attempting manual column fix..."
+if npx prisma migrate deploy 2>&1; then
+  echo "Migrations applied successfully"
+else
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "CRITICAL: prisma migrate deploy FAILED"
+  echo "Schema mismatch may cause runtime errors!"
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "Attempting manual column fix..."
   # If migration fails, ensure critical columns exist
   node -e "
     const { createClient } = require('@libsql/client');
@@ -26,7 +32,7 @@ npx prisma migrate deploy 2>&1 || {
       }
     })();
   " 2>&1 || echo "WARNING: Manual column fix also failed, continuing..."
-}
+fi
 
 echo "=== Configuring fonts for share card rendering ==="
 export FONTCONFIG_FILE=/app/assets/fonts.conf
