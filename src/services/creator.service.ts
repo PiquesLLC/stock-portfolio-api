@@ -797,7 +797,17 @@ export async function discoverCreators(params: {
   // Cap at 500 to prevent unbounded memory usage.
   const allUsers = await prisma.user.findMany({
     where: where as any,
-    include: includeRelations,
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      profilePublic: true,
+      createdAt: true,
+      leaderboardCaches: { where: { window: '1M' }, take: 1 },
+      creator: {
+        include: { visibility: true },
+      },
+    },
     take: 500,
   });
 
