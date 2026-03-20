@@ -54,6 +54,7 @@ async function ensureSeedUser(): Promise<void> {
         displayName: 'System (Seed)',
         profilePublic: false,
       },
+      select: { id: true },
     });
     console.log('[Init] Created seed user (demo/leaderboard exclusion only)');
   }
