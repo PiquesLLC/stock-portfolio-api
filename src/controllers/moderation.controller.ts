@@ -276,9 +276,9 @@ export async function resolveAppealHandler(req: AuthRequest, res: Response): Pro
     }
 
     if (decision === 'overturned') {
-      // Overturn: delete the strike, update appeal, potentially unsuspend
+      // Overturn: mark appeal resolved, then delete strike (appeal cascades via ON DELETE CASCADE)
       await prisma.$transaction(async (tx) => {
-        // Update appeal status
+        // Update appeal status first
         await tx.appeal.update({
           where: { id: appealId },
           data: {
@@ -288,6 +288,9 @@ export async function resolveAppealHandler(req: AuthRequest, res: Response): Pro
             resolvedAt: new Date(),
           },
         });
+
+        // Delete the appeal (so FK doesn't block strike deletion)
+        await tx.appeal.delete({ where: { id: appealId } });
 
         // Delete the strike
         await tx.contentStrike.delete({
