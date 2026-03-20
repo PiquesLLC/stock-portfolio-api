@@ -182,6 +182,7 @@ model User {
   suspended                  Boolean                @default(false)
   suspendedAt                DateTime?
   contentStrikes             ContentStrike[]
+  appeals                    Appeal[]
 }
 
 model Watchlist {
@@ -1397,7 +1398,29 @@ model ContentStrike {
   details   String?  // Admin notes or the offending content snippet
   issuedBy  String   // Admin userId who issued the strike
   createdAt DateTime @default(now())
+  appeal    Appeal?
 
   @@index([userId])
   @@index([createdAt])
+}
+
+// ─── Content Moderation Appeals ─────────────────────────────────────
+
+model Appeal {
+  id          String    @id @default(uuid())
+  strikeId    String    @unique // one appeal per strike
+  userId      String
+  reason      String    // user's explanation (max 1000 chars)
+  status      String    @default("pending") // pending | reviewing | upheld | overturned
+  adminNotes  String?   // admin's resolution notes
+  resolvedBy  String?   // admin userId who resolved
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  strike      ContentStrike @relation(fields: [strikeId], references: [id])
+  user        User          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
 }

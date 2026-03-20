@@ -168,4 +168,17 @@ export const CONTENT_POLICY = {
     'Second offense: 7-day account suspension',
     'Third offense: Permanent ban',
   ],
+  dueProcess: {
+    summary: 'Every user has the right to understand why action was taken and to appeal.',
+    steps: [
+      'When content is blocked, the user sees the specific rule violated',
+      'When a strike is issued, the user is notified with the reason and evidence',
+      'Users can submit one appeal per strike within 30 days',
+      'Appeals are reviewed by the Nala team within 48 hours',
+      'If an appeal is successful, the strike is removed and any suspension is reconsidered',
+      'Users may request a full review of their moderation history at any time',
+    ],
+    appealWindow: 30, // days
+    reviewSLA: 48, // hours
+  },
 };
