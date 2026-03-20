@@ -194,4 +194,75 @@ router.post('/bulk-set-privacy', requireAuth, requireAdmin, async (req: AuthRequ
   }
 });
 
+// POST /admin/user/:userId/strike — record a content moderation strike
+router.post('/user/:userId/strike', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { userId } = req.params;
+  const { reason, details } = req.body;
+
+  if (!reason || typeof reason !== 'string') {
+    res.status(400).json({ error: 'Requires reason (string)' });
+    return;
+  }
+
+  try {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true, suspended: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Record the strike
+    const strike = await prisma.contentStrike.create({
+      data: {
+        userId,
+        reason,
+        details: details || null,
+        issuedBy: req.user!.userId,
+      },
+    });
+
+    // Count total strikes for the user
+    const strikeCount = await prisma.contentStrike.count({ where: { userId } });
+
+    // Auto-suspend at >= 3 strikes
+    let suspended = targetUser.suspended;
+    if (strikeCount >= 3 && !suspended) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { suspended: true, suspendedAt: new Date() },
+      });
+      suspended = true;
+      console.log(`[Content Moderation] User ${userId} (${targetUser.username}) auto-suspended at ${strikeCount} strikes`);
+    }
+
+    res.status(201).json({
+      success: true,
+      strike: { id: strike.id, reason: strike.reason, createdAt: strike.createdAt },
+      strikeCount,
+      suspended,
+    });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// GET /admin/user/:userId/strikes — list all strikes for a user
+router.get('/user/:userId/strikes', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { userId } = req.params;
+
+  try {
+    const strikes = await prisma.contentStrike.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ userId, strikeCount: strikes.length, strikes });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 export default router;

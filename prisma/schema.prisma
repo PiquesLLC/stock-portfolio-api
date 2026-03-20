@@ -177,6 +177,11 @@ model User {
   likes                      Like[]
   socialNotifsReceived       SocialNotification[]   @relation("socialNotifRecipient")
   socialNotifsActed          SocialNotification[]   @relation("socialNotifActor")
+
+  // Content moderation
+  suspended                  Boolean                @default(false)
+  suspendedAt                DateTime?
+  contentStrikes             ContentStrike[]
 }
 
 model Watchlist {
@@ -1380,4 +1385,19 @@ model WealthDistribution {
   createdAt       DateTime @default(now())
 
   @@unique([percentile, date])
+}
+
+// ─── Content Moderation Strikes ──────────────────────────────────────
+
+model ContentStrike {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reason    String   // hate_speech | racial_slur | violent_threat | sexual_content | targeted_harassment | other
+  details   String?  // Admin notes or the offending content snippet
+  issuedBy  String   // Admin userId who issued the strike
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
 }
