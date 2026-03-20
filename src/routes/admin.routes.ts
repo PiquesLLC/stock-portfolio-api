@@ -3,6 +3,12 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
+import {
+  getModerationDashboardHandler,
+  getAppealsHandler,
+  resolveAppealHandler,
+  unsuspendUserHandler,
+} from '../controllers/moderation.controller';
 
 const router = Router();
 
@@ -264,5 +270,19 @@ router.get('/user/:userId/strikes', requireAuth, requireAdmin, async (req: AuthR
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
+
+// ── Moderation Dashboard & Appeal Management ─────────────────────────
+
+// GET /admin/moderation/dashboard — full moderation overview
+router.get('/moderation/dashboard', requireAuth, requireAdmin, getModerationDashboardHandler);
+
+// GET /admin/moderation/appeals — list appeals (default: pending)
+router.get('/moderation/appeals', requireAuth, requireAdmin, getAppealsHandler);
+
+// POST /admin/moderation/appeals/:appealId/resolve — resolve an appeal
+router.post('/moderation/appeals/:appealId/resolve', requireAuth, requireAdmin, resolveAppealHandler);
+
+// POST /admin/moderation/users/:userId/unsuspend — manually unsuspend a user
+router.post('/moderation/users/:userId/unsuspend', requireAuth, requireAdmin, unsuspendUserHandler);
 
 export default router;
