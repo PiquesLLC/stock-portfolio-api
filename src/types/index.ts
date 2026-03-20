@@ -206,6 +206,7 @@ export interface Portfolio {
   quotesMeta?: QuotesMeta;
   session?: MarketSession;  // current market session
   paceProjection?: PaceProjection; // MTD-based pace projections
+  holdingsPaywalled?: boolean; // true when creator paywall hides holdings detail
 }
 
 // Dividend types

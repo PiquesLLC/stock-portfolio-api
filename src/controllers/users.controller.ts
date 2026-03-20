@@ -140,8 +140,18 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
         const visibility = targetUser.creator.visibility;
         if (accessLevel !== 'paid') {
           if (visibility.showHoldings) {
-            // showHoldings=true means holdings are paywalled — clear them for non-paid viewers
-            portfolio.holdings = [];
+            // showHoldings=true means holdings are paywalled — return masked data for blur effect
+            // Tickers are visible (activity feed shows them after delay), but zero out sensitive values
+            portfolio.holdings = portfolio.holdings.map(h => ({
+              ...h,
+              shares: 0,
+              averageCost: 0,
+              totalCost: 0,
+              currentValue: 0,
+              profitLoss: 0,
+              profitLossPercent: 0,
+            }));
+            portfolio.holdingsPaywalled = true;
           } else {
             // Holdings are public but may have partial restrictions
             if (visibility.hideShareCount) {
