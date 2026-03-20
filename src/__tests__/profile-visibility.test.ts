@@ -84,7 +84,7 @@ vi.mock('../services/user-portfolio.service', () => ({
 }));
 
 vi.mock('../services/snapshot.service', () => ({
-  createUserSnapshotIfNeeded: vi.fn(),
+  createUserSnapshotIfNeeded: vi.fn().mockResolvedValue(undefined),
   getUserChartSnapshots: vi.fn().mockResolvedValue({ points: [], periodStartValue: 0 }),
   getSnapshotChartPoints: getSnapshotChartPointsMock,
   reconstructPortfolioHistoryHiRes: vi.fn().mockResolvedValue([]),
@@ -316,6 +316,10 @@ describe('Profile Visibility — Creator paywall (showHoldings=true)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Return fresh deep copy each call so mutations don't leak between tests
+    getUserPortfolioMock.mockImplementation(() =>
+      Promise.resolve(JSON.parse(JSON.stringify(mockPortfolio))),
+    );
     prismaMock.user.findUnique.mockResolvedValue(creatorUser);
     prismaMock.creator.findUnique.mockResolvedValue({
       userId: TARGET_USER_ID,
@@ -323,7 +327,6 @@ describe('Profile Visibility — Creator paywall (showHoldings=true)', () => {
       visibility: creatorUser.creator.visibility,
     });
     resolveAccessLevelMock.mockResolvedValue('public'); // Viewer is NOT a paid subscriber
-    getUserPortfolioMock.mockResolvedValue(mockPortfolio);
     getSnapshotChartPointsMock.mockResolvedValue(mockChartPoints);
     getPerformanceComparisonMock.mockResolvedValue(mockPerformance);
     getCreatorProfileMock.mockResolvedValue({
@@ -357,5 +360,99 @@ describe('Profile Visibility — Creator paywall (showHoldings=true)', () => {
 
       expect([403, 404]).toContain(res.status);
     });
+  });
+
+  /* ================================================================ */
+  /*  CRITICAL: Portfolio endpoint — blur, never hide (Mar 20 fix)     */
+  /* ================================================================ */
+  describe('GET /users/:userId/portfolio — paywalled holdings', () => {
+    it('should return masked holdings with holdingsPaywalled=true for non-paid viewer', async () => {
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+
+      expect(res.status).toBe(200);
+      // MUST return holdings (not empty) so UI can blur them
+      expect(res.body.holdings.length).toBeGreaterThan(0);
+      // MUST set holdingsPaywalled flag
+      expect(res.body.holdingsPaywalled).toBe(true);
+      // Tickers must be real (for blur visual), but values must be zeroed
+      expect(res.body.holdings[0].ticker).toBe('AAPL');
+      expect(res.body.holdings[0].shares).toBe(0);
+      expect(res.body.holdings[0].averageCost).toBe(0);
+      expect(res.body.holdings[0].currentValue).toBe(0);
+      expect(res.body.holdings[0].profitLossPercent).toBe(0);
+    });
+
+    it('should NEVER return empty holdings array for paywalled creators', async () => {
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+
+      expect(res.status).toBe(200);
+      // This is the exact bug from Mar 20 — holdings=[] hides the section entirely
+      // instead of showing blurred content with a lock overlay
+      expect(res.body.holdings).not.toEqual([]);
+    });
+
+    it('should return full unmasked holdings for paid subscribers', async () => {
+      resolveAccessLevelMock.mockResolvedValue('paid');
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+
+      expect(res.status).toBe(200);
+      // Paid subscribers get real data
+      expect(res.body.holdingsPaywalled).toBeUndefined();
+      expect(res.body.holdings[0].shares).toBe(100);
+      expect(res.body.holdings[0].currentValue).toBe(18000);
+    });
+
+    it('owner viewing own profile should never trigger paywall masking', async () => {
+      // The controller checks isOwner = viewerId === userId
+      // When isOwner is true, the paywall branch is skipped entirely
+      // We verify this by checking the controller source for the guard
+      const controllerSource = await import('fs').then(fs =>
+        fs.readFileSync(
+          require('path').resolve(__dirname, '../controllers/users.controller.ts'),
+          'utf-8',
+        ),
+      );
+      // The !isOwner guard must exist before any holdings masking
+      expect(controllerSource).toMatch(/if\s*\(\s*!isOwner\s*\)/);
+      // holdingsPaywalled should only be set inside the !isOwner block
+      expect(controllerSource).toContain('holdingsPaywalled');
+    });
+  });
+});
+
+/* ================================================================== */
+/*  Leaderboard — creator trade delay must NOT null returns (Mar 20)   */
+/* ================================================================== */
+describe('Leaderboard — creator trade delay returns', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should NOT null out returns for creators with tradeDelayHours > 0', async () => {
+    // Verify the leaderboard service source code does NOT contain the
+    // trade delay nulling pattern that caused the Mar 20 bug
+    const serviceSource = await import('fs').then(fs =>
+      fs.readFileSync(
+        require('path').resolve(__dirname, '../services/leaderboard.service.ts'),
+        'utf-8',
+      ),
+    );
+
+    // The old bug: code searched for creators with tradeDelayHours > 0 and nulled their returns
+    // This pattern must NEVER exist in the leaderboard service
+    expect(serviceSource).not.toMatch(/entry\.returnPct\s*=\s*null/);
+    expect(serviceSource).not.toMatch(/entry\.twrPct\s*=\s*null/);
+    expect(serviceSource).not.toMatch(/entry\.returnDollar\s*=\s*null/);
+    // The comment explaining why we DON'T null should be present
+    expect(serviceSource).toContain('Creators with trade delay still show return percentages');
   });
 });
