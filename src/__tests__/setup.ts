@@ -84,6 +84,7 @@ vi.mock('../utils/prisma', () => {
     creator: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
     creatorVisibility: { findUnique: vi.fn(), update: vi.fn() },
     leaderboardCache: { deleteMany: vi.fn() },
+    contentStrike: { create: vi.fn(), count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     waitlist: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),

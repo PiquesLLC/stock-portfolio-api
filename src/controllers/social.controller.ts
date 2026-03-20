@@ -15,6 +15,7 @@ import { getCreatorProfile } from '../services/creator.service';
 import { reportUser } from '../services/report.service';
 import { reportUserBodySchema } from '../validators/report.validators';
 import { getProfileStats } from '../services/profile-stats.service';
+import { filterContent } from '../utils/content-filter';
 
 
 
@@ -427,6 +428,11 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
         res.status(400).json({ error: 'displayName must be a string, max 50 chars' });
         return;
       }
+      const dnFilter = filterContent(displayName);
+      if (!dnFilter.allowed) {
+        res.status(400).json({ error: 'Display name violates our content policy.', code: 'content_policy_violation', reason: dnFilter.reason });
+        return;
+      }
       userData.displayName = displayName.trim();
     }
     if (profilePublic !== undefined) {
@@ -439,7 +445,16 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (region !== undefined) userData.region = region;
     if (showRegion !== undefined) userData.showRegion = showRegion;
     if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
-    if (bio !== undefined) userData.bio = typeof bio === 'string' ? bio.slice(0, 80) : null;
+    if (bio !== undefined) {
+      if (typeof bio === 'string' && bio.trim().length > 0) {
+        const bioFilter = filterContent(bio);
+        if (!bioFilter.allowed) {
+          res.status(400).json({ error: 'Bio violates our content policy.', code: 'content_policy_violation', reason: bioFilter.reason });
+          return;
+        }
+      }
+      userData.bio = typeof bio === 'string' ? bio.slice(0, 80) : null;
+    }
 
     // Audit log: capture privacy-sensitive fields BEFORE update
     if (userData.profilePublic !== undefined || userData.holdingsVisibility !== undefined) {

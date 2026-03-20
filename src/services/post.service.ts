@@ -1,16 +1,6 @@
 import prisma from '../utils/prisma';
 import { sendPushToUser, sendNativePushToUser } from './push.service';
-
-// ── Content Sanitization ──────────────────────────────────────
-
-/** Strip dangerous HTML tags and unicode control chars. React handles display escaping. */
-function sanitizeContent(input: string): string {
-  return input
-    // Strip null bytes and dangerous unicode bidi/zero-width characters
-    .replace(/[\x00\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-    // Strip HTML tags (React escapes on render, but strip tags to prevent storage of markup)
-    .replace(/<[^>]*>/g, '');
-}
+import { sanitizeContent, filterContent } from '../utils/content-filter';
 
 // ── Social Notifications ──────────────────────────────────────
 
@@ -65,6 +55,15 @@ export async function createSocialNotification(
 // ── Post CRUD ─────────────────────────────────────────────────
 
 export async function createPost(userId: string, content: string, ticker?: string, type?: string, attachmentType?: string, attachmentData?: Record<string, unknown>) {
+  // Content moderation — reject before persisting
+  const filterResult = filterContent(content);
+  if (!filterResult.allowed) {
+    throw Object.assign(
+      new Error('Your post was blocked by our content policy. Please review our community guidelines.'),
+      { status: 400, code: 'content_policy_violation', reason: filterResult.reason, severity: filterResult.severity },
+    );
+  }
+
   return prisma.post.create({
     data: {
       userId,
@@ -140,6 +139,15 @@ export async function getUserPosts(userId: string, limit = 20, before?: string) 
 // ── Comments ──────────────────────────────────────────────────
 
 export async function createComment(userId: string, postId: string, content: string) {
+  // Content moderation — reject before persisting
+  const filterResult = filterContent(content);
+  if (!filterResult.allowed) {
+    throw Object.assign(
+      new Error('Your comment was blocked by our content policy. Please review our community guidelines.'),
+      { status: 400, code: 'content_policy_violation', reason: filterResult.reason, severity: filterResult.severity },
+    );
+  }
+
   const post = await prisma.post.findFirst({
     where: { id: postId, deleted: false },
     include: { user: { select: { profilePublic: true } } },
