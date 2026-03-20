@@ -44,6 +44,7 @@ export async function ensureDemoLeaderboardUsers(): Promise<number> {
         leaderboardEligibleAt: ninetyDaysAgo,
         profilePublic: true,
       },
+      select: { id: true },
     });
     created++;
   }
