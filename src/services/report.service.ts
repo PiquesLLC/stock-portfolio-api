@@ -15,7 +15,7 @@ export async function reportUser(
   }
 
   // Reported user must exist
-  const reported = await prisma.user.findUnique({ where: { id: reportedUserId } });
+  const reported = await prisma.user.findUnique({ where: { id: reportedUserId }, select: { id: true } });
   if (!reported) {
     const err = new Error('User not found');
     (err as any).status = 404;

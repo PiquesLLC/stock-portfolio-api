@@ -10,8 +10,8 @@ export async function followUser(followerId: string, followingId: string): Promi
 
   // Verify both users exist
   const [follower, following] = await Promise.all([
-    prisma.user.findUnique({ where: { id: followerId } }),
-    prisma.user.findUnique({ where: { id: followingId } }),
+    prisma.user.findUnique({ where: { id: followerId }, select: { id: true } }),
+    prisma.user.findUnique({ where: { id: followingId }, select: { id: true } }),
   ]);
   if (!follower) throw new Error('Follower user not found');
   if (!following) throw new Error('User to follow not found');

@@ -45,7 +45,7 @@ function isWeekendET(): boolean {
 // Ensure the seed/demo user exists (used only for leaderboard exclusion and demo data seeding).
 // Real users authenticate via JWT — portfolio data is stored per-user, never shared.
 async function ensureSeedUser(): Promise<void> {
-  const existing = await prisma.user.findUnique({ where: { id: DEFAULT_USER_ID } });
+  const existing = await prisma.user.findUnique({ where: { id: DEFAULT_USER_ID }, select: { id: true } });
   if (!existing) {
     await prisma.user.create({
       data: {
@@ -86,7 +86,7 @@ async function ensureDefaultUserLeaderboard(): Promise<void> {
   }
 
   if (Object.keys(updates).length > 0) {
-    await prisma.user.update({ where: { id: DEFAULT_USER_ID }, data: updates });
+    await prisma.user.update({ where: { id: DEFAULT_USER_ID }, data: updates, select: { id: true } });
     console.log('[Init] Enabled leaderboard for system user');
   }
 }

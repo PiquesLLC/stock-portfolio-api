@@ -9,7 +9,12 @@ import { getMarketSession } from '../utils/market-hours';
 export async function getUserPortfolio(userId: string): Promise<Portfolio | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { settings: true },
+    select: {
+      id: true,
+      settings: {
+        select: { cashBalance: true, marginDebt: true },
+      },
+    },
   });
 
   if (!user) return null;
