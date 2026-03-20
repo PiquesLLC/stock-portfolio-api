@@ -147,6 +147,7 @@ export async function findOrCreateOAuthUser(
       await prisma.user.update({
         where: { id: existingByProvider.id },
         data: { avatarUrl: profile.picture },
+        select: { id: true },
       }).catch(() => {});
     }
     return { user: existingByProvider, isNewUser: false };
@@ -262,6 +263,7 @@ export async function findOrCreateOAuthUser(
           await prisma.user.update({
             where: { id: byEmail.id },
             data: { [providerIdField]: profile.providerId },
+            select: { id: true },
           });
           trackP2002('byEmail');
           return { user: byEmail, isNewUser: false };
@@ -290,6 +292,7 @@ export async function commitOAuthLink(
       emailVerified: true,
       ...(pendingLink.avatarUrl ? { avatarUrl: pendingLink.avatarUrl } : {}),
     },
+    select: { id: true },
   });
 }
 

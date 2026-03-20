@@ -78,9 +78,10 @@ async function ensureDefaultUserLeaderboard(): Promise<void> {
     trackingStartAt = firstSnapshot?.timestamp ?? new Date();
   }
 
-  const updates: { leaderboardEligible?: boolean; profilePublic?: boolean; trackingStartAt?: Date } = {};
+  // NEVER auto-flip profilePublic — leaderboard eligibility is independent of profile visibility.
+  // Users must explicitly choose to make their profile public.
+  const updates: { leaderboardEligible?: boolean; trackingStartAt?: Date } = {};
   if (!user.leaderboardEligible) updates.leaderboardEligible = true;
-  if (!user.profilePublic) updates.profilePublic = true;
   if (user.trackingStartAt?.getTime() !== trackingStartAt.getTime()) {
     updates.trackingStartAt = trackingStartAt;
   }
@@ -123,6 +124,7 @@ async function ensureTesterFeatureAccess(): Promise<void> {
           planStartedAt: new Date(),
           planExpiresAt: expiresAt,
         },
+        select: { id: true },
       });
       console.log(`[Init] Granted tester feature access to @${user.username}`);
     }

@@ -22,6 +22,7 @@ export async function processReferral(
       prisma.user.update({
         where: { id: referredUserId },
         data: { referredBy: referrer.id },
+        select: { id: true },
       }),
       prisma.referral.create({
         data: {

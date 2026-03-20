@@ -260,6 +260,7 @@ export async function updateEmail(userId: string, email: string): Promise<void> 
   await prisma.user.update({
     where: { id: userId },
     data: { email: normalizedEmail, emailVerified: false },
+    select: { id: true },
   });
 
   // Send verification code
@@ -298,6 +299,7 @@ export async function verifyEmail(userId: string, code: string): Promise<boolean
       await prisma.user.update({
         where: { id: userId },
         data: { emailVerified: true },
+        select: { id: true },
       });
       return true;
     }

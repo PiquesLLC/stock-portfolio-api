@@ -57,6 +57,7 @@ async function getOrCreateStripeCustomer(userId: string): Promise<string> {
   await prisma.user.update({
     where: { id: userId },
     data: { stripeCustomerId: customer.id },
+    select: { id: true },
   });
   return customer.id;
 }
