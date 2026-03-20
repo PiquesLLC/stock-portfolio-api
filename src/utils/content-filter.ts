@@ -83,7 +83,8 @@ const BLOCKED_PATTERNS: BlockedEntry[] = [
   [/\bgenocide\s+(them|the\s+\w+)/i, 'hate_speech', 'block'],
 
   // ── Violent threats ────────────────────────────────────────────
-  [/\b(i('ll|m\s+going\s+to|m\s+gonna|will))\s+(kill|murder|shoot|stab|hurt)\s+(you|him|her|them|that\s+guy|everyone)\b/i, 'violent_threat', 'block'],
+  [/\bi('ll|'?m\s+going\s+to|'?m\s+gonna)\s+(kill|murder|shoot|stab|hurt)\s+(you|him|her|them|that\s+guy|everyone)\b/i, 'violent_threat', 'block'],
+  [/\bi\s+(will|want\s+to|wanna|am\s+going\s+to|am\s+gonna)\s+(kill|murder|shoot|stab|hurt)\s+(you|him|her|them|that\s+guy|everyone)\b/i, 'violent_threat', 'block'],
   [/\bkill\s+your\s*self\b/i, 'violent_threat', 'block'],
   [/\bkys\b/i, 'violent_threat', 'block'],
   [/\b(go\s+)?(hang|shoot|stab|cut)\s+yourself\b/i, 'violent_threat', 'block'],
