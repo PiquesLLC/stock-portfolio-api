@@ -40,7 +40,17 @@ router.post('/set-plan', requireAuth, requireAdmin, async (req: AuthRequest, res
 router.get('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.params.userId },
-    select: { id: true, username: true, email: true, plan: true, createdAt: true },
+    select: {
+      id: true, username: true, email: true, plan: true, createdAt: true,
+      stripeCustomerId: true, stripeSubscriptionId: true,
+      profilePublic: true, holdingsVisibility: true,
+      creator: {
+        select: {
+          id: true, status: true, stripeConnectId: true, stripeConnectOnboarded: true,
+          visibility: { select: { showHoldings: true, tradeDelayHours: true } },
+        },
+      },
+    },
   });
 
   if (!user) {
