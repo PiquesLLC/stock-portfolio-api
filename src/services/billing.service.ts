@@ -142,6 +142,7 @@ export async function createCheckoutSession(userId: string, priceId: string): Pr
       await prisma.user.update({
         where: { id: user.id },
         data: { stripeCustomerId: customerId },
+        select: { id: true },
       });
     }
   }
@@ -238,6 +239,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
               planStartedAt: new Date(),
               planExpiresAt: periodEnd,
             },
+            select: { id: true },
           });
         } else {
           await updateUserPlanByCustomer(stripeCustomerId, {
@@ -337,6 +339,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
             stripeSubscriptionId: null,
             planExpiresAt: null,
           },
+          select: { id: true },
         });
         console.log(`[Billing] Refund processed — user ${refundedUser.id} downgraded to free`);
         return;

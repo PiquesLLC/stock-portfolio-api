@@ -298,6 +298,7 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
           await prisma.user.update({
             where: { id: user.id },
             data: { plan, planExpiresAt: expiresDate },
+            select: { id: true },
           });
           console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
         }
@@ -315,6 +316,7 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
             appleOriginalTransactionId: null,
             applePurchaseSource: null,
           },
+          select: { id: true },
         });
         console.log(`[Apple IAP] Downgraded user ${user.id} to free (${notificationType})`);
         break;

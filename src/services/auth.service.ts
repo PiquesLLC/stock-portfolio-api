@@ -392,6 +392,7 @@ export async function changePassword(
   await prisma.user.update({
     where: { id: userId },
     data: { passwordHash },
+    select: { id: true },
   });
 
   // Revoke all existing sessions — if the user changed their password because
@@ -652,6 +653,7 @@ export async function verifyEmailCode(
     prisma.user.update({
       where: { id: user.id },
       data: { emailVerified: true },
+      select: { id: true },
     }),
   ]);
 
@@ -843,6 +845,7 @@ export async function resetPasswordWithCode(
     prisma.user.update({
       where: { id: user.id },
       data: { passwordHash },
+      select: { id: true },
     }),
     prisma.refreshToken.updateMany({
       where: { userId: user.id, revokedAt: null },
