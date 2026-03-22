@@ -9,6 +9,7 @@ import { getHoldings } from './portfolio.service';
 import { fetchPrices } from './market.service';
 import { getSector } from '../utils/sectors';
 import { callAI } from '../utils/ai-provider';
+import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 
 const cache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — tax situation only changes on trades
 
@@ -169,8 +170,8 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
       );
 
       if (result) {
-        aiAnalysis = result.content;
-        aiCitations = result.citations ?? [];
+        aiAnalysis = sanitizeContent(result.content);
+        aiCitations = (result.citations ?? []).filter(validateCitationUrl);
       }
     } catch (err) {
       console.error('[Tax Harvest] Perplexity analysis failed:', (err as Error).message);

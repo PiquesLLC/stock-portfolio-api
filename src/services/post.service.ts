@@ -515,14 +515,14 @@ export async function getTrendingTickers(hours = 24, limit = 10, viewerUserId?: 
       deleted: false,
       createdAt: { gte: since },
     },
-    select: { ticker: true, userId: true, type: true },
+    select: { ticker: true, userId: true, type: true, attachmentType: true },
   });
 
   const tickerCounts = new Map<string, number>();
   for (const p of posts) {
     if (!p.ticker) continue;
     // Exclude trade-type posts from paid creators viewer isn't subscribed to
-    if (p.type === 'trade' && excludedCreatorIds.has(p.userId)) continue;
+    if (p.attachmentType === 'trade' && excludedCreatorIds.has(p.userId)) continue;
     tickerCounts.set(p.ticker, (tickerCounts.get(p.ticker) || 0) + 1);
   }
 
