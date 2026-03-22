@@ -71,6 +71,12 @@ export function isCapacitorRequest(req: Request): boolean {
   // Only trust Capacitor-scheme origins — these cannot be set by a browser
   if (origin && NATIVE_ORIGINS.includes(origin)) return true;
 
+  // Fallback: X-Nala-Native header — the UI sets this on native platforms.
+  // Safe because: auth endpoints are the only place this matters, and login
+  // is rate-limited. A browser spoofing this header only gets tokens it could
+  // already extract from a successful login anyway (pre-auth, no session to steal).
+  if (req.headers['x-nala-native'] === '1') return true;
+
   return false;
 }
 
