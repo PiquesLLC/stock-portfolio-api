@@ -292,8 +292,13 @@ const server = app.listen(config.port, async () => {
   // Must run before any DB operations — enables concurrent reads + write queuing
   await initSqlitePragmas();
 
-  // Ensure social platform tables exist (migration may have partially failed)
+  // Fix partially-failed migrations: ensure tables exist, then mark migration as applied.
+  // Migration 20260319_add_social_platform failed because ALTER TABLE User (kycVerified)
+  // conflicted with existing column, rolling back the CREATE TABLE statements.
+  // This block creates the tables idempotently and marks the migration as finished
+  // so prisma migrate deploy won't retry it.
   try {
+    // 1. Ensure tables exist (idempotent)
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Post" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "ticker" TEXT, "type" TEXT NOT NULL DEFAULT 'thought', "attachmentType" TEXT, "attachmentData" TEXT, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Post_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Comment" ("id" TEXT NOT NULL PRIMARY KEY, "postId" TEXT NOT NULL, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Comment_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "Comment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Like" ("id" TEXT NOT NULL PRIMARY KEY, "postId" TEXT NOT NULL, "userId" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Like_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "Like_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
@@ -301,9 +306,34 @@ const server = app.listen(config.port, async () => {
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SocialNotification" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "actorId" TEXT NOT NULL, "type" TEXT NOT NULL, "postId" TEXT, "message" TEXT NOT NULL, "read" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SocialNotification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "SocialNotification_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Post_userId_createdAt_idx" ON "Post"("userId", "createdAt")`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Post_createdAt_idx" ON "Post"("createdAt")`);
-    console.log('[Init] Social platform tables verified');
+    // Also ensure PerformanceBadge + ProfileStatsCache from same migration
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "PerformanceBadge" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "badge" TEXT NOT NULL, "window" TEXT NOT NULL, "earnedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "expiresAt" DATETIME, CONSTRAINT "PerformanceBadge_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "PerformanceBadge_userId_badge_window_key" ON "PerformanceBadge"("userId", "badge", "window")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "ProfileStatsCache" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL UNIQUE, "winRate" REAL, "totalTrades" INTEGER, "avgHoldDays" REAL, "profitFactor" REAL, "computedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ProfileStatsCache_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+
+    // 2. Mark the migration as successfully applied if it's stuck as failed
+    const migrationRows: any[] = await prisma.$queryRawUnsafe(
+      `SELECT id, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name = '20260319_add_social_platform'`
+    );
+    if (migrationRows.length > 0) {
+      const m = migrationRows[0];
+      if (!m.finished_at || m.rolled_back_at) {
+        await prisma.$executeRawUnsafe(
+          `UPDATE _prisma_migrations SET finished_at = datetime('now'), rolled_back_at = NULL, applied_steps_count = 1, logs = 'Fixed by app startup - tables created manually' WHERE migration_name = '20260319_add_social_platform'`
+        );
+        console.log('[Init] Fixed migration 20260319_add_social_platform — marked as applied');
+      }
+    } else {
+      // Migration record doesn't exist at all — insert it
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO _prisma_migrations (id, checksum, migration_name, finished_at, applied_steps_count, logs) VALUES (lower(hex(randomblob(16))), 'manual', '20260319_add_social_platform', datetime('now'), 1, 'Created by app startup')`
+      );
+      console.log('[Init] Inserted migration record for 20260319_add_social_platform');
+    }
+
+    console.log('[Init] Social platform tables + migration state verified');
   } catch (err: any) {
-    console.error('[Init] Social table creation failed:', err.message);
+    console.error('[Init] Social table/migration fix failed:', err.message);
   }
 
   try {
