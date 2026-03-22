@@ -39,9 +39,13 @@ export async function createPostHandler(req: AuthRequest, res: Response): Promis
     const { content, ticker, type, attachmentType, attachmentData } = parsed.data;
     const post = await createPost(userId, content, ticker, type, attachmentType, attachmentData as Record<string, unknown>);
     res.status(201).json(post);
-  } catch (error: unknown) {
-    console.error('Error creating post:');
-    res.status(500).json({ error: 'Failed to create post' });
+  } catch (error: any) {
+    const status = error.status || 500;
+    console.error('Error creating post:', error.message || error, error.code || '', error.reason || '');
+    res.status(status).json({
+      error: error.message || 'Failed to create post',
+      code: error.code,
+    });
   }
 }
 
