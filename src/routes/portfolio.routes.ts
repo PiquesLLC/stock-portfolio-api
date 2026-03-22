@@ -22,9 +22,11 @@ import {
 } from '../controllers/portfolio.controller';
 import { getPerformanceReportHandler, emailPerformanceReportHandler } from '../controllers/performance-report.controller';
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
+import { fetchPortfolioNews } from '../services/portfolio-news.service';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
+import { AuthRequest } from '../types/auth';
 import { requirePlan } from '../middleware/plan.middleware';
 import multer from 'multer';
 
@@ -33,6 +35,19 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const uploadMapped = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 router.get('/', optionalAuth, getPortfolioHandler);
+router.get('/news', heavyReadLimiter, requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) { res.status(401).json({ error: 'Authentication required' }); return; }
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+    const portfolioId = req.query.portfolioId as string | undefined;
+    const data = await fetchPortfolioNews(userId, limit, portfolioId);
+    res.json(data);
+  } catch (err: any) {
+    console.error('Portfolio news error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch portfolio news' });
+  }
+});
 router.post('/holdings', mutationLimiter, requireAuth, addHolding);
 router.delete('/holdings/:ticker', mutationLimiter, requireAuth, removeHolding);
 router.put('/cash', mutationLimiter, requireAuth, setCashBalance);
