@@ -11,7 +11,7 @@ export const createPostBodySchema = z.object({
     action: z.string().max(10).optional(),
     shares: z.number().optional(),
     price: z.number().optional(),
-    image: z.string().max(500000).optional(), // base64 screenshot (max ~500KB)
+    image: z.string().max(4000000).optional(), // base64 chart capture (max ~4MB)
   }).optional(),
 });
 
