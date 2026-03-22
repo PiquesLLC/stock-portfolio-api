@@ -35,6 +35,14 @@ export async function getUserByUsernameHandler(req: AuthRequest, res: Response):
       return;
     }
 
+    // If profile is not public, return 404 unless the requester is the user themselves
+    const requesterId = req.user?.userId;
+    const isOwner = requesterId === user.id;
+    if (!user.profilePublic && !isOwner) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     res.json(user);
   } catch (error: unknown) {
     console.error('Error looking up user by username:');

@@ -122,13 +122,11 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
+    const isNative = isCapacitorRequest(req);
     const googleBody: any = {
       user: { ...loginResponse.user, isWaitlistAdmin: isAdmin },
       isNewUser,
-      accessToken: loginResponse.token,
-      refreshToken: loginResponse.refreshToken,
-      token: loginResponse.token,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken: loginResponse.token, refreshToken: loginResponse.refreshToken, token: loginResponse.token } : {}),
     };
     res.json(googleBody);
   } catch (error: unknown) {
@@ -203,13 +201,11 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
     const isAppleAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
       (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
+    const isNative = isCapacitorRequest(req);
     const appleBody: any = {
       user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin },
       isNewUser,
-      accessToken: loginResponse.token,
-      refreshToken: loginResponse.refreshToken,
-      token: loginResponse.token,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken: loginResponse.token, refreshToken: loginResponse.refreshToken, token: loginResponse.token } : {}),
     };
     res.json(appleBody);
   } catch (error: unknown) {

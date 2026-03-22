@@ -136,21 +136,18 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
-    // Always include tokens in response body. Web clients ignore them (use httpOnly cookies).
-    // Native clients need them because WKWebView blocks cross-origin cookies entirely.
+    // Only include tokens in response body for native clients (iOS Capacitor).
+    // Browser flows use httpOnly cookies — exposing tokens in JSON is unnecessary risk.
+    const isNative = isCapacitorRequest(req);
     const body: any = {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
-      accessToken: result.token,
-      refreshToken: result.refreshToken,
-      token: result.token,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken: result.token, refreshToken: result.refreshToken, token: result.token } : {}),
     };
     console.error('[AuthRuntime] login response', {
       origin: req.headers.origin,
       nativeHeader: req.headers['x-nala-native'],
+      isNative,
       bodyKeys: Object.keys(body),
-      accessTokenLen: result.token.length,
-      refreshTokenLen: result.refreshToken.length,
     });
     res.json(body);
   } catch (error: unknown) {
@@ -290,13 +287,11 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', result.token, accessOptions);
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
+    const isNative = isCapacitorRequest(req);
     const signupBody: any = {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       emailVerificationRequired: !result.user.emailVerified,
-      accessToken: result.token,
-      refreshToken: result.refreshToken,
-      token: result.token,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken: result.token, refreshToken: result.refreshToken, token: result.token } : {}),
     };
     res.status(201).json(signupBody);
   } catch (error: unknown) {
@@ -658,10 +653,13 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
  */
 export async function refreshHandler(req: Request, res: Response): Promise<void> {
   try {
-    const nativeRefreshBody = typeof req.body?.refreshToken === 'string' && req.body.refreshToken.length > 0;
-    const token = isCapacitorRequest(req)
+    const isNative = isCapacitorRequest(req);
+
+    // Fix 3: Only accept refreshToken from request body for native clients.
+    // Browser flows must use the httpOnly cookie exclusively.
+    const token = isNative
       ? (req.body?.refreshToken || req.cookies?.refreshToken)
-      : (req.cookies?.refreshToken || req.body?.refreshToken);
+      : req.cookies?.refreshToken;
 
     if (!token || typeof token !== 'string') {
       res.status(401).json({ error: 'Refresh token is required', code: 'NO_TOKEN' });
@@ -682,19 +680,13 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     const refreshBody: any = {
       message: 'Token refreshed successfully',
-      accessToken,
-      refreshToken: result.refreshToken,
-      token: accessToken,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken, refreshToken: result.refreshToken, token: accessToken } : {}),
     };
     console.error('[AuthRuntime] refresh response', {
       origin: req.headers.origin,
       nativeHeader: req.headers['x-nala-native'],
-      nativeRefreshBody,
-      isCapacitor: isCapacitorRequest(req),
+      isNative,
       bodyKeys: Object.keys(refreshBody),
-      accessTokenLen: accessToken.length,
-      refreshTokenLen: result.refreshToken.length,
     });
     res.json(refreshBody);
   } catch (error: unknown) {
