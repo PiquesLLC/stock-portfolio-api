@@ -178,15 +178,38 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
     const viewerFollowing = viewerId ? await isFollowing(viewerId, userId) : false;
     let activity: ActivityEventResponse[] = user.profilePublic ? await getUserActivity(userId, 10) : [];
 
-    // Trade delay: filter out recent activity events for non-owner viewers
+    // Trade delay + subscription gate: filter activity for non-owner viewers
     if (!isOwner && activity.length > 0) {
       const creator = await prisma.creator.findUnique({
         where: { userId },
-        select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+        select: { status: true, pricingCents: true, visibility: { select: { tradeDelayHours: true } } },
       });
-      if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
-        const cutoff = Date.now() - creator.visibility.tradeDelayHours * 60 * 60 * 1000;
-        activity = activity.filter(e => new Date(e.createdAt).getTime() <= cutoff);
+      if (creator?.status === 'active') {
+        // Paid creator — hide trades from non-subscribers entirely
+        if (creator.pricingCents > 0 && viewerId) {
+          const now = new Date();
+          const sub = await prisma.creatorSubscription.findFirst({
+            where: {
+              subscriberUserId: viewerId,
+              creatorUserId: userId,
+              status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+              OR: [
+                { trialEnd: { gt: now } },
+                { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+                { currentPeriodEnd: { gt: now } },
+              ],
+            },
+            select: { id: true },
+          });
+          if (!sub) activity = []; // Not subscribed — hide all trades
+        } else if (creator.pricingCents > 0 && !viewerId) {
+          activity = []; // Unauthenticated viewer — hide paid creator trades
+        }
+        // Apply trade delay for trades that pass the subscription check
+        if (activity.length > 0 && creator.visibility?.tradeDelayHours) {
+          const cutoff = Date.now() - creator.visibility.tradeDelayHours * 60 * 60 * 1000;
+          activity = activity.filter(e => new Date(e.createdAt).getTime() <= cutoff);
+        }
       }
     }
 

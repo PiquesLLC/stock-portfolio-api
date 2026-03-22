@@ -290,17 +290,38 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
     : [];
   const likedSet = new Set(viewerLikes.map(l => l.postId));
 
-  // Apply trade delay for creator content (SEC compliance — min 24hr for active creators)
+  // Apply trade delay + subscription gate for creator content
   const MINIMUM_DELAY_HOURS = 24;
   const creators = await prisma.creator.findMany({
     where: { userId: { in: followedIds }, status: 'active' },
-    select: { userId: true, visibility: { select: { tradeDelayHours: true } } },
+    select: { userId: true, pricingCents: true, visibility: { select: { tradeDelayHours: true } } },
   });
   const creatorDelayMap = new Map<string, number>();
+  const paidCreatorIds = new Set<string>();
   for (const c of creators) {
     const configured = c.visibility?.tradeDelayHours ?? MINIMUM_DELAY_HOURS;
-    // Enforce minimum 24hr delay for all active creators (SEC requirement)
     creatorDelayMap.set(c.userId, Math.max(configured, MINIMUM_DELAY_HOURS));
+    if (c.pricingCents > 0) paidCreatorIds.add(c.userId);
+  }
+
+  // Check which paid creators the viewer is subscribed to
+  const subscribedCreatorIds = new Set<string>();
+  if (paidCreatorIds.size > 0) {
+    const now = new Date();
+    const subs = await prisma.creatorSubscription.findMany({
+      where: {
+        subscriberUserId: userId,
+        creatorUserId: { in: [...paidCreatorIds] },
+        status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+        OR: [
+          { trialEnd: { gt: now } },
+          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+          { currentPeriodEnd: { gt: now } },
+        ],
+      },
+      select: { creatorUserId: true },
+    });
+    for (const s of subs) subscribedCreatorIds.add(s.creatorUserId);
   }
 
   // Fetch activity events from followed users
@@ -310,18 +331,21 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
       createdAt: { lt: beforeDate },
     },
     orderBy: { createdAt: 'desc' },
-    take: limit * 2, // fetch extra to account for delay filtering
+    take: limit * 2,
     include: {
       user: { select: { id: true, username: true, displayName: true } },
     },
   });
 
-  // Filter activities by trade delay (only creators have delay; regular users show immediately)
-  const now = Date.now();
+  // Filter activities: trade delay + paid creator subscription gate
+  const nowMs = Date.now();
   const delayedActivities = activities.filter(a => {
+    // Paid creator whose trades are behind a subscription — hide from non-subscribers
+    if (paidCreatorIds.has(a.userId) && !subscribedCreatorIds.has(a.userId)) return false;
+
     const delayHours = creatorDelayMap.get(a.userId);
     if (delayHours == null) return true; // Non-creator: no delay
-    const cutoff = now - delayHours * 60 * 60 * 1000;
+    const cutoff = nowMs - delayHours * 60 * 60 * 1000;
     return a.createdAt.getTime() <= cutoff;
   }).slice(0, limit);
 
