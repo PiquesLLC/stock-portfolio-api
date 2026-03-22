@@ -19,7 +19,8 @@ import { mutationLimiter, enumerationLimiter } from '../middleware/rateLimiter';
 const router = Router();
 
 // Username lookup — MUST be before /:userId routes to avoid conflict
-router.get('/by-username/:username', enumerationLimiter, getUserByUsernameHandler);
+// optionalAuth needed so getUserByUsernameHandler can check if requester is the profile owner
+router.get('/by-username/:username', enumerationLimiter, optionalAuth, getUserByUsernameHandler);
 
 // Public endpoints (optionalAuth for privacy-respecting endpoints)
 router.get('/', optionalAuth, getUsersHandler); // Only shows public profiles

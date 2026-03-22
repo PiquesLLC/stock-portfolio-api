@@ -179,6 +179,50 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
+
+// CSRF protection for cookie-authenticated mutations (POST, PUT, DELETE, PATCH).
+// Checks that the Origin header matches allowed origins for requests that rely on
+// cookie-based auth. Bearer-token requests (native iOS app) and webhook routes
+// (which use signature verification) are exempt.
+app.use((req, res, next) => {
+  // Only check state-changing methods
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+
+  // Skip webhook routes — they use their own signature verification
+  if (req.path === '/billing/webhook' || req.path === '/creator/webhooks/stripe' || req.path === '/billing/apple-webhook') {
+    return next();
+  }
+
+  // Skip requests with Bearer token (native iOS app uses bearer tokens, not cookies)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  // Only enforce for cookie-authenticated requests (have a cookie but no Authorization header)
+  const hasCookie = !!(req.cookies?.authToken || req.cookies?.refreshToken);
+  if (!hasCookie) {
+    return next();
+  }
+
+  // Check Origin header against allowed origins
+  const origin = req.headers.origin;
+  if (!origin) {
+    // No Origin header on a cookie-based mutation — block it.
+    // Same-origin requests from browsers always send Origin on POST/PUT/DELETE/PATCH.
+    res.status(403).json({ error: 'Forbidden: missing Origin header' });
+    return;
+  }
+
+  if (!config.allowedOrigins.includes(origin)) {
+    res.status(403).json({ error: 'Forbidden: origin not allowed' });
+    return;
+  }
+
+  next();
+});
 const jsonParser = express.json({
   limit: '5mb',
   // Capture raw body for webhook signature verification (Plaid)

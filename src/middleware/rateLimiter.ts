@@ -24,22 +24,14 @@ function ipOnlyKey(request: Request): string {
 const isProd = process.env.NODE_ENV === 'production';
 
 /**
- * Trusted sources that bypass rate limiting entirely.
- * Webhook providers verify authenticity via signatures, not rate limits.
+ * Trusted traffic that bypasses rate limiting.
+ * Only the health check endpoint is exempted — webhook providers authenticate
+ * via signature verification, so they go through normal rate limits.
+ * User-Agent headers are trivially spoofable and must NOT be used for bypass.
  */
-const TRUSTED_USER_AGENTS = [
-  'Stripe/',       // Stripe webhooks
-  'PlaidWebhook',  // Plaid webhooks
-  'BetterStack',   // Uptime monitoring
-];
-
 function isTrustedTraffic(req: Request): boolean {
-  // Health checks
+  // Health checks (BetterStack uptime monitoring hits /health)
   if (req.path === '/health') return true;
-
-  // Known webhook/monitoring user agents
-  const ua = req.headers['user-agent'] || '';
-  if (TRUSTED_USER_AGENTS.some(prefix => ua.includes(prefix))) return true;
 
   return false;
 }

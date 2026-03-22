@@ -31,8 +31,29 @@ import { requirePlan } from '../middleware/plan.middleware';
 import multer from 'multer';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
-const uploadMapped = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+
+// MIME validation filters for file uploads
+const imageFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp'];
+  if (allowedImageTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type: ${file.mimetype}. Only PNG, JPEG, and WebP images are allowed.`));
+  }
+};
+
+const csvFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  const allowedCsvTypes = ['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel'];
+  if (allowedCsvTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type: ${file.mimetype}. Only CSV files are allowed.`));
+  }
+};
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFileFilter }); // 10MB limit — screenshots
+const uploadCsv = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: csvFileFilter }); // 10MB limit — CSV imports
+const uploadMappedCsv = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: csvFileFilter }); // 5MB limit — mapped CSV
 
 router.get('/', optionalAuth, getPortfolioHandler);
 router.get('/news', heavyReadLimiter, aiLimiter, requireAuth, async (req: AuthRequest, res) => {
@@ -72,8 +93,8 @@ router.get('/performance', heavyReadLimiter, requireAuth, getPerformanceHandler)
 router.get('/report', heavyReadLimiter, requireAuth, requirePlan('elite'), getPerformanceReportHandler);
 router.post('/report/email', mutationLimiter, requireAuth, requirePlan('elite'), emailPerformanceReportHandler);
 router.get('/activity/:ticker', requireAuth, getTickerActivity);
-router.post('/import/csv', mutationLimiter, requireAuth, upload.single('file'), importPortfolioCsvHandler);
-router.post('/import/csv/mapped', mutationLimiter, requireAuth, uploadMapped.single('file'), importMappedCsvHandler);
+router.post('/import/csv', mutationLimiter, requireAuth, uploadCsv.single('file'), importPortfolioCsvHandler);
+router.post('/import/csv/mapped', mutationLimiter, requireAuth, uploadMappedCsv.single('file'), importMappedCsvHandler);
 router.post('/import/screenshot', mutationLimiter, requireAuth, upload.single('file'), importPortfolioScreenshotHandler);
 router.post('/import/confirm', mutationLimiter, requireAuth, confirmPortfolioImportHandler);
 router.post('/clear', mutationLimiter, requireAuth, clearPortfolioHandler);

@@ -93,12 +93,10 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     const { accessOptions, refreshOptions } = getCookieOptions(req);
     res.cookie('authToken', token, accessOptions);
     res.cookie('refreshToken', refreshToken, refreshOptions);
+    const isNative = isCapacitorRequest(req);
     const mfaBody: any = {
       user: { id: user.id, username: user.username, displayName: user.displayName, isWaitlistAdmin: isAdmin },
-      accessToken: token,
-      refreshToken,
-      token,
-      debugAuthVersion: 'auth-body-v2',
+      ...(isNative ? { accessToken: token, refreshToken, token } : {}),
     };
     res.json(mfaBody);
   } catch (error: unknown) {
