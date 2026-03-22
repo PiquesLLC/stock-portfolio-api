@@ -1,14 +1,27 @@
 import NodeCache from 'node-cache';
 import { fetchTickerNews, fetchMarketNews, MarketNewsItem } from './news.service';
 import prisma from '../utils/prisma';
+import { callAI } from '../utils/ai-provider';
 
 export interface PortfolioNewsItem extends MarketNewsItem {
   matchedTickers: string[];
   portfolioRelevance: number; // 0-100 based on matched holdings weight
 }
 
+export interface MacroSummary {
+  overview: string;        // 2-3 sentence market overview
+  portfolioImpact: string; // How it specifically affects this portfolio
+  outlook: string;         // Forward-looking 1-2 sentences
+  keyThemes: string[];     // 3-5 short theme labels
+  sentiment: 'bullish' | 'bearish' | 'neutral' | 'mixed';
+  citations: string[];
+  generatedAt: string;
+  cached: boolean;
+}
+
 export interface PortfolioNewsResponse {
   items: PortfolioNewsItem[];
+  summary?: MacroSummary;
   holdingCount: number;
   tickersFetched: string[];
   generatedAt: string;
@@ -109,4 +122,97 @@ export async function fetchPortfolioNews(userId: string, limit = 30, portfolioId
 
   portfolioNewsCache.set(cacheKey, response);
   return { ...response, items: response.items.slice(0, limit) };
+}
+
+// ── AI Macro Summary ──────────────────────────────────────────
+
+const summaryCache = new NodeCache({ stdTTL: 1800 }); // 30 min
+
+export async function generateMacroSummary(userId: string, portfolioId?: string): Promise<MacroSummary | null> {
+  const cacheKey = `macro-summary-${userId}-${portfolioId || 'default'}`;
+  const cached = summaryCache.get<MacroSummary>(cacheKey);
+  if (cached) return { ...cached, cached: true };
+
+  // Get news + holdings context
+  const newsData = await fetchPortfolioNews(userId, 20, portfolioId);
+  if (newsData.items.length === 0) return null;
+
+  // Build holdings context
+  const portfolio = await prisma.portfolio.findFirst({
+    where: portfolioId ? { id: portfolioId, userId } : { userId, isDefault: true },
+    include: { holdings: { where: { shares: { gt: 0 } }, select: { ticker: true, shares: true, averageCost: true } } },
+  });
+  if (!portfolio) return null;
+
+  const holdingsSummary = portfolio.holdings
+    .map(h => ({ ticker: h.ticker, costBasis: h.shares * h.averageCost }))
+    .sort((a, b) => b.costBasis - a.costBasis)
+    .slice(0, 15)
+    .map(h => h.ticker)
+    .join(', ');
+
+  // Build news headlines for AI context
+  const headlines = newsData.items
+    .slice(0, 15)
+    .map(item => `- ${item.headline} (${item.source}, ${item.matchedTickers.join('/')})`)
+    .join('\n');
+
+  const systemPrompt = `You are a macro market analyst for a retail investor. Respond in JSON only. No markdown fences.`;
+
+  const userPrompt = `This investor holds: ${holdingsSummary}
+
+Recent news affecting their portfolio:
+${headlines}
+
+Analyze how current market conditions and these news events affect this specific portfolio. Return JSON:
+{
+  "overview": "2-3 sentence macro market overview focusing on what matters for this portfolio",
+  "portfolioImpact": "2-3 sentences on how these events specifically impact their holdings",
+  "outlook": "1-2 sentence forward-looking view",
+  "keyThemes": ["theme1", "theme2", "theme3"],
+  "sentiment": "bullish" | "bearish" | "neutral" | "mixed"
+}
+
+Rules:
+- Be specific about which holdings are affected and why
+- Reference actual ticker symbols from their portfolio
+- Keep language clear and direct, no jargon
+- keyThemes should be 2-4 word labels (e.g. "Tech earnings strong", "Rate cut hopes")
+- sentiment reflects overall macro outlook for THIS portfolio`;
+
+  try {
+    const response = await callAI(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      { timeout: 15000, feature: 'macro-summary', userId },
+    );
+
+    if (!response?.content) return null;
+
+    // Parse JSON from response (may be wrapped in markdown fences)
+    let jsonStr = response.content.trim();
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+    const parsed = JSON.parse(jsonStr);
+
+    const summary: MacroSummary = {
+      overview: parsed.overview || '',
+      portfolioImpact: parsed.portfolioImpact || '',
+      outlook: parsed.outlook || '',
+      keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes.slice(0, 5) : [],
+      sentiment: ['bullish', 'bearish', 'neutral', 'mixed'].includes(parsed.sentiment) ? parsed.sentiment : 'neutral',
+      citations: response.citations || [],
+      generatedAt: new Date().toISOString(),
+      cached: false,
+    };
+
+    summaryCache.set(cacheKey, summary);
+    return summary;
+  } catch (err) {
+    console.error('[MacroSummary] AI call failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
 }
