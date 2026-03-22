@@ -243,9 +243,10 @@ export async function markAllSocialNotifsReadHandler(req: AuthRequest, res: Resp
 
 export async function getTrendingTickersHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user?.userId;
     const hours = Math.min(parseInt(req.query.hours as string) || 24, 168);
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
-    const tickers = await getTrendingTickers(hours, limit);
+    const tickers = await getTrendingTickers(hours, limit, userId);
     res.json({ tickers });
   } catch (error: unknown) {
     console.error('Error getting trending tickers:');
@@ -255,8 +256,9 @@ export async function getTrendingTickersHandler(req: AuthRequest, res: Response)
 
 export async function getCommunityTradesHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
+    const userId = req.user?.userId;
     const hours = Math.min(parseInt(req.query.hours as string) || 24, 168);
-    const data = await getCommunityTradeActivity(hours);
+    const data = await getCommunityTradeActivity(hours, undefined, userId);
     res.json(data);
   } catch (error: unknown) {
     console.error('Error getting community trades:');

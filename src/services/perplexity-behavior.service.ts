@@ -1,6 +1,7 @@
 import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
 import { parsePerplexityJson } from '../utils/perplexity';
+import { sanitizeContent } from '../utils/content-filter';
 import { getPortfolio } from './portfolio.service';
 import { getUserActivity } from './activity.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -159,12 +160,12 @@ export async function getBehaviorInsights(userId: string, portfolioId?: string):
 
     const result: BehaviorInsightsResponse = {
       generatedAt: new Date().toISOString(),
-      summary: String(parsed.summary || '').slice(0, 500),
+      summary: sanitizeContent(String(parsed.summary || '').slice(0, 500)),
       insights: (parsed.insights || []).slice(0, 8).map((i: any) => ({
         category: validCategories.includes(i.category) ? i.category : 'general',
-        title: String(i.title || '').slice(0, 100),
-        observation: String(i.observation || '').slice(0, 300),
-        suggestion: String(i.suggestion || '').slice(0, 300),
+        title: sanitizeContent(String(i.title || '').slice(0, 100)),
+        observation: sanitizeContent(String(i.observation || '').slice(0, 300)),
+        suggestion: sanitizeContent(String(i.suggestion || '').slice(0, 300)),
         severity: validSeverities.includes(i.severity) ? i.severity : 'info',
       })),
       activityCount: activity.length,
