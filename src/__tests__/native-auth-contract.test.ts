@@ -137,6 +137,7 @@ describe('Native Auth Contract Routes', () => {
   it('returns token fields from POST /auth/mfa/verify', async () => {
     const res = await request(app)
       .post('/auth/mfa/verify')
+      .set('Origin', 'capacitor://localhost')
       .send({ challengeToken: 'challenge-1', code: '123456', method: 'totp' });
 
     expect(res.status).toBe(200);
@@ -151,6 +152,7 @@ describe('Native Auth Contract Routes', () => {
   it('returns token fields from POST /auth/oauth/google/callback', async () => {
     const res = await request(app)
       .post('/auth/oauth/google/callback')
+      .set('Origin', 'capacitor://localhost')
       .send({ access_token: 'google-access-token' });
 
     expect(res.status).toBe(200);
@@ -166,6 +168,7 @@ describe('Native Auth Contract Routes', () => {
   it('returns token fields from POST /auth/oauth/apple/callback', async () => {
     const res = await request(app)
       .post('/auth/oauth/apple/callback')
+      .set('Origin', 'capacitor://localhost')
       .send({ id_token: 'apple-id-token' });
 
     expect(res.status).toBe(200);

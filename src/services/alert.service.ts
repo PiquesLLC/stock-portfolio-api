@@ -229,7 +229,7 @@ export async function checkCongressTradeAlerts(): Promise<void> {
 
       // Build fingerprint from trade details for dedup (sorted for stability)
       const fingerprint = recentTrades
-        .map(t => `${t.ticker}:${t.transactionType}:${t.politician}`)
+        .map(t => `${t.ticker}:${t.transactionType}:${t.politician}:${t.tradeDate}`)
         .sort()
         .join(',');
 

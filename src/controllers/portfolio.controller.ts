@@ -1056,6 +1056,12 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       return;
     }
 
+    // Reject binary files (NUL bytes indicate non-text content)
+    if (file.buffer.includes(0x00)) {
+      res.status(400).json({ error: 'Invalid CSV file: binary content detected' });
+      return;
+    }
+
     const parseStart = Date.now();
     const csvText = preprocessCsvText(file.buffer.toString('utf8'));
     const data = parseCsv(csvText, {
@@ -1224,6 +1230,12 @@ export async function importMappedCsvHandler(req: AuthRequest, res: Response): P
     const file = (req as any).file as Express.Multer.File | undefined;
     if (!file || !file.buffer) {
       res.status(400).json({ error: 'CSV file is required (field name: file)' });
+      return;
+    }
+
+    // Reject binary files (NUL bytes indicate non-text content)
+    if (file.buffer.includes(0x00)) {
+      res.status(400).json({ error: 'Invalid CSV file: binary content detected' });
       return;
     }
 

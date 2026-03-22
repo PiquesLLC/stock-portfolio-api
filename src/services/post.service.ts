@@ -115,11 +115,11 @@ export async function deletePost(userId: string, postId: string): Promise<boolea
   return true;
 }
 
-export async function getUserPosts(userId: string, limit = 20, before?: string) {
+export async function getUserPosts(userId: string, limit = 20, before?: string, viewerUserId?: string) {
   const where: any = { userId, deleted: false };
   if (before) where.createdAt = { lt: new Date(before) };
 
-  const posts = await prisma.post.findMany({
+  let posts = await prisma.post.findMany({
     where,
     orderBy: { createdAt: 'desc' },
     take: limit,
@@ -128,6 +128,34 @@ export async function getUserPosts(userId: string, limit = 20, before?: string) 
       _count: { select: { comments: { where: { deleted: false } }, likes: true } },
     },
   });
+
+  // Filter out trade-bearing posts from paid creators if viewer isn't subscribed
+  if (viewerUserId !== userId) {
+    const creator = await prisma.creator.findUnique({
+      where: { userId },
+      select: { status: true, pricingCents: true },
+    });
+    if (creator?.status === 'active' && creator.pricingCents > 0) {
+      const now = new Date();
+      const sub = viewerUserId
+        ? await prisma.creatorSubscription.findFirst({
+            where: {
+              subscriberUserId: viewerUserId,
+              creatorUserId: userId,
+              status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+              OR: [
+                { trialEnd: { gt: now } },
+                { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+                { currentPeriodEnd: { gt: now } },
+              ],
+            },
+          })
+        : null;
+      if (!sub) {
+        posts = posts.filter(p => p.attachmentType !== 'trade');
+      }
+    }
+  }
 
   return posts.map(p => ({
     ...p,

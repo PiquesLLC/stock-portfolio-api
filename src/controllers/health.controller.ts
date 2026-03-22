@@ -9,56 +9,8 @@ import { getProviderMetrics } from '../utils/provider-metrics';
 import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount } from '../services/job-runner.service';
 
-export async function healthCheck(req: Request, res: Response): Promise<void> {
-  const dbStartedAt = Date.now();
-  let database: { connected: boolean; latencyMs: number | null; error?: string } = {
-    connected: false,
-    latencyMs: null,
-  };
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    database = {
-      connected: true,
-      latencyMs: Date.now() - dbStartedAt,
-    };
-  } catch (error: unknown) {
-    database = {
-      connected: false,
-      latencyMs: Date.now() - dbStartedAt,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  let lastSnapshot: { timestamp: Date } | null = null;
-  try {
-    lastSnapshot = await prisma.portfolioSnapshot.findFirst({
-      orderBy: { timestamp: 'desc' },
-      select: { timestamp: true },
-    });
-  } catch {
-    // Table may not exist in test/CI environments
-  }
-  const memoryUsage = process.memoryUsage();
-
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    database,
-    snapshots: {
-      lastSuccessfulSnapshotAt: lastSnapshot?.timestamp?.toISOString() ?? null,
-    },
-    backgroundJobs: {
-      activeCount: getActiveBackgroundJobCount(),
-    },
-    memory: {
-      rss: memoryUsage.rss,
-      heapTotal: memoryUsage.heapTotal,
-      heapUsed: memoryUsage.heapUsed,
-      external: memoryUsage.external,
-      arrayBuffers: memoryUsage.arrayBuffers,
-    },
-  });
+export async function healthCheck(_req: Request, res: Response): Promise<void> {
+  res.json({ status: 'ok' });
 }
 
 export async function authMetrics(req: Request, res: Response): Promise<void> {
@@ -150,10 +102,52 @@ export async function jobMetrics(req: Request, res: Response): Promise<void> {
 }
 
 export async function healthStatus(req: Request, res: Response): Promise<void> {
+  // DB latency
+  const dbStartedAt = Date.now();
+  let database: { connected: boolean; latencyMs: number | null; error?: string } = {
+    connected: false,
+    latencyMs: null,
+  };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    database = { connected: true, latencyMs: Date.now() - dbStartedAt };
+  } catch (error: unknown) {
+    database = {
+      connected: false,
+      latencyMs: Date.now() - dbStartedAt,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  let lastSnapshot: { timestamp: Date } | null = null;
+  try {
+    lastSnapshot = await prisma.portfolioSnapshot.findFirst({
+      orderBy: { timestamp: 'desc' },
+      select: { timestamp: true },
+    });
+  } catch {
+    // Table may not exist in test/CI environments
+  }
+  const memoryUsage = process.memoryUsage();
+
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    database,
+    snapshots: {
+      lastSuccessfulSnapshotAt: lastSnapshot?.timestamp?.toISOString() ?? null,
+    },
+    backgroundJobs: {
+      activeCount: getActiveBackgroundJobCount(),
+    },
+    memory: {
+      rss: memoryUsage.rss,
+      heapTotal: memoryUsage.heapTotal,
+      heapUsed: memoryUsage.heapUsed,
+      external: memoryUsage.external,
+      arrayBuffers: memoryUsage.arrayBuffers,
+    },
     providers: {
       finnhub: {
         configured: Boolean(config.finnhubApiKey),

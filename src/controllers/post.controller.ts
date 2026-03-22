@@ -117,7 +117,7 @@ export async function getUserPostsHandler(req: AuthRequest, res: Response): Prom
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const before = req.query.before as string | undefined;
     if (!isValidDateParam(before)) { res.status(400).json({ error: 'Invalid before date' }); return; }
-    const posts = await getUserPosts(targetUserId, limit, before);
+    const posts = await getUserPosts(targetUserId, limit, before, userId);
     res.json({ posts });
   } catch (error: unknown) {
     console.error('Error getting user posts:');

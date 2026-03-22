@@ -212,7 +212,16 @@ Critical rules:
       outlook: sanitizeContent(parsed.outlook || ''),
       keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes.slice(0, 5).map((t: string) => sanitizeContent(t)) : [],
       sentiment: ['bullish', 'bearish', 'neutral', 'mixed'].includes(parsed.sentiment) ? parsed.sentiment : 'neutral',
-      citations: (response.citations || []).filter((url: string) => /^https?:\/\//i.test(url)),
+      citations: (response.citations || []).filter((url: string) => {
+        try {
+          const parsed = new URL(url);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+          if (parsed.username || parsed.password) return false;
+          const host = parsed.hostname;
+          if (host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.')) return false;
+          return true;
+        } catch { return false; }
+      }),
       generatedAt: new Date().toISOString(),
       cached: false,
     };
