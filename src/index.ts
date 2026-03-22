@@ -292,6 +292,20 @@ const server = app.listen(config.port, async () => {
   // Must run before any DB operations — enables concurrent reads + write queuing
   await initSqlitePragmas();
 
+  // Ensure social platform tables exist (migration may have partially failed)
+  try {
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Post" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "ticker" TEXT, "type" TEXT NOT NULL DEFAULT 'thought', "attachmentType" TEXT, "attachmentData" TEXT, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Post_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Comment" ("id" TEXT NOT NULL PRIMARY KEY, "postId" TEXT NOT NULL, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Comment_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "Comment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Like" ("id" TEXT NOT NULL PRIMARY KEY, "postId" TEXT NOT NULL, "userId" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Like_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "Like_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Like_postId_userId_key" ON "Like"("postId", "userId")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SocialNotification" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "actorId" TEXT NOT NULL, "type" TEXT NOT NULL, "postId" TEXT, "message" TEXT NOT NULL, "read" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "SocialNotification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "SocialNotification_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Post_userId_createdAt_idx" ON "Post"("userId", "createdAt")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Post_createdAt_idx" ON "Post"("createdAt")`);
+    console.log('[Init] Social platform tables verified');
+  } catch (err: any) {
+    console.error('[Init] Social table creation failed:', err.message);
+  }
+
   try {
     await assertBillingDeploySafety();
     if (config.billingEnabled) {
