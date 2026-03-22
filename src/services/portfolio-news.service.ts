@@ -144,12 +144,15 @@ export async function generateMacroSummary(userId: string, portfolioId?: string)
   });
   if (!portfolio) return null;
 
-  const holdingsSummary = portfolio.holdings
+  const sortedHoldings = portfolio.holdings
     .map(h => ({ ticker: h.ticker, costBasis: h.shares * h.averageCost }))
     .sort((a, b) => b.costBasis - a.costBasis)
-    .slice(0, 15)
-    .map(h => h.ticker)
+    .slice(0, 15);
+  const totalCost = sortedHoldings.reduce((s, h) => s + h.costBasis, 0);
+  const holdingsWithWeight = sortedHoldings
+    .map(h => `${h.ticker} (${totalCost > 0 ? ((h.costBasis / totalCost) * 100).toFixed(0) : 0}%)`)
     .join(', ');
+  const topThree = sortedHoldings.slice(0, 3).map(h => h.ticker).join(', ');
 
   // Build news headlines for AI context
   const headlines = newsData.items
@@ -157,28 +160,29 @@ export async function generateMacroSummary(userId: string, portfolioId?: string)
     .map(item => `- ${item.headline} (${item.source}, ${item.matchedTickers.join('/')})`)
     .join('\n');
 
-  const systemPrompt = `You are a macro market analyst for a retail investor. Respond in JSON only. No markdown fences.`;
+  const systemPrompt = `You are a sharp portfolio analyst writing a personal market brief. JSON only. No markdown fences.`;
 
-  const userPrompt = `This investor holds: ${holdingsSummary}
+  const userPrompt = `Portfolio holdings (by weight): ${holdingsWithWeight}
+Top 3 positions: ${topThree}
 
-Recent news affecting their portfolio:
+Today's relevant news:
 ${headlines}
 
-Analyze how current market conditions and these news events affect this specific portfolio. Return JSON:
+Write a personalized market brief for this investor. Return JSON:
 {
-  "overview": "2-3 sentence macro market overview focusing on what matters for this portfolio",
-  "portfolioImpact": "2-3 sentences on how these events specifically impact their holdings",
-  "outlook": "1-2 sentence forward-looking view",
+  "overview": "2-3 sentences. Lead with their biggest holdings by name. What is happening in the market RIGHT NOW that matters for THEIR specific positions? Not generic market commentary — tie every sentence to their tickers.",
+  "portfolioImpact": "2-3 sentences. Name specific tickers being affected and explain WHY (earnings, sector rotation, macro headwinds, analyst action, etc). Use plain language.",
+  "outlook": "1-2 sentences. What should this investor watch next? Name the tickers or events that matter most for their portfolio in the coming days.",
   "keyThemes": ["theme1", "theme2", "theme3"],
   "sentiment": "bullish" | "bearish" | "neutral" | "mixed"
 }
 
-Rules:
-- Be specific about which holdings are affected and why
-- Reference actual ticker symbols from their portfolio
-- Keep language clear and direct, no jargon
-- keyThemes should be 2-4 word labels (e.g. "Tech earnings strong", "Rate cut hopes")
-- sentiment reflects overall macro outlook for THIS portfolio`;
+Critical rules:
+- EVERY paragraph must name specific tickers from their portfolio — no generic "your holdings" or "broad market" without naming names
+- Lead the overview with their top holdings (${topThree}), not with "the market"
+- portfolioImpact should feel like a friend explaining what's going on, not a research report
+- keyThemes: 2-4 word labels capturing what's driving their portfolio today
+- sentiment: overall outlook for THIS portfolio, not the market in general`;
 
   try {
     const response = await callAI(
