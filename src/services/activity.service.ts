@@ -55,15 +55,38 @@ export async function getFeed(
 
   // Platform-wide minimum 24hr trade delay for ALL users.
   // Creators may have a higher delay (48/72hr) — use the greater of the two.
+  // Paid creators' trades are hidden from non-subscribers entirely.
   const MINIMUM_DELAY_HOURS = 24;
   const creators = await prisma.creator.findMany({
     where: { userId: { in: followingIds }, status: 'active' },
-    select: { userId: true, visibility: { select: { tradeDelayHours: true } } },
+    select: { userId: true, pricingCents: true, visibility: { select: { tradeDelayHours: true } } },
   });
   const creatorDelayMap = new Map<string, number>();
+  const paidCreatorIds = new Set<string>();
   for (const c of creators) {
     const delay = c.visibility?.tradeDelayHours ?? 0;
     if (delay > MINIMUM_DELAY_HOURS) creatorDelayMap.set(c.userId, delay);
+    if (c.pricingCents > 0) paidCreatorIds.add(c.userId);
+  }
+
+  // Check which paid creators the viewer is subscribed to
+  const subscribedCreatorIds = new Set<string>();
+  if (paidCreatorIds.size > 0) {
+    const nowDate = new Date();
+    const subs = await prisma.creatorSubscription.findMany({
+      where: {
+        subscriberUserId: userId,
+        creatorUserId: { in: [...paidCreatorIds] },
+        status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+        OR: [
+          { trialEnd: { gt: nowDate } },
+          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+          { currentPeriodEnd: { gt: nowDate } },
+        ],
+      },
+      select: { creatorUserId: true },
+    });
+    for (const s of subs) subscribedCreatorIds.add(s.creatorUserId);
   }
 
   const where: Record<string, unknown> = {
@@ -89,6 +112,8 @@ export async function getFeed(
   return events
     .filter((e) => {
       if (!e.user.profilePublic) return false;
+      // Paid creator — hide trades from non-subscribers
+      if (paidCreatorIds.has(e.userId) && !subscribedCreatorIds.has(e.userId)) return false;
       // Apply trade delay: minimum 24hr for all users, creator delay if higher
       const delay = creatorDelayMap.get(e.userId) ?? MINIMUM_DELAY_HOURS;
       const cutoff = now - delay * 60 * 60 * 1000;
