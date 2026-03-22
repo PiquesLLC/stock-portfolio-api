@@ -2,6 +2,7 @@
 import prisma from '../utils/prisma';
 import { callAI } from '../utils/ai-provider';
 import { extractJson } from '../utils/perplexity';
+import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { matchPersona, StrategyPersona } from '../data/strategy-personas';
 import { getPortfolio } from './portfolio.service';
 
@@ -190,8 +191,8 @@ function parseStockResults(raw: any): NalaStockResult[] {
         pegRatio: toNumberOrNull(s.metrics?.pegRatio),
       },
       confidenceScore: clamp(Number(s.confidenceScore) || 70, 60, 95),
-      explanation: stripMarkdown(String(s.explanation || '')).slice(0, 500),
-      risks: stripMarkdown(String(s.risks || '')).slice(0, 1000),
+      explanation: sanitizeContent(stripMarkdown(String(s.explanation || '')).slice(0, 500)),
+      risks: sanitizeContent(stripMarkdown(String(s.risks || '')).slice(0, 1000)),
       localData: null,
     }));
 }
@@ -408,8 +409,8 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
       question,
       strategy: strategyInfo,
       stocks,
-      strategyExplanation: stripMarkdown(String(parsed.strategyExplanation || '')).slice(0, 500),
-      citations: resp.citations || [],
+      strategyExplanation: sanitizeContent(stripMarkdown(String(parsed.strategyExplanation || '')).slice(0, 500)),
+      citations: (resp.citations || []).filter(validateCitationUrl),
       generatedAt: new Date().toISOString(),
       cached: false,
     };

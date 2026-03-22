@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import { AxiosError } from 'axios';
 import { callAI } from '../utils/ai-provider';
 import { normalizeSentiment, normalizeType, parsePerplexityJson } from '../utils/perplexity';
+import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 // Cache AI events for 30 minutes per ticker+days combo
@@ -81,9 +82,12 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
       const mappedType = normalizeType(evt.type);
       if (!mappedType || !VALID_TYPES.includes(mappedType)) continue;
 
-      const label = String(evt.label || '').trim().slice(0, 80);
-      const insight = String(evt.insight || '').trim().slice(0, 250);
+      const label = sanitizeContent(String(evt.label || '').trim().slice(0, 80));
+      const insight = sanitizeContent(String(evt.insight || '').trim().slice(0, 250));
       if (!label || !insight) continue;
+
+      const rawUrl = evt.source_url || resp.citations[validEvents.length] || undefined;
+      const source_url = rawUrl && validateCitationUrl(rawUrl) ? rawUrl : undefined;
 
       validEvents.push({
         date: evt.date,
@@ -91,7 +95,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
         label,
         insight,
         sentiment: normalizeSentiment(evt.sentiment),
-        source_url: evt.source_url || resp.citations[validEvents.length] || undefined,
+        source_url,
       });
     }
 

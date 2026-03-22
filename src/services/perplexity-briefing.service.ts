@@ -1,6 +1,7 @@
 import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
 import { parsePerplexityJson } from '../utils/perplexity';
+import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { getPortfolio } from './portfolio.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 import { getHoldingPeriodReturns } from './period-returns.service';
@@ -324,12 +325,12 @@ export async function getPortfolioBriefing(
 
     const result: PortfolioBriefingResponse = {
       generatedAt: new Date().toISOString(),
-      verdict: String(parsed.verdict || '').slice(0, 200),
-      headline: String(parsed.headline || '').slice(0, 200),
+      verdict: sanitizeContent(String(parsed.verdict || '').slice(0, 200)),
+      headline: sanitizeContent(String(parsed.headline || '').slice(0, 200)),
       sections: (Array.isArray(parsed.sections) ? parsed.sections : []).map((s: any) => ({
-        title: String(s.title || '').trim().slice(0, 100),
-        takeaway: String(s.takeaway || '').trim().slice(0, 200),
-        body: String(s.body || '').trim().slice(0, 1000),
+        title: sanitizeContent(String(s.title || '').trim().slice(0, 100)),
+        takeaway: sanitizeContent(String(s.takeaway || '').trim().slice(0, 200)),
+        body: sanitizeContent(String(s.body || '').trim().slice(0, 1000)),
         sentiment: ['positive', 'neutral', 'negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
       })).filter((s: BriefingSection) => s.title.length > 0 && s.body.length > 0),
       holdingCount: portfolio.holdings.length,
@@ -394,8 +395,8 @@ export async function explainBriefingSection(title: string, body: string, userId
   }
 
   const result: BriefingExplainResponse = {
-    explanation: resp.content.trim(),
-    citations: resp.citations || [],
+    explanation: sanitizeContent(resp.content.trim()),
+    citations: (resp.citations || []).filter(validateCitationUrl),
     cached: false,
   };
 

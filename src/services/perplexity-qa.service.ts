@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
+import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 
 export interface StockQAResponse {
@@ -57,8 +58,8 @@ export async function askStockQuestion(
     const result: StockQAResponse = {
       ticker: upperTicker,
       question,
-      answer: resp.content.trim(),
-      citations: resp.citations,
+      answer: sanitizeContent(resp.content.trim()),
+      citations: (resp.citations || []).filter(validateCitationUrl),
       answeredAt: new Date().toISOString(),
     };
 

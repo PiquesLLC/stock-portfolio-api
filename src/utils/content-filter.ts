@@ -152,6 +152,21 @@ export function sanitizeContent(input: string): string {
     .replace(/<[^>]*>/g, '');
 }
 
+/**
+ * Validate that a citation URL is a safe, public HTTP(S) URL.
+ * Rejects non-HTTP protocols, credentials in the URL, and private/local addresses.
+ */
+export function validateCitationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password) return false;
+    const host = parsed.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.')) return false;
+    return true;
+  } catch { return false; }
+}
+
 // ── Content Policy (for UI display) ─────────────────────────────────
 
 export const CONTENT_POLICY = {

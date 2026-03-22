@@ -462,29 +462,126 @@ export async function markAllSocialNotifsRead(userId: string): Promise<void> {
 
 // ── Trending Tickers ──────────────────────────────────────────
 
-export async function getTrendingTickers(hours = 24, limit = 10) {
+export async function getTrendingTickers(hours = 24, limit = 10, viewerUserId?: string) {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-  const results = await prisma.$queryRaw<{ ticker: string; count: number }[]>`
+
+  // Identify paid creators the viewer is NOT subscribed to — their trade posts should be excluded
+  const excludedCreatorIds = new Set<string>();
+  const paidCreators = await prisma.creator.findMany({
+    where: { status: 'active', pricingCents: { gt: 0 } },
+    select: { userId: true },
+  });
+  if (paidCreators.length > 0) {
+    const paidIds = paidCreators.map(c => c.userId);
+    const subscribedIds = new Set<string>();
+    if (viewerUserId) {
+      const now = new Date();
+      const subs = await prisma.creatorSubscription.findMany({
+        where: {
+          subscriberUserId: viewerUserId,
+          creatorUserId: { in: paidIds },
+          status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+          OR: [
+            { trialEnd: { gt: now } },
+            { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+            { currentPeriodEnd: { gt: now } },
+          ],
+        },
+        select: { creatorUserId: true },
+      });
+      for (const s of subs) subscribedIds.add(s.creatorUserId);
+    }
+    for (const c of paidCreators) {
+      if (!subscribedIds.has(c.userId) && c.userId !== viewerUserId) {
+        excludedCreatorIds.add(c.userId);
+      }
+    }
+  }
+
+  // Get all qualifying posts then filter in JS (SQLite doesn't support NOT IN with dynamic lists well via raw query)
+  const results = await prisma.$queryRaw<{ ticker: string; count: number; userId: string }[]>`
     SELECT ticker, COUNT(*) as count FROM Post
     WHERE ticker IS NOT NULL AND deleted = 0 AND createdAt >= ${since}
-    GROUP BY ticker ORDER BY count DESC LIMIT ${limit}`;
-  return results;
+    GROUP BY ticker ORDER BY count DESC LIMIT ${limit * 3}`;
+
+  if (excludedCreatorIds.size === 0) {
+    return results.slice(0, limit);
+  }
+
+  // Re-query with per-post data to filter out trade posts from excluded creators
+  const posts = await prisma.post.findMany({
+    where: {
+      ticker: { not: null },
+      deleted: false,
+      createdAt: { gte: since },
+    },
+    select: { ticker: true, userId: true, type: true },
+  });
+
+  const tickerCounts = new Map<string, number>();
+  for (const p of posts) {
+    if (!p.ticker) continue;
+    // Exclude trade-type posts from paid creators viewer isn't subscribed to
+    if (p.type === 'trade' && excludedCreatorIds.has(p.userId)) continue;
+    tickerCounts.set(p.ticker, (tickerCounts.get(p.ticker) || 0) + 1);
+  }
+
+  return [...tickerCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([ticker, count]) => ({ ticker, count }));
 }
 
 // ── Community Trade Activity ─────────────────────────────────
 
-export async function getCommunityTradeActivity(hours = 168, limit = 6) {
+export async function getCommunityTradeActivity(hours = 168, limit = 6, viewerUserId?: string) {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  // Identify paid creators the viewer is NOT subscribed to
+  const excludedCreatorIds = new Set<string>();
+  const paidCreators = await prisma.creator.findMany({
+    where: { status: 'active', pricingCents: { gt: 0 } },
+    select: { userId: true },
+  });
+  if (paidCreators.length > 0) {
+    const paidIds = paidCreators.map(c => c.userId);
+    const subscribedIds = new Set<string>();
+    if (viewerUserId) {
+      const now = new Date();
+      const subs = await prisma.creatorSubscription.findMany({
+        where: {
+          subscriberUserId: viewerUserId,
+          creatorUserId: { in: paidIds },
+          status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+          OR: [
+            { trialEnd: { gt: now } },
+            { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+            { currentPeriodEnd: { gt: now } },
+          ],
+        },
+        select: { creatorUserId: true },
+      });
+      for (const s of subs) subscribedIds.add(s.creatorUserId);
+    }
+    for (const c of paidCreators) {
+      if (!subscribedIds.has(c.userId) && c.userId !== viewerUserId) {
+        excludedCreatorIds.add(c.userId);
+      }
+    }
+  }
 
   const events = await prisma.activityEvent.findMany({
     where: { createdAt: { gte: since } },
-    select: { type: true, payload: true },
+    select: { type: true, payload: true, userId: true },
   });
 
   const buys = new Map<string, number>();
   const sells = new Map<string, number>();
 
   for (const e of events) {
+    // Filter out events from paid creators the viewer isn't subscribed to
+    if (excludedCreatorIds.has(e.userId)) continue;
+
     let payload: { ticker?: string };
     try { payload = JSON.parse(e.payload); } catch { continue; }
     if (!payload.ticker || /^[0-9a-f]{8}-/i.test(payload.ticker)) continue;

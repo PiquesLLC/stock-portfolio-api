@@ -1,6 +1,7 @@
 import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
 import { extractJson, parsePerplexityJson } from '../utils/perplexity';
+import { sanitizeContent } from '../utils/content-filter';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { getEconomicDashboard } from './economic.service';
@@ -168,8 +169,8 @@ function buildDailyReportFromPayload(
 ): DailyReportResponse {
   const topStories = Array.isArray(payload?.topStories)
     ? payload.topStories.slice(0, 5).map((s: any) => ({
-      headline: stripLeakedTags(String(s?.headline || '').slice(0, 100)),
-      body: stripLeakedTags(String(s?.body || '').slice(0, 300)),
+      headline: sanitizeContent(stripLeakedTags(String(s?.headline || '').slice(0, 100))),
+      body: sanitizeContent(stripLeakedTags(String(s?.body || '').slice(0, 300))),
       sentiment: ['positive', 'negative', 'neutral'].includes(s?.sentiment) ? s.sentiment : 'neutral',
       relatedTickers: Array.isArray(s?.relatedTickers)
         ? s.relatedTickers
@@ -181,14 +182,14 @@ function buildDailyReportFromPayload(
     : fallback.topStories;
 
   const watchToday = Array.isArray(payload?.watchToday)
-    ? payload.watchToday.slice(0, 4).map((w: any) => stripLeakedTags(String(w || '').slice(0, 300)))
+    ? payload.watchToday.slice(0, 4).map((w: any) => sanitizeContent(stripLeakedTags(String(w || '').slice(0, 300))))
     : fallback.watchToday;
 
   return {
     generatedAt: new Date().toISOString(),
-    greeting: stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 200)),
-    marketOverview: stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview).slice(0, 500)),
-    portfolioSummary: stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary).slice(0, 500)),
+    greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 200))),
+    marketOverview: sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview).slice(0, 500))),
+    portfolioSummary: sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary).slice(0, 500))),
     topStories: topStories.length > 0 ? topStories : fallback.topStories,
     watchToday: watchToday.length > 0 ? watchToday : fallback.watchToday,
     cached: false,
