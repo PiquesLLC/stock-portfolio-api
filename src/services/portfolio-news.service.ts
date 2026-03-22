@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import { fetchTickerNews, fetchMarketNews, MarketNewsItem } from './news.service';
 import prisma from '../utils/prisma';
 import { callAI } from '../utils/ai-provider';
+import { sanitizeContent } from '../utils/content-filter';
 
 export interface PortfolioNewsItem extends MarketNewsItem {
   matchedTickers: string[];
@@ -99,7 +100,13 @@ export async function fetchPortfolioNews(userId: string, limit = 30, portfolioId
     // Relevance = sum of matched tickers' portfolio weights
     const portfolioRelevance = matchedTickers.reduce((sum, t) => sum + (weightMap.get(t) ?? 0), 0);
 
-    return { ...item, matchedTickers, portfolioRelevance };
+    return {
+      ...item,
+      headline: sanitizeContent(item.headline),
+      summary: sanitizeContent(item.summary),
+      matchedTickers,
+      portfolioRelevance,
+    };
   });
 
   // Filter to only items relevant to portfolio (at least one matched ticker)
@@ -203,10 +210,10 @@ Critical rules:
     const parsed = JSON.parse(jsonStr);
 
     const summary: MacroSummary = {
-      overview: parsed.overview || '',
-      portfolioImpact: parsed.portfolioImpact || '',
-      outlook: parsed.outlook || '',
-      keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes.slice(0, 5) : [],
+      overview: sanitizeContent(parsed.overview || ''),
+      portfolioImpact: sanitizeContent(parsed.portfolioImpact || ''),
+      outlook: sanitizeContent(parsed.outlook || ''),
+      keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes.slice(0, 5).map((t: string) => sanitizeContent(t)) : [],
       sentiment: ['bullish', 'bearish', 'neutral', 'mixed'].includes(parsed.sentiment) ? parsed.sentiment : 'neutral',
       citations: response.citations || [],
       generatedAt: new Date().toISOString(),

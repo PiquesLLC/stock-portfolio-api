@@ -42,9 +42,11 @@ export async function createPostHandler(req: AuthRequest, res: Response): Promis
   } catch (error: any) {
     const status = error.status || 500;
     console.error('Error creating post:', error.message || error, error.code || '', error.reason || '');
+    // Only return specific error messages for known app errors (status < 500)
+    // Generic message for unexpected errors to avoid leaking internals
     res.status(status).json({
-      error: error.message || 'Failed to create post',
-      code: error.code,
+      error: status < 500 ? (error.message || 'Failed to create post') : 'Failed to create post',
+      code: status < 500 ? error.code : undefined,
     });
   }
 }
