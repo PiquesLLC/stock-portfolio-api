@@ -2217,6 +2217,16 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       return;
     }
 
+    // Server-side magic byte validation — don't trust client MIME type
+    const buf = file.buffer;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+    const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+    const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+    if (!isPng && !isJpeg && !isWebp) {
+      res.status(400).json({ error: 'Invalid image file. Only PNG, JPEG, and WebP are supported.' });
+      return;
+    }
+
     const { text, confidence, variant, parsed: parsedResult } = await extractBestOcrForHoldings(file.buffer, {
       mimeType: file.mimetype,
       fileName: file.originalname,

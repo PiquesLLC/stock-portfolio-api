@@ -57,23 +57,19 @@ function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: 
 // - Security: the response body tokens duplicate what's already in httpOnly cookies.
 //   A native origin cannot be spoofed from a web browser.
 
+// Only Capacitor-scheme origins are unforgeable from a browser.
+// http://localhost and https://localhost are NOT safe — browsers use them.
 const NATIVE_ORIGINS = [
   'capacitor://localhost',
   'ionic://localhost',
   'app://localhost',
-  'http://localhost',
-  'https://localhost',
 ];
 
 export function isCapacitorRequest(req: Request): boolean {
   const origin = req.headers.origin;
-  const nativeHeader = req.headers['x-nala-native'];
 
-  // Primary: native origin is unforgeable from a browser
+  // Only trust Capacitor-scheme origins — these cannot be set by a browser
   if (origin && NATIVE_ORIGINS.includes(origin)) return true;
-
-  // Fallback: explicit header (e.g. origin missing on same-origin or non-browser clients)
-  if (nativeHeader === '1') return true;
 
   return false;
 }
