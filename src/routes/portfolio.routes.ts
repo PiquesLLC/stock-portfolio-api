@@ -24,7 +24,7 @@ import { getPerformanceReportHandler, emailPerformanceReportHandler } from '../c
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
 import { fetchPortfolioNews, generateMacroSummary } from '../services/portfolio-news.service';
 import { getSummaryHandler } from '../controllers/settings.controller';
-import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, mutationLimiter, aiLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 import { AuthRequest } from '../types/auth';
 import { requirePlan } from '../middleware/plan.middleware';
@@ -35,7 +35,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const uploadMapped = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
 router.get('/', optionalAuth, getPortfolioHandler);
-router.get('/news', heavyReadLimiter, requireAuth, async (req: AuthRequest, res) => {
+router.get('/news', heavyReadLimiter, aiLimiter, requireAuth, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) { res.status(401).json({ error: 'Authentication required' }); return; }

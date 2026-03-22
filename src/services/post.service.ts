@@ -349,9 +349,22 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
     return a.createdAt.getTime() <= cutoff;
   }).slice(0, limit);
 
+  // Filter posts: trade-attachment posts from paid creators are hidden from non-subscribers
+  const filteredPosts = posts.filter(p => {
+    if (
+      p.attachmentType === 'trade' &&
+      paidCreatorIds.has(p.userId) &&
+      !subscribedCreatorIds.has(p.userId) &&
+      p.userId !== userId // never filter own posts
+    ) {
+      return false;
+    }
+    return true;
+  });
+
   // Merge and sort by createdAt
   const feedItems = [
-    ...posts.map(p => ({
+    ...filteredPosts.map(p => ({
       kind: 'post' as const,
       id: p.id,
       createdAt: p.createdAt.toISOString(),

@@ -311,6 +311,35 @@ const server = app.listen(config.port, async () => {
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "PerformanceBadge_userId_badge_window_key" ON "PerformanceBadge"("userId", "badge", "window")`);
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "ProfileStatsCache" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL UNIQUE, "winRate" REAL, "totalTrades" INTEGER, "avgHoldDays" REAL, "profitFactor" REAL, "computedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ProfileStatsCache_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
 
+    // 1b. Add kycVerified / kycVerifiedAt columns to User (may already exist)
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "kycVerified" BOOLEAN NOT NULL DEFAULT false`); } catch { /* column already exists */ }
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "kycVerifiedAt" DATETIME`); } catch { /* column already exists */ }
+
+    // 1c. Create missing indexes from the migration
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "PerformanceBadge_userId_idx" ON "PerformanceBadge"("userId")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProfileStatsCache_userId_idx" ON "ProfileStatsCache"("userId")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Post_ticker_createdAt_idx" ON "Post"("ticker", "createdAt")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Comment_postId_createdAt_idx" ON "Comment"("postId", "createdAt")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Comment_userId_idx" ON "Comment"("userId")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Like_postId_idx" ON "Like"("postId")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Like_userId_idx" ON "Like"("userId")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "SocialNotification_userId_read_createdAt_idx" ON "SocialNotification"("userId", "read", "createdAt")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "SocialNotification_userId_createdAt_idx" ON "SocialNotification"("userId", "createdAt")`);
+
+    // 1d. Create CHECK triggers (SQLite doesn't support IF NOT EXISTS for triggers, so wrap in try/catch)
+    try {
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER post_type_check BEFORE INSERT ON "Post" BEGIN SELECT CASE WHEN NEW."type" NOT IN ('thought', 'analysis', 'trade_idea') THEN RAISE(ABORT, 'Invalid post type') END; END`);
+    } catch { /* trigger already exists */ }
+    try {
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER post_type_check_update BEFORE UPDATE ON "Post" BEGIN SELECT CASE WHEN NEW."type" NOT IN ('thought', 'analysis', 'trade_idea') THEN RAISE(ABORT, 'Invalid post type') END; END`);
+    } catch { /* trigger already exists */ }
+    try {
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER social_notif_type_check BEFORE INSERT ON "SocialNotification" BEGIN SELECT CASE WHEN NEW."type" NOT IN ('new_follower', 'comment', 'like', 'mention') THEN RAISE(ABORT, 'Invalid social notification type') END; END`);
+    } catch { /* trigger already exists */ }
+    try {
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER social_notif_type_check_update BEFORE UPDATE ON "SocialNotification" BEGIN SELECT CASE WHEN NEW."type" NOT IN ('new_follower', 'comment', 'like', 'mention') THEN RAISE(ABORT, 'Invalid social notification type') END; END`);
+    } catch { /* trigger already exists */ }
+
     // 2. Mark the migration as successfully applied if it's stuck as failed
     const migrationRows: any[] = await prisma.$queryRawUnsafe(
       `SELECT id, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name = '20260319_add_social_platform'`

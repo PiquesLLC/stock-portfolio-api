@@ -219,17 +219,6 @@ export async function checkCongressTradeAlerts(): Promise<void> {
 
       if (recentTrades.length === 0) continue;
 
-      // 7-day dedup check — skip if we already fired an alert for this alertId in the
-      // same filing window. Prevents the same trades from triggering daily notifications.
-      const recentEvent = await prisma.alertEvent.findFirst({
-        where: {
-          alertId: alert.id,
-          createdAt: { gte: sevenDaysAgo },
-        },
-      });
-
-      if (recentEvent) continue;
-
       // Build summary from all matching trades
       const tradeDescriptions = recentTrades.slice(0, 5).map(t =>
         `Congress member ${t.politician} ${t.transactionType} ${t.ticker}`
@@ -238,11 +227,28 @@ export async function checkCongressTradeAlerts(): Promise<void> {
         ? tradeDescriptions[0]
         : `${tradeDescriptions[0]} (+${recentTrades.length - 1} more)`;
 
+      // Build fingerprint from trade details for dedup (sorted for stability)
+      const fingerprint = recentTrades
+        .map(t => `${t.ticker}:${t.transactionType}:${t.politician}`)
+        .sort()
+        .join(',');
+
+      // Check if an alert event with this exact fingerprint already exists in last 7 days
+      const existingWithFingerprint = await prisma.alertEvent.findFirst({
+        where: {
+          alertId: alert.id,
+          createdAt: { gte: sevenDaysAgo },
+          data: { contains: fingerprint },
+        },
+      });
+      if (existingWithFingerprint) continue;
+
       await prisma.alertEvent.create({
         data: {
           alertId: alert.id,
           message: alertMessage,
           data: JSON.stringify({
+            fingerprint,
             trades: recentTrades.slice(0, 10).map(t => ({
               politician: t.politician,
               ticker: t.ticker,
