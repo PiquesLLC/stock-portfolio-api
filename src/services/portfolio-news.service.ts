@@ -155,10 +155,7 @@ export async function generateMacroSummary(userId: string, portfolioId?: string)
     .map(h => ({ ticker: h.ticker, costBasis: h.shares * h.averageCost }))
     .sort((a, b) => b.costBasis - a.costBasis)
     .slice(0, 15);
-  const totalCost = sortedHoldings.reduce((s, h) => s + h.costBasis, 0);
-  const holdingsWithWeight = sortedHoldings
-    .map(h => `${h.ticker} (${totalCost > 0 ? ((h.costBasis / totalCost) * 100).toFixed(0) : 0}%)`)
-    .join(', ');
+  const holdingTickers = sortedHoldings.map(h => h.ticker).join(', ');
   const topThree = sortedHoldings.slice(0, 3).map(h => h.ticker).join(', ');
 
   // Build news headlines for AI context
@@ -169,7 +166,7 @@ export async function generateMacroSummary(userId: string, portfolioId?: string)
 
   const systemPrompt = `You are a sharp portfolio analyst writing a personal market brief. JSON only. No markdown fences.`;
 
-  const userPrompt = `Portfolio holdings (by weight): ${holdingsWithWeight}
+  const userPrompt = `Portfolio tickers: ${holdingTickers}
 Top 3 positions: ${topThree}
 
 Today's relevant news:
@@ -215,7 +212,7 @@ Critical rules:
       outlook: sanitizeContent(parsed.outlook || ''),
       keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes.slice(0, 5).map((t: string) => sanitizeContent(t)) : [],
       sentiment: ['bullish', 'bearish', 'neutral', 'mixed'].includes(parsed.sentiment) ? parsed.sentiment : 'neutral',
-      citations: response.citations || [],
+      citations: (response.citations || []).filter((url: string) => /^https?:\/\//i.test(url)),
       generatedAt: new Date().toISOString(),
       cached: false,
     };
