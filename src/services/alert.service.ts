@@ -219,11 +219,12 @@ export async function checkCongressTradeAlerts(): Promise<void> {
 
       if (recentTrades.length === 0) continue;
 
-      // 24hr dedup check — skip if we already fired an alert event for this alertId in last 24h
+      // 7-day dedup check — skip if we already fired an alert for this alertId in the
+      // same filing window. Prevents the same trades from triggering daily notifications.
       const recentEvent = await prisma.alertEvent.findFirst({
         where: {
           alertId: alert.id,
-          createdAt: { gte: twentyFourHoursAgo },
+          createdAt: { gte: sevenDaysAgo },
         },
       });
 
