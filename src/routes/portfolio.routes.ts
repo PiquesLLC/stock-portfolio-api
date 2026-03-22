@@ -22,7 +22,7 @@ import {
 } from '../controllers/portfolio.controller';
 import { getPerformanceReportHandler, emailPerformanceReportHandler } from '../controllers/performance-report.controller';
 import { getEtfOverlapHandler } from '../controllers/etf-overlap.controller';
-import { fetchPortfolioNews } from '../services/portfolio-news.service';
+import { fetchPortfolioNews, generateMacroSummary } from '../services/portfolio-news.service';
 import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
@@ -42,6 +42,14 @@ router.get('/news', heavyReadLimiter, requireAuth, async (req: AuthRequest, res)
     const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
     const portfolioId = req.query.portfolioId as string | undefined;
     const data = await fetchPortfolioNews(userId, limit, portfolioId);
+    // Generate AI summary in parallel (non-blocking — returns null if AI unavailable)
+    const includeSummary = req.query.summary !== '0';
+    if (includeSummary) {
+      try {
+        const summary = await generateMacroSummary(userId, portfolioId);
+        if (summary) data.summary = summary;
+      } catch { /* AI summary is optional — don't block news */ }
+    }
     res.json(data);
   } catch (err: any) {
     console.error('Portfolio news error:', err.message);
