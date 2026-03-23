@@ -801,10 +801,10 @@ model CreatorVisibility {
   id               String  @id @default(uuid())
   creatorId        String  @unique
   creator          Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  showHoldings     Boolean @default(true)
+  showHoldings     Boolean @default(false)
   showTradeHistory Boolean @default(false)
   showRationale    Boolean @default(false)
-  showSectors      Boolean @default(true)
+  showSectors      Boolean @default(false)
   showRiskMetrics  Boolean @default(false)
   showWatchlists   Boolean @default(false)
   tradeDelayHours  Int     @default(24) // 24 | 48 | 72 (SEC: 0 not allowed)
