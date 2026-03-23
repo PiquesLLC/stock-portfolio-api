@@ -503,12 +503,13 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
   const chartH = chartB - chartT;
 
   const vals = data.sparklineValues;
-  const sparkMin = vals.length > 0 ? Math.min(...vals) : 0;
-  const sparkMax = vals.length > 0 ? Math.max(...vals) : 0;
+  // Use previousClose as baseline for stocks (matches portfolio chart behavior)
+  const refPrice = data.previousClose;
+  const allVals = [...vals, refPrice];
+  const sparkMin = allVals.length > 0 ? Math.min(...allVals) : 0;
+  const sparkMax = allVals.length > 0 ? Math.max(...allVals) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
 
-  // Reference line at starting price (first value)
-  const refPrice = vals.length > 0 ? vals[0] : data.previousClose;
   const refY = chartT + (1 - (refPrice - sparkMin) / sparkRange) * chartH;
 
   const sparkPoints = vals.length > 1
@@ -579,7 +580,7 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
 
   <!-- Chart (clipped to chart area) -->
   <g clip-path="url(#chartClip)">
-    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.3"/>
+    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>
     <polygon points="${fillPoints}" fill="${accent}" opacity="0.06"/>
     <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="1.8" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
