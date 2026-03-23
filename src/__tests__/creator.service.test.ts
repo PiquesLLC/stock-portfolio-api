@@ -75,7 +75,7 @@ describe('creator service', () => {
           pitch: 'Growth investor',
           visibility: expect.objectContaining({
             create: expect.objectContaining({
-              showHoldings: true,
+              showHoldings: false,
               showTradeHistory: false,
               tradeDelayHours: 24,
             }),

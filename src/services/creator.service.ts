@@ -49,10 +49,10 @@ export async function applyAsCreator(userId: string, pitch?: string): Promise<{
       complianceAcceptedAt: new Date(),
       visibility: {
         create: {
-          showHoldings: true,
+          showHoldings: false,
           showTradeHistory: false,
           showRationale: false,
-          showSectors: true,
+          showSectors: false,
           showRiskMetrics: false,
           showWatchlists: false,
           tradeDelayHours: 24,

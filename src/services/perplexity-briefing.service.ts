@@ -310,7 +310,7 @@ export async function getPortfolioBriefing(
     const resp = await callAI([
       { role: 'system', content: getSystemPrompt(normalizedPeriod) },
       { role: 'user', content: userMessage },
-    ], { timeout: 30000, feature: 'portfolio-briefing', userId });
+    ], { timeout: 30000, feature: 'portfolio-briefing', userId, useSearch: true });
 
     if (!resp || !resp.content) {
       return buildFallback();
@@ -340,9 +340,13 @@ export async function getPortfolioBriefing(
 
     if (result.sections.length > 0) {
       briefingCache.set(cacheKey, result);
+      console.log(`[Perplexity Briefing] Generated ${result.sections.length} sections for ${portfolio.holdings.length} holdings`);
+      return result;
     }
-    console.log(`[Perplexity Briefing] Generated ${result.sections.length} sections for ${portfolio.holdings.length} holdings`);
-    return result;
+
+    // AI returned valid JSON but with wrong structure (no usable sections) — use fallback
+    console.warn(`[Perplexity Briefing] AI response parsed but produced 0 sections — using fallback`);
+    return buildFallback();
   } catch (_error) {
     const msg = _error instanceof Error ? _error.message : String(_error);
     console.error(`[Perplexity Briefing] Error: ${msg}`);
