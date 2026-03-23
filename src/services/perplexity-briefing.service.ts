@@ -329,8 +329,8 @@ export async function getPortfolioBriefing(
       headline: sanitizeContent(String(parsed.headline || '').slice(0, 200)),
       sections: (Array.isArray(parsed.sections) ? parsed.sections : []).map((s: any) => ({
         title: sanitizeContent(String(s.title || '').trim().slice(0, 100)),
-        takeaway: sanitizeContent(String(s.takeaway || '').trim().slice(0, 200)),
-        body: sanitizeContent(String(s.body || '').trim().slice(0, 1000)),
+        takeaway: sanitizeContent(String(s.takeaway || s.summary || '').trim().slice(0, 200)),
+        body: sanitizeContent(String(s.body || s.content || s.text || s.description || '').trim().slice(0, 1000)),
         sentiment: ['positive', 'neutral', 'negative'].includes(s.sentiment) ? s.sentiment : 'neutral',
       })).filter((s: BriefingSection) => s.title.length > 0 && s.body.length > 0),
       holdingCount: portfolio.holdings.length,
