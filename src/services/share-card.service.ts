@@ -88,6 +88,7 @@ interface PerformanceShareCardData {
   period: ShareCardPeriod;
   periodLabel: string;
   currentValue: number;
+  periodStartValue: number;
   periodChangeValue: number;
   periodChangePercent: number;
   sparklineValues: number[];
@@ -472,6 +473,7 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
     period,
     periodLabel,
     currentValue,
+    periodStartValue,
     periodChangeValue,
     periodChangePercent,
     sparklineValues,
@@ -621,15 +623,20 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
   const sparkMax = vals.length > 0 ? Math.max(...vals) : 0;
   const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
 
-  // Reference line at starting price (first value)
-  const refPrice = vals.length > 0 ? vals[0] : data.currentValue;
-  const refY = chartT + (1 - (refPrice - sparkMin) / sparkRange) * chartH;
+  // Reference line at periodStartValue (previous close for 1D, start-of-period for others)
+  // Include periodStartValue in min/max so the baseline is always visible on the chart
+  const refPrice = data.periodStartValue;
+  const allVals = [...vals, refPrice];
+  const adjMin = Math.min(...allVals);
+  const adjMax = Math.max(...allVals);
+  const adjRange = Math.max(1e-6, adjMax - adjMin);
+  const refY = chartT + (1 - (refPrice - adjMin) / adjRange) * chartH;
 
   const sparkPoints = vals.length > 1
     ? vals.map((value, i) => {
       const t = i / (vals.length - 1);
       const x = chartL + t * chartW;
-      const y = chartT + (1 - (value - sparkMin) / sparkRange) * chartH;
+      const y = chartT + (1 - (value - adjMin) / adjRange) * chartH;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ')
     : `${chartL},${chartB} ${chartR},${chartB}`;
@@ -684,7 +691,7 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
 
   <!-- Chart (clipped to chart area) -->
   <g clip-path="url(#chartClipP)">
-    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.3"/>
+    <line x1="${chartL}" y1="${refY.toFixed(1)}" x2="${chartR}" y2="${refY.toFixed(1)}" stroke="${accent}" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>
     <polygon points="${fillPoints}" fill="${accent}" opacity="0.06"/>
     <polyline points="${sparkPoints}" fill="none" stroke="${accent}" stroke-width="1.8" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
