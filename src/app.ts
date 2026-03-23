@@ -201,6 +201,11 @@ app.use((req, res, next) => {
     return next();
   }
 
+  // Skip native iOS requests — they use body tokens, not cookies, and may not send Origin
+  if (req.headers['x-nala-native'] === '1') {
+    return next();
+  }
+
   // Only enforce for cookie-authenticated requests (have a cookie but no Authorization header)
   const hasCookie = !!(req.cookies?.authToken || req.cookies?.refreshToken);
   if (!hasCookie) {
