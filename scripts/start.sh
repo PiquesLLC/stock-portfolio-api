@@ -1,6 +1,10 @@
 #!/bin/bash
 set -uo pipefail
 
+# Resolve any previously failed migrations before deploying
+echo "=== Resolving failed migrations ==="
+npx prisma migrate resolve --rolled-back 20260319_add_post_attachments 2>&1 || true
+
 echo "=== Prisma migrate deploy ==="
 if npx prisma migrate deploy 2>&1; then
   echo "Migrations applied successfully"
