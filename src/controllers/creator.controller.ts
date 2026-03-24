@@ -181,9 +181,9 @@ export async function updateCreatorSettingsHandler(req: AuthRequest, res: Respon
       return;
     }
     await updateCreatorSettings(userId, parsed.data);
-    // Return updated creator profile so UI can refresh state
+    // Return updated creator profile so UI can refresh state (pass userId as viewer for self-view)
     const { getCreatorProfile } = await import('../services/creator.service');
-    const updated = await getCreatorProfile(userId);
+    const updated = await getCreatorProfile(userId, userId);
     res.json(updated ?? { ok: true });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Failed to update creator settings';
