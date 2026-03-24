@@ -416,6 +416,6 @@ export async function creatorStripeWebhookHandler(req: Request, res: Response): 
       return;
     }
     Sentry.captureException(error, { tags: { component: 'creator_webhook' } });
-    res.status(400).json({ error: 'Webhook processing failed' });
+    res.status(500).json({ error: 'Webhook processing failed' });
   }
 }

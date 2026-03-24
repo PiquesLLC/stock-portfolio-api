@@ -31,7 +31,7 @@ export async function appleVerifyHandler(req: AuthRequest, res: Response): Promi
     if (err.message?.includes('already have an active subscription')) {
       res.status(409).json({ error: err.message });
     } else {
-      res.status(400).json({ error: err.message || 'Failed to verify transaction' });
+      res.status(400).json({ error: 'Failed to verify transaction' });
     }
   }
 }
@@ -65,7 +65,7 @@ export async function appleRestoreHandler(req: AuthRequest, res: Response): Prom
     }
   } catch (err: any) {
     console.error('[Apple IAP] Restore error:', err);
-    res.status(400).json({ error: err.message || 'Failed to restore purchases' });
+    res.status(400).json({ error: 'Failed to restore purchases' });
   }
 }
 

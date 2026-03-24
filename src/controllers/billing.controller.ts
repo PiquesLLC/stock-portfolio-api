@@ -95,6 +95,7 @@ export async function billingWebhookHandler(req: Request, res: Response): Promis
       return;
     }
     Sentry.captureException(error, { tags: { component: 'billing_webhook' } });
-    res.status(400).json({ error: 'Webhook processing failed' });
+    // Return 500 for transient failures so Stripe retries (400 = permanent failure, no retry)
+    res.status(500).json({ error: 'Webhook processing failed' });
   }
 }
