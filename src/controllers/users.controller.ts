@@ -142,9 +142,10 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
 
     // Apply holdings visibility filter for non-owner viewers
     if (!isOwner) {
+      const viewerAccessLevel = viewerId ? await resolveAccessLevel(userId, viewerId) : 'public' as const;
       // Creator paywall filtering: server-side filtering only.
       if (targetUser.creator?.status === 'active' && targetUser.creator.visibility) {
-        const accessLevel = await resolveAccessLevel(userId, viewerId);
+        const accessLevel = viewerAccessLevel;
         const visibility = targetUser.creator.visibility;
         if (accessLevel !== 'paid') {
           if (visibility.showHoldings) {
@@ -252,8 +253,11 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
         }
       }
 
+      // Paid subscribers bypass holdingsVisibility — they get full access
       const vis = targetUser.holdingsVisibility ?? 'all';
-      if (vis === 'hidden') {
+      if (viewerAccessLevel === 'paid') {
+        // Paid subscriber — skip visibility filter, show everything
+      } else if (vis === 'hidden') {
         portfolio.holdings = [];
       } else if (vis === 'top5') {
         portfolio.holdings = portfolio.holdings
@@ -354,16 +358,16 @@ export async function getUserChartHandler(req: AuthRequest, res: Response): Prom
         return;
       }
 
-      // Gate chart behind holdingsVisibility
-      if (targetUser.holdingsVisibility !== 'all') {
-        res.json({ points: [], periodStartValue: 0, period });
-        return;
-      }
-
-      // Gate chart behind creator paywall
-      if (targetUser.creator?.status === 'active' && targetUser.creator.visibility?.showHoldings) {
-        const accessLevel = await resolveAccessLevel(userId, viewerId);
-        if (accessLevel !== 'paid') {
+      // Check paid subscriber access — bypasses both visibility and paywall
+      const chartAccess = viewerId ? await resolveAccessLevel(userId, viewerId) : 'public' as const;
+      if (chartAccess !== 'paid') {
+        // Gate chart behind holdingsVisibility
+        if (targetUser.holdingsVisibility !== 'all') {
+          res.json({ points: [], periodStartValue: 0, period });
+          return;
+        }
+        // Gate chart behind creator paywall
+        if (targetUser.creator?.status === 'active' && targetUser.creator.visibility?.showHoldings) {
           res.json({ points: [], periodStartValue: 0, period });
           return;
         }

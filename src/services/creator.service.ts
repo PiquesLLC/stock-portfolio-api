@@ -504,8 +504,8 @@ export async function getCreatorDashboard(userId: string): Promise<{
       },
     }),
     prisma.creatorWalletLedger.findMany({
-      where: { creatorUserId: userId, type: 'earning' },
-      select: { amountCents: true, createdAt: true },
+      where: { creatorUserId: userId, type: { in: ['earning', 'refund'] } },
+      select: { amountCents: true, createdAt: true, type: true },
       orderBy: { createdAt: 'asc' },
     }),
     prisma.creatorSubscriptionEvent.findMany({
@@ -659,8 +659,9 @@ export async function getCreatorSetupStatus(userId: string): Promise<CreatorSetu
   }
 
   const v = creator.visibility;
+  // Creator must enable at least one paywalled section for subscribers to get value
   const hasConfiguredVisibility = v != null && (
-    v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || !v.showHoldings || !v.showSectors
+    v.showHoldings || v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || v.showSectors
   );
 
   return {

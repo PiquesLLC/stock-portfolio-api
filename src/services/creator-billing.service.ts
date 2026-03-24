@@ -73,6 +73,15 @@ export async function createCreatorCheckoutSession(
     throw new Error('Cannot subscribe to yourself');
   }
 
+  // Prevent duplicate subscriptions
+  const existingSub = await prisma.creatorSubscription.findUnique({
+    where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
+    select: { status: true },
+  });
+  if (existingSub && (existingSub.status === 'active' || existingSub.status === 'trialing')) {
+    throw new Error('Already subscribed to this creator');
+  }
+
   const creator = await prisma.creator.findUnique({
     where: { userId: creatorUserId },
     select: {
@@ -263,28 +272,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               eventType: 'created',
             },
           });
-
-          // Credit initial payment to creator's ledger (invoice.paid may have amount_paid=0 for first checkout)
-          const amountTotal = (session as any).amount_total;
-          if (typeof amountTotal === 'number' && amountTotal > 0) {
-            const checkoutEventKey = `stripe_event:${event.id}:checkout_earning`;
-            const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
-              where: { creatorUserId, description: checkoutEventKey },
-              select: { id: true },
-            });
-            if (!alreadyCredited) {
-              const creatorShare = Math.round(amountTotal * 0.8);
-              const platformShare = amountTotal - creatorShare;
-              await prisma.$transaction([
-                prisma.creatorWalletLedger.create({
-                  data: { creatorUserId, type: 'earning', amountCents: creatorShare, subscriptionId: sub.id, description: checkoutEventKey },
-                }),
-                prisma.creatorWalletLedger.create({
-                  data: { creatorUserId, type: 'platform_fee', amountCents: platformShare, subscriptionId: sub.id, description: `stripe_event:${event.id}:checkout_platform` },
-                }),
-              ]);
-            }
-          }
+          // Ledger entry is created by invoice.paid handler — NOT here.
+          // Creating here would double-credit since both events fire for the same payment.
         }
         bumpCounter('processed');
         logCreatorBilling({
@@ -301,10 +290,24 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const subscription = event.data.object as Stripe.Subscription;
         const stripeSubscriptionId = subscription.id;
         const currentPeriodEndUnix = subscription.items.data[0]?.current_period_end ?? null;
+        // Map Stripe's actual status to our status — don't blindly set 'active'
+        const stripeStatus = subscription.status; // active, past_due, canceled, unpaid, etc.
+        let mappedStatus: string;
+        if (stripeStatus === 'canceled' || stripeStatus === 'unpaid') {
+          mappedStatus = 'canceled';
+        } else if (stripeStatus === 'past_due') {
+          mappedStatus = 'past_due';
+        } else if (subscription.cancel_at_period_end) {
+          mappedStatus = 'canceled';
+        } else if (stripeStatus === 'trialing') {
+          mappedStatus = 'trialing';
+        } else {
+          mappedStatus = 'active';
+        }
         await prisma.creatorSubscription.updateMany({
           where: { stripeSubscriptionId },
           data: {
-            status: subscription.cancel_at_period_end ? 'canceled' : 'active',
+            status: mappedStatus,
             currentPeriodEnd: currentPeriodEndUnix ? new Date(currentPeriodEndUnix * 1000) : null,
             canceledAt: subscription.cancel_at_period_end ? new Date() : null,
           },
@@ -544,8 +547,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           prisma.creatorWalletLedger.create({
             data: {
               creatorUserId: sub.creatorUserId,
-              type: 'platform_fee',
-              amountCents: 1500,
+              type: 'refund',
+              amountCents: -1500,
               subscriptionId: sub.id,
               description: `stripe_event:${event.id}:dispute_fee:${reason}`,
             },
@@ -621,23 +624,31 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
 
       case 'account.updated': {
         const account = event.data.object as Stripe.Account;
-        if (account.charges_enabled && account.payouts_enabled && account.id) {
-          const creator = await prisma.creator.findFirst({
-            where: { stripeConnectId: account.id },
-            select: { userId: true, stripeConnectOnboarded: true },
-          });
-          if (creator && !creator.stripeConnectOnboarded) {
+        if (!account.id) { bumpCounter('processed'); return; }
+        const creator = await prisma.creator.findFirst({
+          where: { stripeConnectId: account.id },
+          select: { userId: true, stripeConnectOnboarded: true },
+        });
+        if (creator) {
+          const isEnabled = !!(account.charges_enabled && account.payouts_enabled);
+          if (isEnabled && !creator.stripeConnectOnboarded) {
             await prisma.creator.update({
               where: { userId: creator.userId },
               data: { stripeConnectOnboarded: true },
             });
             logCreatorBilling({
-              outcome: 'processed',
-              eventId: event.id,
-              eventType: event.type,
-              stripeConnectId: account.id,
-              creatorUserId: creator.userId,
-              action: 'onboarded',
+              outcome: 'processed', eventId: event.id, eventType: event.type,
+              stripeConnectId: account.id, creatorUserId: creator.userId, action: 'onboarded',
+            });
+          } else if (!isEnabled && creator.stripeConnectOnboarded) {
+            // Connect account deactivated — disable creator monetization
+            await prisma.creator.update({
+              where: { userId: creator.userId },
+              data: { stripeConnectOnboarded: false },
+            });
+            logCreatorBilling({
+              outcome: 'processed', eventId: event.id, eventType: event.type,
+              stripeConnectId: account.id, creatorUserId: creator.userId, action: 'deactivated',
             });
           }
         }
@@ -850,6 +861,30 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
 
     return { payoutId: payout.id, amountCents: payout.amountCents };
   });
+
+  // Initiate actual Stripe transfer to the creator's Connect account
+  try {
+    const stripe = getStripeClient();
+    const transfer = await stripe.transfers.create({
+      amount: result.amountCents,
+      currency: 'usd',
+      destination: creator.stripeConnectId!,
+      description: `Nala creator payout ${result.payoutId}`,
+      metadata: { payoutId: result.payoutId, creatorUserId: userId },
+    });
+    await prisma.creatorPayout.update({
+      where: { id: result.payoutId },
+      data: { stripeTransferId: transfer.id, status: 'processing' },
+    });
+  } catch (err) {
+    console.error(`[Creator Payout] Stripe transfer failed for ${result.payoutId}:`, (err as Error).message);
+    // Mark payout as failed so it can be retried
+    await prisma.creatorPayout.update({
+      where: { id: result.payoutId },
+      data: { status: 'failed' },
+    });
+    throw new Error('Payout transfer failed — please try again later');
+  }
 
   return result;
 }
