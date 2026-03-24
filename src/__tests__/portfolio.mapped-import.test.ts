@@ -58,7 +58,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Symbol', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -82,7 +82,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Qty', price: 'Cost', action: 'Type' }))
       .attach('file', csv, 'trades.csv');
 
@@ -106,7 +106,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Stock', shares: 'Count', totalAmount: 'Total', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -125,7 +125,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Symbol', price: 'UnitPrice', totalAmount: 'Total', action: 'Type' }))
       .attach('file', csv, 'trades.csv');
 
@@ -145,7 +145,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Shares', price: 'Price', action: 'Action' }))
       .field('excludedRows', JSON.stringify([1])) // Exclude MSFT (index 1)
       .attach('file', csv, 'trades.csv');
@@ -171,7 +171,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -191,7 +191,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -210,7 +210,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', date: 'Date', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -230,7 +230,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
     // Only ticker + action mapped, no price/shares/amount
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', action: 'Action', price: 'Price' }))
       .attach('file', csv, 'trades.csv');
 
@@ -248,7 +248,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -271,7 +271,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Symbol', shares: 'Qty', price: 'Price', action: 'Type' }))
       .attach('file', csv, 'trades.csv');
 
@@ -286,7 +286,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ shares: 'A', price: 'B' }))
       .attach('file', csv, 'trades.csv');
 
@@ -300,7 +300,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -318,7 +318,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
@@ -345,7 +345,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv/mapped')
-      .set('Cookie', `authToken=${token}`)
+      .set('Authorization', `Bearer ${token}`)
       .field('mappings', JSON.stringify({ ticker: 'Ticker', date: 'Date', shares: 'Shares', price: 'Price', action: 'Action' }))
       .attach('file', csv, 'trades.csv');
 
