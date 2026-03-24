@@ -48,7 +48,7 @@ export function requireNotSuspended(req: AuthRequest, res: Response, next: NextF
     });
   }).catch((err) => {
     console.error('[Suspension Check] DB error:', err);
-    // Fail open — don't block users if the DB check itself fails
-    next();
+    // Fail closed — block write operations if we can't verify suspension status
+    res.status(503).json({ error: 'Service temporarily unavailable' });
   });
 }

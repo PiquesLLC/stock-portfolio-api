@@ -162,18 +162,22 @@ export const config = {
   appleKeyId: process.env.APPLE_KEY_ID || '',
   applePrivateKey: (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
 
-  // CORS - always preserve native/local defaults even when ALLOWED_ORIGINS is set in production
+  // CORS - native schemes always allowed; localhost only in development
   allowedOrigins: Array.from(new Set([
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
+    // Native app schemes (always needed for Capacitor)
     'capacitor://localhost',
     'ionic://localhost',
     'app://localhost',
-    'https://localhost',
-    'http://localhost:8080',
-    'http://localhost',
+    // Local dev origins only in non-production
+    ...(process.env.NODE_ENV !== 'production' ? [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5174',
+      'https://localhost',
+      'http://localhost:8080',
+      'http://localhost',
+    ] : []),
     ...((process.env.ALLOWED_ORIGINS || '')
       .split(',')
       .map(origin => origin.trim())

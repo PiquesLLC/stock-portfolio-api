@@ -150,23 +150,13 @@ export async function rotateRefreshToken(
   });
 
   if (stored.revokedAt) {
-    // Token was already revoked (by a previous rotation). Check if there's
-    // still a valid token in the family — if so, issue a fresh token pair.
-    // This handles both concurrent-request races AND the case where a browser
-    // held a stale token (e.g., network drop prevented cookie update).
-    // We intentionally do NOT revoke the entire family — doing so causes
-    // false-positive session kills when the browser's cookie jar is stale.
-    const latestValid = await prisma.refreshToken.findFirst({
-      where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
+    // Revoked token replay detected — revoke entire family for security.
+    // This kills all sessions in this family, forcing re-login.
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
-    if (!latestValid) {
-      return null;
-    }
-    // Issue a new token pair (we can't return the stored hash as a raw token)
-    const payload = buildPayload();
-    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
-    return { accessToken: generateAccessToken(payload), refreshToken, payload };
+    return null;
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds

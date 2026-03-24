@@ -330,6 +330,12 @@ h1{color:#00c805;font-size:1.6rem}h2{margin-top:2rem;font-size:1.1rem}ul{padding
 </body></html>`);
 });
 
+// Express 4 doesn't catch async handler rejections — add global safety net
+process.on('unhandledRejection', (reason) => {
+  console.error('[Express] Unhandled promise rejection:', reason);
+  Sentry.captureException(reason);
+});
+
 app.use('/', routes);
 
 // In production, serve the UI static files from client/ directory

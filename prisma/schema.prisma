@@ -833,6 +833,7 @@ model CreatorSubscription {
   @@index([subscriberUserId])
   @@index([creatorUserId])
   @@index([status])
+  @@index([stripeSubscriptionId])
 }
 
 model CreatorSubscriptionEvent {
@@ -875,6 +876,8 @@ model CreatorPayout {
 
   @@index([creatorUserId])
   @@index([status])
+  @@index([stripeTransferId])
+  @@index([stripePayoutId])
 }
 
 model CreatorReport {

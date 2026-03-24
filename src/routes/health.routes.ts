@@ -1,19 +1,26 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { healthCheck, healthStatus, authMetrics, apiUsage, webhookMetrics, jobMetrics, providerMetrics } from '../controllers/health.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { AuthRequest } from '../types/auth';
+
+const ADMIN_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
+  if (!req.user || req.user.userId !== ADMIN_USER_ID) { res.status(403).json({ error: 'Forbidden' }); return; }
+  next();
+}
 
 const router = Router();
 
 // Basic health check — public (BetterStack uptime monitoring needs it)
 router.get('/', healthCheck);
-// Detailed health/metrics endpoints — require authentication
-router.get('/status', requireAuth, healthStatus);
-router.get('/webhook-metrics', requireAuth, webhookMetrics);
-router.get('/job-metrics', requireAuth, jobMetrics);
-router.get('/provider-metrics', requireAuth, providerMetrics);
+// Detailed health/metrics endpoints — admin only
+router.get('/status', requireAuth, requireAdmin, healthStatus);
+router.get('/webhook-metrics', requireAuth, requireAdmin, webhookMetrics);
+router.get('/job-metrics', requireAuth, requireAdmin, jobMetrics);
+router.get('/provider-metrics', requireAuth, requireAdmin, providerMetrics);
 if (process.env.NODE_ENV !== 'production') {
-  router.get('/auth-metrics', requireAuth, authMetrics);
-  router.get('/api-usage', requireAuth, apiUsage);
+  router.get('/auth-metrics', requireAuth, requireAdmin, authMetrics);
+  router.get('/api-usage', requireAuth, requireAdmin, apiUsage);
 }
 
 export default router;
