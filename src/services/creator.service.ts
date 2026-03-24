@@ -521,10 +521,10 @@ export async function getCreatorDashboard(userId: string): Promise<{
     }),
   ]);
 
-  // Subtract reserved (last 14 days of earnings) and pending payouts — matches requestPayout's check
+  // Subtract reserved (last 14 days of earnings only, not refunds) and pending payouts
   const reserveCutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const reservedCents = ledger
-    .filter(e => e.createdAt > reserveCutoff)
+    .filter(e => e.createdAt > reserveCutoff && e.type === 'earning')
     .reduce((sum, e) => sum + Math.abs(e.amountCents), 0);
   const pendingCents = pendingPayoutAgg._sum.amountCents ?? 0;
   const payoutBalanceCents = Math.max(0, rawPayoutBalance - reservedCents - pendingCents);

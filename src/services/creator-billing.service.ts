@@ -73,13 +73,17 @@ export async function createCreatorCheckoutSession(
     throw new Error('Cannot subscribe to yourself');
   }
 
-  // Prevent duplicate subscriptions
+  // Prevent duplicate subscriptions — block if active, trialing, or canceled but still within paid period
   const existingSub = await prisma.creatorSubscription.findUnique({
     where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
-    select: { status: true },
+    select: { status: true, currentPeriodEnd: true },
   });
-  if (existingSub && (existingSub.status === 'active' || existingSub.status === 'trialing')) {
-    throw new Error('Already subscribed to this creator');
+  if (existingSub) {
+    const stillEntitled = existingSub.status === 'active' || existingSub.status === 'trialing'
+      || (existingSub.currentPeriodEnd && existingSub.currentPeriodEnd > new Date());
+    if (stillEntitled) {
+      throw new Error('Already subscribed to this creator');
+    }
   }
 
   const creator = await prisma.creator.findUnique({
@@ -290,17 +294,20 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const subscription = event.data.object as Stripe.Subscription;
         const stripeSubscriptionId = subscription.id;
         const currentPeriodEndUnix = subscription.items.data[0]?.current_period_end ?? null;
-        // Map Stripe's actual status to our status — don't blindly set 'active'
-        const stripeStatus = subscription.status; // active, past_due, canceled, unpaid, etc.
+        // Map Stripe's actual status — handle all known statuses
+        const stripeStatus = subscription.status;
         let mappedStatus: string;
-        if (stripeStatus === 'canceled' || stripeStatus === 'unpaid') {
+        if (stripeStatus === 'canceled' || stripeStatus === 'unpaid' || stripeStatus === 'incomplete_expired') {
           mappedStatus = 'canceled';
-        } else if (stripeStatus === 'past_due') {
+        } else if (stripeStatus === 'past_due' || stripeStatus === 'incomplete') {
           mappedStatus = 'past_due';
-        } else if (subscription.cancel_at_period_end) {
-          mappedStatus = 'canceled';
+        } else if (stripeStatus === 'paused') {
+          mappedStatus = 'past_due';
         } else if (stripeStatus === 'trialing') {
           mappedStatus = 'trialing';
+        } else if (stripeStatus === 'active' && subscription.cancel_at_period_end) {
+          // Still active until period end — keep active so access isn't revoked early
+          mappedStatus = 'active';
         } else {
           mappedStatus = 'active';
         }
@@ -349,11 +356,28 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const amountPaid = invoice.amount_paid;
         if (typeof amountPaid !== 'number' || !Number.isFinite(amountPaid) || amountPaid <= 0) return;
 
-        const sub = await prisma.creatorSubscription.findFirst({
+        let sub = await prisma.creatorSubscription.findFirst({
           where: { stripeSubscriptionId },
           select: { id: true, creatorUserId: true },
         });
-        if (!sub) return;
+        // invoice.paid can arrive before checkout.session.completed — resolve from Stripe subscription metadata
+        if (!sub) {
+          try {
+            const stripe = getStripeClient();
+            const stripeSub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+            const creatorUserId = stripeSub.metadata?.creatorUserId;
+            const subscriberUserId = stripeSub.metadata?.subscriberUserId;
+            if (creatorUserId && subscriberUserId) {
+              const created = await prisma.creatorSubscription.upsert({
+                where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
+                update: { status: 'active', stripeSubscriptionId, canceledAt: null },
+                create: { subscriberUserId, creatorUserId, status: 'active', stripeSubscriptionId },
+              });
+              sub = { id: created.id, creatorUserId };
+            }
+          } catch { /* Stripe lookup failed — will be retried */ }
+          if (!sub) return;
+        }
 
         const creatorEventKey = `stripe_event:${event.id}:creator_share`;
         const platformEventKey = `stripe_event:${event.id}:platform_fee`;
@@ -592,12 +616,12 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
 
-          // Reverse the $15 dispute fee
+          // Reverse the $15 dispute fee (original was type=refund:-1500, so add back as earning)
           await prisma.creatorWalletLedger.create({
             data: {
               creatorUserId: sub.creatorUserId,
-              type: 'platform_fee',
-              amountCents: -1500,
+              type: 'earning',
+              amountCents: 1500,
               description: `stripe_event:${event.id}:dispute_fee_reversal`,
             },
           });
@@ -659,7 +683,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
       case 'payout.paid': {
         const payout = event.data.object as Stripe.Payout;
         await prisma.creatorPayout.updateMany({
-          where: { stripePayoutId: payout.id },
+          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
           data: {
             status: 'completed',
             paidAt: new Date(),
@@ -678,7 +702,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
       case 'payout.failed': {
         const payout = event.data.object as Stripe.Payout;
         await prisma.creatorPayout.updateMany({
-          where: { stripePayoutId: payout.id },
+          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
           data: {
             status: 'failed',
           },
@@ -878,11 +902,21 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     });
   } catch (err) {
     console.error(`[Creator Payout] Stripe transfer failed for ${result.payoutId}:`, (err as Error).message);
-    // Mark payout as failed so it can be retried
-    await prisma.creatorPayout.update({
-      where: { id: result.payoutId },
-      data: { status: 'failed' },
-    });
+    // Mark payout as failed AND reverse the ledger entry so balance is restored
+    await prisma.$transaction([
+      prisma.creatorPayout.update({
+        where: { id: result.payoutId },
+        data: { status: 'failed' },
+      }),
+      prisma.creatorWalletLedger.create({
+        data: {
+          creatorUserId: userId,
+          type: 'earning',
+          amountCents: result.amountCents,
+          description: `payout_reversal:${result.payoutId}`,
+        },
+      }),
+    ]);
     throw new Error('Payout transfer failed — please try again later');
   }
 
