@@ -1,5 +1,5 @@
 import prisma from '../utils/prisma';
-import { fetchPrices } from './market.service';
+import { fetchPrices, fetchDailyCandles, fetchIntradayCandles } from './market.service';
 
 interface BillionaireHolding {
   ticker: string;
@@ -148,33 +148,83 @@ export async function getBillionaireBySlug(slug: string) {
 }
 
 /**
- * Get chart data (snapshots) for a billionaire.
+ * Get chart data for a billionaire — reconstructed from actual stock price candles.
+ * Net worth at each candle = baseNetWorthUsd + sum(shares × close) for each holding.
  */
 export async function getBillionaireChart(slug: string, period: string) {
-  const b = await prisma.billionaire.findUnique({ where: { slug }, select: { id: true } });
+  const b = await prisma.billionaire.findUnique({ where: { slug } });
   if (!b) return null;
 
-  const periodMs: Record<string, number> = {
-    '1D': 24 * 60 * 60 * 1000,
-    '1W': 7 * 24 * 60 * 60 * 1000,
-    '1M': 30 * 24 * 60 * 60 * 1000,
-    '3M': 90 * 24 * 60 * 60 * 1000,
-    '6M': 180 * 24 * 60 * 60 * 1000,
-    '1Y': 365 * 24 * 60 * 60 * 1000,
-    'ALL': 10 * 365 * 24 * 60 * 60 * 1000,
+  let holdings: BillionaireHolding[];
+  try { holdings = JSON.parse(b.holdings); } catch { holdings = []; }
+  const validHoldings = holdings.filter(h => h.ticker && h.shares);
+
+  if (validHoldings.length === 0) {
+    // No public holdings — flat line at base net worth
+    return {
+      points: [{ time: Date.now(), value: b.baseNetWorthUsd }],
+      periodStartValue: b.baseNetWorthUsd,
+    };
+  }
+
+  const periodDays: Record<string, number> = {
+    '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365,
   };
+  const days = periodDays[period] || 30;
 
-  const since = new Date(Date.now() - (periodMs[period] || periodMs['1M']));
+  // Fetch candles for all holdings in parallel
+  const tickers = validHoldings.map(h => h.ticker.toUpperCase());
+  const candleResults = await Promise.all(
+    tickers.map(t =>
+      (period === '1D'
+        ? fetchIntradayCandles(t)
+        : fetchDailyCandles(t, days)
+      ).catch(() => [])
+    )
+  );
 
-  const snapshots = await prisma.billionaireSnapshot.findMany({
-    where: { billionaireId: b.id, timestamp: { gte: since } },
-    orderBy: { timestamp: 'asc' },
-    select: { netWorth: true, timestamp: true },
+  // Build a map of ticker → candles (time as ms, close as number)
+  const candleMap = new Map<string, { time: number; close: number }[]>();
+  tickers.forEach((t, i) => {
+    const candles = candleResults[i]
+      .filter((c: any) => c.close > 0)
+      .map((c: any) => ({ time: typeof c.time === 'string' ? new Date(c.time).getTime() : c.time, close: c.close }));
+    if (candles.length > 0) candleMap.set(t, candles);
   });
 
+  if (candleMap.size === 0) {
+    return {
+      points: [{ time: Date.now(), value: b.computedNetWorth ?? b.baseNetWorthUsd }],
+      periodStartValue: b.computedNetWorth ?? b.baseNetWorthUsd,
+    };
+  }
+
+  // Find the ticker with the most candles — use its timestamps as the time axis
+  let maxCandles: { time: number; close: number }[] = [];
+  for (const candles of candleMap.values()) {
+    if (candles.length > maxCandles.length) maxCandles = candles;
+  }
+
+  // For each timestamp, compute net worth = baseNetWorthUsd + sum(shares × closest price)
+  const points: { time: number; value: number }[] = [];
+  for (const ref of maxCandles) {
+    let publicValue = 0;
+    for (const h of validHoldings) {
+      const candles = candleMap.get(h.ticker.toUpperCase());
+      if (!candles) continue;
+      // Find closest candle by time
+      let closest = candles[0];
+      for (const c of candles) {
+        if (Math.abs(c.time - ref.time) < Math.abs(closest.time - ref.time)) closest = c;
+      }
+      publicValue += h.shares * closest.close;
+    }
+    points.push({ time: ref.time, value: b.baseNetWorthUsd + publicValue });
+  }
+
   return {
-    points: snapshots.map(s => ({ time: s.timestamp.getTime(), value: s.netWorth })),
-    periodStartValue: snapshots.length > 0 ? snapshots[0].netWorth : 0,
+    points,
+    periodStartValue: points.length > 0 ? points[0].value : b.baseNetWorthUsd,
   };
 }
 
