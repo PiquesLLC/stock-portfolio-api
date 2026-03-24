@@ -948,8 +948,9 @@ export async function selfActivateCreator(userId: string): Promise<{ ok: boolean
       if (creator.pricingCents === DEFAULT_PRICING_CENTS) missing.push('set_price');
       if (!creator.stripeConnectOnboarded) missing.push('connect_stripe');
       const v = creator.visibility;
+      // Creator must enable at least one paywalled section for subscribers to get value
       const hasConfiguredVisibility = v != null && (
-        v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || !v.showHoldings || !v.showSectors
+        v.showHoldings || v.showTradeHistory || v.showRationale || v.showRiskMetrics || v.showWatchlists || v.showSectors
       );
       if (!hasConfiguredVisibility) missing.push('configure_visibility');
     }

@@ -311,11 +311,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         } else {
           mappedStatus = 'active';
         }
+        // Don't overwrite currentPeriodEnd for past_due — invoice.payment_failed already expired it
+        const shouldUpdatePeriodEnd = mappedStatus !== 'past_due' && currentPeriodEndUnix;
         await prisma.creatorSubscription.updateMany({
           where: { stripeSubscriptionId },
           data: {
             status: mappedStatus,
-            currentPeriodEnd: currentPeriodEndUnix ? new Date(currentPeriodEndUnix * 1000) : null,
+            ...(shouldUpdatePeriodEnd ? { currentPeriodEnd: new Date(currentPeriodEndUnix * 1000) } : {}),
             canceledAt: subscription.cancel_at_period_end ? new Date() : null,
           },
         });
@@ -896,9 +898,10 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       description: `Nala creator payout ${result.payoutId}`,
       metadata: { payoutId: result.payoutId, creatorUserId: userId },
     });
+    // Transfers are instant — mark as completed immediately
     await prisma.creatorPayout.update({
       where: { id: result.payoutId },
-      data: { stripeTransferId: transfer.id, status: 'processing' },
+      data: { stripeTransferId: transfer.id, status: 'completed', paidAt: new Date() },
     });
   } catch (err) {
     console.error(`[Creator Payout] Stripe transfer failed for ${result.payoutId}:`, (err as Error).message);
