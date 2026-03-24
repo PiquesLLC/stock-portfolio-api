@@ -150,13 +150,22 @@ export async function rotateRefreshToken(
   });
 
   if (stored.revokedAt) {
-    // Revoked token replay detected — revoke entire family for security.
-    // This kills all sessions in this family, forcing re-login.
-    await prisma.refreshToken.updateMany({
-      where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    return null;
+    // Token was already revoked. Allow a 10-second grace window for concurrent
+    // requests (e.g., two tabs refreshing simultaneously). After the grace window,
+    // treat it as a replay attack and revoke the entire family.
+    const revokedAgo = Date.now() - stored.revokedAt.getTime();
+    if (revokedAgo > 10_000) {
+      // Replay attack — revoke entire family, force re-login
+      await prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return null;
+    }
+    // Within grace window — likely concurrent request, issue new tokens
+    const payload = buildPayload();
+    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
+    return { accessToken: generateAccessToken(payload), refreshToken, payload };
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds
