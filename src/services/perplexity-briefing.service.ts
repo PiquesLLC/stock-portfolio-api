@@ -313,8 +313,10 @@ export async function getPortfolioBriefing(
     ], { timeout: 30000, feature: 'portfolio-briefing', userId, useSearch: true });
 
     if (!resp || !resp.content) {
+      console.warn(`[Perplexity Briefing] AI returned null/empty — resp=${!!resp} content=${!!resp?.content}`);
       return buildFallback();
     }
+    console.log(`[Perplexity Briefing] AI response length=${resp.content.length} preview=${resp.content.slice(0, 100)}`);
 
     const parsedResult = parsePerplexityJson<unknown>(resp.content);
     if (!parsedResult.ok) {
