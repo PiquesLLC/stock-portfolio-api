@@ -521,7 +521,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           }),
         ]);
 
-        if (amount > 0 && amountRefunded >= amount) {
+        if (amount > 0 && cumulativeRefunded >= amount) {
           await prisma.creatorSubscription.update({
             where: { id: sub.id },
             data: {
@@ -545,8 +545,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           eventType: event.type,
           creatorUserId: sub.creatorUserId,
           subscriptionId: sub.id,
-          amountRefunded,
-          fullRefund: amount > 0 && amountRefunded >= amount,
+          amountRefunded: cumulativeRefunded,
+          fullRefund: amount > 0 && cumulativeRefunded >= amount,
         });
         return;
       }
