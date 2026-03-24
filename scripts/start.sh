@@ -74,5 +74,8 @@ export FONTCONFIG_FILE=/app/assets/fonts.conf
 mkdir -p /tmp/fontconfig-cache
 fc-cache -f /app/assets 2>/dev/null || true
 
+echo "=== Seeding billionaire data ==="
+node scripts/seed-billionaires.js 2>&1 || echo "WARNING: Billionaire seed failed, continuing..."
+
 echo "=== Starting server ==="
 exec node dist/index.js
