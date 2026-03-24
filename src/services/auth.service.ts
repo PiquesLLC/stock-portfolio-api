@@ -150,22 +150,16 @@ export async function rotateRefreshToken(
   });
 
   if (stored.revokedAt) {
-    // Token was already revoked. Allow a 10-second grace window for concurrent
-    // requests (e.g., two tabs refreshing simultaneously). After the grace window,
-    // treat it as a replay attack and revoke the entire family.
-    const revokedAgo = Date.now() - stored.revokedAt.getTime();
-    if (revokedAgo > 10_000) {
-      // Replay attack — revoke entire family, force re-login
-      await prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      return null;
-    }
-    // Within grace window — likely concurrent request, issue new tokens
-    const payload = buildPayload();
-    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
-    return { accessToken: generateAccessToken(payload), refreshToken, payload };
+    // Token was revoked by a previous rotation. Revoke the entire family
+    // to prevent replay attacks. This forces re-login on all devices in
+    // this family, which is the security-correct behavior.
+    // Concurrent legitimate requests are handled by the revoked.count === 0
+    // branch below (atomic CAS on revokedAt prevents double-revoke).
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return null;
   }
 
   // Atomically revoke the old token — only one concurrent request succeeds
@@ -175,18 +169,10 @@ export async function rotateRefreshToken(
   });
 
   if (revoked.count === 0) {
-    // Another request already revoked it — find if a valid token exists in the
-    // family, and if so issue a new token pair.
-    const latestValid = await prisma.refreshToken.findFirst({
-      where: { userId: stored.userId, family: tokenFamily, revokedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!latestValid) {
-      return null;
-    }
-    const payload = buildPayload();
-    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
-    return { accessToken: generateAccessToken(payload), refreshToken, payload };
+    // Another concurrent request already revoked and rotated this token.
+    // Return null — the client should use the token from the other request's response.
+    // Do NOT issue additional tokens (prevents token proliferation).
+    return null;
   }
 
   const payload = buildPayload();
