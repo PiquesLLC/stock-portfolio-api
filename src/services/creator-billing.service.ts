@@ -476,13 +476,14 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const cumulativeRefunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
         if (cumulativeRefunded <= 0) return;
 
-        // charge.amount_refunded is CUMULATIVE across all refund events for this charge.
-        // To get the incremental refund for THIS event, check what we've already debited.
+        // charge.amount_refunded is CUMULATIVE across all refund events for THIS CHARGE.
+        // Scope refund tracking per-charge (not per-subscription) so multi-month refunds are independent.
+        const chargeId = typeof charge.id === 'string' ? charge.id : '';
         const previousRefundEntries = await prisma.creatorWalletLedger.findMany({
           where: {
             creatorUserId: sub.creatorUserId,
             type: 'refund',
-            subscriptionId: sub.id,
+            description: { contains: `charge:${chargeId}` },
           },
           select: { amountCents: true },
         });
@@ -491,15 +492,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const incrementalCreator = totalCreatorShare - previouslyDebitedCreator;
         if (incrementalCreator <= 0) return; // Already fully accounted for
 
-        // For simplicity, compute incremental platform share from the incremental total
-        const incrementalTotal = incrementalCreator / 0.8; // back-calculate incremental refund amount
+        const incrementalTotal = incrementalCreator / 0.8;
         const incrementalPlatform = Math.round(incrementalTotal) - incrementalCreator;
 
         const creatorRefund = -incrementalCreator;
         const platformRefund = -incrementalPlatform;
-        const amountRefunded = cumulativeRefunded;
-        const creatorRefundKey = `stripe_event:${event.id}:refund_creator`;
-        const platformRefundKey = `stripe_event:${event.id}:refund_platform`;
+        const creatorRefundKey = `stripe_event:${event.id}:charge:${chargeId}:refund_creator`;
+        const platformRefundKey = `stripe_event:${event.id}:charge:${chargeId}:refund_platform`;
 
         await prisma.$transaction([
           prisma.creatorWalletLedger.create({
