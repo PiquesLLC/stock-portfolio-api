@@ -263,6 +263,28 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               eventType: 'created',
             },
           });
+
+          // Credit initial payment to creator's ledger (invoice.paid may have amount_paid=0 for first checkout)
+          const amountTotal = (session as any).amount_total;
+          if (typeof amountTotal === 'number' && amountTotal > 0) {
+            const checkoutEventKey = `stripe_event:${event.id}:checkout_earning`;
+            const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
+              where: { creatorUserId, description: checkoutEventKey },
+              select: { id: true },
+            });
+            if (!alreadyCredited) {
+              const creatorShare = Math.round(amountTotal * 0.8);
+              const platformShare = amountTotal - creatorShare;
+              await prisma.$transaction([
+                prisma.creatorWalletLedger.create({
+                  data: { creatorUserId, type: 'earning', amountCents: creatorShare, subscriptionId: sub.id, description: checkoutEventKey },
+                }),
+                prisma.creatorWalletLedger.create({
+                  data: { creatorUserId, type: 'platform_fee', amountCents: platformShare, subscriptionId: sub.id, description: `stripe_event:${event.id}:checkout_platform` },
+                }),
+              ]);
+            }
+          }
         }
         bumpCounter('processed');
         logCreatorBilling({
