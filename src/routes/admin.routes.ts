@@ -285,4 +285,30 @@ router.post('/moderation/appeals/:appealId/resolve', requireAuth, requireAdmin, 
 // POST /admin/moderation/users/:userId/unsuspend — manually unsuspend a user
 router.post('/moderation/users/:userId/unsuspend', requireAuth, requireAdmin, unsuspendUserHandler);
 
+// POST /admin/fix-creator-ledger { creatorUserId, amountCents } — manually create missing ledger entry
+router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { creatorUserId, amountCents } = req.body;
+  if (!creatorUserId || !amountCents) {
+    res.status(400).json({ error: 'creatorUserId and amountCents required' });
+    return;
+  }
+  const sub = await prisma.creatorSubscription.findFirst({
+    where: { creatorUserId, status: 'active' },
+    select: { id: true },
+  });
+  if (!sub) { res.status(404).json({ error: 'No active subscription found' }); return; }
+
+  const creatorShare = Math.round(amountCents * 0.8);
+  const platformShare = amountCents - creatorShare;
+  await prisma.$transaction([
+    prisma.creatorWalletLedger.create({
+      data: { creatorUserId, type: 'earning', amountCents: creatorShare, subscriptionId: sub.id, description: 'admin_fix:initial_payment' },
+    }),
+    prisma.creatorWalletLedger.create({
+      data: { creatorUserId, type: 'platform_fee', amountCents: platformShare, subscriptionId: sub.id, description: 'admin_fix:platform_fee' },
+    }),
+  ]);
+  res.json({ success: true, creatorShare, platformShare });
+});
+
 export default router;
