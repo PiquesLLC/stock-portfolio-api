@@ -86,8 +86,9 @@ export async function resolveAccessLevel(creatorUserId: string, viewerId?: strin
         status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
         OR: [
           { trialEnd: { gt: now } },
-          // Null period end: grace period for just-created subscriptions (24h max)
-          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+          // Active subscriptions with null periodEnd are valid (Stripe hasn't
+          // sent the first invoice.paid webhook yet, or it's a lifetime sub)
+          { status: 'active', currentPeriodEnd: null },
           { currentPeriodEnd: { gt: now } },
         ],
       },
