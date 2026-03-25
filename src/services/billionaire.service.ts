@@ -76,6 +76,10 @@ export async function refreshAllBillionaires(): Promise<void> {
   }
   // Recompute ranks after all net worths are updated
   await recomputeRanks();
+  // Compute period changes (week/month/ytd) from snapshot history
+  await computePeriodChanges().catch(err =>
+    console.error('[Billionaire] Period change computation failed:', err.message)
+  );
 }
 
 /**
@@ -95,6 +99,52 @@ async function recomputeRanks(): Promise<void> {
         data: { previousRank: sorted[i].rank, rank: newRank },
       });
     }
+  }
+}
+
+/**
+ * Compute week/month/ytd changes from the most recent snapshot near each boundary.
+ */
+async function computePeriodChanges(): Promise<void> {
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 86400000);
+  const monthAgo = new Date(now.getTime() - 30 * 86400000);
+  const jan1 = new Date(now.getFullYear(), 0, 1);
+
+  const billionaires = await prisma.billionaire.findMany({
+    where: { computedNetWorth: { not: null } },
+    select: { id: true, computedNetWorth: true },
+  });
+
+  for (const b of billionaires) {
+    const currentNW = b.computedNetWorth!;
+    // Find closest snapshot to each boundary
+    const [weekSnap, monthSnap, ytdSnap] = await Promise.all([
+      prisma.billionaireSnapshot.findFirst({
+        where: { billionaireId: b.id, timestamp: { gte: new Date(weekAgo.getTime() - 86400000), lte: new Date(weekAgo.getTime() + 86400000) } },
+        orderBy: { timestamp: 'asc' },
+        select: { netWorth: true },
+      }),
+      prisma.billionaireSnapshot.findFirst({
+        where: { billionaireId: b.id, timestamp: { gte: new Date(monthAgo.getTime() - 86400000), lte: new Date(monthAgo.getTime() + 86400000) } },
+        orderBy: { timestamp: 'asc' },
+        select: { netWorth: true },
+      }),
+      prisma.billionaireSnapshot.findFirst({
+        where: { billionaireId: b.id, timestamp: { gte: new Date(jan1.getTime() - 86400000), lte: new Date(jan1.getTime() + 86400000) } },
+        orderBy: { timestamp: 'asc' },
+        select: { netWorth: true },
+      }),
+    ]);
+
+    await prisma.billionaire.update({
+      where: { id: b.id },
+      data: {
+        weekChange: weekSnap ? currentNW - weekSnap.netWorth : null,
+        monthChange: monthSnap ? currentNW - monthSnap.netWorth : null,
+        ytdChange: ytdSnap ? currentNW - ytdSnap.netWorth : null,
+      },
+    });
   }
 }
 
@@ -167,8 +217,9 @@ export async function getBillionaireChart(slug: string, period: string) {
     };
   }
 
+  const ytdDays = Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
   const periodDays: Record<string, number> = {
-    '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365,
+    '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': ytdDays, '1Y': 365,
   };
   const days = periodDays[period] || 30;
 
@@ -222,10 +273,19 @@ export async function getBillionaireChart(slug: string, period: string) {
     points.push({ time: ref.time, value: b.baseNetWorthUsd + publicValue });
   }
 
-  return {
-    points,
-    periodStartValue: points.length > 0 ? points[0].value : b.baseNetWorthUsd,
-  };
+  // periodStartValue = value at the start of the requested period
+  // For YTD, find the closest point to Jan 1; for others, use the first point
+  let periodStartValue = points.length > 0 ? points[0].value : b.baseNetWorthUsd;
+  if (period === 'YTD' && points.length > 1) {
+    const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+    let closest = points[0];
+    for (const p of points) {
+      if (Math.abs(p.time - jan1) < Math.abs(closest.time - jan1)) closest = p;
+    }
+    periodStartValue = closest.value;
+  }
+
+  return { points, periodStartValue };
 }
 
 /**
