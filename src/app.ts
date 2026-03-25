@@ -338,6 +338,46 @@ process.on('unhandledRejection', (reason) => {
 
 app.use('/', routes);
 
+// ── SEO: sitemap.xml ─────────────────────────────────────────────────
+app.get('/sitemap.xml', async (_req, res) => {
+  try {
+    const prisma = (await import('./utils/prisma')).default;
+    const users = await prisma.user.findMany({
+      where: { profilePublic: true },
+      select: { username: true, createdAt: true },
+      take: 1000,
+    });
+
+    const base = 'https://nalaai.com';
+    const staticPages = [
+      { loc: '/', priority: '1.0', changefreq: 'daily' },
+      { loc: '/#tab=leaderboard', priority: '0.8', changefreq: 'daily' },
+      { loc: '/#tab=discover', priority: '0.8', changefreq: 'daily' },
+      { loc: '/#tab=feed', priority: '0.7', changefreq: 'hourly' },
+      { loc: '/privacy', priority: '0.3', changefreq: 'monthly' },
+    ];
+
+    const urls = [
+      ...staticPages.map(p =>
+        `  <url><loc>${base}${p.loc}</loc><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
+      ),
+      ...users.map(u =>
+        `  <url><loc>${base}/${encodeURIComponent(u.username)}</loc><lastmod>${u.createdAt.toISOString().split('T')[0]}</lastmod><changefreq>daily</changefreq><priority>0.6</priority></url>`
+      ),
+    ];
+
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join('\n')}
+</urlset>`);
+  } catch (err) {
+    console.error('[Sitemap] Generation failed:', err);
+    res.status(500).send('Sitemap generation failed');
+  }
+});
+
 // In production, serve the UI static files from client/ directory
 const clientDir = path.join(__dirname, '..', 'client');
 if (fs.existsSync(clientDir)) {
