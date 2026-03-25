@@ -32,7 +32,7 @@ export async function callGemini(
     contents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,
     },
   };
 
@@ -85,14 +85,13 @@ export async function callGemini(
 
   // Extract content from Gemini response
   // Gemini 2.5 models include "thought" parts (internal reasoning) alongside
-  // actual text parts. Filter out thought parts to get only the real response,
-  // otherwise thinking text gets prepended to JSON and breaks parsing.
+  // actual text parts. Filter out thought parts to get only the real response.
+  // With search grounding, Gemini can produce multiple text parts (draft + grounded).
+  // Use only the LAST non-thought text part to avoid duplicate/concatenated JSON.
   const candidates = resp.data?.candidates;
   const allParts: any[] = candidates?.[0]?.content?.parts || [];
-  const content = allParts
-    .filter((p: any) => !p.thought)
-    .map((p: any) => p.text || '')
-    .join('') || '';
+  const textParts = allParts.filter((p: any) => !p.thought && p.text);
+  const content = textParts.length > 0 ? textParts[textParts.length - 1].text : '';
 
   // Extract search citations if available
   const groundingMetadata = candidates?.[0]?.groundingMetadata;
