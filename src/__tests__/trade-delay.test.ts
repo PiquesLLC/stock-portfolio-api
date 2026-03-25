@@ -27,6 +27,8 @@ function ensureMockShape(): void {
   p.activityEvent.findMany ??= vi.fn();
   p.user ??= {};
   p.user.findUnique ??= vi.fn();
+  p.userBlock ??= {};
+  p.userBlock.findMany ??= vi.fn().mockResolvedValue([]);
   p.$transaction ??= vi.fn((arg: unknown) => {
     if (typeof arg === 'function') return arg(p);
     if (Array.isArray(arg)) return Promise.all(arg as Promise<unknown>[]);

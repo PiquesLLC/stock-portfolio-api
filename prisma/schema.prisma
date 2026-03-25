@@ -183,6 +183,10 @@ model User {
   suspendedAt                DateTime?
   contentStrikes             ContentStrike[]
   appeals                    Appeal[]
+
+  // User blocking
+  blocksGiven                UserBlock[]             @relation("blockerBlocks")
+  blocksReceived             UserBlock[]             @relation("blockedBlocks")
 }
 
 model Watchlist {
@@ -1426,6 +1430,20 @@ model Appeal {
 
   @@index([userId])
   @@index([status])
+}
+
+// ─── User Blocking ──────────────────────────────────────────────────
+model UserBlock {
+  id          String   @id @default(uuid())
+  blockerId   String
+  blockedId   String
+  blocker     User     @relation("blockerBlocks", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked     User     @relation("blockedBlocks", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
 }
 
 // ─── Monitoring Reports (from scheduled cloud agents) ────────────────

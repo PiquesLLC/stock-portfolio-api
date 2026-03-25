@@ -1,6 +1,7 @@
 import prisma from '../utils/prisma';
 import { sendPushToUser, sendNativePushToUser } from './push.service';
 import { sanitizeContent, filterContent } from '../utils/content-filter';
+import { getBlockedUserIds } from './block.service';
 
 // ── Social Notifications ──────────────────────────────────────
 
@@ -185,6 +186,17 @@ export async function createComment(userId: string, postId: string, content: str
     throw Object.assign(new Error('Post not found'), { status: 404 });
   }
 
+  // Block check: prevent commenting on posts by users who blocked the commenter, or vice versa
+  const block = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: post.userId, blockedId: userId },
+        { blockerId: userId, blockedId: post.userId },
+      ],
+    },
+  });
+  if (block) throw Object.assign(new Error('Post not found'), { status: 404 });
+
   const comment = await prisma.comment.create({
     data: {
       postId,
@@ -218,8 +230,14 @@ export async function getComments(postId: string, viewerUserId: string, limit = 
   if (!post) return [];
   if (!post.user.profilePublic && post.userId !== viewerUserId) return [];
 
+  // Exclude comments from blocked users
+  const blockedIds = await getBlockedUserIds(viewerUserId);
+
   const where: any = { postId, deleted: false };
   if (before) where.createdAt = { lt: new Date(before) };
+  if (blockedIds.length > 0) {
+    where.userId = { notIn: blockedIds };
+  }
 
   return prisma.comment.findMany({
     where,
@@ -249,6 +267,17 @@ export async function toggleLike(userId: string, postId: string): Promise<{ like
   if (!post.user.profilePublic && post.userId !== userId) {
     throw Object.assign(new Error('Post not found'), { status: 404 });
   }
+
+  // Block check: prevent liking posts by users who blocked the liker, or vice versa
+  const block = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: post.userId, blockedId: userId },
+        { blockerId: userId, blockedId: post.userId },
+      ],
+    },
+  });
+  if (block) throw Object.assign(new Error('Post not found'), { status: 404 });
 
   const existing = await prisma.like.findUnique({
     where: { postId_userId: { postId, userId } },
@@ -292,7 +321,11 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
     },
     select: { followingId: true },
   });
-  const followedIds = [...new Set([userId, ...follows.map(f => f.followingId)])];
+
+  // Exclude blocked users from the feed
+  const blockedIds = await getBlockedUserIds(userId);
+  const blockedSet = new Set(blockedIds);
+  const followedIds = [...new Set([userId, ...follows.map(f => f.followingId)])].filter(id => !blockedSet.has(id));
 
   const beforeDate = before ? new Date(before) : new Date();
 
@@ -430,8 +463,16 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
 // ── Social Notifications ──────────────────────────────────────
 
 export async function getSocialNotifications(userId: string, limit = 50) {
+  // Exclude notifications from blocked users
+  const blockedIds = await getBlockedUserIds(userId);
+
+  const where: any = { userId };
+  if (blockedIds.length > 0) {
+    where.actorId = { notIn: blockedIds };
+  }
+
   return prisma.socialNotification.findMany({
-    where: { userId },
+    where,
     orderBy: { createdAt: 'desc' },
     take: limit,
     include: {

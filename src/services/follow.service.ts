@@ -16,6 +16,17 @@ export async function followUser(followerId: string, followingId: string): Promi
   if (!follower) throw new Error('Follower user not found');
   if (!following) throw new Error('User to follow not found');
 
+  // Block check: prevent following a user who has blocked you or whom you've blocked
+  const block = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: followerId, blockedId: followingId },
+        { blockerId: followingId, blockedId: followerId },
+      ],
+    },
+  });
+  if (block) throw new Error('Unable to follow this user');
+
   await prisma.follow.upsert({
     where: {
       followerId_followingId: { followerId, followingId },
