@@ -273,18 +273,16 @@ export async function getBillionaireChart(slug: string, period: string) {
     points.push({ time: ref.time, value: b.baseNetWorthUsd + publicValue });
   }
 
-  // periodStartValue = value at the start of the requested period
-  // For YTD, find the closest point to Jan 1; for others, use the first point
-  let periodStartValue = points.length > 0 ? points[0].value : b.baseNetWorthUsd;
+  // For YTD: filter out pre-Jan-1 data and set periodStartValue to first point
   if (period === 'YTD' && points.length > 1) {
-    const jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
-    let closest = points[0];
-    for (const p of points) {
-      if (Math.abs(p.time - jan1) < Math.abs(closest.time - jan1)) closest = p;
+    const jan1 = new Date(new Date().getFullYear(), 0, 2).getTime(); // Jan 2 = first trading day
+    const filtered = points.filter(p => p.time >= jan1);
+    if (filtered.length > 0) {
+      return { points: filtered, periodStartValue: filtered[0].value };
     }
-    periodStartValue = closest.value;
   }
 
+  const periodStartValue = points.length > 0 ? points[0].value : b.baseNetWorthUsd;
   return { points, periodStartValue };
 }
 
