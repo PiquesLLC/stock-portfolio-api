@@ -4,6 +4,7 @@ import { extractJson, parsePerplexityJson } from '../utils/perplexity';
 import { sanitizeContent } from '../utils/content-filter';
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
+import { fetchPortfolioNews } from './portfolio-news.service';
 import { getEconomicDashboard } from './economic.service';
 import { getEarningsSummary } from './earnings-summary.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
@@ -258,15 +259,17 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
         new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)),
       ]);
 
-    const [portfolioResult, newsResult, economicResult, earningsResult] = await Promise.allSettled([
+    const [portfolioResult, newsResult, portfolioNewsResult, economicResult, earningsResult] = await Promise.allSettled([
       withDataTimeout(getPortfolio(userId, { portfolioId }), 'portfolio'),
       withDataTimeout(fetchMarketNews(10), 'news'),
+      withDataTimeout(fetchPortfolioNews(userId, 15, portfolioId), 'portfolio-news'),
       withDataTimeout(getEconomicDashboard(), 'economic'),
       withDataTimeout(getEarningsSummary(userId, portfolioId), 'earnings'),
     ]);
 
     const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
     const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
+    const portfolioNews = portfolioNewsResult.status === 'fulfilled' ? portfolioNewsResult.value : null;
     const economic = economicResult.status === 'fulfilled' ? economicResult.value : null;
     const earnings = earningsResult.status === 'fulfilled' ? earningsResult.value : { results: [], partial: true };
 
@@ -317,9 +320,12 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       )
       .join(', ');
 
-    const newsSummary = news.slice(0, 5)
-      .map(n => `- ${n.headline}`)
-      .join('\n');
+    // Combine general market news + portfolio-specific news for richer AI context
+    const generalNews = news.slice(0, 5).map(n => `- ${n.headline}`);
+    const holdingNews = portfolioNews?.items?.slice(0, 10).map(n =>
+      `- ${n.headline} (related: ${n.matchedTickers?.join(', ') || 'market'})`
+    ) || [];
+    const newsSummary = [...new Set([...holdingNews, ...generalNews])].slice(0, 12).join('\n');
 
     let economicSummary = '';
     if (economic) {
