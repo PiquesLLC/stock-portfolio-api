@@ -1,6 +1,5 @@
 import axios from 'axios';
 import NodeCache from 'node-cache';
-import { config } from '../config';
 
 const cache = new NodeCache({ stdTTL: 3600 }); // 1 hour cache
 
@@ -31,58 +30,81 @@ const HIGH_PRIORITY_KEYWORDS = [
   'Durable Goods',
 ];
 
-function classifyImpact(event: string, finnhubImpact?: string): 'high' | 'medium' | 'low' {
-  if (finnhubImpact === 'high') return 'high';
+function classifyImpact(event: string, sourceImpact?: string): 'high' | 'medium' | 'low' {
+  const normalized = sourceImpact?.toLowerCase();
+  if (normalized === 'high') return 'high';
   const upper = event.toUpperCase();
   if (HIGH_PRIORITY_KEYWORDS.some(kw => upper.includes(kw.toUpperCase()))) return 'high';
-  if (finnhubImpact === 'medium') return 'medium';
+  if (normalized === 'medium') return 'medium';
   return 'low';
+}
+
+function parseFloat_(v: string | undefined): number | undefined {
+  if (v == null || v === '') return undefined;
+  const n = parseFloat(v);
+  return isNaN(n) ? undefined : n;
+}
+
+/** Primary source: ForexFactory free JSON feed (no API key required) */
+async function fetchFromForexFactory(): Promise<EconomicCalendarEvent[]> {
+  const resp = await axios.get('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+    timeout: 10000,
+  });
+
+  const events: any[] = resp.data;
+  if (!Array.isArray(events)) return [];
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return events
+    .filter((e: any) => e.country === 'USD')
+    .map((e: any) => {
+      const dt = e.date ? new Date(e.date) : null;
+      const dateStr = dt ? dt.toISOString().split('T')[0] : '';
+      const timeStr = dt
+        ? dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' })
+        : '';
+
+      return {
+        event: e.title || 'Unknown Event',
+        date: dateStr,
+        time: timeStr,
+        country: 'US',
+        impact: classifyImpact(e.title || '', e.impact),
+        actual: parseFloat_(e.actual),
+        estimate: parseFloat_(e.forecast),
+        previous: parseFloat_(e.previous),
+      };
+    })
+    .filter((e: EconomicCalendarEvent) => {
+      // Only future or today events, high/medium impact
+      if (e.impact === 'low') return false;
+      if (!e.date) return false;
+      const eventDate = new Date(e.date + 'T23:59:59');
+      return eventDate >= today;
+    })
+    .sort((a: EconomicCalendarEvent, b: EconomicCalendarEvent) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      return a.impact === 'high' ? -1 : 1;
+    })
+    .slice(0, 20);
 }
 
 export async function getUpcomingEconomicEvents(): Promise<EconomicCalendarEvent[]> {
   const cached = cache.get<EconomicCalendarEvent[]>('economic-calendar');
   if (cached) return cached;
 
-  if (!config.finnhubApiKey) return [];
-
-  const today = new Date();
-  const twoWeeksOut = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-  const from = today.toISOString().split('T')[0];
-  const to = twoWeeksOut.toISOString().split('T')[0];
-
   try {
-    const resp = await axios.get('https://finnhub.io/api/v1/calendar/economic', {
-      params: { from, to, token: config.finnhubApiKey },
-      timeout: 10000,
-    });
-
-    const events: any[] = resp.data?.economicCalendar || [];
-
-    const filtered = events
-      .filter((e: any) => e.country === 'US')
-      .map((e: any) => ({
-        event: e.event || 'Unknown Event',
-        date: e.time?.split(' ')[0] || from,
-        time: e.time?.split(' ')[1] || '',
-        country: e.country || 'US',
-        impact: classifyImpact(e.event || '', e.impact),
-        actual: e.actual != null ? e.actual : undefined,
-        estimate: e.estimate != null ? e.estimate : undefined,
-        previous: e.prev != null ? e.prev : undefined,
-      }))
-      .filter((e: EconomicCalendarEvent) => e.impact === 'high' || e.impact === 'medium')
-      .sort((a: EconomicCalendarEvent, b: EconomicCalendarEvent) => {
-        // Sort by date, then by impact (high first)
-        const dateCompare = a.date.localeCompare(b.date);
-        if (dateCompare !== 0) return dateCompare;
-        return a.impact === 'high' ? -1 : 1;
-      })
-      .slice(0, 20);
-
-    cache.set('economic-calendar', filtered);
-    return filtered;
+    const events = await fetchFromForexFactory();
+    if (events.length > 0) {
+      cache.set('economic-calendar', events);
+      return events;
+    }
   } catch (err) {
-    console.error('[Economic Calendar] Fetch failed:', (err as Error).message);
-    return [];
+    console.warn('[Economic Calendar] ForexFactory fetch failed:', (err as Error).message);
   }
+
+  return [];
 }
