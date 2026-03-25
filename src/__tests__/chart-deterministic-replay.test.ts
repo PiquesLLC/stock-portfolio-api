@@ -76,6 +76,7 @@ describe('Deterministic trade replay', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'trades.csv');
 
@@ -109,6 +110,7 @@ describe('Deterministic trade replay', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'trades.csv');
 
@@ -149,6 +151,7 @@ describe('Deterministic trade replay', () => {
 
       const res = await request(app)
         .post('/portfolio/import/confirm')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({
           holdings: [{ ticker: 'XYZ', shares: 8, averageCost: 107.5 }],
@@ -199,12 +202,14 @@ describe('Deterministic trade replay', () => {
       // First import
       await request(app)
         .post('/portfolio/import/confirm')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send(payload);
 
       // Second import
       await request(app)
         .post('/portfolio/import/confirm')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send(payload);
 

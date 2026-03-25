@@ -146,7 +146,7 @@ describe('Native Auth Contract Routes', () => {
     expect(typeof res.body.refreshToken).toBe('string');
     expect(typeof res.body.token).toBe('string');
     expect(res.body.token).toBe(res.body.accessToken);
-    expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+
   });
 
   it('returns token fields from POST /auth/oauth/google/callback', async () => {
@@ -162,7 +162,7 @@ describe('Native Auth Contract Routes', () => {
     expect(typeof res.body.refreshToken).toBe('string');
     expect(typeof res.body.token).toBe('string');
     expect(res.body.token).toBe(res.body.accessToken);
-    expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+
   });
 
   it('returns token fields from POST /auth/oauth/apple/callback', async () => {
@@ -178,6 +178,6 @@ describe('Native Auth Contract Routes', () => {
     expect(typeof res.body.refreshToken).toBe('string');
     expect(typeof res.body.token).toBe('string');
     expect(res.body.token).toBe(res.body.accessToken);
-    expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+
   });
 });

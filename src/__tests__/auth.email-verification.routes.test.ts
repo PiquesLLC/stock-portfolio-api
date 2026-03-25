@@ -43,6 +43,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', authCookie)
         .send({ code: '123456' });
 
@@ -61,6 +62,7 @@ describe('Email verification routes', () => {
     it('returns 400 for invalid code format', async () => {
       const res = await request(app)
         .post('/auth/verify-email')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', authCookie)
         .send({ code: 'abc' });
 
@@ -76,6 +78,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', authCookie)
         .send({ code: '999999' });
 
@@ -92,6 +95,7 @@ describe('Email verification routes', () => {
 
       const res = await request(app)
         .post('/auth/verify-email')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', authCookie)
         .send({ code: '111111' });
 
@@ -106,6 +110,7 @@ describe('Email verification routes', () => {
 
       await request(app)
         .post('/auth/verify-email')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', authCookie)
         .send({ email: 'attacker@evil.com', code: '123456' });
 
