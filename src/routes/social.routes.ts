@@ -8,6 +8,11 @@ import {
   submitAppealHandler,
   getMyStrikesHandler,
 } from '../controllers/moderation.controller';
+import {
+  blockUserHandler,
+  unblockUserHandler,
+  getBlockedUsersHandler,
+} from '../controllers/block.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -19,6 +24,11 @@ router.get('/stock/:ticker/share-card', getStockShareCardHandler);
 // User-facing moderation: appeal strikes, view own strikes
 router.post('/appeal', requireAuth, submitAppealHandler);
 router.get('/my-strikes', requireAuth, getMyStrikesHandler);
+
+// User blocking
+router.post('/block/:userId', requireAuth, blockUserHandler);
+router.delete('/block/:userId', requireAuth, unblockUserHandler);
+router.get('/blocked', requireAuth, getBlockedUsersHandler);
 
 router.get('/:userId/performance-card', getPerformanceCardHandler);
 

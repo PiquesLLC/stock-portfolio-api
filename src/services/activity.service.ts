@@ -1,5 +1,6 @@
 ﻿import prisma from '../utils/prisma';
 import { getFollowingIds } from './follow.service';
+import { getBlockedUserIds } from './block.service';
 
 
 export type ActivityType = 'holding_added' | 'holding_removed' | 'holding_updated';
@@ -53,12 +54,18 @@ export async function getFeed(
   const followingIds = await getFollowingIds(userId);
   if (followingIds.length === 0) return [];
 
+  // Exclude blocked users from the feed
+  const blockedIds = await getBlockedUserIds(userId);
+  const blockedSet = new Set(blockedIds);
+  const filteredFollowingIds = followingIds.filter(id => !blockedSet.has(id));
+  if (filteredFollowingIds.length === 0) return [];
+
   // Platform-wide minimum 24hr trade delay for ALL users.
   // Creators may have a higher delay (48/72hr) — use the greater of the two.
   // Paid creators' trades are hidden from non-subscribers entirely.
   const MINIMUM_DELAY_HOURS = 24;
   const creators = await prisma.creator.findMany({
-    where: { userId: { in: followingIds }, status: 'active' },
+    where: { userId: { in: filteredFollowingIds }, status: 'active' },
     select: { userId: true, pricingCents: true, visibility: { select: { tradeDelayHours: true } } },
   });
   const creatorDelayMap = new Map<string, number>();
@@ -90,7 +97,7 @@ export async function getFeed(
   }
 
   const where: Record<string, unknown> = {
-    userId: { in: followingIds },
+    userId: { in: filteredFollowingIds },
   };
   if (before) {
     where.createdAt = { lt: new Date(before) };
