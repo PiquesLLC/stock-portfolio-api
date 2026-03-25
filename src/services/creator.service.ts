@@ -86,8 +86,8 @@ export async function resolveAccessLevel(creatorUserId: string, viewerId?: strin
         status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
         OR: [
           { trialEnd: { gt: now } },
-          // Active subscriptions with null periodEnd are valid (Stripe hasn't
-          // sent the first invoice.paid webhook yet, or it's a lifetime sub)
+          // Active subscriptions with null periodEnd are valid — Stripe controls
+          // the status field via webhooks, so active = genuinely active.
           { status: 'active', currentPeriodEnd: null },
           { currentPeriodEnd: { gt: now } },
         ],

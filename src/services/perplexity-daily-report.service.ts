@@ -460,7 +460,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       const fallback = buildQuickFallback(weekend);
       // Let pipeline finish in background and cache
       fullPipeline.then(aiResult => {
-        if (aiResult.topStories.length > 0) {
+        if (aiResult.topStories.length > 0 && !(aiResult as any)._fallback) {
           reportCache.set(cacheKey, aiResult);
           console.log(`[Daily Report] Background generation complete, cached`);
         }
