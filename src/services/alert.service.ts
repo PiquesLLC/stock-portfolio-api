@@ -219,37 +219,51 @@ export async function checkCongressTradeAlerts(): Promise<void> {
 
       if (recentTrades.length === 0) continue;
 
-      // Build summary from all matching trades
-      const tradeDescriptions = recentTrades.slice(0, 5).map(t =>
+      // Dedup per individual trade ID — only alert on trades not yet seen
+      // Look up all trade IDs already mentioned in recent alert events for this alert
+      const recentEvents = await prisma.alertEvent.findMany({
+        where: { alertId: alert.id, createdAt: { gte: sevenDaysAgo } },
+        select: { data: true },
+      });
+      const alertedTradeIds = new Set<string>();
+      for (const ev of recentEvents) {
+        try {
+          const parsed = JSON.parse(ev.data || '{}');
+          if (Array.isArray(parsed.tradeIds)) {
+            for (const id of parsed.tradeIds) alertedTradeIds.add(id);
+          }
+          // Backward compat: also check old fingerprint-based events by trade composite key
+          if (Array.isArray(parsed.trades)) {
+            for (const t of parsed.trades) {
+              alertedTradeIds.add(`${t.ticker}:${t.transactionType}:${t.politician}:${t.tradeDate}`);
+            }
+          }
+        } catch { /* malformed event data, skip */ }
+      }
+
+      // Filter to only genuinely new trades
+      const newTrades = recentTrades.filter(t => {
+        const compositeKey = `${t.ticker}:${t.transactionType}:${t.politician}:${t.tradeDate}`;
+        return !alertedTradeIds.has(t.id) && !alertedTradeIds.has(compositeKey);
+      });
+
+      if (newTrades.length === 0) continue;
+
+      // Build summary from new trades only
+      const tradeDescriptions = newTrades.slice(0, 5).map(t =>
         `Congress member ${t.politician} ${t.transactionType} ${t.ticker}`
       );
       const alertMessage = tradeDescriptions.length === 1
         ? tradeDescriptions[0]
-        : `${tradeDescriptions[0]} (+${recentTrades.length - 1} more)`;
-
-      // Build fingerprint from trade details for dedup (sorted for stability)
-      const fingerprint = recentTrades
-        .map(t => `${t.ticker}:${t.transactionType}:${t.politician}:${t.tradeDate}`)
-        .sort()
-        .join(',');
-
-      // Check if an alert event with this exact fingerprint already exists in last 7 days
-      const existingWithFingerprint = await prisma.alertEvent.findFirst({
-        where: {
-          alertId: alert.id,
-          createdAt: { gte: sevenDaysAgo },
-          data: { contains: fingerprint },
-        },
-      });
-      if (existingWithFingerprint) continue;
+        : `${tradeDescriptions[0]} (+${newTrades.length - 1} more)`;
 
       await prisma.alertEvent.create({
         data: {
           alertId: alert.id,
           message: alertMessage,
           data: JSON.stringify({
-            fingerprint,
-            trades: recentTrades.slice(0, 10).map(t => ({
+            tradeIds: newTrades.slice(0, 10).map(t => t.id),
+            trades: newTrades.slice(0, 10).map(t => ({
               politician: t.politician,
               ticker: t.ticker,
               transactionType: t.transactionType,
