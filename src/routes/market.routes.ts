@@ -29,5 +29,14 @@ router.get('/themes/heatmap', heavyReadLimiter, getThemesHeatmapHandler);
 router.get('/etf/heatmap', heavyReadLimiter, getEtfHeatmapHandler);
 router.get('/stock/:ticker/nala-score', heavyReadLimiter, requireAuth, requirePlan('pro'), getNalaScoreHandler);
 router.get('/stock/:ticker/earnings-track', heavyReadLimiter, getEarningsTrackHandler);
+router.get('/economic-calendar', heavyReadLimiter, async (_req, res) => {
+  try {
+    const { getUpcomingEconomicEvents } = await import('../services/economic-calendar.service');
+    const events = await getUpcomingEconomicEvents();
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch economic calendar' });
+  }
+});
 
 export default router;
