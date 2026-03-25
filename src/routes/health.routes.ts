@@ -13,8 +13,9 @@ const router = Router();
 
 // Basic health check — public (BetterStack uptime monitoring needs it)
 router.get('/', healthCheck);
-// Detailed health/metrics endpoints — admin only
-router.get('/status', requireAuth, requireAdmin, healthStatus);
+// Status endpoint — any authenticated user (UI uses this for health indicator)
+router.get('/status', requireAuth, healthStatus);
+// Detailed metrics — admin only (exposes internal data)
 router.get('/webhook-metrics', requireAuth, requireAdmin, webhookMetrics);
 router.get('/job-metrics', requireAuth, requireAdmin, jobMetrics);
 router.get('/provider-metrics', requireAuth, requireAdmin, providerMetrics);
