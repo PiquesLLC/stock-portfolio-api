@@ -132,6 +132,50 @@ async function ensureTesterFeatureAccess(): Promise<void> {
   }
 }
 
+// Auto-seed billionaires on first deploy (data doesn't exist in production DB yet)
+async function seedBillionairesIfEmpty(): Promise<void> {
+  const count = await prisma.billionaire.count();
+  if (count > 0) return;
+
+  console.log('[Init] Seeding billionaires (Bloomberg Billionaires Index)...');
+  const BILLIONAIRES = [
+    { name: 'Elon Musk', slug: 'elon-musk', company: 'Tesla / SpaceX', title: 'CEO', country: 'US', industry: 'Technology', baseNetWorthUsd: 500e9, holdings: [{ ticker: 'TSLA', shares: 411e6, note: 'Includes trust holdings' }] },
+    { name: 'Larry Page', slug: 'larry-page', company: 'Alphabet', title: 'Co-founder', country: 'US', industry: 'Technology', baseNetWorthUsd: 135e9, holdings: [{ ticker: 'GOOGL', shares: 395e6, note: 'Class A + C' }] },
+    { name: 'Sergey Brin', slug: 'sergey-brin', company: 'Alphabet', title: 'Co-founder', country: 'US', industry: 'Technology', baseNetWorthUsd: 134e9, holdings: [{ ticker: 'GOOGL', shares: 372e6, note: 'Class A + C' }] },
+    { name: 'Jeff Bezos', slug: 'jeff-bezos', company: 'Amazon', title: 'Executive Chairman', country: 'US', industry: 'Technology', baseNetWorthUsd: 21e9, holdings: [{ ticker: 'AMZN', shares: 945e6, note: 'Per latest SEC filing' }] },
+    { name: 'Mark Zuckerberg', slug: 'mark-zuckerberg', company: 'Meta', title: 'CEO', country: 'US', industry: 'Technology', baseNetWorthUsd: 8e9, holdings: [{ ticker: 'META', shares: 350e6, note: 'Class A + B' }] },
+    { name: 'Larry Ellison', slug: 'larry-ellison', company: 'Oracle', title: 'CTO & Chairman', country: 'US', industry: 'Technology', baseNetWorthUsd: 19e9, holdings: [{ ticker: 'ORCL', shares: 1170e6, note: 'Direct + trust' }] },
+    { name: 'Jensen Huang', slug: 'jensen-huang', company: 'NVIDIA', title: 'CEO', country: 'US', industry: 'Technology', baseNetWorthUsd: 48e9, holdings: [{ ticker: 'NVDA', shares: 579e6, note: 'Post 10:1 split' }] },
+    { name: 'Michael Dell', slug: 'michael-dell', company: 'Dell Technologies', title: 'CEO', country: 'US', industry: 'Technology', baseNetWorthUsd: 58e9, holdings: [{ ticker: 'DELL', shares: 543e6, note: 'Direct + MSD Capital' }] },
+    { name: 'Jim Walton', slug: 'jim-walton', company: 'Walmart / Arvest Bank', title: 'Chairman, Arvest Bank', country: 'US', industry: 'Retail', baseNetWorthUsd: 40e9, holdings: [{ ticker: 'WMT', shares: 860e6, note: 'Walton family trust' }] },
+    { name: 'Rob Walton', slug: 'rob-walton', company: 'Walmart', title: 'Former Chairman', country: 'US', industry: 'Retail', baseNetWorthUsd: 40e9, holdings: [{ ticker: 'WMT', shares: 860e6, note: 'Walton family trust' }] },
+    { name: 'Warren Buffett', slug: 'warren-buffett', company: 'Berkshire Hathaway', title: 'Chairman & CEO', country: 'US', industry: 'Finance', baseNetWorthUsd: 0, holdings: [{ ticker: 'BRK-B', shares: 298e6, note: 'A-shares converted to B-equivalent' }] },
+    { name: 'Steve Ballmer', slug: 'steve-ballmer', company: 'LA Clippers', title: 'Owner', country: 'US', industry: 'Technology', baseNetWorthUsd: 11e9, holdings: [{ ticker: 'MSFT', shares: 333e6, note: 'Largest individual MSFT holder' }] },
+    { name: 'Bernard Arnault', slug: 'bernard-arnault', company: 'LVMH', title: 'Chairman & CEO', country: 'France', industry: 'Luxury', baseNetWorthUsd: 143e9, holdings: [{ ticker: 'LVMUY', shares: 97e6, note: 'ADR equivalent (partial)' }] },
+    { name: 'Alice Walton', slug: 'alice-walton', company: 'Walmart', title: 'Heiress', country: 'US', industry: 'Retail', baseNetWorthUsd: 40e9, holdings: [{ ticker: 'WMT', shares: 751e6, note: 'Walton family trust' }] },
+    { name: 'Amancio Ortega', slug: 'amancio-ortega', company: 'Inditex (Zara)', title: 'Founder', country: 'Spain', industry: 'Retail', baseNetWorthUsd: 122e9, holdings: [] },
+    { name: 'Carlos Slim', slug: 'carlos-slim', company: 'Grupo Carso', title: 'Chairman', country: 'Mexico', industry: 'Telecom', baseNetWorthUsd: 112e9, holdings: [] },
+    { name: 'Bill Gates', slug: 'bill-gates', company: 'Cascade Investment', title: 'Co-chair, Gates Foundation', country: 'US', industry: 'Technology', baseNetWorthUsd: 79e9, holdings: [{ ticker: 'MSFT', shares: 50e6, note: 'Greatly reduced over years' }] },
+    { name: 'Mukesh Ambani', slug: 'mukesh-ambani', company: 'Reliance Industries', title: 'Chairman', country: 'India', industry: 'Conglomerate', baseNetWorthUsd: 91e9, holdings: [] },
+    { name: 'Francoise Bettencourt Meyers', slug: 'francoise-bettencourt', company: "L'Oreal", title: 'Chairwoman', country: 'France', industry: 'Consumer', baseNetWorthUsd: 81e9, holdings: [] },
+    { name: 'Michael Bloomberg', slug: 'michael-bloomberg', company: 'Bloomberg LP', title: 'Co-founder & CEO', country: 'US', industry: 'Media', baseNetWorthUsd: 95e9, holdings: [] },
+    { name: 'Gautam Adani', slug: 'gautam-adani', company: 'Adani Group', title: 'Chairman', country: 'India', industry: 'Industrial', baseNetWorthUsd: 76e9, holdings: [] },
+    { name: 'Phil Knight', slug: 'phil-knight', company: 'Nike', title: 'Chairman Emeritus', country: 'US', industry: 'Consumer', baseNetWorthUsd: 32e9, holdings: [{ ticker: 'NKE', shares: 250e6, note: 'Class A shares' }] },
+    { name: 'Ken Griffin', slug: 'ken-griffin', company: 'Citadel', title: 'CEO', country: 'US', industry: 'Finance', baseNetWorthUsd: 45e9, holdings: [] },
+    { name: 'MacKenzie Scott', slug: 'mackenzie-scott', company: 'Philanthropist', title: 'Author & Philanthropist', country: 'US', industry: 'Philanthropy', baseNetWorthUsd: 25e9, holdings: [{ ticker: 'AMZN', shares: 56e6, note: 'Post-divorce, reduced by giving' }] },
+    { name: 'Reed Hastings', slug: 'reed-hastings', company: 'Netflix', title: 'Executive Chairman', country: 'US', industry: 'Entertainment', baseNetWorthUsd: 2e9, holdings: [{ ticker: 'NFLX', shares: 55e6, note: 'Post 10:1 split' }] },
+  ];
+
+  for (const b of BILLIONAIRES) {
+    await prisma.billionaire.upsert({
+      where: { name: b.name },
+      create: { name: b.name, slug: b.slug, company: b.company, title: b.title, country: b.country, industry: b.industry, baseNetWorthUsd: b.baseNetWorthUsd, holdings: JSON.stringify(b.holdings), source: 'bloomberg' },
+      update: {},
+    });
+  }
+  console.log(`[Init] Seeded ${BILLIONAIRES.length} billionaires`);
+}
+
 // Helper to get all unique tickers from holdings + watchlists
 async function getAllHeldTickers(): Promise<string[]> {
   const [holdings, watchlistHoldings] = await Promise.all([
@@ -385,6 +429,7 @@ const server = app.listen(config.port, async () => {
   await ensureSeedUser().catch(err => console.error('[Init] Failed to create seed user:', err.message));
   await ensureDefaultUserLeaderboard().catch(err => console.error('[Init] Failed to enable leaderboard for system user:', err.message));
   await ensureTesterFeatureAccess().catch(err => console.error('[Init] Failed to grant tester feature access:', err.message));
+  await seedBillionairesIfEmpty().catch(err => console.error('[Init] Failed to seed billionaires:', err.message));
   registerBackgroundJobHandlers();
 
   // Auto-verify users created before email verification was required (one-time, cutoff date).
