@@ -19,9 +19,9 @@ router.get('/status', requireAuth, healthStatus);
 router.get('/webhook-metrics', requireAuth, requireAdmin, webhookMetrics);
 router.get('/job-metrics', requireAuth, requireAdmin, jobMetrics);
 router.get('/provider-metrics', requireAuth, requireAdmin, providerMetrics);
+router.get('/api-usage', requireAuth, requireAdmin, apiUsage);
 if (process.env.NODE_ENV !== 'production') {
   router.get('/auth-metrics', requireAuth, requireAdmin, authMetrics);
-  router.get('/api-usage', requireAuth, requireAdmin, apiUsage);
 }
 
 export default router;

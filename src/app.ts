@@ -336,6 +336,20 @@ process.on('unhandledRejection', (reason) => {
   Sentry.captureException(reason);
 });
 
+// Prevent WKWebView/browser from caching JSON API responses
+// (fixes pull-to-refresh returning stale data on iOS/native)
+app.use((req, res, next) => {
+  const origJson = res.json.bind(res);
+  res.json = (body: any) => {
+    if (!res.headersSent) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
+    return origJson(body);
+  };
+  next();
+});
+
 app.use('/', routes);
 
 // ── SEO: sitemap.xml ─────────────────────────────────────────────────
