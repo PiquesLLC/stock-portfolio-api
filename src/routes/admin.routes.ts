@@ -311,4 +311,71 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
   res.json({ success: true, creatorShare, platformShare });
 });
 
+// ═══════════════════════════════════════════════════════════════
+// Automated monitoring — reports from scheduled cloud agents
+// ═══════════════════════════════════════════════════════════════
+
+// POST /admin/reports — store a monitoring report (auth via secret key, not JWT)
+router.post('/reports', async (req: AuthRequest, res: Response) => {
+  try {
+    const authHeader = req.headers['x-report-key'];
+    if (!authHeader || authHeader !== process.env.REPORT_API_KEY) {
+      res.status(401).json({ error: 'Invalid report key' });
+      return;
+    }
+    const { type, status, data, source } = req.body;
+    if (!type || !status) {
+      res.status(400).json({ error: 'type and status required' });
+      return;
+    }
+    await prisma.monitoringReport.create({
+      data: {
+        type,      // 'health' | 'briefing' | 'security' | 'dev-report'
+        status,    // 'ok' | 'warning' | 'critical'
+        data: JSON.stringify(data || {}),
+        source: source || 'scheduled-agent',
+      },
+    });
+    res.json({ received: true });
+  } catch (err) {
+    console.error('[Reports] Failed to store report:', err);
+    res.status(500).json({ error: 'Failed to store report' });
+  }
+});
+
+// GET /admin/reports — fetch recent reports (admin only)
+router.get('/reports', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const type = req.query.type as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const reports = await prisma.monitoringReport.findMany({
+      where: type ? { type } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    res.json({ reports: reports.map(r => ({ ...r, data: JSON.parse(r.data) })) });
+  } catch (err) {
+    console.error('[Reports] Failed to fetch reports:', err);
+    res.status(500).json({ error: 'Failed to fetch reports' });
+  }
+});
+
+// GET /admin/reports/latest — latest report per type (admin only)
+router.get('/reports/latest', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const types = ['health', 'briefing', 'security', 'dev-report'];
+    const latest: Record<string, any> = {};
+    for (const type of types) {
+      const report = await prisma.monitoringReport.findFirst({
+        where: { type },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (report) latest[type] = { ...report, data: JSON.parse(report.data) };
+    }
+    res.json(latest);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch reports' });
+  }
+});
+
 export default router;

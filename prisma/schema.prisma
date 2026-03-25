@@ -1427,3 +1427,16 @@ model Appeal {
   @@index([userId])
   @@index([status])
 }
+
+// ─── Monitoring Reports (from scheduled cloud agents) ────────────────
+model MonitoringReport {
+  id        String   @id @default(uuid())
+  type      String   // health | briefing | security | dev-report
+  status    String   // ok | warning | critical
+  data      String   @default("{}") // JSON payload
+  source    String   @default("scheduled-agent")
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([createdAt])
+}
