@@ -474,6 +474,8 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       reportCache.set(cacheKey, result);
     }
     console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms${(result as any)._fallback ? ' (fallback — not cached)' : ''}`);
+    // Strip internal _fallback flag before returning to client
+    if ((result as any)._fallback) delete (result as any)._fallback;
     return result;
   } catch (_error) {
     if (strictFailures) {

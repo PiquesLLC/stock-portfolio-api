@@ -262,7 +262,7 @@ export async function checkCongressTradeAlerts(): Promise<void> {
           alertId: alert.id,
           message: alertMessage,
           data: JSON.stringify({
-            tradeIds: newTrades.slice(0, 10).map(t => t.id),
+            tradeIds: newTrades.map(t => t.id),
             trades: newTrades.slice(0, 10).map(t => ({
               politician: t.politician,
               ticker: t.ticker,
