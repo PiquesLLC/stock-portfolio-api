@@ -360,8 +360,8 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          type: 'platform_fee',
-          amountCents: 1500,
+          type: 'refund',
+          amountCents: -1500,
         }),
       })
     );
@@ -427,13 +427,13 @@ describe('creator billing webhooks', () => {
     const fx = fixtureFactory('payout');
     await handleCreatorWebhookEvent(fx.event.payoutPaid('evt_payout_paid_1'));
     expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { stripePayoutId: fx.ids.stripePayoutId },
+      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
       data: { status: 'completed', paidAt: expect.any(Date) },
     });
 
     await handleCreatorWebhookEvent(fx.event.payoutFailed('evt_payout_failed_1'));
     expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { stripePayoutId: fx.ids.stripePayoutId },
+      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
       data: { status: 'failed' },
     });
   });
@@ -521,7 +521,7 @@ describe('creator billing webhooks', () => {
     expect(paidLedgerByEvent.length).toBe(2); // creator share + platform fee once
     expect(refundLedgerByEvent.length).toBe(2); // refund + platform refund once
     expect((prismaMock as any).creatorPayout.updateMany.mock.calls.filter(
-      (c: any[]) => c?.[0]?.where?.stripePayoutId === fx.ids.stripePayoutId
+      (c: any[]) => c?.[0]?.where?.OR?.[0]?.stripePayoutId === fx.ids.stripePayoutId
     ).length).toBe(1);
   });
 
@@ -628,7 +628,7 @@ describe('creator billing webhooks', () => {
 
     // Should not throw — updateMany with count 0 is a no-op
     expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { stripePayoutId: fx.ids.stripePayoutId },
+      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
       data: { status: 'completed', paidAt: expect.any(Date) },
     });
   });
@@ -714,7 +714,13 @@ describe('creator billing webhooks', () => {
 
     await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_partial', 'acct_connect_456', false, true));
 
-    expect((prismaMock as any).creator.findFirst).not.toHaveBeenCalled();
+    // findFirst is always called to look up the creator by stripeConnectId
+    expect((prismaMock as any).creator.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeConnectId: 'acct_connect_456' },
+      })
+    );
+    // But update should NOT be called because charges_enabled is false and creator is not onboarded
     expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
   });
 

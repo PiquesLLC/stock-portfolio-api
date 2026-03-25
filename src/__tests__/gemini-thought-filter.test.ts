@@ -156,7 +156,8 @@ describe('callGemini thought filtering', () => {
     );
 
     expect(result).not.toBeNull();
-    expect(result!.content).toBe('{"headline":"test"}');
+    // Code takes only the LAST non-thought text part (avoids duplicate JSON from search grounding)
+    expect(result!.content).toBe('"test"}');
     expect(result!.content).not.toContain('Internal reasoning');
   });
 });

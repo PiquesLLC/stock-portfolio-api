@@ -112,11 +112,13 @@ describe('Cross-broker normalization', () => {
 
     const robinhoodRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(robinhoodCsv), 'robinhood.csv');
 
     const schwabRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(schwabCsv), 'schwab.csv');
 
@@ -144,11 +146,13 @@ describe('Cross-broker normalization', () => {
 
     const robinhoodRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(robinhoodCsv), 'robinhood.csv');
 
     const schwabRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(schwabCsv), 'schwab.csv');
 
@@ -178,6 +182,7 @@ describe('Cross-broker normalization', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(robinhoodCsv), 'robinhood.csv');
 
@@ -205,6 +210,7 @@ describe('Cross-broker normalization', () => {
 
     const res = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(schwabCsvWithHeader), 'schwab-full.csv');
 
@@ -224,6 +230,7 @@ describe('Cross-broker normalization', () => {
 
     const schwabRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(schwabCsv), 'schwab.csv');
 
@@ -232,6 +239,7 @@ describe('Cross-broker normalization', () => {
 
     const robinhoodRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(robinhoodCsv), 'robinhood.csv');
 
@@ -244,11 +252,13 @@ describe('Cross-broker normalization', () => {
 
     const robinhoodRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(robinhoodCsv), 'robinhood.csv');
 
     const schwabRes = await request(app)
       .post('/portfolio/import/csv')
+      .set('Origin', 'http://localhost:5173')
       .set('Cookie', `authToken=${token}`)
       .attach('file', Buffer.from(schwabCsv), 'schwab.csv');
 
@@ -275,6 +285,7 @@ describe('Cross-broker normalization', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'schwab-split.csv');
 
@@ -303,6 +314,7 @@ describe('Cross-broker normalization', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'schwab-transfer.csv');
 
@@ -325,6 +337,7 @@ describe('Cross-broker normalization', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'schwab-reinvest.csv');
 
@@ -352,6 +365,7 @@ describe('Cross-broker normalization', () => {
 
       const res = await request(app)
         .post('/portfolio/import/csv')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .attach('file', Buffer.from(csv), 'schwab-dividends.csv');
 

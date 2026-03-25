@@ -432,7 +432,7 @@ describe('Auth Service', () => {
       expect(result).toBeNull();
     });
 
-    it('should return latest valid token when revoked token has family successor', async () => {
+    it('should revoke entire family and return null when revoked token is reused (replay attack)', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
         id: 'rt-2b',
         token: 'revoked-token-recent',
@@ -442,16 +442,17 @@ describe('Auth Service', () => {
         expiresAt: new Date(Date.now() + 86400000),
         user: { id: 'user-1', username: 'alice', plan: 'free', planExpiresAt: null, emailVerified: true },
       });
-      // Valid successor exists in the family
-      prismaMock.refreshToken.findFirst.mockResolvedValue({ token: 'latest-valid-token' });
+      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await rotateRefreshToken('revoked-token-recent');
-      expect(result).not.toBeNull();
-      // rotateRefreshToken generates a NEW token via generateRefreshToken(),
-      // it doesn't return the successor's stored token value
-      expect(typeof result!.refreshToken).toBe('string');
-      expect(result!.refreshToken.length).toBeGreaterThan(0);
-      expect(result!.accessToken).toBeDefined();
+      // Revoked token reuse triggers family-wide revocation and returns null
+      expect(result).toBeNull();
+      // Verify the entire family was revoked
+      expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: 'user-1', family: 'family-1', revokedAt: null }),
+        })
+      );
     });
 
     it('should return null for expired refresh token', async () => {
@@ -776,16 +777,16 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/login')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'alice', password: 'ValidPass1' });
 
       expect(res.status).toBe(200);
       expect(res.body.user).toBeDefined();
       expect(res.body.user.username).toBe('alice');
-      expect(typeof res.body.accessToken).toBe('string');
-      expect(typeof res.body.refreshToken).toBe('string');
-      expect(typeof res.body.token).toBe('string');
-      expect(res.body.token).toBe(res.body.accessToken);
-      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+      // Tokens are only in response body for native (Capacitor) clients;
+      // web clients receive them via httpOnly cookies only.
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.body.refreshToken).toBeUndefined();
       // Check that cookies are set
       const cookies = res.headers['set-cookie'];
       expect(cookies).toBeDefined();
@@ -798,6 +799,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/login')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'nobody', password: 'SomePass1' });
 
       expect(res.status).toBe(401);
@@ -807,6 +809,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 when username is missing', async () => {
       const res = await request(app)
         .post('/auth/login')
+        .set('Origin', 'http://localhost:5173')
         .send({ password: 'SomePass1' });
 
       expect(res.status).toBe(400);
@@ -815,6 +818,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 when password is missing', async () => {
       const res = await request(app)
         .post('/auth/login')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'alice' });
 
       expect(res.status).toBe(400);
@@ -824,7 +828,9 @@ describe('Auth Routes (Integration)', () => {
   // â”€â”€ POST /auth/logout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('POST /auth/logout', () => {
     it('should return 200 and clear cookies', async () => {
-      const res = await request(app).post('/auth/logout');
+      const res = await request(app)
+        .post('/auth/logout')
+        .set('Origin', 'http://localhost:5173');
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('Logged out');
@@ -888,6 +894,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({
           username: 'newuser',
           email: 'newuser@example.com',
@@ -899,16 +906,16 @@ describe('Auth Routes (Integration)', () => {
 
       expect(res.status).toBe(201);
       expect(res.body.user.username).toBe('newuser');
-      expect(typeof res.body.accessToken).toBe('string');
-      expect(typeof res.body.refreshToken).toBe('string');
-      expect(typeof res.body.token).toBe('string');
-      expect(res.body.token).toBe(res.body.accessToken);
-      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+      // Tokens are only in response body for native (Capacitor) clients;
+      // web clients receive them via httpOnly cookies only.
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.body.refreshToken).toBeUndefined();
     });
 
     it('should return 400 for invalid username format', async () => {
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
@@ -917,6 +924,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for weak password (no uppercase)', async () => {
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
@@ -925,6 +933,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 for short password', async () => {
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
@@ -936,6 +945,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(409);
@@ -945,6 +955,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 400 when display name is missing', async () => {
       const res = await request(app)
         .post('/auth/signup')
+        .set('Origin', 'http://localhost:5173')
         .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
@@ -959,6 +970,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/set-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'NewPass123' });
 
@@ -972,6 +984,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/set-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'NewPass123' });
 
@@ -983,6 +996,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/set-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'weak' });
 
@@ -994,6 +1008,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/set-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'NoNumbersHere' });
 
@@ -1011,6 +1026,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/change-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ currentPassword: 'OldPass1', newPassword: 'NewPass123' });
 
@@ -1025,6 +1041,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/change-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ currentPassword: 'WrongPass1', newPassword: 'NewPass123' });
 
@@ -1035,6 +1052,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 401 when not authenticated', async () => {
       const res = await request(app)
         .post('/auth/change-password')
+        .set('Origin', 'http://localhost:5173')
         .send({ currentPassword: 'Old1', newPassword: 'New1Pass' });
 
       expect(res.status).toBe(401);
@@ -1045,6 +1063,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/change-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ currentPassword: 'OldPass1', newPassword: 'weak' });
 
@@ -1065,6 +1084,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .delete('/auth/delete-account')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'MyPass1' });
 
@@ -1082,6 +1102,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .delete('/auth/delete-account')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ password: 'WrongPass1' });
 
@@ -1092,6 +1113,7 @@ describe('Auth Routes (Integration)', () => {
     it('should return 401 when not authenticated', async () => {
       const res = await request(app)
         .delete('/auth/delete-account')
+        .set('Origin', 'http://localhost:5173')
         .send({ password: 'Pass1234' });
 
       expect(res.status).toBe(401);
@@ -1102,6 +1124,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .delete('/auth/delete-account')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({});
 
@@ -1168,15 +1191,15 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/refresh')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', 'refreshToken=valid-refresh');
 
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('refreshed');
-      expect(typeof res.body.accessToken).toBe('string');
-      expect(typeof res.body.refreshToken).toBe('string');
-      expect(typeof res.body.token).toBe('string');
-      expect(res.body.token).toBe(res.body.accessToken);
-      expect(res.body.debugAuthVersion).toBe('auth-body-v2');
+      // Tokens are only in response body for native (Capacitor) clients;
+      // web clients receive them via httpOnly cookies only.
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.body.refreshToken).toBeUndefined();
       const cookies = res.headers['set-cookie'];
       expect(cookies).toBeDefined();
       const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
@@ -1184,7 +1207,9 @@ describe('Auth Routes (Integration)', () => {
     });
 
     it('should return 401 when no refresh token provided', async () => {
-      const res = await request(app).post('/auth/refresh');
+      const res = await request(app)
+        .post('/auth/refresh')
+        .set('Origin', 'http://localhost:5173');
 
       expect(res.status).toBe(401);
       expect(res.body.code).toBe('NO_TOKEN');
@@ -1195,6 +1220,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/refresh')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', 'refreshToken=invalid-token');
 
       expect(res.status).toBe(401);
@@ -1213,6 +1239,7 @@ describe('Auth Routes (Integration)', () => {
 
       const res = await request(app)
         .post('/auth/change-password')
+        .set('Origin', 'http://localhost:5173')
         .set('Cookie', `authToken=${token}`)
         .send({ currentPassword: 'OldPass1', newPassword: 'NewPass123' });
 
