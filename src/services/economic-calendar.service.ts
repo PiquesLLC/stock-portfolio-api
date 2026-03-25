@@ -87,7 +87,8 @@ async function fetchFromForexFactory(): Promise<EconomicCalendarEvent[]> {
     .sort((a: EconomicCalendarEvent, b: EconomicCalendarEvent) => {
       const dateCompare = a.date.localeCompare(b.date);
       if (dateCompare !== 0) return dateCompare;
-      return a.impact === 'high' ? -1 : 1;
+      const impactOrder = { high: 0, medium: 1, low: 2 };
+      return (impactOrder[a.impact] ?? 2) - (impactOrder[b.impact] ?? 2);
     })
     .slice(0, 20);
 }
