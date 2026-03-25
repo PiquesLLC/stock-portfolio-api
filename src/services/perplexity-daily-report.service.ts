@@ -146,6 +146,22 @@ function buildFallbackReport(
   };
 }
 
+/** Truncate text at the last sentence boundary within maxLen, or at last word boundary */
+function truncateCleanly(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const trimmed = text.slice(0, maxLen);
+  // Try to cut at last sentence-ending punctuation
+  const sentenceEnd = Math.max(trimmed.lastIndexOf('. '), trimmed.lastIndexOf('.) '), trimmed.lastIndexOf('."'));
+  if (sentenceEnd > maxLen * 0.5) return trimmed.slice(0, sentenceEnd + 1).trim();
+  // Fall back to last period
+  const lastDot = trimmed.lastIndexOf('.');
+  if (lastDot > maxLen * 0.5) return trimmed.slice(0, lastDot + 1).trim();
+  // Fall back to last word boundary
+  const lastSpace = trimmed.lastIndexOf(' ');
+  if (lastSpace > maxLen * 0.5) return trimmed.slice(0, lastSpace).trim() + '…';
+  return trimmed.trim() + '…';
+}
+
 function decodeJsonFragment(value: string): string {
   try {
     return JSON.parse(`"${value}"`);
@@ -180,8 +196,8 @@ function salvageTopStories(source: string): DailyReportResponse['topStories'] {
       .filter((ticker) => ticker && !TICKER_BLACKLIST.has(ticker));
 
     stories.push({
-      headline: stripLeakedTags(decodeJsonFragment(match[1]).slice(0, 100)),
-      body: stripLeakedTags(decodeJsonFragment(match[2]).slice(0, 300)),
+      headline: stripLeakedTags(decodeJsonFragment(match[1]).slice(0, 120)),
+      body: truncateCleanly(stripLeakedTags(decodeJsonFragment(match[2])), 600),
       sentiment: ['positive', 'negative', 'neutral'].includes(match[3]) ? match[3] as 'positive' | 'negative' | 'neutral' : 'neutral',
       relatedTickers,
     });
@@ -196,8 +212,8 @@ function buildDailyReportFromPayload(
 ): DailyReportResponse {
   const topStories = Array.isArray(payload?.topStories)
     ? payload.topStories.slice(0, 5).map((s: any) => ({
-      headline: sanitizeContent(stripLeakedTags(String(s?.headline || '').slice(0, 100))),
-      body: sanitizeContent(stripLeakedTags(String(s?.body || '').slice(0, 300))),
+      headline: sanitizeContent(stripLeakedTags(String(s?.headline || '').slice(0, 120))),
+      body: truncateCleanly(sanitizeContent(stripLeakedTags(String(s?.body || ''))), 600),
       sentiment: ['positive', 'negative', 'neutral'].includes(s?.sentiment) ? s.sentiment : 'neutral',
       relatedTickers: Array.isArray(s?.relatedTickers)
         ? s.relatedTickers
@@ -209,14 +225,14 @@ function buildDailyReportFromPayload(
     : fallback.topStories;
 
   const watchToday = Array.isArray(payload?.watchToday)
-    ? payload.watchToday.slice(0, 4).map((w: any) => sanitizeContent(stripLeakedTags(String(w || '').slice(0, 300))))
+    ? payload.watchToday.slice(0, 5).map((w: any) => truncateCleanly(sanitizeContent(stripLeakedTags(String(w || ''))), 400))
     : fallback.watchToday;
 
   return {
     generatedAt: new Date().toISOString(),
-    greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 200))),
-    marketOverview: sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview).slice(0, 500))),
-    portfolioSummary: sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary).slice(0, 500))),
+    greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 250))),
+    marketOverview: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview))), 1000),
+    portfolioSummary: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary))), 1000),
     topStories: topStories.length > 0 ? topStories : fallback.topStories,
     watchToday: watchToday.length > 0 ? watchToday : fallback.watchToday,
     cached: false,
