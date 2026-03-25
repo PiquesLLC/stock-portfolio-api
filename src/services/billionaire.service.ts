@@ -217,11 +217,21 @@ export async function getBillionaireChart(slug: string, period: string) {
     };
   }
 
-  const ytdDays = Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-  const periodDays: Record<string, number> = {
-    '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': ytdDays, '1Y': 365,
+  // Compute the hard cutoff timestamp for each period — no data before this
+  const now = Date.now();
+  const cutoffMs: Record<string, number> = {
+    '1D': now - 1 * 86400000,
+    '1W': now - 7 * 86400000,
+    '1M': now - 30 * 86400000,
+    '3M': now - 90 * 86400000,
+    '6M': now - 180 * 86400000,
+    'YTD': new Date(new Date().getFullYear(), 0, 2).getTime(), // Jan 2 = first trading day
+    '1Y': now - 365 * 86400000,
   };
-  const days = periodDays[period] || 30;
+  const cutoff = cutoffMs[period] ?? (now - 30 * 86400000);
+
+  // Fetch a few extra days to ensure the first trading day is included
+  const fetchDays = Math.ceil((now - cutoff) / 86400000) + 10;
 
   // Fetch candles for all holdings in parallel
   const tickers = validHoldings.map(h => h.ticker.toUpperCase());
@@ -229,7 +239,7 @@ export async function getBillionaireChart(slug: string, period: string) {
     tickers.map(t =>
       (period === '1D'
         ? fetchIntradayCandles(t)
-        : fetchDailyCandles(t, days)
+        : fetchDailyCandles(t, fetchDays)
       ).catch(() => [])
     )
   );
@@ -257,33 +267,28 @@ export async function getBillionaireChart(slug: string, period: string) {
   }
 
   // For each timestamp, compute net worth = baseNetWorthUsd + sum(shares × closest price)
-  const points: { time: number; value: number }[] = [];
+  const allPoints: { time: number; value: number }[] = [];
   for (const ref of maxCandles) {
     let publicValue = 0;
     for (const h of validHoldings) {
       const candles = candleMap.get(h.ticker.toUpperCase());
       if (!candles) continue;
-      // Find closest candle by time
       let closest = candles[0];
       for (const c of candles) {
         if (Math.abs(c.time - ref.time) < Math.abs(closest.time - ref.time)) closest = c;
       }
       publicValue += h.shares * closest.close;
     }
-    points.push({ time: ref.time, value: b.baseNetWorthUsd + publicValue });
+    allPoints.push({ time: ref.time, value: b.baseNetWorthUsd + publicValue });
   }
 
-  // For YTD: filter out pre-Jan-1 data and set periodStartValue to first point
-  if (period === 'YTD' && points.length > 1) {
-    const jan1 = new Date(new Date().getFullYear(), 0, 2).getTime(); // Jan 2 = first trading day
-    const filtered = points.filter(p => p.time >= jan1);
-    if (filtered.length > 0) {
-      return { points: filtered, periodStartValue: filtered[0].value };
-    }
+  // Filter to only points within the period (fetchDailyCandles overshoots)
+  const points = period === '1D' ? allPoints : allPoints.filter(p => p.time >= cutoff);
+  if (points.length === 0) {
+    return { points: allPoints, periodStartValue: allPoints[0]?.value ?? b.baseNetWorthUsd };
   }
 
-  const periodStartValue = points.length > 0 ? points[0].value : b.baseNetWorthUsd;
-  return { points, periodStartValue };
+  return { points, periodStartValue: points[0].value };
 }
 
 /**
