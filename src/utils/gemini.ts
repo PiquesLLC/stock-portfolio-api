@@ -50,37 +50,55 @@ export async function callGemini(
   // into Axios error objects (config.url, request.path), server logs, and Sentry.
   const url = `${GEMINI_API_BASE}/models/${model}:generateContent`;
 
+  const reqTimeout = options?.timeout ?? 30000;
+  const maxAttempts = 2; // Retry once on transient 503/429
   let resp;
-  try {
-    resp = await axios.post(url, body, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': config.googleGeminiApiKey,
-      },
-      timeout: options?.timeout ?? 30000,
-    });
-  } catch (error: unknown) {
-    const err = error as { code?: string; response?: { status?: number; data?: any }; message?: string };
-    const durationMs = Date.now() - startMs;
-    const status = err.response?.status;
-    const category =
-      status === 429 ? 'rate_limited'
-      : status === 401 || status === 403 ? 'auth'
-      : err.code === 'ECONNABORTED' ? 'timeout'
-      : status && status >= 500 ? 'upstream_5xx'
-      : 'request_failed';
-    console.warn(`[Gemini] call_failed feature=${options?.feature || 'unknown'} category=${category} status=${status || 'n/a'} durationMs=${durationMs} ticker=${options?.ticker || 'n/a'} message=${err.message || 'unknown'}`);
-    // Sanitize the error: strip config.headers which contains the API key
-    // before re-throwing so Sentry/callers don't capture it.
-    if (err && typeof err === 'object' && 'config' in err) {
-      const axiosErr = err as { config?: { headers?: Record<string, unknown> } };
-      if (axiosErr.config?.headers) {
-        delete axiosErr.config.headers['x-goog-api-key'];
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      resp = await axios.post(url, body, {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': config.googleGeminiApiKey,
+        },
+        timeout: reqTimeout,
+      });
+      break; // Success
+    } catch (error: unknown) {
+      lastError = error;
+      const err = error as { code?: string; response?: { status?: number; data?: any }; message?: string };
+      const durationMs = Date.now() - startMs;
+      const status = err.response?.status;
+      const category =
+        status === 429 ? 'rate_limited'
+        : status === 401 || status === 403 ? 'auth'
+        : err.code === 'ECONNABORTED' ? 'timeout'
+        : status && status >= 500 ? 'upstream_5xx'
+        : 'request_failed';
+
+      const retryable = status === 503 || status === 429 || status === 500;
+      if (retryable && attempt < maxAttempts) {
+        const backoffMs = status === 429 ? 3000 : 2000;
+        console.warn(`[Gemini] attempt=${attempt} retryable ${status}, retrying in ${backoffMs}ms feature=${options?.feature || 'unknown'}`);
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
       }
+
+      console.warn(`[Gemini] call_failed feature=${options?.feature || 'unknown'} category=${category} status=${status || 'n/a'} durationMs=${durationMs} ticker=${options?.ticker || 'n/a'} attempts=${attempt} message=${err.message || 'unknown'}`);
+      // Sanitize the error: strip config.headers which contains the API key
+      // before re-throwing so Sentry/callers don't capture it.
+      if (err && typeof err === 'object' && 'config' in err) {
+        const axiosErr = err as { config?: { headers?: Record<string, unknown> } };
+        if (axiosErr.config?.headers) {
+          delete axiosErr.config.headers['x-goog-api-key'];
+        }
+      }
+      throw error;
     }
-    throw error;
   }
 
+  if (!resp) throw lastError ?? new Error('Gemini: no response after retries');
   const durationMs = Date.now() - startMs;
 
   // Extract content from Gemini response

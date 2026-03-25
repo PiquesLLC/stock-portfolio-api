@@ -136,14 +136,13 @@ function buildFallbackReport(
   return {
     generatedAt: new Date().toISOString(),
     greeting: weekend ? 'Happy weekend!' : 'Good morning!',
-    marketOverview: news.length > 0
-      ? `Here's what's driving markets: ${news[0]?.headline || 'Markets are active today.'}`
-      : 'Markets are open. Check back shortly for AI-powered analysis.',
+    marketOverview: 'Your AI briefing is generating — refresh in a moment for the full report.',
     portfolioSummary: `Your portfolio ($${totalValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}) is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% ($${Math.abs(dollarChange).toFixed(0)}) today.`,
     topStories: fallbackStories.slice(0, 5),
     watchToday,
     cached: false,
-  };
+    _fallback: true,
+  } as DailyReportResponse;
 }
 
 /** Truncate text at the last sentence boundary within maxLen, or at last word boundary */
@@ -288,8 +287,8 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
   const strictFailures = options.strictFailures === true;
 
   // Single hard deadline wrapping EVERYTHING — data gathering + AI call.
-  // Daily reports are longer responses, so give Perplexity enough time to finish.
-  const HARD_DEADLINE_MS = 30000;
+  // Gemini 2.5 Flash can take 15-25s for rich daily reports + needs retry room for 503s.
+  const HARD_DEADLINE_MS = 55000;
   const startTime = Date.now();
   const weekend = isWeekendET();
 
@@ -470,10 +469,11 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     }
 
     const result = raceResult;
-    if (result.topStories.length > 0) {
+    // Only cache AI-generated reports, never fallback reports
+    if (result.topStories.length > 0 && !(result as any)._fallback) {
       reportCache.set(cacheKey, result);
     }
-    console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms`);
+    console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms${(result as any)._fallback ? ' (fallback — not cached)' : ''}`);
     return result;
   } catch (_error) {
     if (strictFailures) {
