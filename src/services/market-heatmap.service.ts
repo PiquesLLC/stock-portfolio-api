@@ -196,14 +196,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   // Removed getPolygonMarketCaps (328 individual API calls, ~20s cold) — fundamentalsCache
   // and screenerCache already have market cap for almost all S&P 500 tickers.
   //
-  // For 1D: skip both period candle fetch and week changes on cold start.
-  //   - Polygon snapshot gives us changePercent for every ticker (paid plan).
-  //   - 2-day candle fallback is only for edge case after midnight; not worth 10s penalty.
-  //   - weekChangePercent is tooltip-only data; fine to show 0 on first load.
+  // For 1D: skip period candle fetch (Polygon snapshot gives changePercent).
   // For non-1D: period changes are essential (the main changePercent), run in parallel.
+  // Week changes are always fetched — Top 100 view shows 7D column regardless of period.
   const candleDays = PERIOD_DAYS[period];
   const needsPeriodChanges = period !== '1D' && candleDays > 0;
-  const needsWeekChanges = period !== '1D';
 
   const parallelFetches: [
     Promise<{ quotes: Map<string, any> }>,
@@ -224,8 +221,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     }),
     // Period changes — only for non-1D (1D uses live quote changePercent)
     needsPeriodChanges ? fetchPeriodChanges(uniqueTickers, candleDays) : Promise.resolve(null),
-    // Week changes — only for non-1D (tooltip-only for 1D, skip on cold start)
-    needsWeekChanges ? fetchPeriodChanges(uniqueTickers, 7) : Promise.resolve(null),
+    // Week changes — always fetched (Top 100 shows 7D column)
+    fetchPeriodChanges(uniqueTickers, 7),
   ];
 
   const [{ quotes }, fundamentals, polygonVolumes, screenerRows, periodChanges, weekChanges] =

@@ -176,7 +176,13 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     const counts = await getFollowCounts(userId);
     const viewerFollowing = viewerId ? await isFollowing(viewerId, userId) : false;
+    const holdingsHidden = !isOwner && user.holdingsVisibility !== 'all';
     let activity: ActivityEventResponse[] = user.profilePublic ? await getUserActivity(userId, 10) : [];
+
+    // Holdings-private gate: hide all activity if holdings are not public
+    if (!isOwner && holdingsHidden && activity.length > 0) {
+      activity = [];
+    }
 
     // Trade delay + subscription gate: filter activity for non-owner viewers
     if (!isOwner && activity.length > 0) {
@@ -215,7 +221,6 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
 
     // Fetch performance stats for the profile (1M window, SPY benchmark)
     let performance = null;
-    const holdingsHidden = !isOwner && user.holdingsVisibility !== 'all';
     if ((user.profilePublic || isOwner) && !holdingsHidden) {
       try {
         performance = await getPerformanceComparison('1M', 'SPY', userId);
