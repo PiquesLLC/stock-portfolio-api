@@ -155,7 +155,8 @@ export async function getPortfolioBriefing(
   await ensureEmailVerifiedForAi(userId);
   const normalizedPeriod = normalizeBriefingPeriod(period);
   const periodConfig = getPeriodConfig(normalizedPeriod);
-  const cacheKey = `portfolio-briefing:${userId}:${portfolioId ?? 'default'}:${normalizedPeriod}`;
+  const todayDate = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const cacheKey = `portfolio-briefing:${userId}:${portfolioId ?? 'default'}:${normalizedPeriod}:${todayDate}`;
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
@@ -219,7 +220,11 @@ export async function getPortfolioBriefing(
     .join('\n');
 
   const totalValue = portfolio.netEquity.toFixed(0);
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/New_York' });
   const userMessage =
+    `TODAY'S DATE: ${todayStr}\n` +
+    `IMPORTANT: This briefing is for TODAY (${todayStr}). Reference today's market activity, not yesterday's.\n\n` +
     `PORTFOLIO TOTAL VALUE: $${totalValue} (use this exact number if referencing portfolio value)\n\n` +
     `Here is my stock portfolio (${portfolio.holdings.length} positions, ` +
     `total value $${totalValue}` +
