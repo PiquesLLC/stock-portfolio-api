@@ -1086,6 +1086,22 @@ model ScreenerCache {
   @@index([lastFetchedAt])
 }
 
+// ─── Value Radar ─────────────────────────────────────────────────────
+
+model ValueRadarCache {
+  id            String   @id @default(uuid())
+  ticker        String   @unique
+  avgPE         Float?
+  peHistoryJson String?  // JSON: [{ year: 2016, pe: 32.1 }, ...]
+  yearsOfData   Int?
+  lastFetchedAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([ticker])
+  @@index([lastFetchedAt])
+}
+
 // ─── Waitlist ────────────────────────────────────────────────────────
 
 model Waitlist {

@@ -507,3 +507,17 @@ export async function getEarningsTrackHandler(req: Request, res: Response): Prom
     res.status(500).json({ error: 'Failed to compute earnings track record' });
   }
 }
+
+// ── Value Radar ─────────────────────────────────────────────────
+import { getValueRadarData } from '../services/value-radar.service';
+
+export async function getValueRadarHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const data = await getValueRadarData();
+    res.json(data);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Value Radar] Error:', msg);
+    res.status(500).json({ error: 'Failed to fetch value radar data', detail: msg });
+  }
+}
