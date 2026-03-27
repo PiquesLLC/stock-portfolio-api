@@ -13,7 +13,8 @@ export async function getStockShareCardHandler(req: Request, res: Response): Pro
 
     const raw = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1W';
     const period = raw === 'MAX' ? 'ALL' : raw;
-    const pngBuffer = await generateStockShareCard(ticker, period);
+    const tz = typeof req.query.tz === 'string' ? req.query.tz : undefined;
+    const pngBuffer = await generateStockShareCard(ticker, period, tz);
     if (!pngBuffer) {
       res.status(404).json({ error: 'Stock data unavailable' });
       return;
@@ -42,7 +43,8 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
       return;
     }
 
-    const pngBuffer = await generatePerformanceCard(userId, periodRaw);
+    const tz = typeof req.query.tz === 'string' ? req.query.tz : undefined;
+    const pngBuffer = await generatePerformanceCard(userId, periodRaw, tz);
     if (!pngBuffer) {
       res.status(404).json({ error: 'User not found or profile is private' });
       return;

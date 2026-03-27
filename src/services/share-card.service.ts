@@ -173,14 +173,16 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     return points;
   }
 
-  const sameDayRegularHours = datedPoints
-    .filter(entry => entry.isWeekday && entry.etDate === latestTradingDay && entry.hourFloat >= 9.5 && entry.hourFloat < 16)
+  // 1D share card must match the in-app chart: show 4 AM – 8 PM ET (pre-market included).
+  const sameDayFull = datedPoints
+    .filter(entry => entry.isWeekday && entry.etDate === latestTradingDay && entry.hourFloat >= 4 && entry.hourFloat < 20)
     .map(entry => entry.point);
 
-  if (sameDayRegularHours.length >= 2) {
-    return sameDayRegularHours;
+  if (sameDayFull.length >= 2) {
+    return sameDayFull;
   }
 
+  // Fallback: all points on the latest trading day
   const latestTradingDayPoints = datedPoints
     .filter(entry => entry.isWeekday && entry.etDate === latestTradingDay)
     .map(entry => entry.point);
@@ -189,40 +191,15 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     return latestTradingDayPoints;
   }
 
-  const nowEt = etDateFmt.format(nowDate);
-  const sameCalendarDayRegularHours = datedPoints
-    .filter(entry => entry.isWeekday && entry.etDate === nowEt && entry.hourFloat >= 9.5 && entry.hourFloat < 16)
-    .map(entry => entry.point);
-
-  if (sameCalendarDayRegularHours.length >= 2) {
-    return sameCalendarDayRegularHours;
-  }
-
-  // Fallback to the broader same-day session if a thin trading day or provider issue
-  // would otherwise leave the card with too few points.
-  const etOffNoon = new Date(`${latestTradingDay}T12:00:00Z`);
-  const etNoonHour = parseInt(new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(etOffNoon).split(':')[0], 10);
-  const etOffsetMs = (etNoonHour - 12) * 3600000;
-  const latestTradingDay4amEt = new Date(`${latestTradingDay}T04:00:00Z`).getTime() - etOffsetMs;
-  const sameTradingDayExpanded = points.filter(point => point.time >= latestTradingDay4amEt && point.time <= nowMs);
-
-  if (sameTradingDayExpanded.length >= 2) {
-    return sameTradingDayExpanded;
-  }
-
+  const nowEtDate = etDateFmt.format(nowDate);
   const todayExpanded = points.filter(point => {
     const { etDate } = getEtHourFloat(new Date(point.time));
-    return etDate === nowEt;
+    return etDate === nowEtDate;
   });
   return todayExpanded.length >= 2 ? todayExpanded : points;
 }
 
-async function getStockShareCardData(inputTicker: string, periodInput?: string): Promise<StockShareCardData | null> {
+async function getStockShareCardData(inputTicker: string, periodInput?: string, tz?: string): Promise<StockShareCardData | null> {
   const ticker = inputTicker.toUpperCase();
   const period = normalizePeriod(periodInput || '1W');
   const candleFetcher = period === '1D'
@@ -315,8 +292,9 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
     if (!d) return '';
     const date = new Date(d);
     if (period === '1D') {
-      // Show time for intraday
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+      const labelTz = tz || 'America/New_York';
+      try { return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: labelTz }); }
+      catch { return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }); }
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
@@ -347,7 +325,7 @@ async function getStockShareCardData(inputTicker: string, periodInput?: string):
   };
 }
 
-async function getPerformanceShareCardData(userId: string, periodInput: string): Promise<PerformanceShareCardData | null> {
+async function getPerformanceShareCardData(userId: string, periodInput: string, tz?: string): Promise<PerformanceShareCardData | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -455,7 +433,9 @@ async function getPerformanceShareCardData(userId: string, periodInput: string):
     if (!t) return '';
     const date = new Date(t);
     if (period === '1D') {
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+      const labelTz = tz || 'America/New_York';
+      try { return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: labelTz }); }
+      catch { return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }); }
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
@@ -709,8 +689,8 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
 </svg>`;
 }
 
-export async function generateStockShareCard(ticker: string, period?: string): Promise<Buffer | null> {
-  const data = await getStockShareCardData(ticker, period);
+export async function generateStockShareCard(ticker: string, period?: string, tz?: string): Promise<Buffer | null> {
+  const data = await getStockShareCardData(ticker, period, tz);
   if (!data) return null;
 
   const svg = await buildStockSvg(data);
@@ -720,8 +700,8 @@ export async function generateStockShareCard(ticker: string, period?: string): P
     .toBuffer();
 }
 
-export async function generatePerformanceCard(userId: string, period: string): Promise<Buffer | null> {
-  const data = await getPerformanceShareCardData(userId, period);
+export async function generatePerformanceCard(userId: string, period: string, tz?: string): Promise<Buffer | null> {
+  const data = await getPerformanceShareCardData(userId, period, tz);
   if (!data) return null;
 
   const svg = await buildPerformanceSvg(data);

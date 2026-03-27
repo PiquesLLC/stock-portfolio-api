@@ -13,6 +13,7 @@ import prisma from '../utils/prisma';
 import { config } from '../config';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { subSectorGroups } from '../utils/sectors';
+import { fetchPrices } from './market.service';
 
 const POLYGON_BASE = 'https://api.polygon.io';
 const responseCache = new NodeCache({ stdTTL: 1800 }); // 30-min in-memory cache
@@ -35,6 +36,16 @@ export interface ValueRadarStock {
   tier: 'deep_value' | 'attractive' | 'fair' | 'expensive';
   peHistory: PEHistoryEntry[];
   yearsOfData: number;
+  dividendYield: number | null;
+  forwardPE: number | null;
+  beta: number | null;
+  week52High: number | null;
+  week52Low: number | null;
+  week52Pos: number | null;
+  returnOnEquity: number | null;
+  profitMargin: number | null;
+  analystTargetPrice: number | null;
+  upsideToTarget: number | null;
 }
 
 export interface ValueRadarResponse {
@@ -204,7 +215,7 @@ export async function backfillValueRadar(): Promise<void> {
 
   console.log(`[Value Radar] ${needsRefresh.length} tickers need refresh`);
 
-  const BATCH_SIZE = 5; // Conservative — 2 Polygon calls per ticker
+  const BATCH_SIZE = 15; // Paid Polygon Developer plan — 2 calls/ticker
   let success = 0;
   let failed = 0;
 
@@ -241,9 +252,9 @@ export async function backfillValueRadar(): Promise<void> {
       else failed++;
     }
 
-    // Delay between batches to respect Polygon rate limits
+    // Brief pause between batches — Developer plan has high but not unlimited throughput
     if (i + BATCH_SIZE < needsRefresh.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 
@@ -294,19 +305,23 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     };
   }
 
-  // 2. Load screener cache for current EPS
+  // 2. Load screener cache (EPS), fundamentals cache (name/sector/marketCap), and live prices concurrently
   const tickers = radarEntries.map(r => r.ticker);
-  const screenerRows = await prisma.screenerCache.findMany({
-    where: { ticker: { in: tickers } },
-    select: { ticker: true, eps: true },
-  });
+  const [screenerRows, fundamentalsRows, { quotes }] = await Promise.all([
+    prisma.screenerCache.findMany({
+      where: { ticker: { in: tickers } },
+      select: { ticker: true, eps: true, annualDividend: true, beta: true, week52High: true, week52Low: true },
+    }),
+    prisma.fundamentalsCache.findMany({
+      where: { ticker: { in: tickers } },
+      select: { ticker: true, overviewJson: true },
+    }),
+    fetchPrices(tickers),
+  ]);
   const epsMap = new Map(screenerRows.filter(r => r.eps != null).map(r => [r.ticker, r.eps!]));
+  const screenerMap = new Map(screenerRows.map(r => [r.ticker, r]));
 
-  // 3. Load current prices from heatmap fundamentals cache
-  const fundamentalsRows = await prisma.fundamentalsCache.findMany({
-    where: { ticker: { in: tickers } },
-    select: { ticker: true, overviewJson: true },
-  });
+  // 3. Build overview map for name/sector/marketCap lookups (NOT for price)
   const overviewMap = new Map<string, any>();
   for (const row of fundamentalsRows) {
     if (row.overviewJson) {
@@ -328,8 +343,9 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
 
     if (!eps || eps <= 0 || !avgPE || avgPE <= 0) continue;
 
-    // Get current price from overview or skip
-    const price = overview?.price ?? overview?.currentPrice;
+    // Get current price from live quote
+    const quote = quotes.get(entry.ticker);
+    const price = quote?.currentPrice ?? 0;
     if (!price || price <= 0) continue;
 
     const currentPE = price / eps;
@@ -343,6 +359,36 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     try {
       peHistory = entry.peHistoryJson ? JSON.parse(entry.peHistoryJson) : [];
     } catch { /* skip */ }
+
+    // Extract additional fields from screener and overview caches
+    const screener = screenerMap.get(entry.ticker);
+    const forwardPE = overview?.forwardPE != null ? Math.round(overview.forwardPE * 100) / 100 : null;
+    const returnOnEquity = overview?.returnOnEquity != null ? Math.round(overview.returnOnEquity * 100) / 100 : null;
+    const profitMargin = overview?.profitMargin != null ? Math.round(overview.profitMargin * 100) / 100 : null;
+    const analystTargetPrice = overview?.analystTargetPrice != null ? Math.round(overview.analystTargetPrice * 100) / 100 : null;
+    const beta = screener?.beta != null ? Math.round(screener.beta * 100) / 100 : null;
+    const week52High = screener?.week52High != null ? Math.round(screener.week52High * 100) / 100 : null;
+    const week52Low = screener?.week52Low != null ? Math.round(screener.week52Low * 100) / 100 : null;
+
+    // Compute dividendYield: prefer overview, fallback to screener annualDividend / price
+    let dividendYield: number | null = null;
+    if (overview?.dividendYield != null) {
+      dividendYield = Math.round(overview.dividendYield * 100) / 100;
+    } else if (screener?.annualDividend != null && screener.annualDividend > 0) {
+      dividendYield = Math.round(((screener.annualDividend / price) * 100) * 100) / 100;
+    }
+
+    // Compute week52Pos: position in 52-week range (0-1)
+    let week52Pos: number | null = null;
+    if (week52High != null && week52Low != null && week52High !== week52Low) {
+      week52Pos = Math.round(((price - week52Low) / (week52High - week52Low)) * 100) / 100;
+    }
+
+    // Compute upsideToTarget: percentage upside to analyst target
+    let upsideToTarget: number | null = null;
+    if (analystTargetPrice != null && analystTargetPrice > 0) {
+      upsideToTarget = Math.round(((analystTargetPrice - price) / price) * 100 * 100) / 100;
+    }
 
     stocks.push({
       ticker: entry.ticker,
@@ -359,6 +405,16 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       tier,
       peHistory,
       yearsOfData: entry.yearsOfData ?? peHistory.length,
+      dividendYield,
+      forwardPE,
+      beta,
+      week52High,
+      week52Low,
+      week52Pos,
+      returnOnEquity,
+      profitMargin,
+      analystTargetPrice,
+      upsideToTarget,
     });
   }
 
