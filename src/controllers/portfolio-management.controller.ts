@@ -119,11 +119,6 @@ export async function deletePortfolioHandler(req: AuthRequest, res: Response): P
       res.status(400).json({ error: 'Cannot delete the default portfolio' });
       return;
     }
-    if (result.status === 'has_holdings') {
-      res.status(400).json({ error: 'Cannot delete portfolio with holdings', holdingsCount: result.count });
-      return;
-    }
-
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting portfolio:', error);

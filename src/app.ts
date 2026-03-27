@@ -138,8 +138,8 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com", "https://static.cloudflareinsights.com", "https://accounts.google.com", "https://appleid.cdn-apple.com"],
       // NOTE: The UI's index.html also has a CSP <meta> tag. Both must be kept in sync.
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'", "data:", "blob:", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       workerSrc: ["'self'"],
       objectSrc: ["'none'"],
@@ -325,7 +325,7 @@ h1{color:#00c805;font-size:1.6rem}h2{margin-top:2rem;font-size:1.1rem}ul{padding
 <p>We may update this policy periodically. Continued use of the app after changes constitutes acceptance.</p>
 
 <h2>10. Contact</h2>
-<p>Questions or requests? Email <a href="mailto:privacy@piques.io">privacy@piques.io</a></p>
+<p>Questions or requests? Email <a href="mailto:privacy@nalaai.com">privacy@nalaai.com</a></p>
 <p style="margin-top:2rem;color:#888;font-size:.8rem">&copy; 2026 Piques LLC. All rights reserved.</p>
 </body></html>`);
 });
