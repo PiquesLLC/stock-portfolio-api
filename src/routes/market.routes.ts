@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler, getValueRadarHandler } from '../controllers/market.controller';
 import { getSectorPerformanceHandler } from '../controllers/sector-performance.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -29,6 +29,7 @@ router.get('/themes/heatmap', heavyReadLimiter, getThemesHeatmapHandler);
 router.get('/etf/heatmap', heavyReadLimiter, getEtfHeatmapHandler);
 router.get('/stock/:ticker/nala-score', heavyReadLimiter, requireAuth, requirePlan('pro'), getNalaScoreHandler);
 router.get('/stock/:ticker/earnings-track', heavyReadLimiter, getEarningsTrackHandler);
+router.get('/value-radar', heavyReadLimiter, getValueRadarHandler);
 router.get('/economic-calendar', heavyReadLimiter, async (_req, res) => {
   try {
     const { getUpcomingEconomicEvents } = await import('../services/economic-calendar.service');

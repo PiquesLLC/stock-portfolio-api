@@ -15,6 +15,7 @@ import { refreshEconomicIndicators, refreshInternationalIndicators } from './ser
 import { refreshFundamentalsForTicker } from './services/polygon-fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { backfillPolygonScreenerData } from './services/polygon-screener.service';
+import { backfillValueRadar } from './services/value-radar.service';
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
@@ -308,6 +309,7 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('polygon_fundamentals', runPolygonFundamentalsJob);
   registerJobHandler('heatmap_fundamentals', backfillHeatmapFundamentals);
   registerJobHandler('polygon_screener', backfillPolygonScreenerData);
+  registerJobHandler('value_radar', backfillValueRadar);
   registerJobHandler('earnings_alerts', sendEarningsAlerts);
   registerJobHandler('milestone_check', checkMilestoneAlerts);
   registerJobHandler('anomaly_detection', runAnomalyDetectionForAllUsers);
@@ -595,6 +597,15 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     runJob({ name: 'polygon_screener', fn: backfillPolygonScreenerData });
   }, 12 * 60 * 60 * 1000); // Every 12 hours
+
+  // Value Radar backfill — compute 10Y avg P/E on startup + every 24 hours
+  console.log('[Value Radar] Backfill scheduled');
+  setTimeout(() => {
+    runJob({ name: 'value_radar', fn: backfillValueRadar });
+  }, 210000); // 210s delay (after screener)
+  setInterval(() => {
+    runJob({ name: 'value_radar', fn: backfillValueRadar });
+  }, 24 * 60 * 60 * 1000);
 
   // Earnings alerts — audit log for upcoming earnings (every 6 hours, skip weekends)
   console.log('[Notifications] Earnings alerts scheduled');
