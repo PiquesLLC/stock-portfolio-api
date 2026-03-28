@@ -148,8 +148,15 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
     if (data && dataAge !== 'stale') {
       return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge };
     }
+    // If stale but less than 7 days old, return stale data instead of hitting external APIs
+    // This prevents the N+1 Finnhub/AV call chain that causes hangs
+    if (data && ageMs < 7 * 24 * 60 * 60 * 1000) {
+      return { ticker: upper, ...data, lastUpdated: new Date(cached.lastFetchedAt).toISOString(), dataAge: 'stale' };
+    }
   }
 
+  // Polygon is the sole earnings source (paid plan). No Finnhub/AV fallback chain
+  // — those external calls caused N+1 hangs and connection pool exhaustion.
   try {
     const polygonQuarterly = await fetchPolygonEarnings(upper);
     if (polygonQuarterly && polygonQuarterly.length > 0) {
@@ -158,19 +165,10 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
       return { ticker: upper, ...earningsData, lastUpdated: new Date().toISOString(), dataAge: 'fresh' };
     }
   } catch (err) {
-    console.warn(`[Polygon Earnings] Falling back for ${upper}:`, (err as Error).message);
+    console.warn(`[Polygon Earnings] Failed for ${upper}:`, (err as Error).message);
   }
 
-  const finnhub = await fetchFinnhubFallback(upper);
-  if (finnhub.quarterly.length > 0) {
-    return finnhub;
-  }
-
-  const alphaVantage = await fetchAlphaVantageFallback(upper, cached);
-  if (alphaVantage.quarterly.length > 0 || alphaVantage.annual.length > 0) {
-    return alphaVantage;
-  }
-
+  // Return stale cache if available, otherwise empty
   if (cached?.earningsJson) {
     const data = parseCachedEarnings(upper, cached.earningsJson);
     if (data) {
@@ -198,16 +196,21 @@ async function fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
     const fromDate = now.toISOString().slice(0, 10);
     const toDate = threeMonthsLater.toISOString().slice(0, 10);
 
+    const controller = new AbortController();
+    const killTimer = setTimeout(() => controller.abort(), 8000);
     const [histResp, calResp] = await Promise.all([
       axios.get('https://finnhub.io/api/v1/stock/earnings', {
         params: { symbol: ticker, token: config.finnhubApiKey },
-        timeout: 10000,
+        timeout: 8000,
+        signal: controller.signal,
       }).catch(() => null),
       axios.get('https://finnhub.io/api/v1/calendar/earnings', {
         params: { symbol: ticker, from: fromDate, to: toDate, token: config.finnhubApiKey },
-        timeout: 10000,
+        timeout: 8000,
+        signal: controller.signal,
       }).catch(() => null),
     ]);
+    clearTimeout(killTimer);
 
     const historical: ParsedQuarterlyEarning[] = (histResp?.data || []).map((h: {
       actual: number | null; estimate: number | null; period: string;
