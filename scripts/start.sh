@@ -1,9 +1,18 @@
 #!/bin/bash
 set -uo pipefail
 
-# Resolve any previously failed migrations before deploying
-echo "=== Resolving failed migrations ==="
+# Resolve stuck/failed migrations by marking them as applied.
+# These migrations failed because tables/columns already existed (created by fallback script).
+echo "=== Resolving stuck migrations ==="
 npx prisma migrate resolve --rolled-back 20260319_add_post_attachments 2>&1 || true
+npx prisma migrate resolve --applied 20260319_add_social_platform 2>&1 || true
+npx prisma migrate resolve --applied 20260320_add_appeals 2>&1 || true
+npx prisma migrate resolve --applied 20260320_add_content_moderation 2>&1 || true
+npx prisma migrate resolve --applied 20260323_creator_visibility_defaults 2>&1 || true
+npx prisma migrate resolve --applied 20260324_add_monitoring_reports 2>&1 || true
+npx prisma migrate resolve --applied 20260324_add_stripe_indexes 2>&1 || true
+npx prisma migrate resolve --applied 20260325_add_user_block 2>&1 || true
+npx prisma migrate resolve --applied 20260327_add_value_radar_cache 2>&1 || true
 
 echo "=== Prisma migrate deploy ==="
 if npx prisma migrate deploy 2>&1; then
