@@ -45,27 +45,33 @@ export async function getEarningsSummary(userId: string, portfolioId?: string): 
   const now = new Date();
   const maxDate = new Date(now.getTime() + UPCOMING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const results = await Promise.allSettled(
-    tickers.map(async (ticker) => {
-      const data = await getEarningsData(ticker);
-      const upcoming = (data.quarterly || [])
-        .map(q => {
-          const date = parseDate(q.reportedDate) || parseDate(q.fiscalDateEnding);
-          return { ...q, date };
-        })
-        .filter(q => q.date && q.reportedEPS == null)
-        .filter(q => q.date! >= now && q.date! <= maxDate)
-        .map(q => ({
-          ticker,
-          reportDate: q.date!.toISOString().slice(0, 10),
-          estimatedEPS: q.estimatedEPS ?? null,
-          reportedEPS: null,
-          daysUntil: daysUntil(q.date!, now),
-        }));
-
-      return upcoming;
-    })
-  );
+  // Process in batches of 5 to prevent connection pool exhaustion
+  const BATCH_SIZE = 5;
+  const results: PromiseSettledResult<EarningsSummaryItem[]>[] = [];
+  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
+    const batch = tickers.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        const data = await getEarningsData(ticker);
+        const upcoming = (data.quarterly || [])
+          .map(q => {
+            const date = parseDate(q.reportedDate) || parseDate(q.fiscalDateEnding);
+            return { ...q, date };
+          })
+          .filter(q => q.date && q.reportedEPS == null)
+          .filter(q => q.date! >= now && q.date! <= maxDate)
+          .map(q => ({
+            ticker,
+            reportDate: q.date!.toISOString().slice(0, 10),
+            estimatedEPS: q.estimatedEPS ?? null,
+            reportedEPS: null,
+            daysUntil: daysUntil(q.date!, now),
+          }));
+        return upcoming;
+      })
+    );
+    results.push(...batchResults);
+  }
 
   const flattened: EarningsSummaryItem[] = [];
   let partial = false;
