@@ -61,6 +61,11 @@ else
         await client.execute('CREATE TABLE IF NOT EXISTS \"SocialNotification\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"actorId\" TEXT NOT NULL, \"type\" TEXT NOT NULL, \"postId\" TEXT, \"message\" TEXT NOT NULL, \"read\" BOOLEAN NOT NULL DEFAULT false, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"SocialNotification_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT \"SocialNotification_actorId_fkey\" FOREIGN KEY (\"actorId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
         await client.execute('CREATE INDEX IF NOT EXISTS \"SocialNotification_userId_read_createdAt_idx\" ON \"SocialNotification\"(\"userId\", \"read\", \"createdAt\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"SocialNotification_userId_createdAt_idx\" ON \"SocialNotification\"(\"userId\", \"createdAt\")');
+        // Ensure ValueRadarCache table
+        await client.execute('CREATE TABLE IF NOT EXISTS \"ValueRadarCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"ticker\" TEXT NOT NULL, \"avgPE\" REAL, \"peHistoryJson\" TEXT, \"yearsOfData\" INTEGER, \"lastFetchedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_key\" ON \"ValueRadarCache\"(\"ticker\")');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_idx\" ON \"ValueRadarCache\"(\"ticker\")');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"ValueRadarCache_lastFetchedAt_idx\" ON \"ValueRadarCache\"(\"lastFetchedAt\")');
         console.log('[Migration Fix] Column + table check complete');
       } catch (e) {
         console.error('[Migration Fix] Failed:', e.message);
