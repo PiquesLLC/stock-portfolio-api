@@ -1,8 +1,24 @@
 #!/bin/bash
 set -uo pipefail
 
+# Ensure critical tables exist BEFORE resolving migrations.
+# Migrations marked as "applied" require the tables to actually exist.
+echo "=== Ensuring critical tables ==="
+node -e "
+  const { createClient } = require('@libsql/client');
+  const client = createClient({ url: process.env.DATABASE_URL || 'file:/data/nala.db' });
+  (async () => {
+    try {
+      await client.execute('CREATE TABLE IF NOT EXISTS \"UserBlock\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"blockerId\" TEXT NOT NULL, \"blockedId\" TEXT NOT NULL, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"UserBlock_blockerId_fkey\" FOREIGN KEY (\"blockerId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT \"UserBlock_blockedId_fkey\" FOREIGN KEY (\"blockedId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
+      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"UserBlock_blockerId_blockedId_key\" ON \"UserBlock\"(\"blockerId\", \"blockedId\")');
+      await client.execute('CREATE TABLE IF NOT EXISTS \"ValueRadarCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"ticker\" TEXT NOT NULL, \"avgPE\" REAL, \"peHistoryJson\" TEXT, \"yearsOfData\" INTEGER, \"lastFetchedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_key\" ON \"ValueRadarCache\"(\"ticker\")');
+      console.log('[Startup] Critical tables ensured');
+    } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
+  })();
+" 2>&1 || true
+
 # Resolve stuck/failed migrations by marking them as applied.
-# These migrations failed because tables/columns already existed (created by fallback script).
 echo "=== Resolving stuck migrations ==="
 npx prisma migrate resolve --rolled-back 20260319_add_post_attachments 2>&1 || true
 npx prisma migrate resolve --applied 20260319_add_social_platform 2>&1 || true
