@@ -111,11 +111,11 @@ export const mfaSendLimiter = rateLimit({
   keyGenerator: ipOnlyKey,
 });
 
-/** Waitlist join. 5/hour prod. */
+/** Waitlist join. 2/hour prod per IP. */
 export const waitlistJoinLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: isProd ? 5 : 50,
-  message: { error: 'Too many requests. Please try again later.' },
+  max: isProd ? 2 : 50,
+  message: { error: 'Too many signups from this address. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: ipOnlyKey,

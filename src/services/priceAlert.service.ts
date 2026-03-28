@@ -1,7 +1,7 @@
 import prisma from '../utils/prisma';
 import { getPolygonQuotes } from '../utils/polygon';
 import { PlanLimitError } from '../utils/plan-limit.error';
-import { sendPushToUser } from './push.service';
+import { sendPushToUser, sendNativePushToUser } from './push.service';
 
 
 
@@ -246,14 +246,16 @@ export async function evaluatePriceAlerts(): Promise<void> {
         }),
       ]);
 
-      // Fire-and-forget push notification
+      // Fire-and-forget push notification (web + native)
       if (alert.userId) {
-        sendPushToUser(alert.userId, {
+        const pushPayload = {
           title: `Price Alert: ${alert.ticker}`,
           body: message,
           tag: `price-alert-${alert.id}`,
           data: { type: 'price_alert', url: '/' },
-        }).catch(() => {});
+        };
+        sendPushToUser(alert.userId, pushPayload).catch(() => {});
+        sendNativePushToUser(alert.userId, pushPayload).catch(() => {});
       }
     }
   }
