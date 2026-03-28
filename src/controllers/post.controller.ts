@@ -90,7 +90,7 @@ export async function getEnhancedFeedHandler(req: AuthRequest, res: Response): P
     const items = await getEnhancedFeed(userId, limit, before);
     res.json({ items });
   } catch (error: unknown) {
-    console.error('Error getting feed:');
+    console.error('Error getting feed:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get feed' });
   }
 }
