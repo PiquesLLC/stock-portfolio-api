@@ -1,7 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
 import { getMarketSession } from '../utils/market-hours';
-import { sendPushToUser } from './push.service';
+import { sendPushToUser, sendNativePushToUser } from './push.service';
 import { fetchPrices } from './market.service';
 import NodeCache from 'node-cache';
 
@@ -222,13 +222,15 @@ export async function checkMilestoneAlerts(): Promise<void> {
             },
           });
 
-          // Fire-and-forget push notification
-          sendPushToUser(userId, {
+          // Fire-and-forget push notification (web + native)
+          const milestonePushPayload = {
             title: `Milestone: ${ticker}`,
             body: message,
             tag: `milestone-${ticker}-${type}`,
             data: { type: 'milestone', url: '/' },
-          }).catch(() => {});
+          };
+          sendPushToUser(userId, milestonePushPayload).catch(() => {});
+          sendNativePushToUser(userId, milestonePushPayload).catch(() => {});
 
           recentNotifications.set(notificationKey, now);
 

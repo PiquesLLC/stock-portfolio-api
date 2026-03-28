@@ -1,5 +1,7 @@
 import prisma from '../utils/prisma';
 import { getEarningsData } from './earnings.service';
+import { sendPushToUser, sendNativePushToUser } from './push.service';
+import { config } from '../config';
 
 type NotificationType = 'earnings_alert';
 
@@ -111,18 +113,34 @@ export async function sendEarningsAlerts(windowDays = 7): Promise<{ sent: number
 
         const refKey = `${ticker}:${nextDate.toISOString().slice(0, 10)}`;
 
+        const earningsTitle = `${ticker} earnings coming up`;
+        const earningsMessage = `${ticker} reports earnings on ${nextDate.toISOString().slice(0, 10)}.`;
+
         const logged = await logNotification({
           userId,
           type: 'earnings_alert',
           status: 'sent',
           channel: 'in_app',
-          title: `${ticker} earnings coming up`,
-          message: `${ticker} reports earnings on ${nextDate.toISOString().slice(0, 10)}.`,
+          title: earningsTitle,
+          message: earningsMessage,
           refKey,
           payload: { ticker, earningsDate: nextDate.toISOString() },
           sentAt: new Date(),
         });
-        if (logged) sent++;
+        if (logged) {
+          sent++;
+          // Fire-and-forget push notification (web + native)
+          if (config.pushEnabled) {
+            const pushPayload = {
+              title: earningsTitle,
+              body: earningsMessage,
+              tag: `earnings-${refKey}`,
+              data: { type: 'earnings_alert', url: '/' },
+            };
+            sendPushToUser(userId, pushPayload).catch(() => {});
+            sendNativePushToUser(userId, pushPayload).catch(() => {});
+          }
+        }
         else skipped++;
       } catch (err) {
         // Retry once after 2s for transient failures (API timeouts, rate limits)
@@ -137,19 +155,34 @@ export async function sendEarningsAlerts(windowDays = 7): Promise<{ sent: number
           }
 
           const refKey = `${ticker}:${nextDate.toISOString().slice(0, 10)}`;
+          const retryTitle = `${ticker} earnings coming up`;
+          const retryMessage = `${ticker} reports earnings on ${nextDate.toISOString().slice(0, 10)}.`;
 
           const logged = await logNotification({
             userId,
             type: 'earnings_alert',
             status: 'sent',
             channel: 'in_app',
-            title: `${ticker} earnings coming up`,
-            message: `${ticker} reports earnings on ${nextDate.toISOString().slice(0, 10)}.`,
+            title: retryTitle,
+            message: retryMessage,
             refKey,
             payload: { ticker, earningsDate: nextDate.toISOString() },
             sentAt: new Date(),
           });
-          if (logged) sent++;
+          if (logged) {
+            sent++;
+            // Fire-and-forget push notification (web + native)
+            if (config.pushEnabled) {
+              const pushPayload = {
+                title: retryTitle,
+                body: retryMessage,
+                tag: `earnings-${refKey}`,
+                data: { type: 'earnings_alert', url: '/' },
+              };
+              sendPushToUser(userId, pushPayload).catch(() => {});
+              sendNativePushToUser(userId, pushPayload).catch(() => {});
+            }
+          }
           else skipped++;
           console.log(`[Notifications] Earnings alert retry succeeded for ${ticker}`);
         } catch (retryErr) {

@@ -5,7 +5,7 @@ import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { getSector } from '../utils/sectors';
 import { fetchTickerNews } from './news.service';
-import { sendPushToUser } from './push.service';
+import { sendPushToUser, sendNativePushToUser } from './push.service';
 
 
 // Cooldown: 1 anomaly per user+ticker+type per 4 hours (general), 7 days (dividend)
@@ -302,14 +302,16 @@ export async function detectAnomalies(userId: string): Promise<void> {
       },
     });
 
-    // Fire-and-forget push for warning+critical only
+    // Fire-and-forget push for warning+critical only (web + native)
     if (c.severity === 'warning' || c.severity === 'critical') {
-      sendPushToUser(userId, {
+      const pushPayload = {
         title: c.title,
         body: c.description,
         tag: `anomaly-${c.ticker}-${c.type}`,
         data: { type: 'anomaly', url: '/' },
-      }).catch(() => {});
+      };
+      sendPushToUser(userId, pushPayload).catch(() => {});
+      sendNativePushToUser(userId, pushPayload).catch(() => {});
     }
 
     created++;
@@ -437,14 +439,16 @@ export async function detectDividendChanges(userId: string): Promise<void> {
       },
     });
 
-    // Fire-and-forget push for warning+critical only
+    // Fire-and-forget push for warning+critical only (web + native)
     if (severity === 'warning' || severity === 'critical') {
-      sendPushToUser(userId, {
+      const divPushPayload = {
         title: divTitle,
         body: divDescription,
         tag: `anomaly-${ticker}-dividend_change`,
         data: { type: 'anomaly', url: '/' },
-      }).catch(() => {});
+      };
+      sendPushToUser(userId, divPushPayload).catch(() => {});
+      sendNativePushToUser(userId, divPushPayload).catch(() => {});
     }
 
     created++;
