@@ -59,6 +59,7 @@ vi.mock('../controllers/market.controller', () => {
     getEtfHeatmapHandler: ok,
     getNalaScoreHandler: ok,
     getEarningsTrackHandler: ok,
+    getValueRadarHandler: ok,
   };
 });
 
