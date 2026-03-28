@@ -31,7 +31,7 @@ export async function getSettingsHandler(req: AuthRequest, res: Response): Promi
       cashInterestRate: Math.round((userSettings?.cashInterestRate ?? 0) * 100) / 100,
     });
   } catch (error: unknown) {
-    console.error('Error fetching settings:');
+    console.error('Error fetching settings:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch settings' });
   }
 }
@@ -107,7 +107,7 @@ export async function updateSettingsHandler(req: AuthRequest, res: Response): Pr
       cashInterestRate: Math.round((userSettings.cashInterestRate ?? 0) * 100) / 100,
     });
   } catch (error: unknown) {
-    console.error('Error updating settings:');
+    console.error('Error updating settings:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update settings' });
   }
 }
@@ -132,7 +132,7 @@ export async function setBaselineHandler(req: AuthRequest, res: Response): Promi
       baselineType: settings.baselineType,
     });
   } catch (error: unknown) {
-    console.error('Error setting baseline:');
+    console.error('Error setting baseline:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to set baseline' });
   }
 }
@@ -171,7 +171,7 @@ export async function setBrokerLifetimeHandler(req: AuthRequest, res: Response):
       brokerLifetimeAsOf: settings.brokerLifetimeAsOf,
     });
   } catch (error: unknown) {
-    console.error('Error setting broker lifetime:');
+    console.error('Error setting broker lifetime:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to set broker lifetime data' });
   }
 }
@@ -182,7 +182,7 @@ export async function clearBrokerLifetimeHandler(req: AuthRequest, res: Response
     await clearBrokerLifetime(userId);
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error clearing broker lifetime:');
+    console.error('Error clearing broker lifetime:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to clear broker lifetime data' });
   }
 }
@@ -196,7 +196,7 @@ export async function getYtdHandler(req: AuthRequest, res: Response): Promise<vo
       ytdNetContributions: settings?.ytdNetContributions ?? null,
     });
   } catch (error: unknown) {
-    console.error('Error fetching YTD settings:');
+    console.error('Error fetching YTD settings:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch YTD settings' });
   }
 }
@@ -223,7 +223,7 @@ export async function setYtdHandler(req: AuthRequest, res: Response): Promise<vo
       ytdNetContributions: settings.ytdNetContributions,
     });
   } catch (error: unknown) {
-    console.error('Error setting YTD data:');
+    console.error('Error setting YTD data:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to set YTD data' });
   }
 }
@@ -234,7 +234,7 @@ export async function clearYtdHandler(req: AuthRequest, res: Response): Promise<
     await clearYtdData(userId);
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error clearing YTD data:');
+    console.error('Error clearing YTD data:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to clear YTD data' });
   }
 }
@@ -252,7 +252,7 @@ export async function getSummaryHandler(req: AuthRequest, res: Response): Promis
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
-    console.error('Error fetching summary:');
+    console.error('Error fetching summary:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch performance summary' });
   }
 }
@@ -266,7 +266,7 @@ export async function activateTrackingHandler(req: AuthRequest, res: Response): 
       trackingStartDate: settings.trackingStartDate,
     });
   } catch (error: unknown) {
-    console.error('Error activating tracking:');
+    console.error('Error activating tracking:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to activate tracking' });
   }
 }
@@ -280,7 +280,7 @@ export async function restartTrackingHandler(req: AuthRequest, res: Response): P
       trackingStartDate: settings.trackingStartDate,
     });
   } catch (error: unknown) {
-    console.error('Error restarting tracking:');
+    console.error('Error restarting tracking:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to restart tracking' });
   }
 }
@@ -299,7 +299,7 @@ export async function cleanupSnapshotsHandler(req: AuthRequest, res: Response): 
       snapshotsAfter: countAfter,
     });
   } catch (error: unknown) {
-    console.error('Error cleaning up snapshots:');
+    console.error('Error cleaning up snapshots:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to cleanup snapshots' });
   }
 }
@@ -326,7 +326,7 @@ export async function getCashInterestAccrualHandler(req: AuthRequest, res: Respo
       asOf: new Date().toISOString(),
     });
   } catch (error: unknown) {
-    console.error('Error calculating cash interest accrual:');
+    console.error('Error calculating cash interest accrual:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to calculate cash interest accrual' });
   }
 }

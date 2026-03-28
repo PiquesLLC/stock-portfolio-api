@@ -15,7 +15,7 @@ export async function getEtfOverlapHandler(req: AuthRequest, res: Response): Pro
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
-    console.error('Error fetching ETF overlap:');
+    console.error('Error fetching ETF overlap:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch ETF overlap' });
   }
 }

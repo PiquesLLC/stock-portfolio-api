@@ -8,7 +8,7 @@ export async function getTransactionsHandler(req: AuthRequest, res: Response): P
     const transactions = await getTransactions(req.user!.userId);
     res.json(transactions);
   } catch (error: unknown) {
-    console.error('Error fetching transactions:');
+    console.error('Error fetching transactions:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 }
@@ -26,7 +26,7 @@ export async function addTransactionHandler(req: AuthRequest, res: Response): Pr
     const tx = await addTransaction({ type, amount, date, userId: req.user!.userId });
     res.status(201).json(tx);
   } catch (error: unknown) {
-    console.error('Error adding transaction:');
+    console.error('Error adding transaction:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to add transaction' });
   }
 }
@@ -47,7 +47,7 @@ export async function deleteTransactionHandler(req: AuthRequest, res: Response):
     }
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error deleting transaction:');
+    console.error('Error deleting transaction:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete transaction' });
   }
 }

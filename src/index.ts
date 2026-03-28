@@ -31,6 +31,8 @@ import { checkCongressTradeAlerts } from './services/alert.service';
 import { syncLatestCongressTrades } from './services/congress.service';
 import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
+import { backupDatabase } from './services/backup.service';
+import { cleanupStaleData } from './services/cleanup.service';
 
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
@@ -329,6 +331,7 @@ function registerBackgroundJobHandlers(): void {
     const count = await cleanupOldAnalyticsEvents();
     if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
   });
+  registerJobHandler('stale_data_cleanup', cleanupStaleData);
 }
 
 const server = app.listen(config.port, async () => {
@@ -736,6 +739,27 @@ const server = app.listen(config.port, async () => {
     });
   }, 24 * 60 * 60 * 1000);
 
+  // Stale data cleanup — purge old snapshots, logs, job runs daily to prevent SQLITE_FULL
+  console.log('[Cleanup] Scheduled daily');
+  setTimeout(() => {
+    runJob({
+      name: 'stale_data_cleanup',
+      fn: cleanupStaleData,
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('stale_data_cleanup', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
+  }, 60000); // 60s delay after startup
+  setInterval(() => {
+    runJob({
+      name: 'stale_data_cleanup',
+      fn: cleanupStaleData,
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('stale_data_cleanup', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
+  }, 24 * 60 * 60 * 1000);
+
   // Daily Report pre-generation — warm cache so reports load instantly
   // Runs 2 min after startup + every 4 hours (aligns with 8h cache TTL)
   console.log('[Daily Report Pre-Gen] Scheduled: startup + every 4 hours');
@@ -805,6 +829,11 @@ const server = app.listen(config.port, async () => {
   // Fundamentals prefetch — continuously cycles through stock universe
   // pre-fetching fundamentals + earnings so data is ready before users search
   startFundamentalsPrefetch();
+
+  // Database backup — daily automated backup of SQLite database
+  console.log('[Backup] Scheduled daily');
+  setTimeout(() => backupDatabase(), 30000);
+  setInterval(() => backupDatabase(), 24 * 60 * 60 * 1000);
 });
 
 process.on('SIGTERM', async () => {

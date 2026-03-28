@@ -31,7 +31,7 @@ export async function askNalaHandler(req: AuthRequest, res: Response): Promise<v
     const result = await askNala(question.trim(), req.user!.userId);
     res.json(result);
   } catch (error: unknown) {
-    console.error('[Nala Controller] Error:');
+    console.error('[Nala Controller] Error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({
       error: 'Failed to process research question',
       question: req.body?.question || '',

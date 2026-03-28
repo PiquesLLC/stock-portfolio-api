@@ -18,7 +18,7 @@ export async function getMilestoneEventsHandler(req: AuthRequest, res: Response)
     const events = await getMilestoneEvents(req.user.userId, limit);
     res.json(events);
   } catch (error: unknown) {
-    console.error('Error getting milestone events:');
+    console.error('Error getting milestone events:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get milestone events' });
   }
 }
@@ -33,7 +33,7 @@ export async function getUnreadMilestoneCountHandler(req: AuthRequest, res: Resp
     const count = await getUnreadMilestoneCount(req.user.userId);
     res.json({ count });
   } catch (error: unknown) {
-    console.error('Error getting unread count:');
+    console.error('Error getting unread count:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }
@@ -53,7 +53,7 @@ export async function markMilestoneEventReadHandler(req: AuthRequest, res: Respo
     }
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking event read:');
+    console.error('Error marking event read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark event read' });
   }
 }
@@ -68,7 +68,7 @@ export async function markAllMilestoneEventsReadHandler(req: AuthRequest, res: R
     await markAllMilestoneEventsRead(req.user.userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking all events read:');
+    console.error('Error marking all events read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark all events read' });
   }
 }

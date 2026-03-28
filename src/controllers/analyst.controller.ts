@@ -15,7 +15,7 @@ export async function getAnalystEventsHandler(req: AuthRequest, res: Response): 
     const events = await getAnalystEvents(limit, ticker, req.user!.userId);
     res.json(events);
   } catch (error: unknown) {
-    console.error('Error getting analyst events:');
+    console.error('Error getting analyst events:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get analyst events' });
   }
 }
@@ -26,7 +26,7 @@ export async function getUnreadAnalystCountHandler(req: AuthRequest, res: Respon
     const count = await getUnreadAnalystCount(req.user!.userId);
     res.json({ count });
   } catch (error: unknown) {
-    console.error('Error getting unread count:');
+    console.error('Error getting unread count:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }
@@ -37,7 +37,7 @@ export async function markAllAnalystEventsReadHandler(req: AuthRequest, res: Res
     await markAllAnalystEventsRead(req.user!.userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking all events read:');
+    console.error('Error marking all events read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark all events read' });
   }
 }
@@ -53,7 +53,7 @@ export async function getAnalystSnapshotHandler(req: Request, res: Response): Pr
     }
     res.json(snapshot);
   } catch (error: unknown) {
-    console.error('Error getting analyst snapshot:');
+    console.error('Error getting analyst snapshot:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get analyst snapshot' });
   }
 }

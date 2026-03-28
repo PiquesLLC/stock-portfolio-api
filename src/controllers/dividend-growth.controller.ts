@@ -22,7 +22,7 @@ export async function getDividendGrowthRatesHandler(req: AuthRequest, res: Respo
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
-    console.error('Error fetching dividend growth rates:');
+    console.error('Error fetching dividend growth rates:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch dividend growth rates' });
   }
 }

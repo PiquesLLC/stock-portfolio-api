@@ -33,7 +33,7 @@ export async function unblockUserHandler(req: AuthRequest, res: Response): Promi
     await unblockUser(blockerId, blockedId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error unblocking user:');
+    console.error('Error unblocking user:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to unblock user' });
   }
 }
@@ -50,7 +50,7 @@ export async function getBlockedUsersHandler(req: AuthRequest, res: Response): P
     const blocked = await getBlockedUsers(userId);
     res.json({ blocked });
   } catch (error: unknown) {
-    console.error('Error getting blocked users:');
+    console.error('Error getting blocked users:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get blocked users' });
   }
 }

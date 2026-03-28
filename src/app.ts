@@ -244,6 +244,20 @@ app.use((req, res, next) => {
   jsonParser(req, res, next);
 });
 
+// Global request timeout — prevents hung requests from consuming resources
+app.use((req, res, next) => {
+  req.setTimeout(30000, () => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Request timeout' });
+    }
+  });
+  // Longer timeout for specific slow endpoints
+  if (req.path.includes('/deep-research') || req.path.includes('/share-card') || req.path.includes('/performance-card')) {
+    req.setTimeout(120000);
+  }
+  next();
+});
+
 // Request timing — log slow requests (>3s) for diagnostics
 app.use((req, res, next) => {
   const start = Date.now();

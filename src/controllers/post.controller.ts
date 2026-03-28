@@ -60,7 +60,7 @@ export async function getPostHandler(req: AuthRequest, res: Response): Promise<v
     if (!post) { res.status(404).json({ error: 'Post not found' }); return; }
     res.json(post);
   } catch (error: unknown) {
-    console.error('Error getting post:');
+    console.error('Error getting post:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get post' });
   }
 }
@@ -74,7 +74,7 @@ export async function deletePostHandler(req: AuthRequest, res: Response): Promis
     if (!deleted) { res.status(404).json({ error: 'Post not found' }); return; }
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error deleting post:');
+    console.error('Error deleting post:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete post' });
   }
 }
@@ -120,7 +120,7 @@ export async function getUserPostsHandler(req: AuthRequest, res: Response): Prom
     const posts = await getUserPosts(targetUserId, limit, before, userId);
     res.json({ posts });
   } catch (error: unknown) {
-    console.error('Error getting user posts:');
+    console.error('Error getting user posts:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get user posts' });
   }
 }
@@ -155,7 +155,7 @@ export async function getCommentsHandler(req: AuthRequest, res: Response): Promi
     const comments = await getComments(req.params.postId, userId, limit, before);
     res.json({ comments });
   } catch (error: unknown) {
-    console.error('Error getting comments:');
+    console.error('Error getting comments:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get comments' });
   }
 }
@@ -169,7 +169,7 @@ export async function deleteCommentHandler(req: AuthRequest, res: Response): Pro
     if (!deleted) { res.status(404).json({ error: 'Comment not found' }); return; }
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error deleting comment:');
+    console.error('Error deleting comment:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete comment' });
   }
 }
@@ -223,7 +223,7 @@ export async function markSocialNotifReadHandler(req: AuthRequest, res: Response
     if (!ok) { res.status(404).json({ error: 'Notification not found' }); return; }
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking notification read:');
+    console.error('Error marking notification read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark notification read' });
   }
 }
@@ -236,7 +236,7 @@ export async function markAllSocialNotifsReadHandler(req: AuthRequest, res: Resp
     await markAllSocialNotifsRead(userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking all notifications read:');
+    console.error('Error marking all notifications read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark all notifications read' });
   }
 }
@@ -249,7 +249,7 @@ export async function getTrendingTickersHandler(req: AuthRequest, res: Response)
     const tickers = await getTrendingTickers(hours, limit, userId);
     res.json({ tickers });
   } catch (error: unknown) {
-    console.error('Error getting trending tickers:');
+    console.error('Error getting trending tickers:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get trending tickers' });
   }
 }
@@ -261,7 +261,7 @@ export async function getCommunityTradesHandler(req: AuthRequest, res: Response)
     const data = await getCommunityTradeActivity(hours, undefined, userId);
     res.json(data);
   } catch (error: unknown) {
-    console.error('Error getting community trades:');
+    console.error('Error getting community trades:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get community trades' });
   }
 }

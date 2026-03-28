@@ -31,7 +31,7 @@ export async function getPriceAlertsHandler(req: AuthRequest, res: Response): Pr
     const alerts = await getPriceAlerts(req.user!.userId, ticker);
     res.json(alerts);
   } catch (error: unknown) {
-    console.error('Error getting price alerts:');
+    console.error('Error getting price alerts:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get price alerts' });
   }
 }
@@ -47,7 +47,7 @@ export async function getPriceAlertHandler(req: AuthRequest, res: Response): Pro
     }
     res.json(alert);
   } catch (error: unknown) {
-    console.error('Error getting price alert:');
+    console.error('Error getting price alert:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get price alert' });
   }
 }
@@ -73,7 +73,7 @@ export async function createPriceAlertHandler(req: AuthRequest, res: Response): 
       res.status(403).json({ error: 'limit_reached', limit: error.limit, plan: error.plan });
       return;
     }
-    console.error('Error creating price alert:');
+    console.error('Error creating price alert:', error instanceof Error ? error.message : String(error));
     res.status(400).json({ error: 'Failed to create price alert' });
   }
 }
@@ -97,7 +97,7 @@ export async function updatePriceAlertHandler(req: AuthRequest, res: Response): 
     }
     res.json(alert);
   } catch (error: unknown) {
-    console.error('Error updating price alert:');
+    console.error('Error updating price alert:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update price alert' });
   }
 }
@@ -114,7 +114,7 @@ export async function deletePriceAlertHandler(req: AuthRequest, res: Response): 
     }
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error deleting price alert:');
+    console.error('Error deleting price alert:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete price alert' });
   }
 }
@@ -126,7 +126,7 @@ export async function getPriceAlertEventsHandler(req: AuthRequest, res: Response
     const events = await getPriceAlertEvents(req.user!.userId, limit);
     res.json(events);
   } catch (error: unknown) {
-    console.error('Error getting price alert events:');
+    console.error('Error getting price alert events:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get price alert events' });
   }
 }
@@ -138,7 +138,7 @@ export async function markEventReadHandler(req: AuthRequest, res: Response): Pro
     await markEventRead(id, req.user!.userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error marking event read:');
+    console.error('Error marking event read:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark event read' });
   }
 }
@@ -149,7 +149,7 @@ export async function getUnreadCountHandler(req: AuthRequest, res: Response): Pr
     const count = await getUnreadCount(req.user!.userId);
     res.json({ count });
   } catch (error: unknown) {
-    console.error('Error getting unread count:');
+    console.error('Error getting unread count:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }

@@ -39,8 +39,8 @@ export async function createCheckoutHandler(req: AuthRequest, res: Response): Pr
 
     const url = await createCheckoutSession(req.user!.userId, parsed.data.priceId);
     res.json({ url });
-  } catch {
-    console.error('[Billing] Checkout session creation failed');
+  } catch (error) {
+    console.error('[Billing] Checkout session creation failed', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
 }
@@ -49,8 +49,8 @@ export async function createPortalHandler(req: AuthRequest, res: Response): Prom
   try {
     const url = await createCustomerPortalSession(req.user!.userId);
     res.json({ url });
-  } catch {
-    console.error('[Billing] Portal session creation failed');
+  } catch (error) {
+    console.error('[Billing] Portal session creation failed', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create customer portal session' });
   }
 }
@@ -59,8 +59,8 @@ export async function getBillingStatusHandler(req: AuthRequest, res: Response): 
   try {
     const status = await getBillingStatus(req.user!.userId);
     res.json(status);
-  } catch {
-    console.error('[Billing] Billing status retrieval failed');
+  } catch (error) {
+    console.error('[Billing] Billing status retrieval failed', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch billing status' });
   }
 }
@@ -88,7 +88,7 @@ export async function billingWebhookHandler(req: Request, res: Response): Promis
     recordWebhookEvent('billing', 'processed', event.type);
     res.json({ received: true });
   } catch (error) {
-    console.error('[Billing] Webhook handling failed');
+    console.error('[Billing] Webhook handling failed', error instanceof Error ? error.message : String(error));
     recordWebhookEvent('billing', 'failed', 'unknown');
     if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
       res.status(400).json({ error: 'Invalid webhook signature' });

@@ -15,7 +15,7 @@ export async function createLinkTokenHandler(req: AuthRequest, res: Response) {
     const linkToken = await createLinkToken(req.user!.userId);
     res.json({ linkToken });
   } catch (_err) {
-    console.error('[Plaid] Link token creation failed');
+    console.error('[Plaid] Link token creation failed', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to create link token' });
   }
 }
@@ -34,7 +34,7 @@ export async function exchangeTokenHandler(req: AuthRequest, res: Response) {
     const result = await exchangePublicToken(req.user!.userId, parsed.data.publicToken);
     res.json(result);
   } catch (_err) {
-    console.error('[Plaid] Token exchange failed');
+    console.error('[Plaid] Token exchange failed', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to link account' });
   }
 }
@@ -48,7 +48,7 @@ export async function getItemsHandler(req: AuthRequest, res: Response) {
     const items = await getPlaidItems(req.user!.userId);
     res.json({ items });
   } catch (_err) {
-    console.error('[Plaid] Failed to retrieve items');
+    console.error('[Plaid] Failed to retrieve items', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to retrieve linked accounts' });
   }
 }
@@ -70,7 +70,7 @@ export async function disconnectItemHandler(req: AuthRequest, res: Response) {
     }
     res.json({ success: true });
   } catch (_err) {
-    console.error('[Plaid] Disconnect failed');
+    console.error('[Plaid] Disconnect failed', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to disconnect account' });
   }
 }
@@ -89,7 +89,7 @@ export async function getHoldingsHandler(req: AuthRequest, res: Response) {
     const holdings = await getInvestmentHoldings(parsed.data.itemId, req.user!.userId);
     res.json({ holdings });
   } catch (_err) {
-    console.error('[Plaid] Holdings fetch failed');
+    console.error('[Plaid] Holdings fetch failed', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to fetch holdings' });
   }
 }
@@ -107,8 +107,8 @@ export async function syncHoldingsHandler(req: AuthRequest, res: Response) {
 
     const result = await syncHoldingsFromPlaid(parsed.data.itemId, req.user!.userId);
     res.json({ result });
-  } catch {
-    console.error('[Plaid] Holdings sync failed');
+  } catch (_err) {
+    console.error('[Plaid] Holdings sync failed', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Failed to sync holdings' });
   }
 }
@@ -154,7 +154,7 @@ export async function webhookHandler(req: Request, res: Response) {
     await handleItemWebhook(webhook_type, webhook_code, item_id, error);
     res.json({ received: true });
   } catch (_err) {
-    console.error('[Plaid] Webhook processing error');
+    console.error('[Plaid] Webhook processing error', _err instanceof Error ? _err.message : String(_err));
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 }

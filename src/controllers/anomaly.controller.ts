@@ -12,7 +12,7 @@ export async function getAnomaliesHandler(req: AuthRequest, res: Response): Prom
     });
     res.json(anomalies);
   } catch (error: unknown) {
-    console.error('Error fetching anomalies');
+    console.error('Error fetching anomalies', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch anomalies' });
   }
 }
@@ -24,7 +24,7 @@ export async function getUnreadAnomalyCountHandler(req: AuthRequest, res: Respon
     });
     res.json({ count });
   } catch (error: unknown) {
-    console.error('Error fetching unread anomaly count');
+    console.error('Error fetching unread anomaly count', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get unread count' });
   }
 }
@@ -45,7 +45,7 @@ export async function markAnomalyReadHandler(req: AuthRequest, res: Response): P
     });
     res.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error marking anomaly read');
+    console.error('Error marking anomaly read', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark anomaly as read' });
   }
 }
@@ -58,7 +58,7 @@ export async function markAllAnomaliesReadHandler(req: AuthRequest, res: Respons
     });
     res.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error marking all anomalies read');
+    console.error('Error marking all anomalies read', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to mark all anomalies as read' });
   }
 }

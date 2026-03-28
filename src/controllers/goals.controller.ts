@@ -21,7 +21,7 @@ export async function listGoalsHandler(req: AuthRequest, res: Response): Promise
     const goals = await getAllGoalsWithProgress(req.user!.userId, portfolioId);
     res.json(goals);
   } catch (error: unknown) {
-    console.error('Error listing goals:');
+    console.error('Error listing goals:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to list goals' });
   }
 }
@@ -47,7 +47,7 @@ export async function getGoalHandler(req: AuthRequest, res: Response): Promise<v
 
     res.json(goal);
   } catch (error: unknown) {
-    console.error('Error getting goal:');
+    console.error('Error getting goal:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get goal' });
   }
 }
@@ -74,7 +74,7 @@ export async function createGoalHandler(req: AuthRequest, res: Response): Promis
 
     res.status(201).json(goal);
   } catch (error: unknown) {
-    console.error('Error creating goal:');
+    console.error('Error creating goal:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create goal' });
   }
 }
@@ -107,7 +107,7 @@ export async function updateGoalHandler(req: AuthRequest, res: Response): Promis
       res.status(404).json({ error: 'Goal not found' });
       return;
     }
-    console.error('Error updating goal:');
+    console.error('Error updating goal:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update goal' });
   }
 }
@@ -131,7 +131,7 @@ export async function deleteGoalHandler(req: AuthRequest, res: Response): Promis
       res.status(404).json({ error: 'Goal not found' });
       return;
     }
-    console.error('Error deleting goal:');
+    console.error('Error deleting goal:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete goal' });
   }
 }

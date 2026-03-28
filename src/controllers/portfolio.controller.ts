@@ -2276,7 +2276,7 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
 
     res.json(responsePayload);
   } catch (error) {
-    console.error('Screenshot OCR error:');
+    console.error('Screenshot OCR error:', error instanceof Error ? error.message : String(error));
     if (String((error as Error)?.message || '').includes('HEIC conversion failed')) {
       res.status(400).json({ error: 'Unsupported image format. Please upload PNG or JPG.' });
       return;
