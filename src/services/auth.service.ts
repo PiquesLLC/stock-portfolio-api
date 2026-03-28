@@ -423,7 +423,7 @@ const RESERVED_USERNAMES = new Set([
   'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
   // Common reserved words
   'admin', 'api', 'www', 'app', 'help', 'support', 'about', 'login', 'signup',
-  'register', 'account', 'dashboard', 'home', 'index', 'privacy', 'terms',
+  'register', 'invite', 'account', 'dashboard', 'home', 'index', 'privacy', 'terms',
   'tos', 'null', 'undefined', 'favicon', 'robots', 'sitemap',
 ]);
 

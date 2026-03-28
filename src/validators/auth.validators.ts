@@ -23,7 +23,7 @@ const RESERVED_USERNAMES = new Set([
   // UI tab names / routes
   'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
   // Common reserved words
-  'api', 'www', 'app', 'help', 'about', 'login', 'signup', 'register',
+  'api', 'www', 'app', 'help', 'about', 'login', 'signup', 'register', 'invite',
   'account', 'dashboard', 'home', 'index', 'privacy', 'terms', 'tos',
   'null', 'undefined', 'favicon', 'robots', 'sitemap',
 ]);
