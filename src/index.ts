@@ -1,6 +1,6 @@
 ﻿import app from './app';
 import { config } from './config';
-import { ensureBenchmarksCached } from './utils/candle-cache';
+import { ensureBenchmarksCached, restoreCandleCache, persistCandleCache } from './utils/candle-cache';
 import { createSnapshotIfNeeded, refreshLeaderboardSnapshots } from './services/snapshot.service';
 import { backfillLeaderboardDemoData } from './services/demo-data.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
@@ -338,6 +338,9 @@ const server = app.listen(config.port, async () => {
   // Must run before any DB operations — enables concurrent reads + write queuing
   await initSqlitePragmas();
 
+  // Restore candle cache from disk so intelligence 5D/1M works immediately after deploy
+  restoreCandleCache();
+
   // Fix partially-failed migrations: ensure tables exist, then mark migration as applied.
   // Migration 20260319_add_social_platform failed because ALTER TABLE User (kycVerified)
   // conflicted with existing column, rolling back the CREATE TABLE statements.
@@ -471,6 +474,11 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     runJob({ name: 'snapshot_scheduler', fn: runSnapshotSchedulerForAllUsers, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('snapshot_scheduler', SNAPSHOT_INTERVAL_MS), idempotencyTtlMs: SNAPSHOT_INTERVAL_MS + 10000 }); // maxAttempts: 1 — runs every ~60s, no point retrying
   }, SNAPSHOT_INTERVAL_MS);
+
+  // Persist candle cache to disk every 30 minutes so it survives deploys
+  setInterval(() => persistCandleCache(), 30 * 60 * 1000);
+  // Also persist on first data load (5 min after startup)
+  setTimeout(() => persistCandleCache(), 5 * 60 * 1000);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
   // Disable this env var once real users join the leaderboard.
