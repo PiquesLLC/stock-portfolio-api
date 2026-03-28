@@ -421,6 +421,12 @@ if (fs.existsSync(clientDir)) {
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
   // Other static files (favicon, icons) short cache, but NEVER serve index.html from here
   app.use(express.static(clientDir, { maxAge: '1h', etag: true, index: false }));
+
+  // Waitlist approval email bridge: sets sessionStorage flag then redirects to /
+  app.get('/invite', (_req, res) => {
+    res.type('html').send(`<!doctype html><html><head><meta charset="UTF-8"/></head><body><script>try{sessionStorage.setItem("nala:pending-auth-mode","signup")}catch(e){}window.location.replace("/")</script><noscript><meta http-equiv="refresh" content="0; url=/"/></noscript></body></html>`);
+  });
+
   app.use(async (req, res, next) => {
     if (req.method !== 'GET' || !cachedIndexHtml) {
       next();
