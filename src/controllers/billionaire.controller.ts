@@ -13,7 +13,7 @@ export async function getLeaderboardHandler(req: AuthRequest, res: Response): Pr
     const data = await getBillionaireLeaderboard();
     res.json({ billionaires: data });
   } catch (error: unknown) {
-    console.error('Error getting billionaire leaderboard:');
+    console.error('Error getting billionaire leaderboard:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get leaderboard' });
   }
 }
@@ -24,7 +24,7 @@ export async function getMoversHandler(req: AuthRequest, res: Response): Promise
     const data = await getBillionaireMovers();
     res.json(data);
   } catch (error: unknown) {
-    console.error('Error getting billionaire movers:');
+    console.error('Error getting billionaire movers:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get movers' });
   }
 }
@@ -36,7 +36,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
     if (!data) { res.status(404).json({ error: 'Billionaire not found' }); return; }
     res.json(data);
   } catch (error: unknown) {
-    console.error('Error getting billionaire profile:');
+    console.error('Error getting billionaire profile:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get profile' });
   }
 }
@@ -49,7 +49,7 @@ export async function getChartHandler(req: AuthRequest, res: Response): Promise<
     if (!data) { res.status(404).json({ error: 'Billionaire not found' }); return; }
     res.json(data);
   } catch (error: unknown) {
-    console.error('Error getting billionaire chart:');
+    console.error('Error getting billionaire chart:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get chart' });
   }
 }
@@ -65,7 +65,7 @@ export async function getWealthContextHandler(req: AuthRequest, res: Response): 
     });
     res.json({ distributions: data });
   } catch (error: unknown) {
-    console.error('Error getting wealth context:');
+    console.error('Error getting wealth context:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get wealth context' });
   }
 }

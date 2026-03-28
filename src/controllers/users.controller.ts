@@ -45,7 +45,7 @@ export async function getUserByUsernameHandler(req: AuthRequest, res: Response):
 
     res.json(user);
   } catch (error: unknown) {
-    console.error('Error looking up user by username:');
+    console.error('Error looking up user by username:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to look up user' });
   }
 }
@@ -78,7 +78,7 @@ export async function getUsersHandler(req: AuthRequest, res: Response): Promise<
 
     res.json({ users: results, nextCursor });
   } catch (error: unknown) {
-    console.error('Error fetching users:');
+    console.error('Error fetching users:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 }
@@ -309,7 +309,7 @@ export async function updateHoldingsVisibilityHandler(req: AuthRequest, res: Res
     await prisma.user.update({ where: { id: userId }, data: { holdingsVisibility }, select: { id: true } });
     res.json({ holdingsVisibility });
   } catch (error: unknown) {
-    console.error('Error updating holdings visibility:');
+    console.error('Error updating holdings visibility:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update holdings visibility' });
   }
 }

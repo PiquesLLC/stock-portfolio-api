@@ -111,7 +111,7 @@ export async function getAIEvents(ticker: string, days = 90, userId: string): Pr
     if (error instanceof AxiosError && error.response?.status === 429) {
       console.warn(`[Perplexity] Rate limited for ${upper} (ai-events)`);
     } else if (error instanceof AxiosError && error.response?.status === 401) {
-      console.error('[Perplexity] Invalid API key');
+      console.error('[Perplexity] Invalid API key', error instanceof Error ? error.message : String(error));
     } else if (error instanceof AxiosError && error.code === 'ECONNABORTED') {
       console.error(`[Perplexity] Timeout for ${upper} (ai-events)`);
     } else {

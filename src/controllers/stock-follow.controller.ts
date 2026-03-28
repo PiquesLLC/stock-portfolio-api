@@ -37,7 +37,7 @@ export async function followStockHandler(req: AuthRequest, res: Response): Promi
     await followStock(userId, symbol);
     res.json({ ok: true, symbol });
   } catch (error: unknown) {
-    console.error('Error following stock:');
+    console.error('Error following stock:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to follow stock' });
   }
 }
@@ -57,7 +57,7 @@ export async function unfollowStockHandler(req: AuthRequest, res: Response): Pro
     await unfollowStock(userId, symbol);
     res.json({ ok: true, symbol });
   } catch (error: unknown) {
-    console.error('Error unfollowing stock:');
+    console.error('Error unfollowing stock:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to unfollow stock' });
   }
 }
@@ -71,7 +71,7 @@ export async function getStockFollowStatusHandler(req: AuthRequest, res: Respons
     const status = await getStockFollowStatus(req.user?.userId, symbol);
     res.json(status);
   } catch (error: unknown) {
-    console.error('Error fetching stock follow status:');
+    console.error('Error fetching stock follow status:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch stock follow status' });
   }
 }
@@ -84,7 +84,7 @@ export async function getMostFollowedStocksHandler(req: AuthRequest, res: Respon
     const items = await getMostFollowedStocks(limit);
     res.json(items);
   } catch (error: unknown) {
-    console.error('Error fetching most-followed stocks:');
+    console.error('Error fetching most-followed stocks:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch most-followed stocks' });
   }
 }
@@ -101,7 +101,7 @@ export async function getMyStockFollowsHandler(req: AuthRequest, res: Response):
     const symbols = await getMyFollowedSymbols(userId);
     res.json(symbols);
   } catch (error: unknown) {
-    console.error('Error fetching my stock follows:');
+    console.error('Error fetching my stock follows:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch followed symbols' });
   }
 }

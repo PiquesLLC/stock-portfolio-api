@@ -14,7 +14,7 @@ export async function getCalendarICS(req: AuthRequest, res: Response): Promise<v
     res.setHeader('Content-Disposition', 'attachment; filename="nala-dividends.ics"');
     res.send(ical);
   } catch (error: unknown) {
-    console.error('[Calendar] Error generating ICS:');
+    console.error('[Calendar] Error generating ICS:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to generate calendar file' });
   }
 }

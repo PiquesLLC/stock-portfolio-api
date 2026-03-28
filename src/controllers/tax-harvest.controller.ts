@@ -15,7 +15,7 @@ export async function getTaxHarvestHandler(req: AuthRequest, res: Response): Pro
       res.status(404).json({ error: 'Portfolio not found' });
       return;
     }
-    console.error('[Tax Harvest] Error:');
+    console.error('[Tax Harvest] Error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to compute tax harvest suggestions' });
   }
 }

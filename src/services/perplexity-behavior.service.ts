@@ -179,7 +179,7 @@ export async function getBehaviorInsights(userId: string, portfolioId?: string):
     console.log(`[Perplexity Behavior] Generated ${result.insights.length} insights for ${portfolio.holdings.length} holdings`);
     return result;
   } catch (_error) {
-    console.error('[Perplexity Behavior] Error');
+    console.error('[Perplexity Behavior] Error', _error instanceof Error ? _error.message : String(_error));
     return buildFallback();
   }
 }

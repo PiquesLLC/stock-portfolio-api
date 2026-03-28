@@ -289,7 +289,7 @@ export async function getSectorPerformanceHandler(req: Request, res: Response): 
     sectorPerformanceCache.set(cacheKey, response);
     res.json(response);
   } catch (error: unknown) {
-    console.error('Error fetching sector performance data:');
+    console.error('Error fetching sector performance data:', error instanceof Error ? error.message : String(error));
     res.status(503).json({
       sectors: [],
       benchmark: emptyBenchmark(),

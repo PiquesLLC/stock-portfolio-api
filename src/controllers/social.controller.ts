@@ -39,7 +39,7 @@ export async function followHandler(req: AuthRequest, res: Response): Promise<vo
     await followUser(followerId, userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error following user:');
+    console.error('Error following user:', error instanceof Error ? error.message : String(error));
     res.status(400).json({ error: 'Failed to follow user' });
   }
 }
@@ -59,7 +59,7 @@ export async function unfollowHandler(req: AuthRequest, res: Response): Promise<
     await unfollowUser(followerId, userId);
     res.json({ ok: true });
   } catch (error: unknown) {
-    console.error('Error unfollowing:');
+    console.error('Error unfollowing:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to unfollow' });
   }
 }
@@ -76,7 +76,7 @@ export async function isFollowingHandler(req: AuthRequest, res: Response): Promi
     const following = await isFollowing(followerId, userId);
     res.json({ following });
   } catch (error: unknown) {
-    console.error('Error checking follow:');
+    console.error('Error checking follow:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to check follow status' });
   }
 }
@@ -103,7 +103,7 @@ export async function getFollowersHandler(req: AuthRequest, res: Response): Prom
     const followers = await getFollowers(userId);
     res.json(followers);
   } catch (error: unknown) {
-    console.error('Error getting followers:');
+    console.error('Error getting followers:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get followers' });
   }
 }
@@ -130,7 +130,7 @@ export async function getFollowingHandler(req: AuthRequest, res: Response): Prom
     const following = await getFollowing(userId);
     res.json(following);
   } catch (error: unknown) {
-    console.error('Error getting following:');
+    console.error('Error getting following:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get following' });
   }
 }
@@ -266,7 +266,7 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       viewerAccessLevel: creatorProfile?.accessLevel ?? 'public',
     });
   } catch (error: unknown) {
-    console.error('Error getting profile:');
+    console.error('Error getting profile:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get profile' });
   }
 }
@@ -304,7 +304,7 @@ export async function updateRegionHandler(req: AuthRequest, res: Response): Prom
 
     res.json(user);
   } catch (error: unknown) {
-    console.error('Error updating region:');
+    console.error('Error updating region:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update region' });
   }
 }
@@ -368,7 +368,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       createdAt: user.createdAt.toISOString(),
     });
   } catch (error: unknown) {
-    console.error('Error getting user settings:');
+    console.error('Error getting user settings:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get user settings' });
   }
 }
@@ -592,7 +592,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       priceSpikePct: priceSpikePctResult,
     });
   } catch (error: unknown) {
-    console.error('Error updating user settings:');
+    console.error('Error updating user settings:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update user settings' });
   }
 }
@@ -634,7 +634,7 @@ export async function getFeedHandler(req: AuthRequest, res: Response): Promise<v
     const events = await getFeed(userId, 50, before);
     res.json({ events });
   } catch (error: unknown) {
-    console.error('Error getting feed:');
+    console.error('Error getting feed:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get feed' });
   }
 }
@@ -648,7 +648,7 @@ export async function deleteActivityEventHandler(req: AuthRequest, res: Response
     if (!deleted) { res.status(404).json({ error: 'Event not found' }); return; }
     res.status(204).send();
   } catch (error: unknown) {
-    console.error('Error deleting activity event:');
+    console.error('Error deleting activity event:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete activity event' });
   }
 }

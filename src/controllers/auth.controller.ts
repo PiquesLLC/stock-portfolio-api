@@ -153,7 +153,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     });
     res.json(body);
   } catch (error: unknown) {
-    console.error('Login error:');
+    console.error('Login error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Login failed' });
   }
 }
@@ -197,7 +197,7 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
       isWaitlistAdmin: isWaitlistAdmin(user.id, user.email, user.emailVerified),
     });
   } catch (error: unknown) {
-    console.error('Me error:');
+    console.error('Me error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get user info' });
   }
 }
@@ -229,7 +229,7 @@ export async function setPasswordHandler(req: AuthRequest, res: Response): Promi
 
     res.json({ message: 'Password set successfully' });
   } catch (error: unknown) {
-    console.error('Set password error:');
+    console.error('Set password error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to set password' });
   }
 }
@@ -297,7 +297,7 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     };
     res.status(201).json(signupBody);
   } catch (error: unknown) {
-    console.error('Signup error:');
+    console.error('Signup error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create account' });
   }
 }
@@ -355,7 +355,7 @@ export async function verifyEmailHandler(req: AuthRequest, res: Response): Promi
 
     res.json({ message: 'Email verified successfully' });
   } catch (error: unknown) {
-    console.error('Verify email error:');
+    console.error('Verify email error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to verify email' });
   }
 }
@@ -387,7 +387,7 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
 
     res.json({ message: 'If this email is registered, a verification code was sent.' });
   } catch (error: unknown) {
-    console.error('Resend verification error:');
+    console.error('Resend verification error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to resend verification code' });
   }
 }
@@ -406,7 +406,7 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
     await requestPasswordReset(parsed.data.email);
     res.json({ message: 'If this email is registered, a reset code was sent.' });
   } catch (error: unknown) {
-    console.error('Forgot password error:');
+    console.error('Forgot password error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to process password reset request' });
   }
 }
@@ -425,7 +425,7 @@ export async function forgotUsernameHandler(req: Request, res: Response): Promis
     await requestUsernameReminder(parsed.data.email);
     res.json({ message: 'If this email is registered, your username was sent.' });
   } catch (error: unknown) {
-    console.error('Forgot username error:');
+    console.error('Forgot username error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to process username reminder request' });
   }
 }
@@ -456,7 +456,7 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
     clearAllAuthCookies(res, req);
     res.json({ message: 'Password reset successfully' });
   } catch (error: unknown) {
-    console.error('Reset password error:');
+    console.error('Reset password error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to reset password' });
   }
 }
@@ -509,7 +509,7 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
     const exists = await usernameExists(username);
     res.json({ available: !exists });
   } catch (error: unknown) {
-    console.error('Check username error:');
+    console.error('Check username error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to check username' });
   }
 }
@@ -541,7 +541,7 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
     await revokeAllRefreshTokens(req.user.userId);
     res.json({ message: 'Password changed successfully' });
   } catch (error: unknown) {
-    console.error('Change password error:');
+    console.error('Change password error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to change password' });
   }
 }
@@ -603,10 +603,25 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.mfaChallenge.deleteMany({ where: { userId: user.id } });
       await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
       await tx.emailOtpCode.deleteMany({ where: { userId: user.id } });
-      // Social
+      // Social — posts, comments, likes, notifications
+      await tx.like.deleteMany({ where: { userId: user.id } });
+      await tx.comment.deleteMany({ where: { userId: user.id } });
+      await tx.post.deleteMany({ where: { userId: user.id } });
+      await tx.socialNotification.deleteMany({ where: { userId: user.id } });
+      await tx.socialNotification.deleteMany({ where: { actorId: user.id } });
       await tx.activityEvent.deleteMany({ where: { userId: user.id } });
       await tx.follow.deleteMany({ where: { followerId: user.id } });
       await tx.follow.deleteMany({ where: { followingId: user.id } });
+      await tx.stockFollow.deleteMany({ where: { userId: user.id } });
+      // User blocking (both directions)
+      await tx.userBlock.deleteMany({ where: { blockerId: user.id } });
+      await tx.userBlock.deleteMany({ where: { blockedId: user.id } });
+      // Content moderation (appeal before strike due to FK)
+      await tx.appeal.deleteMany({ where: { userId: user.id } });
+      await tx.contentStrike.deleteMany({ where: { userId: user.id } });
+      // UGC reporting (both directions)
+      await tx.userReport.deleteMany({ where: { reporterUserId: user.id } });
+      await tx.userReport.deleteMany({ where: { reportedUserId: user.id } });
       // Alerts (children before parents)
       await tx.alertEvent.deleteMany({ where: { alert: { userId: user.id } } });
       await tx.alert.deleteMany({ where: { userId: user.id } });
@@ -621,20 +636,58 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
         await tx.holdingSnapshot.deleteMany({ where: { snapshotId: { in: snapshotIds } } });
       }
       await tx.holding.deleteMany({ where: { userId: user.id } });
+      await tx.portfolio.deleteMany({ where: { userId: user.id } });
       await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
       await tx.portfolioCompositionChange.deleteMany({ where: { userId: user.id } });
       // Watchlists (WatchlistHolding cascades via onDelete: Cascade)
       await tx.watchlist.deleteMany({ where: { userId: user.id } });
+      // Trade history & ledger
+      await tx.portfolioTrade.deleteMany({ where: { userId: user.id } });
+      await tx.ledgerEvent.deleteMany({ where: { userId: user.id } });
       // Dividends & lots
+      await tx.dismissedDividend.deleteMany({ where: { userId: user.id } });
       await tx.dividendReinvestment.deleteMany({ where: { userId: user.id } });
       await tx.dividendCredit.deleteMany({ where: { userId: user.id } });
       await tx.lot.deleteMany({ where: { userId: user.id } });
       await tx.transaction.deleteMany({ where: { userId: user.id } });
+      // Goals
+      await tx.goal.deleteMany({ where: { userId: user.id } });
       // Insights & notifications
       await tx.milestoneEvent.deleteMany({ where: { userId: user.id } });
       await tx.anomalyEvent.deleteMany({ where: { userId: user.id } });
       await tx.notificationAuditLog.deleteMany({ where: { userId: user.id } });
       await tx.leaderboardCache.deleteMany({ where: { userId: user.id } });
+      // Verified performance
+      await tx.performanceBadge.deleteMany({ where: { userId: user.id } });
+      await tx.profileStatsCache.deleteMany({ where: { userId: user.id } });
+      // Deep Research
+      await tx.deepResearchJob.deleteMany({ where: { userId: user.id } });
+      // Analytics
+      await tx.analyticsEvent.deleteMany({ where: { userId: user.id } });
+      // Creator monetization (subscription events/ledger before subscriptions, then creator profile)
+      const creatorSubIds = (await tx.creatorSubscription.findMany({
+        where: { OR: [{ subscriberUserId: user.id }, { creatorUserId: user.id }] },
+        select: { id: true },
+      })).map(s => s.id);
+      if (creatorSubIds.length > 0) {
+        await tx.creatorSubscriptionEvent.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
+        await tx.creatorWalletLedger.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
+      }
+      await tx.creatorSubscription.deleteMany({ where: { subscriberUserId: user.id } });
+      await tx.creatorSubscription.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorWalletLedger.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorPayout.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorReport.deleteMany({ where: { reporterUserId: user.id } });
+      await tx.creatorReport.deleteMany({ where: { creatorUserId: user.id } });
+      // Creator profile (visibility cascades via onDelete: Cascade)
+      const creator = await tx.creator.findUnique({ where: { userId: user.id } });
+      if (creator) {
+        await tx.creatorVisibility.deleteMany({ where: { creatorId: creator.id } });
+        await tx.creator.delete({ where: { userId: user.id } });
+      }
+      // Referrals (both directions)
+      await tx.referral.deleteMany({ where: { referrerUserId: user.id } });
+      await tx.referral.deleteMany({ where: { referredUserId: user.id } });
       // Settings & consent
       await tx.userSettings.deleteMany({ where: { userId: user.id } });
       await tx.consentRecord.deleteMany({ where: { userId: user.id } });
@@ -645,7 +698,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
     clearAllAuthCookies(res, req);
     res.json({ message: 'Account deleted successfully' });
   } catch (error: unknown) {
-    console.error('Delete account error:');
+    console.error('Delete account error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to delete account' });
   }
 }
@@ -692,7 +745,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     });
     res.json(refreshBody);
   } catch (error: unknown) {
-    console.error('Refresh token error:');
+    console.error('Refresh token error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 }

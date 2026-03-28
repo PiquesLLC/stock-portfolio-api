@@ -96,7 +96,7 @@ export async function updatePortfolioHandler(req: AuthRequest, res: Response): P
       res.status(409).json({ error: 'A portfolio with that name already exists' });
       return;
     }
-    console.error('Error updating portfolio:');
+    console.error('Error updating portfolio:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to update portfolio' });
   }
 }

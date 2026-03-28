@@ -389,7 +389,7 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
     try {
       parsed = JSON.parse(jsonStr);
     } catch (_parseErr) {
-      console.error('[Nala AI] JSON parse error');
+      console.error('[Nala AI] JSON parse error', _parseErr instanceof Error ? _parseErr.message : String(_parseErr));
       return await buildFallbackNala(question, strategyInfo, userId);
     }
 
@@ -423,7 +423,7 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
     console.log(`[Nala AI] Returned ${result.stocks.length} stocks, ${result.citations.length} citations`);
     return result;
   } catch (_error) {
-    console.error('[Nala AI] Error');
+    console.error('[Nala AI] Error', _error instanceof Error ? _error.message : String(_error));
     return await buildFallbackNala(question, strategyInfo, userId);
   }
 }

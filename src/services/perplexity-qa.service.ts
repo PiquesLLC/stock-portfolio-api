@@ -67,7 +67,7 @@ export async function askStockQuestion(
     qaCache.set(cacheKey, result);
     return result;
   } catch (_error) {
-    console.error(`[Perplexity Q&A] Error for ${upperTicker}`);
+    console.error(`[Perplexity Q&A] Error for ${upperTicker}`, _error instanceof Error ? _error.message : String(_error));
     return {
       ticker: upperTicker,
       question,
