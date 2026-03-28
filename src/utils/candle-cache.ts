@@ -11,6 +11,8 @@
 
 import NodeCache from 'node-cache';
 import { fetchPolygonAggs, yahooGet } from './yahoo-http';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Historical candle data interface
 export interface HistoricalCandles {
@@ -36,6 +38,80 @@ export interface CandleFetchResult {
 
 // 24-hour cache
 const candleCache = new NodeCache({ stdTTL: 86400 });
+
+// ── Persistent candle cache (survives deploys) ──────────────────
+const CANDLE_SNAPSHOT_PATH = process.env.NODE_ENV === 'production'
+  ? '/data/candle-cache-snapshot.json'
+  : path.join(process.cwd(), 'prisma', 'candle-cache-snapshot.json');
+
+interface CandleSnapshot {
+  ticker: string;
+  closes: number[];
+  dates: string[]; // ISO strings
+  fetchedAt: number;
+  daysAvailable: number;
+}
+
+/** Save current candle cache to disk */
+export function persistCandleCache(): void {
+  try {
+    const keys = candleCache.keys();
+    const entries: CandleSnapshot[] = [];
+    for (const key of keys) {
+      const data = candleCache.get<HistoricalCandles>(key);
+      if (data && !data.partial && data.closes.length >= 5) {
+        entries.push({
+          ticker: data.ticker,
+          closes: data.closes,
+          dates: data.dates.map(d => (d instanceof Date ? d.toISOString() : String(d))),
+          fetchedAt: data.fetchedAt,
+          daysAvailable: data.daysAvailable,
+        });
+      }
+    }
+    if (entries.length === 0) return;
+    fs.writeFileSync(CANDLE_SNAPSHOT_PATH, JSON.stringify(entries), 'utf-8');
+    console.log(`[CandleCache] Persisted ${entries.length} tickers to disk`);
+  } catch (err) {
+    console.warn('[CandleCache] Failed to persist:', (err as Error).message);
+  }
+}
+
+/** Restore candle cache from disk on startup */
+export function restoreCandleCache(): void {
+  try {
+    if (!fs.existsSync(CANDLE_SNAPSHOT_PATH)) return;
+    const raw = fs.readFileSync(CANDLE_SNAPSHOT_PATH, 'utf-8');
+    const entries: CandleSnapshot[] = JSON.parse(raw);
+    const maxAge = 48 * 60 * 60 * 1000; // Skip entries older than 48 hours
+    const now = Date.now();
+    let loaded = 0;
+    for (const entry of entries) {
+      if (now - entry.fetchedAt > maxAge) continue;
+      const cacheKey = `candles:${entry.ticker}`;
+      if (candleCache.has(cacheKey)) continue;
+      const returns: number[] = [];
+      for (let i = 1; i < entry.closes.length; i++) {
+        if (entry.closes[i - 1] > 0) {
+          returns.push((entry.closes[i] - entry.closes[i - 1]) / entry.closes[i - 1]);
+        }
+      }
+      candleCache.set(cacheKey, {
+        ticker: entry.ticker,
+        closes: entry.closes,
+        dates: entry.dates.map(d => new Date(d)),
+        returns,
+        fetchedAt: entry.fetchedAt,
+        partial: false,
+        daysAvailable: entry.daysAvailable,
+      });
+      loaded++;
+    }
+    if (loaded > 0) console.log(`[CandleCache] Restored ${loaded} tickers from disk`);
+  } catch (err) {
+    console.warn('[CandleCache] Failed to restore:', (err as Error).message);
+  }
+}
 
 // Track failed tickers (don't retry too often)
 const failedTickers = new Map<string, { time: number; reason: string }>(); // ticker -> { time, reason }
