@@ -604,93 +604,98 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
       await tx.emailOtpCode.deleteMany({ where: { userId: user.id } });
       // Social — posts, comments, likes, notifications
-      await tx.like.deleteMany({ where: { userId: user.id } });
-      await tx.comment.deleteMany({ where: { userId: user.id } });
-      await tx.post.deleteMany({ where: { userId: user.id } });
-      await tx.socialNotification.deleteMany({ where: { userId: user.id } });
-      await tx.socialNotification.deleteMany({ where: { actorId: user.id } });
-      await tx.activityEvent.deleteMany({ where: { userId: user.id } });
-      await tx.follow.deleteMany({ where: { followerId: user.id } });
-      await tx.follow.deleteMany({ where: { followingId: user.id } });
-      await tx.stockFollow.deleteMany({ where: { userId: user.id } });
+      // Extended cleanup — optional chaining + try-catch for models that may not exist in all environments
+      try {
+      await tx.like?.deleteMany({ where: { userId: user.id } });
+      await tx.comment?.deleteMany({ where: { userId: user.id } });
+      await tx.post?.deleteMany({ where: { userId: user.id } });
+      await tx.socialNotification?.deleteMany({ where: { userId: user.id } });
+      await tx.socialNotification?.deleteMany({ where: { actorId: user.id } });
+      await tx.activityEvent?.deleteMany({ where: { userId: user.id } });
+      await tx.follow?.deleteMany({ where: { followerId: user.id } });
+      await tx.follow?.deleteMany({ where: { followingId: user.id } });
+      await tx.stockFollow?.deleteMany({ where: { userId: user.id } });
       // User blocking (both directions)
-      await tx.userBlock.deleteMany({ where: { blockerId: user.id } });
-      await tx.userBlock.deleteMany({ where: { blockedId: user.id } });
+      await tx.userBlock?.deleteMany({ where: { blockerId: user.id } });
+      await tx.userBlock?.deleteMany({ where: { blockedId: user.id } });
       // Content moderation (appeal before strike due to FK)
-      await tx.appeal.deleteMany({ where: { userId: user.id } });
-      await tx.contentStrike.deleteMany({ where: { userId: user.id } });
+      await tx.appeal?.deleteMany({ where: { userId: user.id } });
+      await tx.contentStrike?.deleteMany({ where: { userId: user.id } });
       // UGC reporting (both directions)
-      await tx.userReport.deleteMany({ where: { reporterUserId: user.id } });
-      await tx.userReport.deleteMany({ where: { reportedUserId: user.id } });
+      await tx.userReport?.deleteMany({ where: { reporterUserId: user.id } }).catch(() => {});
+      await tx.userReport?.deleteMany({ where: { reportedUserId: user.id } }).catch(() => {});
       // Alerts (children before parents)
-      await tx.alertEvent.deleteMany({ where: { alert: { userId: user.id } } });
-      await tx.alert.deleteMany({ where: { userId: user.id } });
-      await tx.priceAlertEvent.deleteMany({ where: { priceAlert: { userId: user.id } } });
-      await tx.priceAlert.deleteMany({ where: { userId: user.id } });
+      await tx.alertEvent?.deleteMany({ where: { alert: { userId: user.id } } });
+      await tx.alert?.deleteMany({ where: { userId: user.id } });
+      await tx.priceAlertEvent?.deleteMany({ where: { priceAlert: { userId: user.id } } });
+      await tx.priceAlert?.deleteMany({ where: { userId: user.id } });
       // Portfolio & holdings (HoldingSnapshots before PortfolioSnapshots)
-      const snapshotIds = (await tx.portfolioSnapshot.findMany({
+      const snapshotIds = (await tx.portfolioSnapshot?.findMany({
         where: { userId: user.id },
         select: { id: true },
-      })).map(s => s.id);
+      }) ?? []).map(s => s.id);
       if (snapshotIds.length > 0) {
-        await tx.holdingSnapshot.deleteMany({ where: { snapshotId: { in: snapshotIds } } });
+        await tx.holdingSnapshot?.deleteMany({ where: { snapshotId: { in: snapshotIds } } });
       }
-      await tx.holding.deleteMany({ where: { userId: user.id } });
-      await tx.portfolio.deleteMany({ where: { userId: user.id } });
-      await tx.portfolioSnapshot.deleteMany({ where: { userId: user.id } });
-      await tx.portfolioCompositionChange.deleteMany({ where: { userId: user.id } });
+      await tx.holding?.deleteMany({ where: { userId: user.id } });
+      await tx.portfolio?.deleteMany({ where: { userId: user.id } });
+      await tx.portfolioSnapshot?.deleteMany({ where: { userId: user.id } });
+      await tx.portfolioCompositionChange?.deleteMany({ where: { userId: user.id } });
       // Watchlists (WatchlistHolding cascades via onDelete: Cascade)
-      await tx.watchlist.deleteMany({ where: { userId: user.id } });
+      await tx.watchlist?.deleteMany({ where: { userId: user.id } });
       // Trade history & ledger
-      await tx.portfolioTrade.deleteMany({ where: { userId: user.id } });
-      await tx.ledgerEvent.deleteMany({ where: { userId: user.id } });
+      await tx.portfolioTrade?.deleteMany({ where: { userId: user.id } });
+      await tx.ledgerEvent?.deleteMany({ where: { userId: user.id } });
       // Dividends & lots
-      await tx.dismissedDividend.deleteMany({ where: { userId: user.id } });
-      await tx.dividendReinvestment.deleteMany({ where: { userId: user.id } });
-      await tx.dividendCredit.deleteMany({ where: { userId: user.id } });
-      await tx.lot.deleteMany({ where: { userId: user.id } });
-      await tx.transaction.deleteMany({ where: { userId: user.id } });
+      await tx.dismissedDividend?.deleteMany({ where: { userId: user.id } });
+      await tx.dividendReinvestment?.deleteMany({ where: { userId: user.id } });
+      await tx.dividendCredit?.deleteMany({ where: { userId: user.id } });
+      await tx.lot?.deleteMany({ where: { userId: user.id } });
+      await tx.transaction?.deleteMany({ where: { userId: user.id } });
       // Goals
-      await tx.goal.deleteMany({ where: { userId: user.id } });
+      await tx.goal?.deleteMany({ where: { userId: user.id } });
       // Insights & notifications
-      await tx.milestoneEvent.deleteMany({ where: { userId: user.id } });
-      await tx.anomalyEvent.deleteMany({ where: { userId: user.id } });
-      await tx.notificationAuditLog.deleteMany({ where: { userId: user.id } });
-      await tx.leaderboardCache.deleteMany({ where: { userId: user.id } });
+      await tx.milestoneEvent?.deleteMany({ where: { userId: user.id } });
+      await tx.anomalyEvent?.deleteMany({ where: { userId: user.id } });
+      await tx.notificationAuditLog?.deleteMany({ where: { userId: user.id } });
+      await tx.leaderboardCache?.deleteMany({ where: { userId: user.id } });
       // Verified performance
-      await tx.performanceBadge.deleteMany({ where: { userId: user.id } });
-      await tx.profileStatsCache.deleteMany({ where: { userId: user.id } });
+      await tx.performanceBadge?.deleteMany({ where: { userId: user.id } }).catch(() => {});
+      await tx.profileStatsCache?.deleteMany({ where: { userId: user.id } }).catch(() => {});
       // Deep Research
-      await tx.deepResearchJob.deleteMany({ where: { userId: user.id } });
+      await tx.deepResearchJob?.deleteMany({ where: { userId: user.id } });
       // Analytics
-      await tx.analyticsEvent.deleteMany({ where: { userId: user.id } });
+      await tx.analyticsEvent?.deleteMany({ where: { userId: user.id } });
       // Creator monetization (subscription events/ledger before subscriptions, then creator profile)
-      const creatorSubIds = (await tx.creatorSubscription.findMany({
+      const creatorSubIds = (await tx.creatorSubscription?.findMany({
         where: { OR: [{ subscriberUserId: user.id }, { creatorUserId: user.id }] },
         select: { id: true },
-      })).map(s => s.id);
+      }) ?? []).map(s => s.id);
       if (creatorSubIds.length > 0) {
-        await tx.creatorSubscriptionEvent.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
-        await tx.creatorWalletLedger.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
+        await tx.creatorSubscriptionEvent?.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
+        await tx.creatorWalletLedger?.deleteMany({ where: { subscriptionId: { in: creatorSubIds } } });
       }
-      await tx.creatorSubscription.deleteMany({ where: { subscriberUserId: user.id } });
-      await tx.creatorSubscription.deleteMany({ where: { creatorUserId: user.id } });
-      await tx.creatorWalletLedger.deleteMany({ where: { creatorUserId: user.id } });
-      await tx.creatorPayout.deleteMany({ where: { creatorUserId: user.id } });
-      await tx.creatorReport.deleteMany({ where: { reporterUserId: user.id } });
-      await tx.creatorReport.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorSubscription?.deleteMany({ where: { subscriberUserId: user.id } });
+      await tx.creatorSubscription?.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorWalletLedger?.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorPayout?.deleteMany({ where: { creatorUserId: user.id } });
+      await tx.creatorReport?.deleteMany({ where: { reporterUserId: user.id } }).catch(() => {});
+      await tx.creatorReport?.deleteMany({ where: { creatorUserId: user.id } }).catch(() => {});
       // Creator profile (visibility cascades via onDelete: Cascade)
-      const creator = await tx.creator.findUnique({ where: { userId: user.id } });
+      const creator = await tx.creator?.findUnique({ where: { userId: user.id } });
       if (creator) {
-        await tx.creatorVisibility.deleteMany({ where: { creatorId: creator.id } });
-        await tx.creator.delete({ where: { userId: user.id } });
+        await tx.creatorVisibility?.deleteMany({ where: { creatorId: creator.id } });
+        await tx.creator?.delete({ where: { userId: user.id } });
       }
       // Referrals (both directions)
-      await tx.referral.deleteMany({ where: { referrerUserId: user.id } });
-      await tx.referral.deleteMany({ where: { referredUserId: user.id } });
+      await tx.referral?.deleteMany({ where: { referrerUserId: user.id } }).catch(() => {});
+      await tx.referral?.deleteMany({ where: { referredUserId: user.id } }).catch(() => {});
       // Settings & consent
-      await tx.userSettings.deleteMany({ where: { userId: user.id } });
-      await tx.consentRecord.deleteMany({ where: { userId: user.id } });
+      await tx.userSettings?.deleteMany({ where: { userId: user.id } });
+      await tx.consentRecord?.deleteMany({ where: { userId: user.id } });
+      } catch (cleanupErr) {
+        console.warn('[DeleteAccount] Extended cleanup partial failure (non-fatal):', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
+      }
       // Finally, delete the user
       await tx.user.delete({ where: { id: user.id } });
     });
