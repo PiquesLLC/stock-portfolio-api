@@ -53,6 +53,7 @@ export interface ValueRadarResponse {
   totalStocks: number;
   generatedAt: string;
   cached: boolean;
+  preliminary: boolean;
 }
 
 function classifyTier(discountPct: number): 'deep_value' | 'attractive' | 'fair' | 'expensive' {
@@ -289,20 +290,148 @@ function buildSectorLookup(): Map<string, { sector: string; subSector: string }>
 export async function getValueRadarData(): Promise<ValueRadarResponse> {
   const cacheKey = 'value-radar-response';
   const cached = responseCache.get<ValueRadarResponse>(cacheKey);
-  if (cached) return { ...cached, cached: true };
+  if (cached) return { ...cached, cached: true, preliminary: cached.preliminary };
 
   // 1. Load all value radar cache entries that have valid avgPE
   const radarEntries = await prisma.valueRadarCache.findMany({
     where: { avgPE: { not: null } },
   });
 
+  // If ValueRadarCache is empty, bootstrap from FundamentalsCache + ScreenerCache
   if (radarEntries.length === 0) {
-    return {
-      stocks: [],
-      totalStocks: 0,
+    console.log('[Value Radar] Cache empty — bootstrapping from FundamentalsCache + ScreenerCache');
+
+    const [fundRows, screenRows] = await Promise.all([
+      prisma.fundamentalsCache.findMany({
+        where: { overviewJson: { not: null } },
+        select: { ticker: true, overviewJson: true },
+      }),
+      prisma.screenerCache.findMany({
+        where: { eps: { not: null } },
+        select: { ticker: true, eps: true, annualDividend: true, beta: true, week52High: true, week52Low: true },
+      }),
+    ]);
+
+    // Build lookup maps
+    const screenMap = new Map(screenRows.filter(r => r.eps != null && r.eps > 0).map(r => [r.ticker, r]));
+    const overviewByTicker = new Map<string, any>();
+    for (const row of fundRows) {
+      if (row.overviewJson) {
+        try { overviewByTicker.set(row.ticker, JSON.parse(row.overviewJson)); } catch { /* skip */ }
+      }
+    }
+
+    // Only keep tickers that appear in our sector map and have both overview + eps
+    const sectorLookup = buildSectorLookup();
+    const bootstrapTickers = [...sectorLookup.keys()].filter(
+      t => overviewByTicker.has(t) && screenMap.has(t),
+    );
+
+    if (bootstrapTickers.length === 0) {
+      return {
+        stocks: [],
+        totalStocks: 0,
+        generatedAt: new Date().toISOString(),
+        cached: false,
+        preliminary: false,
+      };
+    }
+
+    // Fetch live prices for bootstrap tickers
+    const { quotes: bootQuotes } = await fetchPrices(bootstrapTickers);
+
+    const bootStocks: ValueRadarStock[] = [];
+    for (const ticker of bootstrapTickers) {
+      const overview = overviewByTicker.get(ticker);
+      const screener = screenMap.get(ticker)!;
+      const eps = screener.eps!;
+      const quote = bootQuotes.get(ticker);
+      const price = quote?.currentPrice ?? 0;
+      if (!price || price <= 0) continue;
+
+      const currentPE = price / eps;
+      if (currentPE <= 0 || currentPE > 200) continue;
+
+      // Use fundamentals peRatio as avgPE proxy (reasonable when no 10-year history)
+      const fundPE = typeof overview?.peRatio === 'number' && overview.peRatio > 0
+        ? overview.peRatio
+        : null;
+      // If fundamentals has a peRatio, use it as avgPE; otherwise use currentPE (discount will be ~0%)
+      const avgPE = fundPE ?? currentPE;
+
+      const discountPct = ((currentPE - avgPE) / avgPE) * 100;
+      const tier = classifyTier(discountPct);
+      const sectorInfo = sectorLookup.get(ticker);
+
+      const forwardPE = overview?.forwardPE != null ? Math.round(overview.forwardPE * 100) / 100 : null;
+      const returnOnEquity = overview?.returnOnEquity != null ? Math.round(overview.returnOnEquity * 100) / 100 : null;
+      const profitMarginVal = overview?.profitMargin != null ? Math.round(overview.profitMargin * 100) / 100 : null;
+      const analystTargetPrice = overview?.analystTargetPrice != null ? Math.round(overview.analystTargetPrice * 100) / 100 : null;
+      const beta = screener.beta != null ? Math.round(screener.beta * 100) / 100 : null;
+      const week52High = screener.week52High != null ? Math.round(screener.week52High * 100) / 100 : null;
+      const week52Low = screener.week52Low != null ? Math.round(screener.week52Low * 100) / 100 : null;
+
+      let dividendYield: number | null = null;
+      if (overview?.dividendYield != null) {
+        dividendYield = Math.round(overview.dividendYield * 100) / 100;
+      } else if (screener.annualDividend != null && screener.annualDividend > 0) {
+        dividendYield = Math.round(((screener.annualDividend / price) * 100) * 100) / 100;
+      }
+
+      let week52Pos: number | null = null;
+      if (week52High != null && week52Low != null && week52High !== week52Low) {
+        week52Pos = Math.round(((price - week52Low) / (week52High - week52Low)) * 100) / 100;
+      }
+
+      let upsideToTarget: number | null = null;
+      if (analystTargetPrice != null && analystTargetPrice > 0) {
+        upsideToTarget = Math.round(((analystTargetPrice - price) / price) * 100 * 100) / 100;
+      }
+
+      bootStocks.push({
+        ticker,
+        name: overview?.companyName || overview?.name || ticker,
+        sector: sectorInfo?.sector || overview?.sector || 'Unknown',
+        subSector: sectorInfo?.subSector || '',
+        price: Math.round(price * 100) / 100,
+        marketCapB: overview?.marketCap
+          ? Math.round((overview.marketCap / 1_000_000_000) * 100) / 100
+          : 0,
+        currentPE: Math.round(currentPE * 100) / 100,
+        avgPE: Math.round(avgPE * 100) / 100,
+        discountPct: Math.round(discountPct * 10) / 10,
+        tier,
+        peHistory: [],
+        yearsOfData: 0,
+        dividendYield,
+        forwardPE,
+        beta,
+        week52High,
+        week52Low,
+        week52Pos,
+        returnOnEquity,
+        profitMargin: profitMarginVal,
+        analystTargetPrice,
+        upsideToTarget,
+      });
+    }
+
+    bootStocks.sort((a, b) => a.discountPct - b.discountPct);
+
+    const bootResult: ValueRadarResponse = {
+      stocks: bootStocks,
+      totalStocks: bootStocks.length,
       generatedAt: new Date().toISOString(),
       cached: false,
+      preliminary: true,
     };
+
+    if (bootStocks.length > 0) {
+      responseCache.set(cacheKey, bootResult);
+    }
+
+    console.log(`[Value Radar] Bootstrap complete: ${bootStocks.length} stocks from existing caches`);
+    return bootResult;
   }
 
   // 2. Load screener cache (EPS), fundamentals cache (name/sector/marketCap), and live prices concurrently
@@ -426,6 +555,7 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     totalStocks: stocks.length,
     generatedAt: new Date().toISOString(),
     cached: false,
+    preliminary: false,
   };
 
   if (stocks.length > 0) {
