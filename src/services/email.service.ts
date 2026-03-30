@@ -159,9 +159,9 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
 
         <!-- Body -->
         <div style="padding: 32px;">
-          <h2 style="color: #fff; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Welcome to Nala</h2>
+          <h2 style="color: #fff; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Congratulations — You've Been Approved!</h2>
           <p style="color: rgba(255,255,255,0.7); font-size: 15px; line-height: 1.6; margin: 0 0 20px;">
-            Great news — you've been approved! Your spot is ready and you can start building your portfolio right now.
+            Your waitlist application has been approved and your account is ready to be created on Nala.
           </p>
 
           <!-- CTA Button -->
@@ -171,9 +171,16 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
 
           <!-- Web browser notice -->
           <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; margin: 24px 0;">
+            <p style="color: rgba(255,255,255,0.5); font-size: 13px; line-height: 1.6; margin: 0;">
+              <strong style="color: rgba(255,255,255,0.7);">Important — How to access Nala:</strong><br/><br/>
+              Nala is currently under review on the iOS App Store. In the meantime, the full platform is available on desktop and mobile browsers at <a href="${signupUrl}" style="color: #00c805; text-decoration: none; font-weight: 600;">nalaai.com</a>. We recommend Chrome, Safari, or Edge for the best experience. We'll notify you as soon as the iOS app is live.
+            </p>
+          </div>
+
+          <!-- Support -->
+          <div style="background: rgba(255,255,255,0.02); border-radius: 8px; padding: 14px 16px; margin: 0 0 8px;">
             <p style="color: rgba(255,255,255,0.5); font-size: 13px; line-height: 1.5; margin: 0;">
-              <strong style="color: rgba(255,255,255,0.7);">How to access Nala:</strong><br/>
-              Visit <a href="${signupUrl}" style="color: #00c805; text-decoration: none; font-weight: 600;">nalaai.com</a> in your web browser (Chrome, Safari, or Edge) to create your account and start tracking your portfolio. Our iOS app is currently under review with Apple and will be available on the App Store soon.
+              <strong style="color: rgba(255,255,255,0.7);">Need help?</strong> Contact us anytime at <a href="mailto:support@nalaai.com" style="color: #00c805; text-decoration: none; font-weight: 600;">support@nalaai.com</a> — we're here to help with any questions or issues.
             </p>
           </div>
 
