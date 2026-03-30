@@ -142,10 +142,12 @@ function mapBarsToCandles(
   return candles;
 }
 
-function filterRegularHoursIfNeeded(candles: IntradayCandle[], interval: CandleInterval): IntradayCandle[] {
-  if (interval === '1D' || interval === '1W' || interval === '1M') {
-    return candles;
-  }
+function filterRegularHoursIfNeeded(candles: IntradayCandle[], interval: CandleInterval, period?: CandlePeriod): IntradayCandle[] {
+  // Daily/weekly/monthly intervals never need filtering
+  if (interval === '1D' || interval === '1W' || interval === '1M') return candles;
+  // 1D period: show all candles including pre/post market (matches line chart 4AM-8PM behavior)
+  if (period === '1D') return candles;
+  // Multi-day periods: filter to regular hours only to avoid overnight gaps
   return candles.filter((candle) => isRegularHours(candle.time));
 }
 
@@ -224,7 +226,7 @@ async function fetchYahooCandles(ticker: string, period: CandlePeriod, interval:
     if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
 
     const candles = mapBarsToCandles(result.timestamp, result.indicators.quote[0]);
-    return filterRegularHoursIfNeeded(candles, interval);
+    return filterRegularHoursIfNeeded(candles, interval, period);
   } catch {
     return [];
   }
@@ -254,7 +256,7 @@ async function fetchPolygonCandles(ticker: string, period: CandlePeriod, interva
     volume: pg.volumes[i],
   }));
 
-  return filterRegularHoursIfNeeded(candles, interval);
+  return filterRegularHoursIfNeeded(candles, interval, period);
 }
 
 export async function fetchCandles(ticker: string, period: string, interval: string): Promise<IntradayCandle[]> {
