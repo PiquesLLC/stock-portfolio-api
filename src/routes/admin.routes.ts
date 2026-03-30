@@ -42,6 +42,18 @@ router.post('/set-plan', requireAuth, requireAdmin, async (req: AuthRequest, res
   res.json({ success: true, user });
 });
 
+// PUT /admin/user/:userId — update username/displayName
+router.put('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { username, displayName } = req.body;
+  const data: Record<string, string> = {};
+  if (username) data.username = username;
+  if (displayName) data.displayName = displayName;
+  if (Object.keys(data).length === 0) { res.status(400).json({ error: 'Nothing to update' }); return; }
+  const user = await prisma.user.update({ where: { id: req.params.userId }, data });
+  console.log(`[Admin] ${req.user!.userId} updated user ${req.params.userId}: ${JSON.stringify(data)}`);
+  res.json({ success: true, user: { id: user.id, username: user.username, displayName: user.displayName } });
+});
+
 // GET /admin/user/:userId — view any user's info
 router.get('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.findUnique({
