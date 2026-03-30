@@ -1,5 +1,7 @@
 import axios, { AxiosError } from 'axios';
+import * as fs from 'fs';
 import NodeCache from 'node-cache';
+import * as path from 'path';
 import { Quote, MarketSession } from '../types';
 import { config } from '../config';
 import { getMarketSession } from './market-hours';
@@ -14,6 +16,15 @@ const backupCache = new NodeCache({ stdTTL: 3600 });
 // Reference market cap cache (changes slowly)
 const marketCapCache = new NodeCache({ stdTTL: 12 * 60 * 60 }); // 12h
 
+const QUOTE_SNAPSHOT_PATH = process.env.NODE_ENV === 'production'
+  ? '/data/quote-cache-snapshot.json'
+  : path.join(process.cwd(), 'prisma', 'quote-cache-snapshot.json');
+
+interface QuoteSnapshotEntry {
+  key: string;
+  quote: Quote;
+}
+
 // Rate limit backoff tracking
 let rateLimitBackoffUntil: number = 0;
 const RATE_LIMIT_BACKOFF_MS = 60000; // 1 minute backoff on 429
@@ -27,6 +38,77 @@ let lastPolygonSuccessMs = 0;
 
 function markPolygonSuccess(): void {
   lastPolygonSuccessMs = Date.now();
+}
+
+export function persistQuoteCache(): void {
+  try {
+    const entries: QuoteSnapshotEntry[] = [];
+
+    for (const key of backupCache.keys()) {
+      const quote = backupCache.get<Quote>(key);
+      if (quote && quote.currentPrice > 0) {
+        entries.push({ key, quote });
+      }
+    }
+
+    if (entries.length === 0) return;
+
+    fs.mkdirSync(path.dirname(QUOTE_SNAPSHOT_PATH), { recursive: true });
+    fs.writeFileSync(QUOTE_SNAPSHOT_PATH, JSON.stringify(entries), 'utf-8');
+    console.log(`[QuoteCache] Persisted ${entries.length} quotes to disk`);
+  } catch (err) {
+    console.warn('[QuoteCache] Failed to persist:', (err as Error).message);
+  }
+}
+
+export function restoreQuoteCache(): void {
+  try {
+    if (!fs.existsSync(QUOTE_SNAPSHOT_PATH)) return;
+
+    const raw = fs.readFileSync(QUOTE_SNAPSHOT_PATH, 'utf-8');
+    const entries: unknown = JSON.parse(raw);
+    if (!Array.isArray(entries)) return;
+
+    const maxAgeMs = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    let restored = 0;
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+
+      const { key, quote } = entry as QuoteSnapshotEntry;
+      if (typeof key !== 'string' || !key.startsWith('polygon:') || !quote || typeof quote !== 'object') {
+        continue;
+      }
+
+      if (typeof quote.currentPrice !== 'number' || !Number.isFinite(quote.currentPrice) || quote.currentPrice <= 0) {
+        continue;
+      }
+
+      const updatedAtMs =
+        typeof quote.updatedAt === 'number' && Number.isFinite(quote.updatedAt) && quote.updatedAt > 0
+          ? quote.updatedAt
+          : typeof quote.timestamp === 'number' && Number.isFinite(quote.timestamp) && quote.timestamp > 0
+            ? quote.timestamp * 1000
+            : 0;
+
+      if (updatedAtMs <= 0 || now - updatedAtMs > maxAgeMs) continue;
+
+      const upperTicker = key.slice('polygon:'.length).toUpperCase();
+      const normalizedKey = `polygon:${upperTicker}`;
+      const normalizedQuote: Quote = { ...quote, ticker: upperTicker };
+
+      cache.set(normalizedKey, normalizedQuote);
+      backupCache.set(normalizedKey, normalizedQuote);
+      restored++;
+    }
+
+    if (restored > 0) {
+      console.log(`[QuoteCache] Restored ${restored} quotes from disk`);
+    }
+  } catch {
+    // Invalid/missing snapshot should not block startup.
+  }
 }
 
 // Polygon Previous Day response type (free tier)
