@@ -275,6 +275,13 @@ export async function fetchCandles(ticker: string, period: string, interval: str
     candles = await fetchPolygonCandles(upperTicker, normalizedPeriod, normalizedInterval, cacheTTL);
   }
 
+  // For 1D period with intraday intervals, keep only the last trading day
+  if (normalizedPeriod === '1D' && candles.length > 0 && normalizedInterval !== '1D' && normalizedInterval !== '1W' && normalizedInterval !== '1M') {
+    const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+    const lastDate = etDateFmt.format(new Date(candles[candles.length - 1].time));
+    candles = candles.filter(c => etDateFmt.format(new Date(c.time)) === lastDate);
+  }
+
   if (candles.length > 0) {
     candleCache.set(cacheKey, candles, cacheTTL);
   }
