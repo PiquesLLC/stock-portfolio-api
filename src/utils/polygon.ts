@@ -40,11 +40,21 @@ function markPolygonSuccess(): void {
   lastPolygonSuccessMs = Date.now();
 }
 
+// Track tickers that matter (holdings + watchlists) to avoid persisting random searched tickers
+const activeTickersSet = new Set<string>();
+export function setActiveQuoteTickers(tickers: string[]): void {
+  activeTickersSet.clear();
+  for (const t of tickers) activeTickersSet.add(t.toUpperCase());
+}
+
 export function persistQuoteCache(): void {
   try {
     const entries: QuoteSnapshotEntry[] = [];
 
     for (const key of backupCache.keys()) {
+      const ticker = key.slice('polygon:'.length);
+      // Only persist active holdings/watchlist tickers (bounded size)
+      if (activeTickersSet.size > 0 && !activeTickersSet.has(ticker)) continue;
       const quote = backupCache.get<Quote>(key);
       if (quote && quote.currentPrice > 0) {
         entries.push({ key, quote });
@@ -53,8 +63,12 @@ export function persistQuoteCache(): void {
 
     if (entries.length === 0) return;
 
-    fs.mkdirSync(path.dirname(QUOTE_SNAPSHOT_PATH), { recursive: true });
-    fs.writeFileSync(QUOTE_SNAPSHOT_PATH, JSON.stringify(entries), 'utf-8');
+    // Atomic write: temp file + rename prevents corrupt snapshots on crash
+    const dir = path.dirname(QUOTE_SNAPSHOT_PATH);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpPath = QUOTE_SNAPSHOT_PATH + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(entries), 'utf-8');
+    fs.renameSync(tmpPath, QUOTE_SNAPSHOT_PATH);
     console.log(`[QuoteCache] Persisted ${entries.length} quotes to disk`);
   } catch (err) {
     console.warn('[QuoteCache] Failed to persist:', (err as Error).message);
@@ -106,8 +120,8 @@ export function restoreQuoteCache(): void {
     if (restored > 0) {
       console.log(`[QuoteCache] Restored ${restored} quotes from disk`);
     }
-  } catch {
-    // Invalid/missing snapshot should not block startup.
+  } catch (err) {
+    console.warn('[QuoteCache] Failed to restore snapshot:', (err as Error).message);
   }
 }
 

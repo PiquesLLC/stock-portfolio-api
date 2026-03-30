@@ -1098,6 +1098,9 @@ export async function warmHoldingsCache(): Promise<void> {
   });
 
   const tickers = [...new Set(holdings.map(h => h.ticker.toUpperCase()))];
+  // Register active tickers so quote persistence only saves holdings (not random searches)
+  const { setActiveQuoteTickers } = await import('../utils/polygon');
+  setActiveQuoteTickers(tickers);
   if (tickers.length === 0) {
     console.log('[Startup] No holdings to warm');
     return;
