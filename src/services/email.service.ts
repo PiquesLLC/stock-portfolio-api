@@ -284,6 +284,31 @@ export async function sendPerformanceReport(to: string, html: string, period: st
   });
 }
 
+export async function sendNewSignupNotification(adminEmail: string, username: string, email: string, displayName: string): Promise<void> {
+  const r = getResend();
+  const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  if (!r) {
+    console.log(`[Email] Dev mode — new signup: ${username} (${email}) at ${now}`);
+    return;
+  }
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to: adminEmail,
+    subject: `New Account Created: ${escapeHtml(username)}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px; background: #050505; border-radius: 12px;">
+        <h2 style="color: #00c805; margin: 0 0 20px; font-size: 18px;">New Account Created</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr><td style="color: rgba(255,255,255,0.4); font-size: 13px; padding: 6px 0;">Username</td><td style="color: #fff; font-size: 13px; font-weight: 600; padding: 6px 0;">${escapeHtml(username)}</td></tr>
+          <tr><td style="color: rgba(255,255,255,0.4); font-size: 13px; padding: 6px 0;">Display Name</td><td style="color: #fff; font-size: 13px; padding: 6px 0;">${escapeHtml(displayName)}</td></tr>
+          <tr><td style="color: rgba(255,255,255,0.4); font-size: 13px; padding: 6px 0;">Email</td><td style="color: #fff; font-size: 13px; padding: 6px 0;">${escapeHtml(email)}</td></tr>
+          <tr><td style="color: rgba(255,255,255,0.4); font-size: 13px; padding: 6px 0;">Time</td><td style="color: #fff; font-size: 13px; padding: 6px 0;">${now} ET</td></tr>
+        </table>
+      </div>
+    `,
+  });
+}
+
 export function getCapturedEmailVerificationCode(email: string): string | null {
   if (process.env.NODE_ENV === 'production') {
     return null;
