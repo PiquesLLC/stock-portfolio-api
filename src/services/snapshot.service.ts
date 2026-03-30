@@ -542,7 +542,7 @@ export async function reconstructPortfolioHistoryHiRes(
     const startOfYear = new Date(new Date().getFullYear(), 0, 1).getTime();
     const ytdDays = Math.max(2, Math.ceil((Date.now() - startOfYear) / 86400000) + 2);
     const rangeDaysMap: Record<string, number> = {
-      '1d': 2,
+      '1d': 5,  // 5 days ensures Polygon covers the last trading day even on weekends
       '5d': 7,
       '1mo': 30,
       '3mo': 95,
