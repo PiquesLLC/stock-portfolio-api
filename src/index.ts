@@ -1,6 +1,7 @@
 ﻿import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached, restoreCandleCache, persistCandleCache } from './utils/candle-cache';
+import { persistQuoteCache, restoreQuoteCache } from './utils/polygon';
 import { createSnapshotIfNeeded, refreshLeaderboardSnapshots } from './services/snapshot.service';
 import { backfillLeaderboardDemoData } from './services/demo-data.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
@@ -334,6 +335,23 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('stale_data_cleanup', cleanupStaleData);
 }
 
+let isShuttingDown = false;
+
+async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`${signal} received, shutting down gracefully`);
+  stopQuoteRefresh();
+  persistQuoteCache();
+  await stopFundamentalsPrefetch();
+  prisma.$disconnect().catch(() => undefined);
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+}
+
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
@@ -343,6 +361,9 @@ const server = app.listen(config.port, async () => {
 
   // Restore candle cache from disk so intelligence 5D/1M works immediately after deploy
   restoreCandleCache();
+  const quoteCacheRestoreStartedAt = Date.now();
+  restoreQuoteCache();
+  console.log(`[Init] Quote cache restore completed in ${Date.now() - quoteCacheRestoreStartedAt}ms`);
 
   // Fix partially-failed migrations: ensure tables exist, then mark migration as applied.
   // Migration 20260319_add_social_platform failed because ALTER TABLE User (kycVerified)
@@ -482,6 +503,7 @@ const server = app.listen(config.port, async () => {
   setInterval(() => persistCandleCache(), 30 * 60 * 1000);
   // Also persist on first data load (5 min after startup)
   setTimeout(() => persistCandleCache(), 5 * 60 * 1000);
+  setInterval(() => persistQuoteCache(), 60 * 1000);
 
   // Demo leaderboard data backfill — only runs when DEMO_LEADERBOARD=true (pre-beta).
   // Disable this env var once real users join the leaderboard.
@@ -836,25 +858,17 @@ const server = app.listen(config.port, async () => {
   setInterval(() => backupDatabase(), 24 * 60 * 60 * 1000);
 });
 
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  stopQuoteRefresh();
-  await stopFundamentalsPrefetch();
-  prisma.$disconnect().catch(() => undefined);
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+process.on('SIGTERM', () => {
+  shutdown('SIGTERM').catch(err => {
+    console.error('[Shutdown] SIGTERM handler failed:', err);
+    process.exit(1);
   });
 });
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  stopQuoteRefresh();
-  await stopFundamentalsPrefetch();
-  prisma.$disconnect().catch(() => undefined);
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+process.on('SIGINT', () => {
+  shutdown('SIGINT').catch(err => {
+    console.error('[Shutdown] SIGINT handler failed:', err);
+    process.exit(1);
   });
 });
 
