@@ -144,7 +144,7 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
     console.log(`[Email] Dev mode — waitlist approval for ${to}`);
     return;
   }
-  const signupUrl = 'https://nalaai.com';
+  const signupUrl = 'https://nalaai.com/invite';
   const result = await r.emails.send({
     from: `Nala <${config.resendFromEmail}>`,
     to,
