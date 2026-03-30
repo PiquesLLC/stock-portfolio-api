@@ -18,6 +18,11 @@ export const hourlyCandlesQuerySchema = z.object({
   period: z.enum(['1W', '1M', '6M', 'YTD']),
 });
 
+export const candleQuerySchema = z.object({
+  period: z.enum(['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'MAX']),
+  interval: z.enum(['1m', '5m', '15m', '1h', '1D', '1W', '1M']),
+});
+
 export const searchSymbolsQuerySchema = z.object({
   q: z.string().optional(),
   held: z.string().optional(),
