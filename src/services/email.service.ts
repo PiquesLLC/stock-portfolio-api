@@ -188,19 +188,31 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
           <p style="color: rgba(255,255,255,0.5); font-size: 13px; margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">What's waiting for you</p>
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
-              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Real-time portfolio tracking</td>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">AI Portfolio Analysis + Daily Briefings</td>
               <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">Live</td>
             </tr>
             <tr>
-              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Candlestick charts + technical indicators</td>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Social Feed + Creator Subscriptions</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">Live</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Sector Heatmaps + Market Rotation</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">Live</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Candlestick Charts + Technical Indicators</td>
               <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">New</td>
             </tr>
             <tr>
-              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">AI-powered divergence detection</td>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">AI Divergence Detection</td>
               <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">New</td>
             </tr>
             <tr>
-              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px;">Nala Score + AI market insights</td>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Nala Score + Value Radar</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">Live</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px;">Public Leaderboard + Portfolio Sharing</td>
               <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right;">Live</td>
             </tr>
           </table>
