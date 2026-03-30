@@ -454,7 +454,12 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
   return [];
 }
 
-const yahooQuoteCache = new NodeCache({ stdTTL: 15 }); // 15s cache — Yahoo is primary real-time source during market hours
+// Dynamic TTL: 15s during market hours, 15min when closed (prices don't change on weekends/overnight)
+function getQuoteCacheTTL(): number {
+  const session = getMarketSession();
+  return session === 'REG' || session === 'PRE' || session === 'POST' ? 15 : 900;
+}
+const yahooQuoteCache = new NodeCache({ stdTTL: 15 }); // default 15s, overridden per-set when markets closed
 const YAHOO_BATCH_SIZE = 200;
 
 // Hardcoded ETF reference data for common ETFs where Finnhub free tier returns nulls.
@@ -640,7 +645,7 @@ export async function fetchYahooBatchQuotes(
 
         const parsed: YahooBatchQuote = { price: numericPrice, previousClose, regularMarketPrice, marketState };
         results.set(symbol, parsed);
-        yahooQuoteCache.set(`yahoo-quote:${symbol}`, parsed);
+        yahooQuoteCache.set(`yahoo-quote:${symbol}`, parsed, getQuoteCacheTTL());
       }
     } catch {
       // Best-effort by batch. Caller handles partial misses.
@@ -730,7 +735,7 @@ export async function fetchYahooV8BatchQuotes(
 
       const { ticker, quote } = result.value;
       results.set(ticker, quote);
-      yahooQuoteCache.set(`yahoo-v8-quote:${ticker}`, quote);
+      yahooQuoteCache.set(`yahoo-v8-quote:${ticker}`, quote, getQuoteCacheTTL());
     }
   }
 
