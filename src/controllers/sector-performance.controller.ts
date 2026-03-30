@@ -117,7 +117,20 @@ function getLastTimestampIso(...series: Array<{ timestamps: string[] }>): string
 }
 
 async function fetchCandlesForPeriod(ticker: string, period: SectorPeriod): Promise<IntradayCandle[]> {
-  if (period === '1D') return fetchIntradayCandles(ticker);
+  if (period === '1D') {
+    const intraday = await fetchIntradayCandles(ticker);
+    if (intraday.length > 0) return intraday;
+    // Weekend/holiday fallback: fetch 1W hourly data, filter to last trading day
+    const hourly = await fetchHourlyCandles(ticker, '1W');
+    const cleaned = filterTradingHours(hourly.filter(
+      c => !!c.time && typeof c.close === 'number' && Number.isFinite(c.close) && c.close > 0
+    ));
+    if (cleaned.length === 0) return [];
+    // Extract the last trading day's candles
+    const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+    const lastDate = etDateFmt.format(new Date(cleaned[cleaned.length - 1].time));
+    return cleaned.filter(c => etDateFmt.format(new Date(c.time)) === lastDate);
+  }
   return fetchHourlyCandles(ticker, period);
 }
 
