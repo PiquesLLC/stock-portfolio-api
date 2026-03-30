@@ -569,26 +569,48 @@ export async function getCreatorDashboard(userId: string): Promise<{
   };
 }
 
-export async function getMyCreatorSubscriptions(userId: string): Promise<Array<{
-  creatorUserId: string;
-  status: string;
-  currentPeriodEnd: Date | null;
-  trialEnd: Date | null;
-}>> {
+export async function getMyCreatorSubscriptions(userId: string) {
   const rows = await prisma.creatorSubscription.findMany({
     where: {
       subscriberUserId: userId,
       status: { in: ['active', 'past_due', 'canceled'] },
     },
     select: {
+      id: true,
       creatorUserId: true,
       status: true,
       currentPeriodEnd: true,
       trialEnd: true,
+      canceledAt: true,
+      createdAt: true,
     },
     orderBy: { updatedAt: 'desc' },
   });
-  return rows;
+
+  // Enrich with creator user info and pricing
+  const enriched = await Promise.all(rows.map(async (row) => {
+    const creatorUser = await prisma.user.findUnique({
+      where: { id: row.creatorUserId },
+      select: { username: true, displayName: true },
+    });
+    const creatorProfile = await prisma.creator.findUnique({
+      where: { userId: row.creatorUserId },
+      select: { pricingCents: true },
+    });
+    return {
+      id: row.id,
+      creatorUserId: row.creatorUserId,
+      creatorUsername: creatorUser?.username ?? 'Unknown',
+      creatorDisplayName: creatorUser?.displayName ?? creatorUser?.username ?? 'Unknown',
+      status: row.status,
+      pricingCents: creatorProfile?.pricingCents ?? 0,
+      currentPeriodEnd: row.currentPeriodEnd?.toISOString() ?? null,
+      trialEnd: row.trialEnd?.toISOString() ?? null,
+      canceledAt: row.canceledAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }));
+  return enriched;
 }
 
 export async function reportCreator(
