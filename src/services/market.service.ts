@@ -99,6 +99,189 @@ export interface IntradayCandle {
   volume: number;
 }
 
+const candleCache = new NodeCache();
+
+type CandlePeriod = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'MAX';
+type CandleInterval = '1m' | '5m' | '15m' | '1h' | '1D' | '1W' | '1M';
+
+function isRegularHours(isoTime: string): boolean {
+  const d = new Date(isoTime);
+  const et = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = et.getHours() * 60 + et.getMinutes();
+  return mins >= 570 && mins < 960;
+}
+
+function mapBarsToCandles(
+  timestamps: number[],
+  q: {
+    open?: Array<number | null>;
+    high?: Array<number | null>;
+    low?: Array<number | null>;
+    close?: Array<number | null>;
+    volume?: Array<number | null>;
+  },
+): IntradayCandle[] {
+  const candles: IntradayCandle[] = [];
+
+  for (let i = 0; i < timestamps.length; i++) {
+    const close = q.close?.[i];
+    if (!Number.isFinite(close)) continue;
+
+    candles.push({
+      time: new Date(timestamps[i] * 1000).toISOString(),
+      open: q.open?.[i] ?? close!,
+      high: q.high?.[i] ?? close!,
+      low: q.low?.[i] ?? close!,
+      close: close!,
+      volume: q.volume?.[i] ?? 0,
+    });
+  }
+
+  return candles;
+}
+
+function filterRegularHoursIfNeeded(candles: IntradayCandle[], interval: CandleInterval): IntradayCandle[] {
+  if (interval === '1D' || interval === '1W' || interval === '1M') {
+    return candles;
+  }
+  return candles.filter((candle) => isRegularHours(candle.time));
+}
+
+function getPeriodDays(period: CandlePeriod): number {
+  switch (period) {
+    case '1D':
+      return 5;
+    case '1W':
+      return 9;
+    case '1M':
+      return 35;
+    case '3M':
+      return 95;
+    case '6M':
+      return 185;
+    case '1Y':
+      return 370;
+    case 'MAX':
+      return 3650;
+    case 'YTD':
+      return Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000) + 5;
+  }
+}
+
+function getDateRange(period: CandlePeriod): { from: string; to: string } {
+  const to = new Date().toISOString().split('T')[0];
+  if (period === 'YTD') {
+    return { from: `${new Date().getFullYear()}-01-01`, to };
+  }
+
+  const from = new Date(Date.now() - getPeriodDays(period) * 86400000).toISOString().split('T')[0];
+  return { from, to };
+}
+
+function getYahooRange(period: CandlePeriod, interval: CandleInterval): string | null {
+  switch (interval) {
+    case '1m':
+      return period === '1D' ? '1d' : null;
+    case '5m':
+      if (period === '1D') return '1d';
+      if (period === '1W') return '5d';
+      return null;
+    case '15m':
+      if (period === '1W') return '5d';
+      if (period === '1M') return '1mo';
+      return null;
+    case '1h':
+      if (period === '1M') return '1mo';
+      if (period === '3M') return '3mo';
+      return null;
+    case '1D':
+      if (period === '1D') return '5d';
+      if (period === '1W') return '5d';
+      if (period === '1M') return '1mo';
+      if (period === '3M') return '3mo';
+      if (period === '6M') return '6mo';
+      if (period === 'YTD') return 'ytd';
+      if (period === '1Y') return '1y';
+      if (period === 'MAX') return '10y';
+      return null;
+    default:
+      return null;
+  }
+}
+
+async function fetchYahooCandles(ticker: string, period: CandlePeriod, interval: CandleInterval): Promise<IntradayCandle[]> {
+  const range = getYahooRange(period, interval);
+  if (!range) return [];
+
+  const yahooInterval = interval === '1h' ? '60m' : interval === '1D' ? '1d' : interval;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${yahooInterval}&range=${range}&includePrePost=true`;
+
+  try {
+    const resp = await yahooGet(url);
+    const result = resp.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
+
+    const candles = mapBarsToCandles(result.timestamp, result.indicators.quote[0]);
+    return filterRegularHoursIfNeeded(candles, interval);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPolygonCandles(ticker: string, period: CandlePeriod, interval: CandleInterval, cacheTTL: number): Promise<IntradayCandle[]> {
+  const mapping: Record<CandleInterval, { multiplier: number; timespan: string }> = {
+    '1m': { multiplier: 1, timespan: 'minute' },
+    '5m': { multiplier: 5, timespan: 'minute' },
+    '15m': { multiplier: 15, timespan: 'minute' },
+    '1h': { multiplier: 1, timespan: 'hour' },
+    '1D': { multiplier: 1, timespan: 'day' },
+    '1W': { multiplier: 1, timespan: 'week' },
+    '1M': { multiplier: 1, timespan: 'month' },
+  };
+  const { from, to } = getDateRange(period);
+  const { multiplier, timespan } = mapping[interval];
+  const pg = await fetchPolygonAggs(ticker, multiplier, timespan, from, to, cacheTTL);
+  if (!pg?.closes.length) return [];
+
+  const candles = pg.timestamps.map((t, i) => ({
+    time: new Date(t * 1000).toISOString(),
+    open: pg.opens[i],
+    high: pg.highs[i],
+    low: pg.lows[i],
+    close: pg.closes[i],
+    volume: pg.volumes[i],
+  }));
+
+  return filterRegularHoursIfNeeded(candles, interval);
+}
+
+export async function fetchCandles(ticker: string, period: string, interval: string): Promise<IntradayCandle[]> {
+  const upperTicker = ticker.toUpperCase();
+  const normalizedPeriod = period.toUpperCase() as CandlePeriod;
+  const normalizedInterval = interval as CandleInterval;
+  const cacheKey = `candle:${upperTicker}:${normalizedPeriod}:${normalizedInterval}`;
+  const cacheTTL = normalizedInterval === '1D' || normalizedInterval === '1W' || normalizedInterval === '1M' ? 3600 : 15;
+  const cached = candleCache.get<IntradayCandle[]>(cacheKey);
+  if (cached) return cached;
+
+  const yahooSupported = normalizedInterval === '1m' || normalizedInterval === '5m' || normalizedInterval === '15m' || normalizedInterval === '1h' || normalizedInterval === '1D';
+  let candles: IntradayCandle[] = [];
+  if (yahooSupported) {
+    candles = await fetchYahooCandles(upperTicker, normalizedPeriod, normalizedInterval);
+  }
+  if (candles.length === 0) {
+    candles = await fetchPolygonCandles(upperTicker, normalizedPeriod, normalizedInterval, cacheTTL);
+  }
+
+  if (candles.length > 0) {
+    candleCache.set(cacheKey, candles, cacheTTL);
+  }
+
+  return candles;
+}
+
 export async function fetchIntradayCandles(ticker: string): Promise<IntradayCandle[]> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `intra:${upperTicker}`;

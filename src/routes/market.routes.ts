@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler, getValueRadarHandler } from '../controllers/market.controller';
+import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, getCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler, getValueRadarHandler } from '../controllers/market.controller';
 import { getSectorPerformanceHandler } from '../controllers/sector-performance.controller';
 import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -14,6 +14,7 @@ router.get('/stock/:ticker/details', heavyReadLimiter, getStockDetails);
 router.get('/stock/:ticker/intraday', heavyReadLimiter, getIntraday);
 router.get('/stock/:ticker/hourly', heavyReadLimiter, getHourlyCandles);
 router.get('/stock/:ticker/daily', heavyReadLimiter, getDailyCandles);
+router.get('/stock/:ticker/candles', heavyReadLimiter, getCandles);
 router.get('/stock/:ticker/etf-holdings', heavyReadLimiter, getETFHoldingsHandler);
 router.get('/stock/:ticker/about', heavyReadLimiter, getAssetAboutHandler);
 router.get('/benchmark/:ticker/closes', getBenchmarkClosesHandler);

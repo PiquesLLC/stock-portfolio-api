@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles } from '../services/market.service';
+import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles, fetchCandles } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
@@ -16,6 +16,7 @@ import { EmailVerificationRequiredError } from '../services/email-verification-g
 import {
   aiEventsQuerySchema,
   benchmarkParamSchema,
+  candleQuerySchema,
   heatmapQuerySchema,
   historicalCagrQuerySchema,
   hourlyCandlesQuerySchema,
@@ -36,6 +37,21 @@ interface PriceResult {
   isRepricing?: boolean;
   quoteAgeSeconds?: number;
   session?: string;
+}
+
+function normalizeCandleInterval(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+
+  if (value === '1m' || value === '5m' || value === '15m' || value === '1h') {
+    return value;
+  }
+
+  const upper = value.toUpperCase();
+  if (upper === '1D' || upper === '1W' || upper === '1M') {
+    return upper;
+  }
+
+  return value;
 }
 
 export async function getPrices(req: Request, res: Response): Promise<void> {
@@ -201,6 +217,28 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
   } catch (error: unknown) {
     console.error('[Market] getDailyCandles error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch daily data' });
+  }
+}
+
+export async function getCandles(req: Request, res: Response): Promise<void> {
+  try {
+    const parsedParams = tickerParamSchema.safeParse(req.params);
+    const parsedQuery = candleQuerySchema.safeParse({
+      period: typeof req.query.period === 'string' ? req.query.period.toUpperCase() : req.query.period,
+      interval: normalizeCandleInterval(req.query.interval),
+    });
+    if (!parsedParams.success || !parsedQuery.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+
+    const { ticker } = parsedParams.data;
+    const { period, interval } = parsedQuery.data;
+    const candles = await fetchCandles(ticker, period, interval);
+    res.json({ ticker, period, interval, candles });
+  } catch (error: unknown) {
+    console.error('[Market] getCandles error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to fetch candles' });
   }
 }
 
