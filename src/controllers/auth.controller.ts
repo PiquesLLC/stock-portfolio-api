@@ -35,7 +35,7 @@ import {
   formatZodError,
 } from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
-import { getCapturedEmailVerificationCode } from '../services/email.service';
+import { getCapturedEmailVerificationCode, sendNewSignupNotification } from '../services/email.service';
 
 
 
@@ -296,6 +296,13 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       ...(isNative ? { accessToken: result.token, refreshToken: result.refreshToken, token: result.token } : {}),
     };
     res.status(201).json(signupBody);
+
+    // Notify admin of new signup (fire and forget)
+    if (config.waitlistNotifyEmail) {
+      sendNewSignupNotification(config.waitlistNotifyEmail, username, email, displayName).catch(err => {
+        console.warn('[Signup] Failed to send admin notification:', err instanceof Error ? err.message : String(err));
+      });
+    }
   } catch (error: unknown) {
     console.error('Signup error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create account' });
