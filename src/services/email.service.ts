@@ -144,19 +144,67 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
     console.log(`[Email] Dev mode — waitlist approval for ${to}`);
     return;
   }
-  const signupUrl = `${config.appFrontendUrl.replace(/\/+$/, '')}/invite/`;
+  const signupUrl = 'https://nalaai.com';
   const result = await r.emails.send({
     from: `Nala <${config.resendFromEmail}>`,
     to,
-    subject: "You're in! Create your Nala account",
+    subject: "You're in! Your Nala account is ready",
     html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
-        <h2 style="color: #00c805; margin: 0 0 24px;">Nala</h2>
-        <p style="color: #333; font-size: 16px; margin: 0 0 16px;">Great news — your spot is ready.</p>
-        <p style="color: #666; font-size: 14px; margin: 0 0 24px;">You've been approved to join Nala. Click below to create your account and start tracking your portfolio.</p>
-        <a href="${signupUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 24px; font-size: 14px; font-weight: 600;">Create Your Account</a>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;" />
-        <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 0; background: #050505; border-radius: 12px; overflow: hidden;">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #050505 0%, #0a1a0a 100%); padding: 40px 32px 24px; text-align: center;">
+          <h1 style="color: #00c805; margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Nala</h1>
+          <p style="color: rgba(255,255,255,0.4); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Portfolio Intelligence Platform</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding: 32px;">
+          <h2 style="color: #fff; font-size: 22px; margin: 0 0 16px; font-weight: 600;">Welcome to Nala</h2>
+          <p style="color: rgba(255,255,255,0.7); font-size: 15px; line-height: 1.6; margin: 0 0 20px;">
+            Great news — you've been approved! Your spot is ready and you can start building your portfolio right now.
+          </p>
+
+          <!-- CTA Button -->
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${signupUrl}" style="display: inline-block; background: #00c805; color: #fff; text-decoration: none; padding: 14px 36px; border-radius: 28px; font-size: 15px; font-weight: 600; letter-spacing: 0.3px;">Get Started at NalaAI.com</a>
+          </div>
+
+          <!-- Web browser notice -->
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; margin: 24px 0;">
+            <p style="color: rgba(255,255,255,0.5); font-size: 13px; line-height: 1.5; margin: 0;">
+              <strong style="color: rgba(255,255,255,0.7);">How to access Nala:</strong><br/>
+              Visit <a href="${signupUrl}" style="color: #00c805; text-decoration: none; font-weight: 600;">nalaai.com</a> in your web browser (Chrome, Safari, or Edge) to create your account and start tracking your portfolio. Our iOS app is currently under review with Apple and will be available on the App Store soon.
+            </p>
+          </div>
+
+          <!-- What you get -->
+          <p style="color: rgba(255,255,255,0.5); font-size: 13px; margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">What's waiting for you</p>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Real-time portfolio tracking</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">Live</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">Candlestick charts + technical indicators</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">New</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);">AI-powered divergence detection</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">New</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: rgba(255,255,255,0.7); font-size: 14px;">Nala Score + AI market insights</td>
+              <td style="padding: 8px 0; color: #00c805; font-size: 14px; text-align: right;">Live</td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding: 20px 32px; border-top: 1px solid rgba(255,255,255,0.06);">
+          <p style="color: rgba(255,255,255,0.25); font-size: 11px; margin: 0; text-align: center;">
+            Piques LLC &middot; NalaAI.com &middot; Not financial advice
+          </p>
+        </div>
       </div>
     `,
   });
