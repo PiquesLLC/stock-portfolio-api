@@ -33,11 +33,20 @@ export interface DailyReportResponse {
   greeting: string;
   marketOverview: string;
   portfolioSummary: string;
+  positionMoves?: {
+    ticker: string;
+    changePercent: number;
+    reason: string;
+  }[];
   topStories: {
     headline: string;
     body: string;
     sentiment: 'positive' | 'negative' | 'neutral';
     relatedTickers: string[];
+  }[];
+  questionsOfTheDay?: {
+    question: string;
+    answer: string;
   }[];
   watchToday: string[];
   cached: boolean;
@@ -56,12 +65,25 @@ Return ONLY valid JSON with this structure:
   "greeting": "Brief, contextual greeting referencing today's main theme",
   "marketOverview": "4-6 sentences covering: major index moves with exact percentages, key macro drivers (yields, oil, dollar, VIX), geopolitical catalysts, and what's driving sentiment today. Include specific numbers — Fed rate, 10Y yield level, oil price, VIX level. This should read like the opening paragraph of a Goldman Sachs morning note.",
   "portfolioSummary": "4-6 sentences analyzing the user's specific holdings: which positions drove gains/losses and WHY (not just that they moved), how the portfolio performed vs SPY, any notable sector rotation affecting holdings, and one forward-looking insight. Reference specific company news, analyst actions, or earnings that affected their stocks TODAY.",
+  "positionMoves": [
+    {
+      "ticker": "AAPL",
+      "changePercent": -2.34,
+      "reason": "1-2 sentences explaining the SPECIFIC catalyst that moved this stock today. Name the news event, analyst action, or macro factor."
+    }
+  ],
   "topStories": [
     {
       "headline": "Specific, punchy headline with a number — max 100 chars",
       "body": "3-4 sentences of real analysis. Name the companies involved, the specific catalyst (earnings beat, analyst upgrade, FDA decision, trade policy), the magnitude of the move, and what it means for the investor's portfolio. Every story must connect back to either a holding or a macro theme affecting their positions.",
       "sentiment": "positive|negative|neutral",
       "relatedTickers": ["AAPL", "MSFT"]
+    }
+  ],
+  "questionsOfTheDay": [
+    {
+      "question": "A thought-provoking market insight or portfolio observation phrased as a bold statement or question",
+      "answer": "2-3 sentences with historical context, data, or actionable insight. Reference specific numbers and how it relates to the user's portfolio."
     }
   ],
   "watchToday": [
@@ -72,7 +94,9 @@ Return ONLY valid JSON with this structure:
 QUALITY REQUIREMENTS:
 - marketOverview: MUST include at least 4 specific data points (index %, yield level, oil price, VIX)
 - portfolioSummary: MUST reference at least 3 of the user's actual holdings by ticker with specific % moves
+- positionMoves: Pick the 3-5 holdings with the LARGEST absolute % moves. For each, explain the specific catalyst (earnings, analyst action, sector rotation, macro event). Use the actual changePercent from the portfolio data provided. This is the most important section — users want to know WHY their money moved.
 - topStories: Write 5-7 stories, each 3-4 sentences with specific catalysts and numbers
+- questionsOfTheDay: Write 2 insightful observations. One should be a historical/statistical market insight relevant to today. The other should be a specific observation about the user's portfolio (concentration risk, correlation, sector exposure, etc). Make them thought-provoking and educational.
 - watchToday: 3-5 items with specific times, consensus estimates, and portfolio impact
 - Every section must have TODAY's actual data — never generic filler
 - If a holding moved >2%, explain exactly WHY with a specific news catalyst
@@ -227,12 +251,29 @@ function buildDailyReportFromPayload(
     ? payload.watchToday.slice(0, 5).map((w: any) => truncateCleanly(sanitizeContent(stripLeakedTags(String(w || ''))), 400))
     : fallback.watchToday;
 
+  const positionMoves = Array.isArray(payload?.positionMoves)
+    ? payload.positionMoves.slice(0, 5).map((m: any) => ({
+      ticker: String(m?.ticker || '').toUpperCase(),
+      changePercent: typeof m?.changePercent === 'number' ? m.changePercent : 0,
+      reason: truncateCleanly(sanitizeContent(stripLeakedTags(String(m?.reason || ''))), 300),
+    })).filter((m: any) => m.ticker && m.reason)
+    : undefined;
+
+  const questionsOfTheDay = Array.isArray(payload?.questionsOfTheDay)
+    ? payload.questionsOfTheDay.slice(0, 2).map((q: any) => ({
+      question: sanitizeContent(stripLeakedTags(String(q?.question || ''))).slice(0, 200),
+      answer: truncateCleanly(sanitizeContent(stripLeakedTags(String(q?.answer || ''))), 500),
+    })).filter((q: any) => q.question && q.answer)
+    : undefined;
+
   return {
     generatedAt: new Date().toISOString(),
     greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 250))),
     marketOverview: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview))), 1000),
     portfolioSummary: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary))), 1000),
+    positionMoves: positionMoves && positionMoves.length > 0 ? positionMoves : undefined,
     topStories: topStories.length > 0 ? topStories : fallback.topStories,
+    questionsOfTheDay: questionsOfTheDay && questionsOfTheDay.length > 0 ? questionsOfTheDay : undefined,
     watchToday: watchToday.length > 0 ? watchToday : fallback.watchToday,
     cached: false,
   };
