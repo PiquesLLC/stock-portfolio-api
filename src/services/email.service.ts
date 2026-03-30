@@ -209,7 +209,7 @@ export async function sendWaitlistApprovalEmail(to: string): Promise<void> {
         <!-- Footer -->
         <div style="padding: 20px 32px; border-top: 1px solid rgba(255,255,255,0.06);">
           <p style="color: rgba(255,255,255,0.25); font-size: 11px; margin: 0; text-align: center;">
-            Piques LLC &middot; NalaAI.com &middot; Not financial advice
+            Nala &middot; <a href="https://nalaai.com" style="color: rgba(255,255,255,0.3); text-decoration: none;">NalaAI.com</a>
           </p>
         </div>
       </div>
