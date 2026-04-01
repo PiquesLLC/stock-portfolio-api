@@ -1102,6 +1102,12 @@ model ValueRadarCache {
   @@index([lastFetchedAt])
 }
 
+model ValueRadarTierSnapshot {
+  ticker    String   @id
+  tier      String   // deep_value | attractive | fair | expensive
+  updatedAt DateTime @default(now())
+}
+
 // ─── Waitlist ────────────────────────────────────────────────────────
 
 model Waitlist {

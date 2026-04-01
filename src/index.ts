@@ -17,6 +17,7 @@ import { refreshFundamentalsForTicker } from './services/polygon-fundamentals.se
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { backfillPolygonScreenerData } from './services/polygon-screener.service';
 import { backfillValueRadar } from './services/value-radar.service';
+import { evaluateValueRadarAlerts, sendValueRadarDigest } from './services/value-radar-alerts.service';
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
@@ -313,6 +314,8 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('heatmap_fundamentals', backfillHeatmapFundamentals);
   registerJobHandler('polygon_screener', backfillPolygonScreenerData);
   registerJobHandler('value_radar', backfillValueRadar);
+  registerJobHandler('value_radar_alerts', evaluateValueRadarAlerts);
+  registerJobHandler('value_radar_digest', sendValueRadarDigest);
   registerJobHandler('earnings_alerts', sendEarningsAlerts);
   registerJobHandler('milestone_check', checkMilestoneAlerts);
   registerJobHandler('anomaly_detection', runAnomalyDetectionForAllUsers);
@@ -639,6 +642,32 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     runJob({ name: 'value_radar', fn: backfillValueRadar });
   }, 24 * 60 * 60 * 1000);
+
+  // Value Radar alerts — detect deep_value transitions every 30 min (market hours only)
+  console.log('[Value Radar Alerts] Scheduled every 30 min');
+  setTimeout(() => {
+    if (isWeekendET()) return;
+    runJob({ name: 'value_radar_alerts', fn: evaluateValueRadarAlerts, maxAttempts: 1 });
+  }, 240000); // 240s (after value radar backfill starts)
+  setInterval(() => {
+    if (isWeekendET()) return;
+    runJob({ name: 'value_radar_alerts', fn: evaluateValueRadarAlerts, maxAttempts: 1 });
+  }, 30 * 60 * 1000);
+
+  // Value Radar daily digest — single morning notification summarizing tier changes
+  console.log('[Value Radar Digest] Scheduled daily');
+  setInterval(() => {
+    if (isWeekendET()) return;
+    const etTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hour = etTime.getHours();
+    const min = etTime.getMinutes();
+    // Only fire near market open (9:30-10:00 AM ET)
+    if (hour === 9 && min >= 30 || hour === 10 && min < 1) {
+      runJob({ name: 'value_radar_digest', fn: sendValueRadarDigest, maxAttempts: 1,
+        idempotencyKey: `value_radar_digest:${new Date().toISOString().slice(0, 10)}`,
+        idempotencyTtlMs: 24 * 60 * 60 * 1000 });
+    }
+  }, 30 * 60 * 1000); // Check every 30 min; idempotency ensures one-per-day
 
   // Earnings alerts — audit log for upcoming earnings (every 6 hours, skip weekends)
   console.log('[Notifications] Earnings alerts scheduled');

@@ -3,7 +3,7 @@ import { getEarningsData } from './earnings.service';
 import { sendPushToUser, sendNativePushToUser } from './push.service';
 import { config } from '../config';
 
-type NotificationType = 'earnings_alert';
+type NotificationType = 'earnings_alert' | 'value_radar_alert' | 'value_radar_digest';
 
 function normalizeDate(dateStr?: string | null): Date | null {
   if (!dateStr) return null;
