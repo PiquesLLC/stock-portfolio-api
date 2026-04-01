@@ -14,9 +14,10 @@ import { config } from '../config';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { subSectorGroups } from '../utils/sectors';
 import { fetchPrices } from './market.service';
+import { getMarketSession } from '../utils/market-hours';
 
 const POLYGON_BASE = 'https://api.polygon.io';
-const responseCache = new NodeCache({ stdTTL: 1800 }); // 30-min in-memory cache
+const responseCache = new NodeCache({ stdTTL: 300 }); // 5-min default TTL
 
 interface PEHistoryEntry {
   year: number;
@@ -46,6 +47,8 @@ export interface ValueRadarStock {
   profitMargin: number | null;
   analystTargetPrice: number | null;
   upsideToTarget: number | null;
+  changePercent: number;
+  changeDollar: number;
 }
 
 export interface ValueRadarResponse {
@@ -413,6 +416,8 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
         profitMargin: profitMarginVal,
         analystTargetPrice,
         upsideToTarget,
+        changePercent: Math.round((quote?.changePercent ?? 0) * 100) / 100,
+        changeDollar: Math.round((quote?.change ?? 0) * 100) / 100,
       });
     }
 
@@ -426,8 +431,10 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       preliminary: true,
     };
 
+    const session = getMarketSession();
+    const cacheTtl = session === 'CLOSED' ? 1800 : 300; // 30 min closed, 5 min during market
     if (bootStocks.length > 0) {
-      responseCache.set(cacheKey, bootResult);
+      responseCache.set(cacheKey, bootResult, cacheTtl);
     }
 
     console.log(`[Value Radar] Bootstrap complete: ${bootStocks.length} stocks from existing caches`);
@@ -544,6 +551,8 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       profitMargin,
       analystTargetPrice,
       upsideToTarget,
+      changePercent: Math.round((quote?.changePercent ?? 0) * 100) / 100,
+      changeDollar: Math.round((quote?.change ?? 0) * 100) / 100,
     });
   }
 
@@ -558,8 +567,10 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     preliminary: false,
   };
 
+  const session = getMarketSession();
+  const cacheTtl = session === 'CLOSED' ? 1800 : 300; // 30 min closed, 5 min during market
   if (stocks.length > 0) {
-    responseCache.set(cacheKey, result);
+    responseCache.set(cacheKey, result, cacheTtl);
   }
 
   return result;

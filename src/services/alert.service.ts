@@ -3,7 +3,7 @@ import { sendPushToUser, sendNativePushToUser } from './push.service';
 
 
 
-const _ALERT_TYPES = ['drawdown', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl', 'congress_trade'] as const;
+const _ALERT_TYPES = ['drawdown', 'underperform_spy', '52w_high', '52w_low', 'ath', 'atl', 'congress_trade', 'value_radar'] as const;
 type AlertType = (typeof _ALERT_TYPES)[number];
 
 const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
@@ -14,6 +14,7 @@ const DEFAULT_ALERTS: { type: AlertType; threshold: number | null }[] = [
   { type: 'ath', threshold: null },            // All-time high
   { type: 'atl', threshold: null },            // All-time low
   { type: 'congress_trade', threshold: null }, // Congress member trades your holdings
+  { type: 'value_radar', threshold: null },    // Holdings/watchlist enter deep value
 ];
 
 export async function ensureDefaultAlerts(userId: string): Promise<void> {
