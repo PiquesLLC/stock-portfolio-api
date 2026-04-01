@@ -97,7 +97,7 @@ QUALITY REQUIREMENTS:
 - positionMoves: Pick the 3-5 holdings with the LARGEST absolute % moves. For each, explain the specific catalyst (earnings, analyst action, sector rotation, macro event). Use the actual changePercent from the portfolio data provided. This is the most important section — users want to know WHY their money moved.
 - topStories: Write 5-7 stories, each 3-4 sentences with specific catalysts and numbers
 - questionsOfTheDay: Write 2 insightful observations. One should be a historical/statistical market insight relevant to today. The other should be a specific observation about the user's portfolio (concentration risk, correlation, sector exposure, etc). Make them thought-provoking and educational.
-- watchToday: 3-5 items with specific times, consensus estimates, and portfolio impact
+- watchToday: REQUIRED — 3-5 items. Each must have a specific time (e.g. "8:30 AM ET"), what's happening, consensus/expected value, and how it could affect the user's holdings. Include economic data releases, earnings reports, Fed speeches, or major corporate events. This section must NEVER be empty.
 - Every section must have TODAY's actual data — never generic filler
 - If a holding moved >2%, explain exactly WHY with a specific news catalyst
 - Include at least one story about sector rotation or money flow patterns
@@ -154,7 +154,13 @@ function buildFallbackReport(
 
   const watchToday: string[] = [];
   if (upcomingEarnings.length > 0) {
-    watchToday.push(`Upcoming earnings: ${upcomingEarnings.join(', ')}`);
+    watchToday.push(`Earnings to watch: ${upcomingEarnings.join(', ')}`);
+  }
+  // Add top movers as watch items
+  if (movers.length > 0) {
+    for (const m of movers.slice(0, 2)) {
+      watchToday.push(`${m.ticker} ${m.dayChangePercent >= 0 ? 'up' : 'down'} ${Math.abs(m.dayChangePercent).toFixed(1)}% — watch for continuation or reversal`);
+    }
   }
 
   return {
