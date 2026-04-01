@@ -47,6 +47,8 @@ export interface ValueRadarStock {
   profitMargin: number | null;
   analystTargetPrice: number | null;
   upsideToTarget: number | null;
+  qualityScore: number | null;
+  qualityScoreCoverage: number | null;
   changePercent: number;
   changeDollar: number;
 }
@@ -64,6 +66,89 @@ function classifyTier(discountPct: number): 'deep_value' | 'attractive' | 'fair'
   if (discountPct <= -20) return 'attractive';
   if (discountPct <= 20) return 'fair';
   return 'expensive';
+}
+
+// ─── Quality Score ──────────────────────────────────────────────────────────
+
+/**
+ * Compute a business quality score (0–100) using weighted fundamentals.
+ * Weights: ROE 25%, Profit Margin 20%, Forward P/E Improvement 20%,
+ *          52-Week Position 20%, Dividend Yield 10%, Analyst Upside 5%.
+ * Returns null if less than 60% of weight is backed by data.
+ */
+function computeQualityScore(stock: {
+  returnOnEquity: number | null;
+  profitMargin: number | null;
+  currentPE: number;
+  forwardPE: number | null;
+  week52Pos: number | null;
+  dividendYield: number | null;
+  upsideToTarget: number | null;
+}): { qualityScore: number | null; qualityScoreCoverage: number | null } {
+  const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+  const factors: { weight: number; score: number | null }[] = [
+    // ROE: 0% → 0, 30%+ → 1. Negative → 0.
+    {
+      weight: 0.25,
+      score: stock.returnOnEquity != null
+        ? clamp01(Math.max(0, stock.returnOnEquity) / 0.30)
+        : null,
+    },
+    // Profit Margin: 0% → 0, 25%+ → 1. Negative → 0.
+    {
+      weight: 0.20,
+      score: stock.profitMargin != null
+        ? clamp01(Math.max(0, stock.profitMargin) / 0.25)
+        : null,
+    },
+    // Forward P/E Improvement: (currentPE - forwardPE) / currentPE. 0% → 0, 40%+ → 1.
+    // Negative forwardPE = distressed earnings → score 0, not null.
+    {
+      weight: 0.20,
+      score: stock.forwardPE != null && stock.currentPE > 0
+        ? (stock.forwardPE <= 0 ? 0 : clamp01(Math.max(0, (stock.currentPE - stock.forwardPE) / stock.currentPE) / 0.40))
+        : null,
+    },
+    // 52-Week Position: at low → 1, at high → 0.
+    {
+      weight: 0.20,
+      score: stock.week52Pos != null
+        ? 1 - clamp01(stock.week52Pos)
+        : null,
+    },
+    // Dividend Yield: 0% → 0, 6%+ → 1. dividendYield is always a percentage number (3.5 = 3.5%).
+    {
+      weight: 0.10,
+      score: stock.dividendYield != null
+        ? clamp01(Math.max(0, stock.dividendYield) / 6)
+        : null,
+    },
+    // Analyst Upside: 0% → 0, 30%+ → 1. upsideToTarget is a percentage number (30 = 30%).
+    {
+      weight: 0.05,
+      score: stock.upsideToTarget != null
+        ? clamp01(Math.max(0, stock.upsideToTarget) / 30)
+        : null,
+    },
+  ];
+
+  const available = factors.filter(f => f.score != null);
+  const totalAvailableWeight = available.reduce((sum, f) => sum + f.weight, 0);
+
+  // Coverage below 60% → suppress score
+  if (totalAvailableWeight < 0.60) {
+    return { qualityScore: null, qualityScoreCoverage: Math.round(totalAvailableWeight * 100) / 100 };
+  }
+
+  // Weighted sum, redistributed across available factors
+  const rawScore = available.reduce((sum, f) => sum + (f.weight / totalAvailableWeight) * f.score!, 0);
+  const qualityScore = Math.round(rawScore * 100);
+
+  return {
+    qualityScore,
+    qualityScoreCoverage: Math.round(totalAvailableWeight * 100) / 100,
+  };
 }
 
 // ─── Polygon Data Fetchers ──────────────────────────────────────────────────
@@ -374,9 +459,12 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       const week52High = screener.week52High != null ? Math.round(screener.week52High * 100) / 100 : null;
       const week52Low = screener.week52Low != null ? Math.round(screener.week52Low * 100) / 100 : null;
 
+      // dividendYield: always store as percentage number (3.5 = 3.5%)
+      // overview.dividendYield is decimal (0.035), screener fallback already computes pct
+      // Only trust overview when meaningfully positive; zero may be a data gap
       let dividendYield: number | null = null;
-      if (overview?.dividendYield != null) {
-        dividendYield = Math.round(overview.dividendYield * 100) / 100;
+      if (overview?.dividendYield != null && overview.dividendYield > 0) {
+        dividendYield = Math.round(overview.dividendYield * 100 * 100) / 100;
       } else if (screener.annualDividend != null && screener.annualDividend > 0) {
         dividendYield = Math.round(((screener.annualDividend / price) * 100) * 100) / 100;
       }
@@ -390,6 +478,11 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       if (analystTargetPrice != null && analystTargetPrice > 0) {
         upsideToTarget = Math.round(((analystTargetPrice - price) / price) * 100 * 100) / 100;
       }
+
+      const { qualityScore, qualityScoreCoverage } = computeQualityScore({
+        returnOnEquity, profitMargin: profitMarginVal, currentPE, forwardPE,
+        week52Pos, dividendYield, upsideToTarget,
+      });
 
       bootStocks.push({
         ticker,
@@ -416,6 +509,8 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
         profitMargin: profitMarginVal,
         analystTargetPrice,
         upsideToTarget,
+        qualityScore,
+        qualityScoreCoverage,
         changePercent: Math.round((quote?.changePercent ?? 0) * 100) / 100,
         changeDollar: Math.round((quote?.change ?? 0) * 100) / 100,
       });
@@ -506,10 +601,12 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     const week52High = screener?.week52High != null ? Math.round(screener.week52High * 100) / 100 : null;
     const week52Low = screener?.week52Low != null ? Math.round(screener.week52Low * 100) / 100 : null;
 
-    // Compute dividendYield: prefer overview, fallback to screener annualDividend / price
+    // dividendYield: always store as percentage number (3.5 = 3.5%)
+    // overview.dividendYield is decimal (0.035), screener fallback already computes pct
+    // Only trust overview when meaningfully positive; zero may be a data gap
     let dividendYield: number | null = null;
-    if (overview?.dividendYield != null) {
-      dividendYield = Math.round(overview.dividendYield * 100) / 100;
+    if (overview?.dividendYield != null && overview.dividendYield > 0) {
+      dividendYield = Math.round(overview.dividendYield * 100 * 100) / 100;
     } else if (screener?.annualDividend != null && screener.annualDividend > 0) {
       dividendYield = Math.round(((screener.annualDividend / price) * 100) * 100) / 100;
     }
@@ -525,6 +622,11 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
     if (analystTargetPrice != null && analystTargetPrice > 0) {
       upsideToTarget = Math.round(((analystTargetPrice - price) / price) * 100 * 100) / 100;
     }
+
+    const { qualityScore, qualityScoreCoverage } = computeQualityScore({
+      returnOnEquity, profitMargin, currentPE, forwardPE,
+      week52Pos, dividendYield, upsideToTarget,
+    });
 
     stocks.push({
       ticker: entry.ticker,
@@ -551,6 +653,8 @@ export async function getValueRadarData(): Promise<ValueRadarResponse> {
       profitMargin,
       analystTargetPrice,
       upsideToTarget,
+      qualityScore,
+      qualityScoreCoverage,
       changePercent: Math.round((quote?.changePercent ?? 0) * 100) / 100,
       changeDollar: Math.round((quote?.change ?? 0) * 100) / 100,
     });
