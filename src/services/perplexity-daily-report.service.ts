@@ -62,7 +62,7 @@ const SYSTEM_PROMPT = `You are a Wall Street morning desk analyst writing a prem
 
 Return ONLY valid JSON with this structure:
 {
-  "greeting": "Brief, contextual greeting referencing today's main theme",
+  "greeting": "One-sentence market headline. Do NOT include the date, 'morning brief', 'recap', or 'good morning' — just the key market theme and portfolio impact.",
   "marketOverview": "4-6 sentences covering: major index moves with exact percentages, key macro drivers (yields, oil, dollar, VIX), geopolitical catalysts, and what's driving sentiment today. Include specific numbers — Fed rate, 10Y yield level, oil price, VIX level. This should read like the opening paragraph of a Goldman Sachs morning note.",
   "portfolioSummary": "4-6 sentences analyzing the user's specific holdings: which positions drove gains/losses and WHY (not just that they moved), how the portfolio performed vs SPY, any notable sector rotation affecting holdings, and one forward-looking insight. Reference specific company news, analyst actions, or earnings that affected their stocks TODAY.",
   "positionMoves": [
