@@ -253,35 +253,80 @@ export async function checkAnalystUpdates(tickers: string[]): Promise<void> {
 }
 
 export async function getAnalystEvents(limit = 50, ticker?: string, userId?: string): Promise<any[]> {
-  const events = await prisma.analystEvent.findMany({
-    where: ticker ? { ticker: ticker.toUpperCase() } : undefined,
+  // If a specific ticker is requested, return events for that ticker only
+  if (ticker) {
+    const events = await prisma.analystEvent.findMany({
+      where: { ticker: ticker.toUpperCase() },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    if (!userId) return events;
+    const settings = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { analystLastReadAt: true },
+    });
+    const lastReadAt = settings?.analystLastReadAt;
+    return events.map((event) => ({
+      ...event,
+      read: lastReadAt ? event.createdAt <= lastReadAt : false,
+    }));
+  }
+
+  // For the feed: only show events for tickers the user actually holds
+  if (userId) {
+    const userHoldings = await prisma.holding.findMany({
+      where: { userId, shares: { gt: 0 } },
+      select: { ticker: true },
+      distinct: ['ticker'],
+    });
+    const heldTickers = userHoldings.map(h => h.ticker.toUpperCase());
+
+    if (heldTickers.length === 0) return [];
+
+    const events = await prisma.analystEvent.findMany({
+      where: { ticker: { in: heldTickers } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const settings = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { analystLastReadAt: true },
+    });
+    const lastReadAt = settings?.analystLastReadAt;
+    return events.map((event) => ({
+      ...event,
+      read: lastReadAt ? event.createdAt <= lastReadAt : false,
+    }));
+  }
+
+  // No userId — return all (admin/system usage)
+  return prisma.analystEvent.findMany({
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
-
-  if (!userId) return events;
-
-  const settings = await prisma.userSettings.findUnique({
-    where: { userId },
-    select: { analystLastReadAt: true },
-  });
-  const lastReadAt = settings?.analystLastReadAt;
-
-  return events.map((event) => ({
-    ...event,
-    read: lastReadAt ? event.createdAt <= lastReadAt : false,
-  }));
 }
 
 export async function getUnreadAnalystCount(userId: string): Promise<number> {
-  // Per-user unread: events created after user's last read timestamp
+  // Only count events for tickers the user actually holds
+  const userHoldings = await prisma.holding.findMany({
+    where: { userId, shares: { gt: 0 } },
+    select: { ticker: true },
+    distinct: ['ticker'],
+  });
+  const heldTickers = userHoldings.map(h => h.ticker.toUpperCase());
+  if (heldTickers.length === 0) return 0;
+
   const settings = await prisma.userSettings.findUnique({
     where: { userId },
     select: { analystLastReadAt: true },
   });
   const lastReadAt = settings?.analystLastReadAt;
   return prisma.analystEvent.count({
-    where: lastReadAt ? { createdAt: { gt: lastReadAt } } : {},
+    where: {
+      ticker: { in: heldTickers },
+      ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
+    },
   });
 }
 
