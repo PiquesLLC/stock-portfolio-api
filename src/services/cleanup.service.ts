@@ -51,7 +51,22 @@ export async function cleanupStaleData(): Promise<void> {
     }).catch(() => ({ count: 0 }));
     totalDeleted += social.count;
 
-    console.log(`[Cleanup] Removed ${totalDeleted} stale records (snapshots: ${snapshots.count}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count})`);
+    // 7. Dead letter entries older than 14 days
+    const deadLetterCutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const deadLetters = await prisma.deadLetterEntry.deleteMany({
+      where: { createdAt: { lt: deadLetterCutoff } },
+    }).catch(() => ({ count: 0 }));
+    totalDeleted += deadLetters.count;
+
+    // 8. Expired or revoked refresh tokens
+    const expiredTokens = await prisma.refreshToken.deleteMany({
+      where: { OR: [{ expiresAt: { lt: now } }, { revokedAt: { not: null } }] },
+    }).catch(() => ({ count: 0 }));
+    totalDeleted += expiredTokens.count;
+
+    await prisma.$executeRawUnsafe('PRAGMA wal_checkpoint(TRUNCATE)').catch(() => {});
+
+    console.log(`[Cleanup] Removed ${totalDeleted} stale records (snapshots: ${snapshots.count}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count}, deadLetters: ${deadLetters.count}, expiredTokens: ${expiredTokens.count})`);
   } catch (err) {
     console.error('[Cleanup] Failed:', (err as Error).message);
   }
