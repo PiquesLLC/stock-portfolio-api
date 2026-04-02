@@ -163,6 +163,16 @@ function buildFallbackReport(
     }
   }
 
+  // Build positionMoves from top movers
+  const allMovers = sortedHoldings
+    .filter(h => Math.abs(h.dayChangePercent) > 0.1)
+    .slice(0, 5);
+  const positionMoves = allMovers.map((h: any) => ({
+    ticker: h.ticker,
+    changePercent: h.dayChangePercent ?? 0,
+    reason: `${h.ticker} ${h.dayChangePercent >= 0 ? 'gained' : 'lost'} ${Math.abs(h.dayChangePercent).toFixed(1)}% today.`,
+  }));
+
   return {
     generatedAt: new Date().toISOString(),
     greeting: weekend ? 'Happy weekend!' : 'Good morning!',
@@ -170,6 +180,7 @@ function buildFallbackReport(
     portfolioSummary: `Your portfolio ($${totalValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}) is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% ($${Math.abs(dollarChange).toFixed(0)}) today.`,
     topStories: fallbackStories.slice(0, 5),
     watchToday,
+    positionMoves,
     cached: false,
     _fallback: true,
   } as DailyReportResponse;
@@ -277,7 +288,7 @@ function buildDailyReportFromPayload(
     greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 250))),
     marketOverview: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview))), 1000),
     portfolioSummary: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary))), 1000),
-    positionMoves: positionMoves && positionMoves.length > 0 ? positionMoves : undefined,
+    positionMoves: positionMoves && positionMoves.length > 0 ? positionMoves : fallback.positionMoves,
     topStories: topStories.length > 0 ? topStories : fallback.topStories,
     questionsOfTheDay: questionsOfTheDay && questionsOfTheDay.length > 0 ? questionsOfTheDay : undefined,
     watchToday: watchToday.length > 0 ? watchToday : fallback.watchToday,
