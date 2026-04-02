@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { Request, Response } from 'express';
 import { config } from '../config';
 import { getFinnhubStatus } from '../utils/finnhub';
@@ -10,7 +11,24 @@ import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount } from '../services/job-runner.service';
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
-  res.json({ status: 'ok' });
+  const response: {
+    status: 'ok';
+    disk?: {
+      totalMB: number;
+      freeMB: number;
+      usedPercent: number;
+    };
+  } = { status: 'ok' };
+
+  if (fs.existsSync('/data')) {
+    const stats = fs.statfsSync('/data');
+    const totalMB = Math.round((stats.bsize * stats.blocks) / 1024 / 1024);
+    const freeMB = Math.round((stats.bsize * stats.bavail) / 1024 / 1024);
+    const usedPercent = Math.round(((totalMB - freeMB) / totalMB) * 100);
+    response.disk = { totalMB, freeMB, usedPercent };
+  }
+
+  res.json(response);
 }
 
 export async function authMetrics(req: Request, res: Response): Promise<void> {
