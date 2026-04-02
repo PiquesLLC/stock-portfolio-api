@@ -296,6 +296,25 @@ function buildDailyReportFromPayload(
   };
 }
 
+function salvagePositionMoves(source: string): { ticker: string; changePercent: number; reason: string }[] {
+  const movesMatch = source.match(/"positionMoves"\s*:\s*\[([\s\S]*?)\]\s*(?:,|})/i);
+  if (!movesMatch) return [];
+
+  const moves: { ticker: string; changePercent: number; reason: string }[] = [];
+  const moveRegex = /\{[\s\S]*?"ticker"\s*:\s*"((?:\\.|[^"\\])*)"[\s\S]*?"changePercent"\s*:\s*(-?\d+(?:\.\d+)?)[\s\S]*?"reason"\s*:\s*"((?:\\.|[^"\\])*)"[\s\S]*?\}/g;
+
+  for (const match of movesMatch[1].matchAll(moveRegex)) {
+    const ticker = decodeJsonFragment(match[1]).trim().toUpperCase();
+    const changePercent = parseFloat(match[2]);
+    const reason = truncateCleanly(sanitizeContent(stripLeakedTags(decodeJsonFragment(match[3]))), 300);
+    if (ticker && reason) {
+      moves.push({ ticker, changePercent: isNaN(changePercent) ? 0 : changePercent, reason });
+    }
+  }
+
+  return moves.slice(0, 5);
+}
+
 function salvagePartialDailyReport(content: string, fallback: DailyReportResponse): DailyReportResponse | null {
   const extracted = extractJson(content) || content;
   const partial = {
@@ -303,6 +322,7 @@ function salvagePartialDailyReport(content: string, fallback: DailyReportRespons
     marketOverview: extractStringField(extracted, 'marketOverview'),
     portfolioSummary: extractStringField(extracted, 'portfolioSummary'),
     topStories: salvageTopStories(extracted),
+    positionMoves: salvagePositionMoves(extracted),
     watchToday: extractStringArrayField(extracted, 'watchToday'),
   };
 
@@ -461,7 +481,8 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       `Top: ${holdingsSummary}\n` +
       `News:\n${newsSummary}\n` +
       (economicSummary ? `Macro: ${economicSummary}\n` : '') +
-      earningsSummaryLine;
+      earningsSummaryLine +
+      `\nIMPORTANT: You MUST include "positionMoves" in your JSON response. Pick the 3-5 holdings with the largest absolute % moves from the portfolio data above and explain the specific catalyst for each.`;
 
     // How much time is left for Perplexity after data gathering?
     const elapsedSoFar = Date.now() - startTime;
