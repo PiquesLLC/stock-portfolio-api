@@ -91,7 +91,7 @@ export const config = {
   mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM
   resendApiKey: process.env.RESEND_API_KEY || '',
   resendFromEmail: process.env.RESEND_FROM_EMAIL || 'noreply@nalaai.com',
-  emailVerificationEnabled: process.env.EMAIL_VERIFICATION_ENABLED === 'true',
+  emailVerificationEnabled: process.env.EMAIL_VERIFICATION_ENABLED !== 'false',
 
   // Plaid
   plaidClientId: process.env.PLAID_CLIENT_ID || '',
@@ -119,7 +119,7 @@ export const config = {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean),
-  waitlistEnabled: process.env.WAITLIST_ENABLED !== 'false',
+  waitlistEnabled: process.env.WAITLIST_ENABLED === 'true',
   waitlistNotifyEmail: process.env.WAITLIST_NOTIFY_EMAIL || '',
   waitlistAdminEmails: (process.env.WAITLIST_ADMIN_EMAILS || process.env.WAITLIST_NOTIFY_EMAIL || '')
     .split(',')

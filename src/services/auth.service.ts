@@ -246,7 +246,7 @@ export function verifyTokenDetailed(token: string): { payload: JwtPayload | null
 export async function loginWithPassword(
   username: string,
   password: string
-): Promise<LoginResponse | MfaChallengeResponse | null> {
+): Promise<LoginResponse | MfaChallengeResponse | { error: string } | null> {
   const user = await prisma.user.findUnique({
     where: { username },
     select: {
@@ -256,10 +256,23 @@ export async function loginWithPassword(
       email: true,
       emailVerified: true,
       passwordHash: true,
+      failedLoginAttempts: true,
+      lockedUntil: true,
       plan: true,
       planExpiresAt: true,
     },
-  });
+  } as any) as {
+    id: string;
+    username: string;
+    displayName: string;
+    email: string | null;
+    emailVerified: boolean;
+    passwordHash: string | null;
+    failedLoginAttempts: number;
+    lockedUntil: Date | null;
+    plan: string;
+    planExpiresAt: Date | null;
+  } | null;
 
   if (!user) {
     return null;
@@ -270,9 +283,41 @@ export async function loginWithPassword(
     return null;
   }
 
+  // Account lockout: return null (same as invalid credentials) to avoid leaking username existence
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    return null;
+  }
+
+  // If lock has expired, reset attempts before checking password
+  const effectiveAttempts = (user.lockedUntil && user.lockedUntil <= new Date()) ? 0 : user.failedLoginAttempts;
+
   const isValid = await verifyPassword(password, user.passwordHash);
   if (!isValid) {
+    const nextFailedLoginAttempts = effectiveAttempts + 1;
+    const lockoutThreshold = 10;
+    const lockoutDurationMs = 30 * 60 * 1000;
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: nextFailedLoginAttempts,
+        lockedUntil: nextFailedLoginAttempts >= lockoutThreshold
+          ? new Date(Date.now() + lockoutDurationMs)
+          : null,
+      },
+    } as any);
+
     return null;
+  }
+
+  if (user.failedLoginAttempts !== 0 || user.lockedUntil !== null) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    } as any);
   }
 
   // Check if MFA is enabled — if so, return a challenge instead of tokens
@@ -413,6 +458,8 @@ export async function emailExists(email: string): Promise<boolean> {
 // Usernames that conflict with API route prefixes, UI tabs, or common reserved words.
 // Checked case-insensitively during signup.
 const RESERVED_USERNAMES = new Set([
+  // System / admin
+  '_system', 'system',
   // API route prefixes
   'auth', 'health', 'market', 'portfolio', 'dividends', 'settings', 'insights',
   'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
@@ -425,10 +472,37 @@ const RESERVED_USERNAMES = new Set([
   'admin', 'api', 'www', 'app', 'help', 'support', 'about', 'login', 'signup',
   'register', 'invite', 'account', 'dashboard', 'home', 'index', 'privacy', 'terms',
   'tos', 'null', 'undefined', 'favicon', 'robots', 'sitemap',
+  // Authority / trust impersonation
+  'moderator', 'mod', 'staff', 'official', 'verified', 'customer_service',
+  'helpdesk', 'operator', 'ceo', 'cto', 'cfo', 'founder', 'developer',
+  'engineer', 'security', 'root', 'superuser', 'sysadmin',
+  // Brokerage / fintech brand impersonation
+  'robinhood', 'fidelity', 'schwab', 'vanguard', 'etrade', 'webull',
+  'coinbase', 'binance', 'ameritrade', 'merrill', 'sofi', 'wealthfront',
+  'betterment', 'charles_schwab', 'td_ameritrade', 'interactive_brokers',
+  // Profanity / slurs
+  'fuck', 'shit', 'ass', 'asshole', 'bitch', 'bastard', 'damn', 'dick',
+  'pussy', 'cock', 'cunt', 'fag', 'faggot', 'nigger', 'nigga', 'retard',
+  'slut', 'whore', 'rape', 'nazi', 'hitler', 'kkk',
 ]);
 
+// Prefixes that indicate impersonation or abuse
+const BLOCKED_PREFIXES = ['admin_', 'mod_', 'staff_', 'official_'];
+
+// Brand substring — always blocked regardless of position
+const BLOCKED_SUBSTRINGS_ALWAYS = ['nala'];
+
+// Profanity patterns — matched as whole segments between word boundaries (underscores/digits/start/end)
+// This avoids false positives like "scunthorpe" or "shitake"
+const BLOCKED_PROFANITY_PATTERN = /(?:^|_)(fuck|shit|nigger|nigga|faggot|cunt|fag)(?:_|$)/;
+
 export function isReservedUsername(username: string): boolean {
-  return RESERVED_USERNAMES.has(username.toLowerCase());
+  const lower = username.toLowerCase();
+  if (RESERVED_USERNAMES.has(lower)) return true;
+  if (BLOCKED_PREFIXES.some((p) => lower.startsWith(p))) return true;
+  if (BLOCKED_SUBSTRINGS_ALWAYS.some((s) => lower.includes(s))) return true;
+  if (BLOCKED_PROFANITY_PATTERN.test(lower)) return true;
+  return false;
 }
 
 export async function signup(
