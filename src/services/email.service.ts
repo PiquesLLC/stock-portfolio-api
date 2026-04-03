@@ -284,6 +284,64 @@ export async function sendPerformanceReport(to: string, html: string, period: st
   });
 }
 
+export async function sendWelcomeEmail(to: string, displayName: string): Promise<void> {
+  const r = getResend();
+  const firstName = displayName.split(/\s+/)[0] || displayName;
+  if (!r) {
+    console.log(`[Email] Dev mode — welcome email for ${to} (${firstName})`);
+    return;
+  }
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to,
+    subject: `Welcome to Nala, ${firstName}!`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 32px; background: #050505; border-radius: 16px;">
+        <div style="text-align: center; margin-bottom: 28px;">
+          <img src="https://nalaai.com/north-signal-logo.png" alt="Nala" width="48" height="48" style="display: inline-block;" />
+        </div>
+        <h1 style="color: #00c805; margin: 0 0 8px; font-size: 24px; font-weight: 700; text-align: center;">Welcome to Nala</h1>
+        <p style="color: rgba(255,255,255,0.6); font-size: 15px; line-height: 1.6; text-align: center; margin: 0 0 28px;">
+          Hey ${escapeHtml(firstName)}, your account is ready. Here's what you can do:
+        </p>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 28px;">
+          <tr>
+            <td style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+              <span style="color: #00c805; font-size: 15px; margin-right: 8px;">1.</span>
+              <span style="color: #fff; font-size: 14px;">Add your holdings to track your portfolio</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+              <span style="color: #00c805; font-size: 15px; margin-right: 8px;">2.</span>
+              <span style="color: #fff; font-size: 14px;">Get your daily AI briefing on what moved</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+              <span style="color: #00c805; font-size: 15px; margin-right: 8px;">3.</span>
+              <span style="color: #fff; font-size: 14px;">Explore Discover for market insights</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 12px 16px;">
+              <span style="color: #00c805; font-size: 15px; margin-right: 8px;">4.</span>
+              <span style="color: #fff; font-size: 14px;">Ask Nala anything about your investments</span>
+            </td>
+          </tr>
+        </table>
+        <div style="text-align: center; margin-bottom: 28px;">
+          <a href="https://nalaai.com" style="display: inline-block; background: #00c805; color: #000; font-size: 14px; font-weight: 700; padding: 12px 32px; border-radius: 8px; text-decoration: none;">Open Nala</a>
+        </div>
+        <p style="color: rgba(255,255,255,0.3); font-size: 12px; text-align: center; margin: 0;">
+          Questions? Reach us at <a href="mailto:support@nalaai.com" style="color: rgba(255,255,255,0.4);">support@nalaai.com</a>
+        </p>
+        <p style="color: rgba(255,255,255,0.15); font-size: 11px; text-align: center; margin: 16px 0 0;">Piques LLC</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendNewSignupNotification(adminEmail: string, username: string, email: string, displayName: string): Promise<void> {
   const r = getResend();
   const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });

@@ -9,8 +9,9 @@ const passwordSchema = z
   .regex(/[0-9]/, 'Password must include a number');
 
 // Reserved usernames that cannot be registered.
-// Blocks API route prefixes, UI tab names, and common reserved words
-// to prevent collision with shareable profile URLs (nalaai.com/<username>).
+// Blocks API route prefixes, UI tab names, common reserved words, brand
+// impersonation, authority impersonation, and profanity to prevent abuse
+// on shareable profile URLs (nalaai.com/<username>).
 // Defense-in-depth: auth.service.ts has the same check.
 const RESERVED_USERNAMES = new Set([
   // System / admin
@@ -18,15 +19,40 @@ const RESERVED_USERNAMES = new Set([
   // API route prefixes
   'auth', 'health', 'market', 'portfolio', 'dividends', 'settings', 'insights',
   'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
-  'alerts', 'analyst', 'milestones', 'fundamentals', 'watchlists', 'creator',
-  'referral', 'notifications', 'plaid', 'billing',
+  'alerts', 'price-alerts', 'analyst', 'milestones', 'fundamentals', 'watchlists',
+  'stock-follows', 'creator', 'referral', 'notifications', 'plaid', 'billing', 'waitlist',
   // UI tab names / routes
   'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
   // Common reserved words
   'api', 'www', 'app', 'help', 'about', 'login', 'signup', 'register', 'invite',
   'account', 'dashboard', 'home', 'index', 'privacy', 'terms', 'tos',
   'null', 'undefined', 'favicon', 'robots', 'sitemap',
+  // Authority / trust impersonation
+  'moderator', 'mod', 'staff', 'official', 'verified', 'customer_service',
+  'helpdesk', 'operator', 'ceo', 'cto', 'cfo', 'founder', 'developer',
+  'engineer', 'security', 'root', 'superuser', 'sysadmin',
+  // Brokerage / fintech brand impersonation
+  'robinhood', 'fidelity', 'schwab', 'vanguard', 'etrade', 'webull',
+  'coinbase', 'binance', 'ameritrade', 'merrill', 'sofi', 'wealthfront',
+  'betterment', 'charles_schwab', 'td_ameritrade', 'interactive_brokers',
+  // Profanity / slurs
+  'fuck', 'shit', 'ass', 'asshole', 'bitch', 'bastard', 'damn', 'dick',
+  'pussy', 'cock', 'cunt', 'fag', 'faggot', 'nigger', 'nigga', 'retard',
+  'slut', 'whore', 'rape', 'nazi', 'hitler', 'kkk',
 ]);
+
+const BLOCKED_PREFIXES = ['admin_', 'mod_', 'staff_', 'official_'];
+const BLOCKED_SUBSTRINGS_ALWAYS = ['nala'];
+const BLOCKED_PROFANITY_PATTERN = /(?:^|_)(fuck|shit|nigger|nigga|faggot|cunt|fag)(?:_|$)/;
+
+function isReservedUsername(val: string): boolean {
+  const lower = val.toLowerCase();
+  if (RESERVED_USERNAMES.has(lower)) return true;
+  if (BLOCKED_PREFIXES.some((p) => lower.startsWith(p))) return true;
+  if (BLOCKED_SUBSTRINGS_ALWAYS.some((s) => lower.includes(s))) return true;
+  if (BLOCKED_PROFANITY_PATTERN.test(lower)) return true;
+  return false;
+}
 
 // Username format: alphanumeric + underscores, 3-20 chars
 const usernameSchema = z
@@ -34,7 +60,7 @@ const usernameSchema = z
   .min(3, 'Username must be at least 3 characters')
   .max(20, 'Username must be at most 20 characters')
   .regex(/^[a-zA-Z0-9_]+$/, 'Username must contain only letters, numbers, and underscores')
-  .refine((val) => !RESERVED_USERNAMES.has(val.toLowerCase()), 'This username is reserved');
+  .refine((val) => !isReservedUsername(val), 'This username is not allowed');
 
 export const loginSchema = z.object({
   username: z.string({ error: 'Username is required' }).min(1, 'Username is required'),

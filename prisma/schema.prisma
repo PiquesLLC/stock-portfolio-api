@@ -79,6 +79,8 @@ model User {
   username               String                 @unique
   displayName            String
   passwordHash           String?
+  failedLoginAttempts    Int                    @default(0)
+  lockedUntil            DateTime?
   plan                   String                 @default("free")
   stripeCustomerId       String?                @unique
   stripeSubscriptionId   String?

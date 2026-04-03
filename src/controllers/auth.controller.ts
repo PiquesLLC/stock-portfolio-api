@@ -19,6 +19,7 @@ import {
   resetPasswordWithCode,
   generateAccessToken,
   generateRefreshToken,
+  isReservedUsername,
 } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
@@ -35,7 +36,7 @@ import {
   formatZodError,
 } from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
-import { getCapturedEmailVerificationCode, sendNewSignupNotification } from '../services/email.service';
+import { getCapturedEmailVerificationCode, sendNewSignupNotification, sendWelcomeEmail } from '../services/email.service';
 
 
 
@@ -126,6 +127,11 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
 
     if (!result) {
       res.status(401).json({ error: 'Invalid username or password' });
+      return;
+    }
+
+    if ('error' in result) {
+      res.status(401).json({ error: result.error });
       return;
     }
 
@@ -296,6 +302,11 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
       ...(isNative ? { accessToken: result.token, refreshToken: result.refreshToken, token: result.token } : {}),
     };
     res.status(201).json(signupBody);
+
+    // Send welcome email to new user (fire and forget)
+    sendWelcomeEmail(email, displayName).catch(err => {
+      console.warn('[Signup] Failed to send welcome email:', err instanceof Error ? err.message : String(err));
+    });
 
     // Notify admin of new signup (fire and forget)
     if (config.waitlistNotifyEmail) {
@@ -510,6 +521,11 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
 
     if (!username) {
       res.status(400).json({ error: 'Username is required' });
+      return;
+    }
+
+    if (isReservedUsername(username)) {
+      res.json({ available: false });
       return;
     }
 
