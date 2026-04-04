@@ -1,19 +1,31 @@
 import prisma from '../utils/prisma';
 
+// UUID v4 format — userIds in the User table. Usernames cannot contain hyphens
+// (regex is [a-zA-Z0-9_]+), so the two formats are disjoint and safe to discriminate.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve a referral code (userId UUID or username) to a stable userId.
+ * UUID path is preferred — links survive username changes.
+ * Username path is kept for backwards compat with old referral links.
+ */
+async function resolveReferrer(referralCode: string): Promise<{ id: string } | null> {
+  if (UUID_PATTERN.test(referralCode)) {
+    return prisma.user.findUnique({ where: { id: referralCode }, select: { id: true } });
+  }
+  return prisma.user.findUnique({ where: { username: referralCode }, select: { id: true } });
+}
+
 /**
  * Process a referral during signup.
- * Looks up the referrer by username (referral code = username),
- * sets referredBy on the new user, and creates a Referral record.
+ * Referral code may be a userId (UUID, preferred) or a username (legacy).
+ * Sets referredBy on the new user and creates a Referral record.
  */
 export async function processReferral(
   referredUserId: string,
   referralCode: string
 ): Promise<{ referrerId: string } | null> {
-  // Referral code is the referrer's username
-  const referrer = await prisma.user.findUnique({
-    where: { username: referralCode },
-    select: { id: true },
-  });
+  const referrer = await resolveReferrer(referralCode);
 
   if (!referrer || referrer.id === referredUserId) return null;
 
@@ -108,12 +120,10 @@ export async function getReferralStats(userId: string) {
 
 /**
  * Validate a referral code (check if user exists).
+ * Accepts userId (UUID, preferred) or username (legacy).
  */
 export async function validateReferralCode(code: string): Promise<{ valid: boolean }> {
-  const user = await prisma.user.findUnique({
-    where: { username: code },
-    select: { id: true },
-  });
+  const user = await resolveReferrer(code);
   if (!user) return { valid: false };
   return { valid: true };
 }

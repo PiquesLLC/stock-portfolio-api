@@ -8,6 +8,7 @@ import {
   signupHandler,
   checkUsernameHandler,
   changePasswordHandler,
+  changeUsernameHandler,
   deleteAccountHandler,
   refreshHandler,
   verifyEmailHandler,
@@ -76,6 +77,9 @@ router.get('/check-username/:username', enumerationLimiter, checkUsernameHandler
 
 // POST /auth/change-password - Change password (allow unverified)
 router.post('/change-password', mutationLimiter, requireAuthAllowUnverified, changePasswordHandler);
+
+// POST /auth/change-username - Change username and reissue auth cookies
+router.post('/change-username', mutationLimiter, requireAuthAllowUnverified, changeUsernameHandler);
 
 // DELETE /auth/delete-account - Permanently delete account (allow unverified)
 router.delete('/delete-account', mutationLimiter, requireAuthAllowUnverified, deleteAccountHandler);

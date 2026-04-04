@@ -432,6 +432,68 @@ export async function changePassword(
   return { success: true };
 }
 
+export async function changeUsername(
+  userId: string,
+  newUsername: string,
+  oldUsername: string,
+  meta?: { ipAddress?: string; userAgent?: string },
+): Promise<{
+  success: boolean;
+  error?: 'USERNAME_TAKEN' | 'SAME_USERNAME' | 'USER_NOT_FOUND';
+  user?: { id: string; username: string; plan: string; planExpiresAt: Date | null; emailVerified: boolean };
+}> {
+  if (newUsername.toLowerCase() === oldUsername.toLowerCase()) {
+    return { success: false, error: 'SAME_USERNAME' };
+  }
+
+  const existingUsers = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "User" WHERE LOWER(username) = LOWER(${newUsername}) LIMIT 1
+  `;
+  const existingUser = existingUsers[0] ?? null;
+
+  if (existingUser && existingUser.id !== userId) {
+    return { success: false, error: 'USERNAME_TAKEN' };
+  }
+
+  try {
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { username: newUsername },
+        select: {
+          id: true,
+          username: true,
+          plan: true,
+          planExpiresAt: true,
+          emailVerified: true,
+        },
+      });
+
+      await tx.usernameChangeAudit.create({
+        data: {
+          userId,
+          oldUsername,
+          newUsername,
+          ipAddress: meta?.ipAddress,
+          userAgent: meta?.userAgent,
+        },
+      });
+
+      return user;
+    });
+
+    return { success: true, user: updatedUser };
+  } catch (e: unknown) {
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
+      return { success: false, error: 'USERNAME_TAKEN' };
+    }
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2025') {
+      return { success: false, error: 'USER_NOT_FOUND' };
+    }
+    throw e;
+  }
+}
+
 /**
  * Check if a username is already taken
  */

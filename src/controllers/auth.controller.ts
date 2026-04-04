@@ -8,6 +8,7 @@ import {
   usernameExists,
   emailExists,
   changePassword,
+  changeUsername,
   verifyPassword,
   rotateRefreshToken,
   revokeAllRefreshTokens,
@@ -28,6 +29,7 @@ import {
   signupSchema,
   setPasswordSchema,
   changePasswordSchema,
+  changeUsernameSchema,
   deleteAccountSchema,
   resendVerificationSchema,
   forgotPasswordSchema,
@@ -566,6 +568,74 @@ export async function changePasswordHandler(req: AuthRequest, res: Response): Pr
   } catch (error: unknown) {
     console.error('Change password error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to change password' });
+  }
+}
+
+/**
+ * POST /auth/change-username
+ */
+export async function changeUsernameHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const parsed = changeUsernameSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const newUsername = parsed.data.username;
+    const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString();
+    const userAgent = req.headers['user-agent'];
+    const result = await changeUsername(req.user.userId, newUsername, req.user.username, { ipAddress, userAgent });
+
+    if (!result.success) {
+      if (result.error === 'USERNAME_TAKEN') {
+        res.status(409).json({ error: 'Username is already taken' });
+        return;
+      }
+      if (result.error === 'SAME_USERNAME') {
+        res.status(400).json({ error: 'Username must be different from your current username' });
+        return;
+      }
+      if (result.error === 'USER_NOT_FOUND') {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+    }
+
+    if (!result.user) {
+      res.status(500).json({ error: 'Failed to change username' });
+      return;
+    }
+
+    // Revoke the current session's refresh token family so the old token
+    // in the DB cannot be reused if it was ever exfiltrated. Other device
+    // sessions (separate families) are preserved.
+    const oldRefreshToken = req.cookies?.refreshToken;
+    if (oldRefreshToken) {
+      await revokeRefreshTokenFamily(oldRefreshToken);
+    }
+
+    const token = generateAccessToken({
+      userId: result.user.id,
+      username: result.user.username,
+      plan: result.user.plan,
+      planExpiresAt: result.user.planExpiresAt ? result.user.planExpiresAt.toISOString() : null,
+      emailVerified: result.user.emailVerified,
+    });
+    const refreshToken = await generateRefreshToken(result.user.id);
+    const { accessOptions, refreshOptions } = getCookieOptions(req);
+    res.cookie('authToken', token, accessOptions);
+    res.cookie('refreshToken', refreshToken, refreshOptions);
+
+    res.json({ username: result.user.username, message: 'Username changed successfully' });
+  } catch (error: unknown) {
+    console.error('Change username error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to change username' });
   }
 }
 

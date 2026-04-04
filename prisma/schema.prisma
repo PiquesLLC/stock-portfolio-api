@@ -116,6 +116,7 @@ model User {
   lots                   Lot[]
   dividendReinvestments  DividendReinvestment[]
   refreshTokens          RefreshToken[]
+  usernameChanges        UsernameChangeAudit[]
   notificationAuditLogs  NotificationAuditLog[]
   consentRecords         ConsentRecord[]
   mfaMethods             MfaMethod[]
@@ -232,6 +233,20 @@ model RefreshToken {
   @@index([userId])
   @@index([token])
   @@index([expiresAt])
+}
+
+model UsernameChangeAudit {
+  id          String   @id @default(uuid())
+  userId      String
+  oldUsername String
+  newUsername String
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([newUsername])
 }
 
 model ConsentRecord {
