@@ -432,20 +432,22 @@ export async function changePassword(
   return { success: true };
 }
 
+class SameUsernameError extends Error {
+  constructor() {
+    super('SAME_USERNAME');
+    this.name = 'SameUsernameError';
+  }
+}
+
 export async function changeUsername(
   userId: string,
   newUsername: string,
-  oldUsername: string,
   meta?: { ipAddress?: string; userAgent?: string },
 ): Promise<{
   success: boolean;
   error?: 'USERNAME_TAKEN' | 'SAME_USERNAME' | 'USER_NOT_FOUND';
   user?: { id: string; username: string; plan: string; planExpiresAt: Date | null; emailVerified: boolean };
 }> {
-  if (newUsername.toLowerCase() === oldUsername.toLowerCase()) {
-    return { success: false, error: 'SAME_USERNAME' };
-  }
-
   const existingUsers = await prisma.$queryRaw<{ id: string }[]>`
     SELECT id FROM "User" WHERE LOWER(username) = LOWER(${newUsername}) LIMIT 1
   `;
@@ -456,7 +458,23 @@ export async function changeUsername(
   }
 
   try {
+    // Read oldUsername from DB inside the transaction — not from the JWT payload,
+    // which may be stale if the user renamed on another device.
     const updatedUser = await prisma.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { username: true },
+      });
+      if (!current) {
+        // Thrown with P2025-like shape so the outer catch maps to USER_NOT_FOUND
+        throw { code: 'P2025' };
+      }
+
+      const oldUsername = current.username;
+      if (newUsername.toLowerCase() === oldUsername.toLowerCase()) {
+        throw new SameUsernameError();
+      }
+
       const user = await tx.user.update({
         where: { id: userId },
         data: { username: newUsername },
@@ -484,6 +502,9 @@ export async function changeUsername(
 
     return { success: true, user: updatedUser };
   } catch (e: unknown) {
+    if (e instanceof SameUsernameError) {
+      return { success: false, error: 'SAME_USERNAME' };
+    }
     if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
       return { success: false, error: 'USERNAME_TAKEN' };
     }
@@ -498,11 +519,11 @@ export async function changeUsername(
  * Check if a username is already taken
  */
 export async function usernameExists(username: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { username },
-    select: { id: true },
-  });
-  return !!user;
+  // Case-insensitive lookup matches the unique-index constraint on LOWER(username).
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "User" WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `;
+  return rows.length > 0;
 }
 
 export async function emailExists(email: string): Promise<boolean> {

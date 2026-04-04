@@ -50,11 +50,12 @@ describe('POST /auth/change-username', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.username).toBe('new_handle');
-    // Service was called with current user id + new username + old username
+    // Service is called with user id + new username + meta (ip/user-agent).
+    // oldUsername is no longer passed — the service reads the current username
+    // from the DB inside the transaction to avoid trusting a stale JWT.
     expect(authService.changeUsername).toHaveBeenCalledWith(
       testUser.userId,
       'new_handle',
-      testUser.username,
       expect.objectContaining({
         ipAddress: expect.any(String),
       }),
