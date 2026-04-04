@@ -55,7 +55,7 @@ function isReservedUsername(val: string): boolean {
 }
 
 // Username format: alphanumeric + underscores, 3-20 chars
-const usernameSchema = z
+export const usernameSchema = z
   .string({ error: 'Username is required' })
   .min(3, 'Username must be at least 3 characters')
   .max(20, 'Username must be at most 20 characters')
@@ -91,6 +91,10 @@ export const setPasswordSchema = z.object({
 export const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Current password is required' }).min(1, 'Current password is required'),
   newPassword: passwordSchema,
+});
+
+export const changeUsernameSchema = z.object({
+  username: usernameSchema,
 });
 
 export const deleteAccountSchema = z.object({
