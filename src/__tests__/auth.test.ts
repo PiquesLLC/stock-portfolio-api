@@ -51,6 +51,8 @@ describe('Auth Service', () => {
     prismaMock.refreshToken.findFirst.mockResolvedValue(null);
     // Default: waitlist not blocking signup
     (prismaMock as any).waitlist.findUnique.mockResolvedValue({ status: 'approved' });
+    // Default: no existing user in case-insensitive username lookup
+    (prismaMock as any).$queryRaw.mockResolvedValue([]);
   });
 
   // â”€â”€ Password Hashing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -349,13 +351,18 @@ describe('Auth Service', () => {
   // â”€â”€ Username Exists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('usernameExists', () => {
     it('should return true for existing username', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'u1' });
+      (prismaMock as any).$queryRaw.mockResolvedValue([{ id: 'u1' }]);
       expect(await usernameExists('alice')).toBe(true);
     });
 
     it('should return false for unknown username', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null);
+      (prismaMock as any).$queryRaw.mockResolvedValue([]);
       expect(await usernameExists('ghost')).toBe(false);
+    });
+
+    it('should be case-insensitive', async () => {
+      (prismaMock as any).$queryRaw.mockResolvedValue([{ id: 'u1' }]);
+      expect(await usernameExists('ALICE')).toBe(true);
     });
   });
 
@@ -759,6 +766,8 @@ describe('Auth Routes (Integration)', () => {
     prismaMock.refreshToken.findFirst.mockResolvedValue(null);
     // Default: no Plaid items (for delete-account)
     prismaMock.plaidItem.findMany.mockResolvedValue([]);
+    // Default: no existing user in case-insensitive username lookup
+    (prismaMock as any).$queryRaw.mockResolvedValue([]);
     // Default: waitlist not blocking signup
     (prismaMock as any).waitlist.findUnique.mockResolvedValue({ status: 'approved' });
   });
@@ -940,8 +949,8 @@ describe('Auth Routes (Integration)', () => {
     });
 
     it('should return 409 for duplicate username', async () => {
-      // First findUnique for usernameExists check
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'existing-id' });
+      // usernameExists now uses case-insensitive $queryRaw
+      (prismaMock as any).$queryRaw.mockResolvedValue([{ id: 'existing-id' }]);
 
       const res = await request(app)
         .post('/auth/signup')
@@ -1135,7 +1144,7 @@ describe('Auth Routes (Integration)', () => {
   // â”€â”€ GET /auth/check-username/:username â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   describe('GET /auth/check-username/:username', () => {
     it('should return available: true for unused username', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null);
+      (prismaMock as any).$queryRaw.mockResolvedValue([]);
 
       const res = await request(app).get('/auth/check-username/newname');
 
@@ -1144,7 +1153,7 @@ describe('Auth Routes (Integration)', () => {
     });
 
     it('should return available: false for taken username', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({ id: 'u1' });
+      (prismaMock as any).$queryRaw.mockResolvedValue([{ id: 'u1' }]);
 
       const res = await request(app).get('/auth/check-username/alice');
 

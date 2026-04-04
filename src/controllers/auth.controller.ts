@@ -590,7 +590,7 @@ export async function changeUsernameHandler(req: AuthRequest, res: Response): Pr
     const newUsername = parsed.data.username;
     const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString();
     const userAgent = req.headers['user-agent'];
-    const result = await changeUsername(req.user.userId, newUsername, req.user.username, { ipAddress, userAgent });
+    const result = await changeUsername(req.user.userId, newUsername, { ipAddress, userAgent });
 
     if (!result.success) {
       if (result.error === 'USERNAME_TAKEN') {
@@ -614,8 +614,11 @@ export async function changeUsernameHandler(req: AuthRequest, res: Response): Pr
 
     // Revoke the current session's refresh token family so the old token
     // in the DB cannot be reused if it was ever exfiltrated. Other device
-    // sessions (separate families) are preserved.
-    const oldRefreshToken = req.cookies?.refreshToken;
+    // sessions (separate families) are preserved. Native/iOS clients may
+    // send the refresh token in the body rather than as a cookie.
+    const oldRefreshToken =
+      req.cookies?.refreshToken ||
+      (typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : undefined);
     if (oldRefreshToken) {
       await revokeRefreshTokenFamily(oldRefreshToken);
     }
