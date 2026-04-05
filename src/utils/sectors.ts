@@ -184,3 +184,8 @@ export const INDEX_SETS: Record<MarketIndex, Set<string>> = {
   DOW30: DOW_30,
   NASDAQ100: NASDAQ_100,
 };
+
+/** Union of SP500 + DOW30 + NASDAQ100 — every ticker the stock heatmap might display. */
+export const ALL_HEATMAP_TICKERS: string[] = Array.from(
+  new Set([...SP_500, ...DOW_30, ...NASDAQ_100])
+);

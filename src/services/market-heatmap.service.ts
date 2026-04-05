@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import prisma from '../utils/prisma';
 import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
+import { shouldServeSnapshot, loadSnapshot, getQuotesFromSnapshot } from './market-close-snapshot.service';
 import { yahooGet } from '../utils/yahoo-http';
 import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
 import { getPolygonSnapshotVolumes } from '../utils/polygon';
@@ -202,6 +203,16 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   const candleDays = PERIOD_DAYS[period];
   const needsPeriodChanges = period !== '1D' && candleDays > 0;
 
+  // When the market is CLOSED (weekend/holiday/overnight) and we have a
+  // captured snapshot on disk, serve quotes from it. This avoids hitting
+  // Polygon/Finnhub/Yahoo when market data isn't changing anyway, and
+  // eliminates the "0.00%" display caused by flaky batch fetches against
+  // a closed market. During PRE/REG/POST sessions we always use live quotes.
+  const useSnapshot = shouldServeSnapshot() && loadSnapshot() !== null;
+  const quotesPromise = useSnapshot
+    ? Promise.resolve(getQuotesFromSnapshot(uniqueTickers))
+    : fetchPrices(uniqueTickers);
+
   const parallelFetches: [
     Promise<{ quotes: Map<string, any> }>,
     Promise<any[]>,
@@ -210,7 +221,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     Promise<Map<string, number> | null>,
     Promise<Map<string, number> | null>,
   ] = [
-    fetchPrices(uniqueTickers),
+    quotesPromise,
     prisma.fundamentalsCache.findMany({
       where: { ticker: { in: uniqueTickers } },
       select: { ticker: true, overviewJson: true },
