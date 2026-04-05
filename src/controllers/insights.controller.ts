@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import prisma from '../utils/prisma';
 import {
   getHealthScore,
   getAttribution,
@@ -162,7 +163,8 @@ export async function getBriefingHandler(req: AuthRequest, res: Response): Promi
         ? periodParam as BriefingPeriod
         : 'daily';
     await validatePortfolioOwnership(portfolioId, req.user.userId);
-    const briefing = await getPortfolioBriefing(req.user.userId, portfolioId, period);
+    const userRow = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { timezone: true } });
+    const briefing = await getPortfolioBriefing(req.user.userId, portfolioId, period, userRow?.timezone ?? null);
     res.json(briefing);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {

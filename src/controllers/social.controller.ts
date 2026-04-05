@@ -17,6 +17,31 @@ import { reportUserBodySchema } from '../validators/report.validators';
 import { getProfileStats } from '../services/profile-stats.service';
 import { filterContent } from '../utils/content-filter';
 
+// IANA timezone validation — cache the allowed-list once at module load.
+// Falls back to try/catch with Intl.DateTimeFormat if supportedValuesOf isn't available.
+const SUPPORTED_TIMEZONES: Set<string> | null = (() => {
+  try {
+    const values = (Intl as any).supportedValuesOf?.('timeZone');
+    // Require non-empty array — an empty set would reject every timezone.
+    return Array.isArray(values) && values.length > 0 ? new Set<string>(values) : null;
+  } catch {
+    return null;
+  }
+})();
+
+export function isValidTimezone(tz: string): boolean {
+  // Fast path: canonical IANA names from the tzdata bundle.
+  if (SUPPORTED_TIMEZONES?.has(tz)) return true;
+  // Fallback: some canonical names (e.g., "UTC") aren't in supportedValuesOf
+  // but are still accepted by DateTimeFormat. Throws RangeError if invalid.
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 
 // POST /users/:userId/follow
@@ -331,6 +356,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
         profilePublic: true,
         region: true,
         showRegion: true,
+        timezone: true,
         holdingsVisibility: true,
         createdAt: true,
         settings: {
@@ -358,6 +384,7 @@ export async function getUserSettingsHandler(req: AuthRequest, res: Response): P
       profilePublic: user.profilePublic,
       region: user.region,
       showRegion: user.showRegion,
+      timezone: user.timezone,
       holdingsVisibility: user.holdingsVisibility,
       dripEnabled: user.settings?.dripEnabled ?? false,
       ytdBaselineValue: user.settings?.ytdBaselineValue ?? null,
@@ -391,6 +418,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
       profilePublic,
       region,
       showRegion,
+      timezone,
       holdingsVisibility,
       dripEnabled,
       bio,
@@ -406,6 +434,13 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (region !== undefined && !VALID_REGIONS.includes(region)) {
       res.status(400).json({ error: `Invalid region. Must be one of: NA, EU, APAC, or null` });
       return;
+    }
+
+    if (timezone !== undefined && timezone !== null) {
+      if (typeof timezone !== 'string' || !isValidTimezone(timezone)) {
+        res.status(400).json({ error: 'timezone must be a valid IANA timezone name or null' });
+        return;
+      }
     }
 
     const VALID_VISIBILITY = ['all', 'top5', 'sectors', 'hidden'];
@@ -472,6 +507,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     }
     if (region !== undefined) userData.region = region;
     if (showRegion !== undefined) userData.showRegion = showRegion;
+    if (timezone !== undefined) userData.timezone = timezone;
     if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
     if (bio !== undefined) {
       if (typeof bio === 'string' && bio.trim().length > 0) {
@@ -515,6 +551,7 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
         profilePublic: true,
         region: true,
         showRegion: true,
+        timezone: true,
         holdingsVisibility: true,
         bio: true,
       },
