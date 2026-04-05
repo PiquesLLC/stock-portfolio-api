@@ -463,6 +463,63 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
   return [];
 }
 
+/**
+ * Build Quote objects from daily candles for tickers that failed live-quote fetch.
+ * Used as a fallback when Polygon's snapshot endpoint drops tickers on weekends.
+ * Historical daily candles are stable archived data (via Polygon Aggregates endpoint,
+ * unrelated to the flaky snapshot endpoint).
+ *
+ * "Change" is computed as (last close - prior close) / prior close — i.e., the
+ * last trading day's move. On Saturday, this is Thursday vs Wednesday.
+ */
+export async function fetchQuotesFromCandles(tickers: string[]): Promise<Map<string, Quote>> {
+  const quotes = new Map<string, Quote>();
+  if (tickers.length === 0) return quotes;
+
+  const session = getMarketSession();
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
+    const batch = tickers.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        const candles = await fetchDailyCandles(ticker, 5);
+        if (candles.length < 2) return null;
+        const last = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        if (last.close <= 0 || prev.close <= 0) return null;
+        const change = last.close - prev.close;
+        const changePercent = (change / prev.close) * 100;
+        const upper = ticker.toUpperCase();
+        const quote: Quote = {
+          ticker: upper,
+          currentPrice: last.close,
+          change,
+          changePercent,
+          high: last.high,
+          low: last.low,
+          open: last.open,
+          previousClose: prev.close,
+          timestamp: Math.floor(new Date(last.time).getTime() / 1000),
+          updatedAt: new Date(last.time).getTime(),
+          isStale: true,
+          isRepricing: false,
+          quoteAgeSeconds: Math.floor((Date.now() - new Date(last.time).getTime()) / 1000),
+          session,
+        };
+        return { upper, quote };
+      }),
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) {
+        quotes.set(result.value.upper, result.value.quote);
+      }
+    }
+  }
+
+  return quotes;
+}
+
 // Dynamic TTL: 15s during market hours, 15min when closed (prices don't change on weekends/overnight)
 function getQuoteCacheTTL(): number {
   const session = getMarketSession();
@@ -865,6 +922,21 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
     for (const [ticker, quote] of result.quotes.entries()) {
       quote.session = getMarketSessionForTicker(ticker);
     }
+  }
+
+  // When market is CLOSED: for any ticker Polygon/Finnhub/Yahoo failed to
+  // return, fall back to historical daily candles. Candles are stable archived
+  // data and don't suffer the snapshot-endpoint drop issue. This fixes the
+  // weekend "no data" problem for portfolio holdings + heatmap tickers.
+  if (session === 'CLOSED' && result.failedTickers.length > 0) {
+    try {
+      const candleQuotes = await fetchQuotesFromCandles(result.failedTickers);
+      for (const [ticker, quote] of candleQuotes.entries()) {
+        quote.session = getMarketSessionForTicker(ticker);
+        result.quotes.set(ticker, quote);
+      }
+      result.failedTickers = result.failedTickers.filter((t) => !candleQuotes.has(t.toUpperCase()));
+    } catch { /* Candle fallback failed — leave failedTickers as-is */ }
   }
 
   return result;
