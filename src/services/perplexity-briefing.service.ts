@@ -151,12 +151,21 @@ export async function getPortfolioBriefing(
   userId: string,
   portfolioId?: string,
   period: BriefingPeriod = 'daily',
+  userTimezone?: string | null,
 ): Promise<PortfolioBriefingResponse> {
   await ensureEmailVerifiedForAi(userId);
   const normalizedPeriod = normalizeBriefingPeriod(period);
   const periodConfig = getPeriodConfig(normalizedPeriod);
-  const todayDate = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-  const cacheKey = `portfolio-briefing:${userId}:${portfolioId ?? 'default'}:${normalizedPeriod}:${todayDate}`;
+  // Fall back to ET if stored timezone is missing or became invalid (e.g., tzdb update).
+  let tz = userTimezone || 'America/New_York';
+  let todayDate: string;
+  try {
+    todayDate = new Date().toLocaleDateString('en-US', { timeZone: tz });
+  } catch {
+    tz = 'America/New_York';
+    todayDate = new Date().toLocaleDateString('en-US', { timeZone: tz });
+  }
+  const cacheKey = `portfolio-briefing:${userId}:${portfolioId ?? 'default'}:${normalizedPeriod}:${tz}:${todayDate}`;
   const cached = briefingCache.get<PortfolioBriefingResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
 
@@ -221,7 +230,7 @@ export async function getPortfolioBriefing(
 
   const totalValue = portfolio.netEquity.toFixed(0);
   const now = new Date();
-  const todayStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/New_York' });
+  const todayStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
   const userMessage =
     `TODAY'S DATE: ${todayStr}\n` +
     `IMPORTANT: This briefing is for TODAY (${todayStr}). Reference today's market activity, not yesterday's.\n\n` +

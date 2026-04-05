@@ -94,6 +94,8 @@ model User {
   profilePublic          Boolean                @default(true)
   region                 String?
   showRegion             Boolean                @default(true)
+  timezone               String?                // IANA timezone name (e.g., "America/New_York"); null = default to ET
+
   holdingsVisibility     String                 @default("all") // 'all' | 'top5' | 'sectors' | 'hidden'
   bio                    String?
   email                  String?                @unique
