@@ -7,7 +7,8 @@ import { config } from '../config';
 import { getMarketSession } from './market-hours';
 
 const POLYGON_BASE_URL = 'https://api.polygon.io';
-const POLYGON_BATCH_SIZE = 50;
+const POLYGON_BATCH_SIZE = 100;
+const POLYGON_CHUNK_DELAY_MS = 250;
 
 // Primary cache with configurable TTL (default 30 seconds)
 const cache = new NodeCache({ stdTTL: config.quoteCacheTtlSeconds });
@@ -647,20 +648,26 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
         tickerChunks.push(uncachedTickers.slice(i, i + POLYGON_BATCH_SIZE));
       }
 
-      const responses = await Promise.all(
-        tickerChunks.map((chunk) =>
-          axios.get<PolygonSnapshotResponse>(
-            `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
-            {
-              params: {
-                tickers: chunk.join(','),
-                apiKey: config.polygonApiKey,
-              },
-              timeout: 10000,
-            }
-          )
-        )
-      );
+      // SERIAL (not parallel) with a small delay between chunks. Parallel fan-out
+      // triggered Polygon rate-limiting; serial pacing stays under per-second caps.
+      const responses: Array<{ data: PolygonSnapshotResponse }> = [];
+      for (let i = 0; i < tickerChunks.length; i++) {
+        const chunk = tickerChunks[i];
+        const response = await axios.get<PolygonSnapshotResponse>(
+          `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
+          {
+            params: {
+              tickers: chunk.join(','),
+              apiKey: config.polygonApiKey,
+            },
+            timeout: 10000,
+          }
+        );
+        responses.push(response);
+        if (i < tickerChunks.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, POLYGON_CHUNK_DELAY_MS));
+        }
+      }
 
       const hasSuccessfulSnapshotResponse = responses.some(
         (response) => response.data.status === 'OK' || response.data.status === 'DELAYED'
