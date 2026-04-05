@@ -12,7 +12,7 @@ import * as path from 'path';
 import { Quote } from '../types';
 import { getMarketSession } from '../utils/market-hours';
 import { isUSMarketHoliday, isUSTradingDay, getLastTradingDayET } from '../utils/market-holidays';
-import { fetchPrices } from './market.service';
+import { fetchPrices, fetchQuote } from './market.service';
 
 const SNAPSHOT_PATH = process.env.NODE_ENV === 'production'
   ? '/data/market-close-snapshot.json'
@@ -115,24 +115,34 @@ export async function captureMarketCloseSnapshot(tickers: string[]): Promise<{ c
   const uniqueTickers = Array.from(new Set(tickers.map((t) => t.toUpperCase())));
   console.log(`[MarketCloseSnapshot] Capturing close for ${uniqueTickers.length} tickers...`);
 
-  const { quotes, failedTickers } = await fetchPrices(uniqueTickers);
+  const { quotes } = await fetchPrices(uniqueTickers);
+  console.log(`[MarketCloseSnapshot] Batch fetch returned ${quotes.size}/${uniqueTickers.length}`);
 
-  // Guard: don't persist a near-empty snapshot (e.g., rate-limited cold start).
-  // 50% is a pragmatic threshold — gives weekend users a partial improvement
-  // even if Polygon rate limits block some tickers on first capture. Subsequent
-  // retries (or the 8 PM ET job) will top it up.
-  const MIN_COVERAGE_RATIO = 0.5;
-  if (quotes.size < uniqueTickers.length * MIN_COVERAGE_RATIO) {
-    console.warn(
-      `[MarketCloseSnapshot] Captured ${quotes.size}/${uniqueTickers.length} ` +
-      `(<${MIN_COVERAGE_RATIO * 100}%) — skipping write`
-    );
-    return { captured: quotes.size, failed: failedTickers.length };
+  // For every ticker missing from the batch, hit Polygon/Finnhub/Yahoo per-ticker.
+  // Polygon unlimited plan — don't throttle. Run in parallel sub-groups of 15 to
+  // avoid burst-protection rate limits but still finish quickly (~5s for 120 tickers).
+  const missing = uniqueTickers.filter((t) => !quotes.has(t));
+  if (missing.length > 0) {
+    console.log(`[MarketCloseSnapshot] Filling ${missing.length} gaps via single-ticker fallback`);
+    const PARALLEL = 15;
+    for (let i = 0; i < missing.length; i += PARALLEL) {
+      const group = missing.slice(i, i + PARALLEL);
+      await Promise.all(
+        group.map(async (ticker) => {
+          try {
+            const q = await fetchQuote(ticker);
+            if (q && q.currentPrice > 0) quotes.set(ticker.toUpperCase(), q);
+          } catch {
+            // Silently drop — merge with existing snapshot handles persistence.
+          }
+        })
+      );
+    }
+    console.log(`[MarketCloseSnapshot] After fallback: ${quotes.size}/${uniqueTickers.length}`);
   }
 
   // Merge with existing snapshot if present: keep previously-captured quotes
-  // for tickers missing from this capture. Prevents regression when a retry
-  // captures fewer tickers than the existing snapshot.
+  // for tickers missing from this capture. Never regress on coverage.
   const existing = loadSnapshot();
   if (existing) {
     for (const [ticker, q] of Object.entries(existing.quotes)) {
@@ -140,6 +150,13 @@ export async function captureMarketCloseSnapshot(tickers: string[]): Promise<{ c
         quotes.set(ticker, q);
       }
     }
+  }
+
+  // After gap-fill + merge, write whatever we have. No threshold — a partial
+  // snapshot beats no snapshot, and subsequent retries keep adding coverage.
+  if (quotes.size === 0) {
+    console.warn('[MarketCloseSnapshot] Zero quotes captured; skipping write');
+    return { captured: 0, failed: uniqueTickers.length };
   }
 
   const quoteMap: Record<string, Quote> = {};
@@ -168,7 +185,7 @@ export async function captureMarketCloseSnapshot(tickers: string[]): Promise<{ c
     console.error('[MarketCloseSnapshot] Failed to write:', (err as Error).message);
   }
 
-  return { captured: snapshot.quoteCount, failed: failedTickers.length };
+  return { captured: snapshot.quoteCount, failed: uniqueTickers.length - snapshot.quoteCount };
 }
 
 /**
