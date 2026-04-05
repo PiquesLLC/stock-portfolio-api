@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Quote } from '../types';
 import { getMarketSession } from '../utils/market-hours';
-import { isUSMarketHoliday, isUSTradingDay } from '../utils/market-holidays';
+import { isUSMarketHoliday, isUSTradingDay, getLastTradingDayET } from '../utils/market-holidays';
 import { fetchPrices } from './market.service';
 
 const SNAPSHOT_PATH = process.env.NODE_ENV === 'production'
@@ -39,13 +39,6 @@ export function shouldServeSnapshot(date: Date = new Date()): boolean {
   if (!isUSTradingDay(date)) return true;
   // Trading day, but outside 4 AM - 8 PM ET window
   return getMarketSession(date) === 'CLOSED';
-}
-
-/**
- * Returns the ET date (YYYY-MM-DD) string.
- */
-function etDateString(date: Date = new Date()): string {
-  return date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
 /**
@@ -141,9 +134,11 @@ export async function captureMarketCloseSnapshot(tickers: string[]): Promise<{ c
     quoteMap[ticker.toUpperCase()] = quote;
   }
 
+  // sessionEndDate = the most recent actual trading day. On weekends/holidays
+  // (bootstrap path), this is the prior Friday or day-before-holiday, NOT today.
   const snapshot: MarketCloseSnapshot = {
     capturedAt: new Date().toISOString(),
-    sessionEndDate: etDateString(),
+    sessionEndDate: getLastTradingDayET(),
     quoteCount: Object.keys(quoteMap).length,
     quotes: quoteMap,
   };
