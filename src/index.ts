@@ -29,6 +29,8 @@ import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/
 import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
 import { runWeeklyBriefCycle, runMonthlyBriefCycle } from './services/brief-scheduler.service';
+import { runMarketCloseSnapshotCycle, loadSnapshot as loadMarketCloseSnapshot, shouldServeSnapshot, captureMarketCloseSnapshot } from './services/market-close-snapshot.service';
+import { ALL_HEATMAP_TICKERS } from './utils/sectors';
 import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analytics.service';
 import { checkCongressTradeAlerts } from './services/alert.service';
 import { syncLatestCongressTrades } from './services/congress.service';
@@ -334,6 +336,7 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('daily_report_pregen', preGenerateDailyReports);
   registerJobHandler('weekly_brief_cycle', runWeeklyBriefCycle);
   registerJobHandler('monthly_brief_cycle', runMonthlyBriefCycle);
+  registerJobHandler('market_close_snapshot', () => runMarketCloseSnapshotCycle(ALL_HEATMAP_TICKERS));
   registerJobHandler('analytics_cleanup', async () => {
     const count = await cleanupOldAnalyticsEvents();
     if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
@@ -856,7 +859,28 @@ const server = app.listen(config.port, async () => {
       idempotencyKey: buildTimeBucketIdempotencyKey('monthly_brief_cycle', 60 * 60 * 1000),
       idempotencyTtlMs: 60 * 60 * 1000,
     });
+    // Market-close snapshot: captures at 20:00-20:59 ET on trading days only.
+    // The cycle function is a no-op outside the capture window.
+    runJob({
+      name: 'market_close_snapshot',
+      fn: () => runMarketCloseSnapshotCycle(ALL_HEATMAP_TICKERS),
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('market_close_snapshot', 60 * 60 * 1000),
+      idempotencyTtlMs: 60 * 60 * 1000,
+    });
   }, 60 * 60 * 1000);
+
+  // Market-close snapshot bootstrap: if server starts during a CLOSED window
+  // and no snapshot exists yet, capture immediately using live quotes.
+  // This fixes the cold-start case where first deploy happens on a weekend.
+  setTimeout(() => {
+    if (shouldServeSnapshot() && loadMarketCloseSnapshot() === null) {
+      console.log('[MarketCloseSnapshot] No snapshot on disk — capturing bootstrap now');
+      captureMarketCloseSnapshot(ALL_HEATMAP_TICKERS).catch((err) =>
+        console.warn('[MarketCloseSnapshot] Bootstrap capture failed:', (err as Error).message)
+      );
+    }
+  }, 30_000); // 30s after startup — give quote services time to warm up
 
   // Profile stats refresh — recompute win rate, avg hold, badges daily
   console.log('[Profile Stats] Refresh scheduled daily');
