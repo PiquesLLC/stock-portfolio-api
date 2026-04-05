@@ -9,6 +9,12 @@ let resend: Resend | null = null;
 const capturedEmailVerificationCodes = new Map<string, { code: string; expiresAt: number }>();
 
 function getResend(): Resend | null {
+  // Hard guard: never send real emails from tests, even if RESEND_API_KEY is
+  // set in the developer's .env. Vitest sets VITEST=true automatically; we
+  // also check NODE_ENV='test' for any other test runner.
+  if (process.env.VITEST === 'true' || process.env.NODE_ENV === 'test') {
+    return null;
+  }
   if (!resend) {
     if (!config.resendApiKey || config.resendApiKey === 'PASTE_YOUR_RESEND_API_KEY_HERE') {
       if (process.env.NODE_ENV !== 'production') {
