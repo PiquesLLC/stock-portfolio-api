@@ -871,21 +871,21 @@ const server = app.listen(config.port, async () => {
   }, 60 * 60 * 1000);
 
   // Market-close snapshot bootstrap: if server starts during a CLOSED window
-  // and no snapshot exists yet, capture immediately via runJob so the idempotency
-  // key prevents racing with the hourly tick. This fixes the cold-start case
-  // where first deploy happens on a weekend/holiday.
-  setTimeout(() => {
-    if (shouldServeSnapshot() && loadMarketCloseSnapshot() === null) {
-      console.log('[MarketCloseSnapshot] No snapshot on disk — capturing bootstrap now');
-      runJob({
-        name: 'market_close_snapshot',
-        fn: () => captureMarketCloseSnapshot(ALL_HEATMAP_TICKERS).then(() => undefined),
-        maxAttempts: 1,
-        idempotencyKey: buildTimeBucketIdempotencyKey('market_close_snapshot', 60 * 60 * 1000),
-        idempotencyTtlMs: 60 * 60 * 1000,
-      });
-    }
-  }, 30_000); // 30s after startup — give quote services time to warm up
+  // and no snapshot exists yet, retry capture every 5 minutes until we clear
+  // the coverage threshold. Cold-start rate limits (many services hitting
+  // Polygon simultaneously after deploy) can block the first attempt — later
+  // attempts succeed once backup caches are warm.
+  const bootstrapAttemptMs = [3 * 60_000, 8 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
+  for (const delayMs of bootstrapAttemptMs) {
+    setTimeout(() => {
+      if (shouldServeSnapshot() && loadMarketCloseSnapshot() === null) {
+        console.log(`[MarketCloseSnapshot] No snapshot on disk — bootstrap attempt at t+${delayMs / 60_000}min`);
+        captureMarketCloseSnapshot(ALL_HEATMAP_TICKERS).catch((err) =>
+          console.warn('[MarketCloseSnapshot] Bootstrap capture failed:', (err as Error).message)
+        );
+      }
+    }, delayMs);
+  }
 
   // Profile stats refresh — recompute win rate, avg hold, badges daily
   console.log('[Profile Stats] Refresh scheduled daily');
