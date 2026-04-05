@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import prisma from '../utils/prisma';
 import { subSectorGroups, MarketIndex, INDEX_SETS } from '../utils/sectors';
 import { fetchPrices, fetchDailyCandles } from './market.service';
+import { getMarketSession } from '../utils/market-hours';
 import { yahooGet } from '../utils/yahoo-http';
 import { queueAdvFetches, getCachedAdv } from '../utils/finnhub';
 import { getPolygonSnapshotVolumes } from '../utils/polygon';
@@ -174,6 +175,40 @@ async function fetchPeriodChanges(
   return changes;
 }
 
+/**
+ * Compute 1D change from the last two daily candles. Used when the market is
+ * CLOSED — on weekends/holidays the live-quote chain is flaky, but archived
+ * daily candles are stable. "1D change" on Saturday = Thursday close vs
+ * Wednesday close (i.e., the last two trading days).
+ */
+async function fetchOneDayChangesFromCandles(
+  tickers: string[],
+): Promise<Map<string, number>> {
+  const changes = new Map<string, number>();
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
+    const batch = tickers.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (ticker) => {
+        // 5-day buffer absorbs weekends + a holiday; we only need the last 2 candles.
+        const candles = await fetchDailyCandles(ticker, 5);
+        if (candles.length < 2) return { ticker, change: 0 };
+        const prev = candles[candles.length - 2].close;
+        const last = candles[candles.length - 1].close;
+        if (prev <= 0) return { ticker, change: 0 };
+        const change = ((last - prev) / prev) * 100;
+        return { ticker, change: Math.round(change * 100) / 100 };
+      }),
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        changes.set(result.value.ticker, result.value.change);
+      }
+    }
+  }
+  return changes;
+}
+
 export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: MarketIndex): Promise<HeatmapResponse> {
   const cacheKey = `heatmap-${period}-${index || 'all'}`;
   const cached = heatmapCache.get<HeatmapResponse>(cacheKey);
@@ -196,10 +231,14 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   // Removed getPolygonMarketCaps (328 individual API calls, ~20s cold) — fundamentalsCache
   // and screenerCache already have market cap for almost all S&P 500 tickers.
   //
-  // For 1D: skip period candle fetch (Polygon snapshot gives changePercent).
-  // For non-1D: period changes are essential (the main changePercent), run in parallel.
+  // For 1D during trading hours: live quote changePercent is fresh.
+  // For 1D when market is CLOSED (weekend/holiday/overnight): live quotes are
+  // flaky — use archived daily candles instead, same reliable path that 1W/1M use.
+  // For non-1D: period changes are essential (the main changePercent).
   // Week changes are always fetched — Top 100 view shows 7D column regardless of period.
   const candleDays = PERIOD_DAYS[period];
+  const marketIsClosed = getMarketSession() === 'CLOSED';
+  const use1DCandles = period === '1D' && marketIsClosed;
   const needsPeriodChanges = period !== '1D' && candleDays > 0;
 
   const parallelFetches: [
@@ -219,8 +258,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     prisma.screenerCache.findMany({
       where: { ticker: { in: uniqueTickers } },
     }),
-    // Period changes — only for non-1D (1D uses live quote changePercent)
-    needsPeriodChanges ? fetchPeriodChanges(uniqueTickers, candleDays) : Promise.resolve(null),
+    // Period changes — for non-1D, or for 1D when market is CLOSED
+    // (live quotes are flaky on weekends/holidays, so use archived daily candles).
+    use1DCandles
+      ? fetchOneDayChangesFromCandles(uniqueTickers)
+      : (needsPeriodChanges ? fetchPeriodChanges(uniqueTickers, candleDays) : Promise.resolve(null)),
     // Week changes — always fetched (Top 100 shows 7D column)
     fetchPeriodChanges(uniqueTickers, 7),
   ];
@@ -281,8 +323,10 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         // For 1D: prefer live quote changePercent when non-zero, fall back to candle data.
         // After midnight or with Polygon free tier, live changePercent is 0 — candle data is reliable.
         // For other periods: always use candle-based periodChanges.
+        // 1D during trading hours → live quote. 1D when market closed → candle change
+        // (periodChanges was populated by fetchOneDayChangesFromCandles). Non-1D → candles.
         let changePercent: number;
-        if (period === '1D' && quote?.changePercent) {
+        if (period === '1D' && !use1DCandles && quote?.changePercent) {
           changePercent = quote.changePercent;
         } else {
           changePercent = periodChanges?.get(upper) ?? (quote?.changePercent ?? 0);
