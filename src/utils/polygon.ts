@@ -7,8 +7,6 @@ import { config } from '../config';
 import { getMarketSession } from './market-hours';
 
 const POLYGON_BASE_URL = 'https://api.polygon.io';
-const POLYGON_BATCH_SIZE = 100;
-const POLYGON_CHUNK_DELAY_MS = 250;
 
 // Primary cache with configurable TTL (default 30 seconds)
 const cache = new NodeCache({ stdTTL: config.quoteCacheTtlSeconds });
@@ -588,8 +586,6 @@ async function fetchPrevDayQuote(ticker: string): Promise<Quote | null> {
  * Falls back to free tier individual requests if snapshot endpoint is not available.
  */
 export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotesResult> {
-  // Polygon's snapshot endpoint silently drops many symbols in very large requests.
-  // Production testing showed roughly a 45% drop rate at 276 tickers, so we fetch uncached symbols in batches of 50.
   const quotes = new Map<string, Quote>();
   const failedTickers: string[] = [];
   let staleCount = 0;
@@ -643,47 +639,27 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
   // or if we know we have premium access
   if (hasPremiumAccess === null || hasPremiumAccess === true) {
     try {
-      const tickerChunks: string[][] = [];
-      for (let i = 0; i < uncachedTickers.length; i += POLYGON_BATCH_SIZE) {
-        tickerChunks.push(uncachedTickers.slice(i, i + POLYGON_BATCH_SIZE));
-      }
-
-      // SERIAL (not parallel) with a small delay between chunks. Parallel fan-out
-      // triggered Polygon rate-limiting; serial pacing stays under per-second caps.
-      const responses: Array<{ data: PolygonSnapshotResponse }> = [];
-      for (let i = 0; i < tickerChunks.length; i++) {
-        const chunk = tickerChunks[i];
-        const response = await axios.get<PolygonSnapshotResponse>(
-          `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
-          {
-            params: {
-              tickers: chunk.join(','),
-              apiKey: config.polygonApiKey,
-            },
-            timeout: 10000,
-          }
-        );
-        responses.push(response);
-        if (i < tickerChunks.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, POLYGON_CHUNK_DELAY_MS));
+      const tickerList = uncachedTickers.join(',');
+      const response = await axios.get<PolygonSnapshotResponse>(
+        `${POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers`,
+        {
+          params: {
+            tickers: tickerList,
+            apiKey: config.polygonApiKey,
+          },
+          timeout: 10000,
         }
-      }
-
-      const hasSuccessfulSnapshotResponse = responses.some(
-        (response) => response.data.status === 'OK' || response.data.status === 'DELAYED'
       );
 
-      if (hasSuccessfulSnapshotResponse) {
+      if (response.data.status === 'OK' || response.data.status === 'DELAYED') {
         markPolygonSuccess();
         hasPremiumAccess = true;
         console.log('[Polygon] Using premium snapshot endpoint');
 
         // Process response tickers
         const tickerMap = new Map<string, PolygonTickerSnapshot>();
-        for (const response of responses) {
-          for (const snapshot of response.data.tickers || []) {
-            tickerMap.set(snapshot.ticker.toUpperCase(), snapshot);
-          }
+        for (const snapshot of response.data.tickers || []) {
+          tickerMap.set(snapshot.ticker.toUpperCase(), snapshot);
         }
 
         // Build quotes for each requested ticker
