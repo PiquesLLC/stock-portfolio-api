@@ -17,6 +17,8 @@ describe('analyst service', () => {
   });
 
   it('projects analyst read state from analystLastReadAt', async () => {
+    // User holds AAPL — required since the service filters events by held tickers.
+    prismaMock.holding.findMany.mockResolvedValue([{ ticker: 'AAPL' }] as any);
     (prismaMock as any).analystEvent.findMany = vi.fn().mockResolvedValue([
       {
         id: 'newer',
