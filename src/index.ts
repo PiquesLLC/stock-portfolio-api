@@ -871,14 +871,19 @@ const server = app.listen(config.port, async () => {
   }, 60 * 60 * 1000);
 
   // Market-close snapshot bootstrap: if server starts during a CLOSED window
-  // and no snapshot exists yet, capture immediately using live quotes.
-  // This fixes the cold-start case where first deploy happens on a weekend.
+  // and no snapshot exists yet, capture immediately via runJob so the idempotency
+  // key prevents racing with the hourly tick. This fixes the cold-start case
+  // where first deploy happens on a weekend/holiday.
   setTimeout(() => {
     if (shouldServeSnapshot() && loadMarketCloseSnapshot() === null) {
       console.log('[MarketCloseSnapshot] No snapshot on disk — capturing bootstrap now');
-      captureMarketCloseSnapshot(ALL_HEATMAP_TICKERS).catch((err) =>
-        console.warn('[MarketCloseSnapshot] Bootstrap capture failed:', (err as Error).message)
-      );
+      runJob({
+        name: 'market_close_snapshot',
+        fn: () => captureMarketCloseSnapshot(ALL_HEATMAP_TICKERS).then(() => undefined),
+        maxAttempts: 1,
+        idempotencyKey: buildTimeBucketIdempotencyKey('market_close_snapshot', 60 * 60 * 1000),
+        idempotencyTtlMs: 60 * 60 * 1000,
+      });
     }
   }, 30_000); // 30s after startup — give quote services time to warm up
 

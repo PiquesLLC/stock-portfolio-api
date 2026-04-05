@@ -58,3 +58,21 @@ export function isUSTradingDay(date: Date = new Date()): boolean {
   if (weekday === 'Sat' || weekday === 'Sun') return false;
   return !isUSMarketHoliday(date);
 }
+
+/**
+ * Returns the ET date string (YYYY-MM-DD) of the most recent US trading day
+ * on-or-before the given date. If `date` is a trading day, returns today's ET date;
+ * otherwise walks backward through weekends/holidays to find the last one.
+ */
+export function getLastTradingDayET(date: Date = new Date()): string {
+  let probe = new Date(date.getTime());
+  // Safety cap at 10 days — covers any realistic run of holidays + weekend.
+  for (let i = 0; i < 10; i++) {
+    if (isUSTradingDay(probe)) {
+      return probe.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    }
+    probe = new Date(probe.getTime() - 24 * 60 * 60 * 1000);
+  }
+  // Fallback: return the original date (should never happen in practice)
+  return date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
