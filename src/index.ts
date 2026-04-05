@@ -28,6 +28,7 @@ import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
 import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
+import { runWeeklyBriefCycle, runMonthlyBriefCycle } from './services/brief-scheduler.service';
 import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analytics.service';
 import { checkCongressTradeAlerts } from './services/alert.service';
 import { syncLatestCongressTrades } from './services/congress.service';
@@ -331,6 +332,8 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('job_run_prune', runJobRunPruneJob);
   registerJobHandler('idempotency_key_prune', runIdempotencyKeyPruneJob);
   registerJobHandler('daily_report_pregen', preGenerateDailyReports);
+  registerJobHandler('weekly_brief_cycle', runWeeklyBriefCycle);
+  registerJobHandler('monthly_brief_cycle', runMonthlyBriefCycle);
   registerJobHandler('analytics_cleanup', async () => {
     const count = await cleanupOldAnalyticsEvents();
     if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
@@ -832,6 +835,28 @@ const server = app.listen(config.port, async () => {
       idempotencyTtlMs: 4 * 60 * 60 * 1000,
     });
   }, 4 * 60 * 60 * 1000);
+
+  // Weekly + monthly brief pre-generation. Runs every hour; each cycle finds
+  // users whose local time is Sunday 06:00-06:59 (weekly) or the 1st at
+  // 06:00-06:59 (monthly) and pre-generates their brief. Hourly idempotency
+  // key prevents double-fires if setInterval ticks twice in the same hour.
+  console.log('[Brief Scheduler] Scheduled: weekly + monthly every hour');
+  setInterval(() => {
+    runJob({
+      name: 'weekly_brief_cycle',
+      fn: runWeeklyBriefCycle,
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('weekly_brief_cycle', 60 * 60 * 1000),
+      idempotencyTtlMs: 60 * 60 * 1000,
+    });
+    runJob({
+      name: 'monthly_brief_cycle',
+      fn: runMonthlyBriefCycle,
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('monthly_brief_cycle', 60 * 60 * 1000),
+      idempotencyTtlMs: 60 * 60 * 1000,
+    });
+  }, 60 * 60 * 1000);
 
   // Profile stats refresh — recompute win rate, avg hold, badges daily
   console.log('[Profile Stats] Refresh scheduled daily');
