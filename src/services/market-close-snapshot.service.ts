@@ -118,15 +118,28 @@ export async function captureMarketCloseSnapshot(tickers: string[]): Promise<{ c
   const { quotes, failedTickers } = await fetchPrices(uniqueTickers);
 
   // Guard: don't persist a near-empty snapshot (e.g., rate-limited cold start).
-  // A snapshot is meant to serve the heatmap; if most tickers are missing, it's
-  // worse than letting the live-fetch path run (which also has the chunking fix).
-  const MIN_COVERAGE_RATIO = 0.75;
+  // 50% is a pragmatic threshold — gives weekend users a partial improvement
+  // even if Polygon rate limits block some tickers on first capture. Subsequent
+  // retries (or the 8 PM ET job) will top it up.
+  const MIN_COVERAGE_RATIO = 0.5;
   if (quotes.size < uniqueTickers.length * MIN_COVERAGE_RATIO) {
     console.warn(
       `[MarketCloseSnapshot] Captured ${quotes.size}/${uniqueTickers.length} ` +
       `(<${MIN_COVERAGE_RATIO * 100}%) — skipping write`
     );
     return { captured: quotes.size, failed: failedTickers.length };
+  }
+
+  // Merge with existing snapshot if present: keep previously-captured quotes
+  // for tickers missing from this capture. Prevents regression when a retry
+  // captures fewer tickers than the existing snapshot.
+  const existing = loadSnapshot();
+  if (existing) {
+    for (const [ticker, q] of Object.entries(existing.quotes)) {
+      if (!quotes.has(ticker)) {
+        quotes.set(ticker, q);
+      }
+    }
   }
 
   const quoteMap: Record<string, Quote> = {};
