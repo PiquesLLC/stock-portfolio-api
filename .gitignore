@@ -17,6 +17,10 @@ src/generated/
 prisma/dev.db
 prisma/dev.db-journal
 
+# Runtime snapshots (regenerated, not source of truth)
+prisma/market-close-snapshot.json
+prisma/quote-cache-snapshot.json
+
 # IDE
 .idea/
 .vscode/

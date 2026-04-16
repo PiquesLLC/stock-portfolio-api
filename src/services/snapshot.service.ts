@@ -11,6 +11,10 @@ import { getMarketSession } from '../utils/market-hours';
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
 
+/** Format a date as YYYY-MM-DD in ET (market timezone) to avoid UTC date rollover after 8 PM ET */
+const _etFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+function etDate(d: Date = new Date()): string { return _etFmt.format(d); }
+
 export type LedgerReplayGap = {
   start: string;
   end: string;
@@ -412,8 +416,8 @@ export async function reconstructPortfolioHistory(
     if (cached) return cached;
 
     // Polygon.io primary
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(Date.now() - Math.max(365, periodDays + 30) * 86400000).toISOString().split('T')[0];
+    const today = etDate();
+    const fromDate = etDate(new Date(Date.now() - Math.max(365, periodDays + 30) * 86400000));
     const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
     if (pg && pg.closes.length > 0) {
       const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
@@ -554,8 +558,8 @@ export async function reconstructPortfolioHistoryHiRes(
       'max': 3650,
     };
     const rangeDays = rangeDaysMap[yahooRange] || 30;
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
+    const today = etDate();
+    const fromDate = etDate(new Date(Date.now() - rangeDays * 86400000));
 
     // Map Yahoo intervals to Polygon multiplier+timespan
     let multiplier = 1;
@@ -1407,8 +1411,8 @@ export async function reconstructPortfolioHistoryFromTrades(
     const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
     if (cached) return cached;
 
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(Date.now() - Math.max(365, periodDays + 30) * 86400000).toISOString().split('T')[0];
+    const today = etDate();
+    const fromDate = etDate(new Date(Date.now() - Math.max(365, periodDays + 30) * 86400000));
     const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
     if (pg && pg.closes.length > 0) {
       const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
@@ -1691,8 +1695,8 @@ export async function reconstructPortfolioHistoryFromLedgerWithDiagnostics(
     const cached = chartCandleCache.get<{ dates: number[]; closes: number[] }>(cacheKey);
     if (cached) return cached;
 
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(startDate.getTime() - 30 * 86400000).toISOString().split('T')[0];
+    const today = etDate();
+    const fromDate = etDate(new Date(startDate.getTime() - 30 * 86400000));
     const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
     if (pg && pg.closes.length > 0) {
       const data = { dates: pg.timestamps.map(t => t * 1000), closes: pg.closes };
@@ -1976,8 +1980,8 @@ export async function reconstructPortfolioHistoryFromTradesHiRes(
 
     const rangeDaysMap: Record<string, number> = { '1d': 2, '5d': 7, '1mo': 30, '3mo': 95, '6mo': 185 };
     const rangeDays = rangeDaysMap[yahooRange] || 30;
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
+    const today = etDate();
+    const fromDate = etDate(new Date(Date.now() - rangeDays * 86400000));
 
     let multiplier = 1;
     let timespan = 'hour';
