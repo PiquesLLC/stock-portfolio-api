@@ -147,6 +147,18 @@ function stripMarkdownFences(content: string): string {
   return trimmed.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
 }
 
+function extractMarkdownFenceBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  const fenceRegex = /```(?:json)?\s*([\s\S]*?)\s*```/gi;
+
+  for (const match of content.matchAll(fenceRegex)) {
+    const block = match[1]?.trim();
+    if (block) blocks.push(block);
+  }
+
+  return blocks;
+}
+
 function trimToBalancedJson(content: string): string {
   let bracketDepth = 0;
   let inString = false;
@@ -207,12 +219,17 @@ function buildJsonCandidates(content: string): string[] {
   if (!normalized) return [];
 
   const stripped = stripMarkdownFences(normalized);
+  const fencedBlocks = extractMarkdownFenceBlocks(normalized);
   const candidates = [
     stripped,
     findFirstJsonStart(stripped),
     trimToBalancedJson(findFirstJsonStart(stripped)),
     removeTrailingCommas(trimToBalancedJson(findFirstJsonStart(stripped))),
     removeTrailingCommas(findFirstJsonStart(stripped)),
+    ...fencedBlocks,
+    ...fencedBlocks.map(findFirstJsonStart),
+    ...fencedBlocks.map(block => trimToBalancedJson(findFirstJsonStart(block))),
+    ...fencedBlocks.map(block => removeTrailingCommas(trimToBalancedJson(findFirstJsonStart(block)))),
   ];
 
   return Array.from(new Set(candidates.filter(Boolean)));
@@ -224,6 +241,14 @@ function buildJsonCandidates(content: string): string[] {
  */
 export function extractJson(content: string): string {
   const candidates = buildJsonCandidates(content);
+  for (const candidate of candidates) {
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
   return candidates[0] ?? '';
 }
 

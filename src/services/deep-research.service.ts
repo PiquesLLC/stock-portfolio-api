@@ -90,7 +90,9 @@ const SUMMARY_FLUSH_INTERVAL_MS = 3_000; // Debounce thinking summary writes to 
 
 // ─── System Prompt ──────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are NALA AI, a senior investment research analyst producing institutional-quality deep research reports for retail investors.
+const SYSTEM_PROMPT = `CRITICAL OUTPUT FORMAT: Your entire response must be a single valid JSON object matching the schema below. Do NOT include markdown prose, headings, tables, or narrative above or below the JSON. Do NOT wrap the JSON in \`\`\` fences. Return raw JSON only.
+
+You are NALA AI, a senior investment research analyst producing institutional-quality deep research reports for retail investors.
 
 Return ONLY valid JSON with this exact structure:
 {
