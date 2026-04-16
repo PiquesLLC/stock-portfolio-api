@@ -121,6 +121,56 @@ Rules:
 - Flag any data gaps or low-confidence areas in confidenceNotes
 - All monetary values in USD unless otherwise specified`;
 
+// ─── Prompt Builder ─────────────────────────────────────────────────
+
+/**
+ * Pure function — composes the full LLM prompt from the three sections
+ * (SYSTEM_PROMPT, portfolio context, user request) plus an optional
+ * research-focus block when a ticker is supplied.
+ *
+ * Regression guard (Apr 16 2026): when a user requests deep research on a
+ * specific ticker (e.g. LITE) but their free-text prompt is generic,
+ * Gemini was latching onto the largest portfolio holding and writing the
+ * report about that instead. The focus block is placed BEFORE the
+ * portfolio context so the model reads the ticker constraint before it
+ * sees any holdings.
+ */
+export function buildDeepResearchPrompt(
+  portfolioContext: string,
+  userPrompt: string,
+  opts: { ticker?: string; researchType?: string }
+): string {
+  let focusBlock = '';
+  if (opts.ticker) {
+    const ticker = opts.ticker.toUpperCase();
+    const typeLine = opts.researchType
+      ? `Research type: ${opts.researchType}\n`
+      : '';
+    focusBlock =
+      `--- RESEARCH FOCUS ---\n` +
+      `Primary ticker: ${ticker}\n` +
+      typeLine +
+      `This report MUST be about ${ticker} and ONLY this ticker. ` +
+      `Do NOT substitute a different company from the user's portfolio, ` +
+      `even if other holdings are larger or more familiar. Every section ` +
+      `(executive summary, bull/base/bear cases, valuation, catalysts, ` +
+      `risks) must analyze ${ticker} specifically. The portfolio context ` +
+      `below is provided only so you can note how ${ticker} fits alongside ` +
+      `existing positions — it is NOT the subject of the report.\n\n`;
+  } else if (opts.researchType) {
+    focusBlock =
+      `--- RESEARCH FOCUS ---\n` +
+      `Research type: ${opts.researchType}\n\n`;
+  }
+
+  return (
+    `${SYSTEM_PROMPT}\n\n` +
+    focusBlock +
+    `--- USER PORTFOLIO CONTEXT ---\n${portfolioContext}\n\n` +
+    `--- USER RESEARCH REQUEST ---\n${userPrompt}`
+  );
+}
+
 // ─── Portfolio Context Builder ──────────────────────────────────────
 
 async function buildPortfolioContext(userId: string): Promise<string> {
@@ -677,7 +727,10 @@ export async function startDeepResearch(
 
   // Build full prompt with portfolio context
   const portfolioContext = await buildPortfolioContext(userId);
-  const fullPrompt = `${SYSTEM_PROMPT}\n\n--- USER PORTFOLIO CONTEXT ---\n${portfolioContext}\n\n--- USER RESEARCH REQUEST ---\n${prompt}`;
+  const fullPrompt = buildDeepResearchPrompt(portfolioContext, prompt, {
+    ticker: opts.ticker,
+    researchType: opts.researchType,
+  });
 
   // Create DB record
   const job = await prisma.deepResearchJob.create({

@@ -4,7 +4,7 @@ export const RESEARCH_TYPES = ['stock', 'portfolio', 'sector', 'custom'] as cons
 
 export const startResearchSchema = z.object({
   prompt: z.string().trim().min(10, 'Prompt must be at least 10 characters').max(2000, 'Prompt must be at most 2000 characters'),
-  ticker: z.string().trim().min(1).max(10).toUpperCase().optional(),
+  ticker: z.string().trim().toUpperCase().pipe(z.string().regex(/^[A-Z0-9.\-]{1,10}$/, 'Invalid ticker')).optional(),
   researchType: z.enum(RESEARCH_TYPES).default('stock'),
   clientRequestId: z.string().trim().min(1).max(128).optional(),
 });
