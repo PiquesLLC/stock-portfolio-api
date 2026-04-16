@@ -11,6 +11,7 @@
 
 import NodeCache from 'node-cache';
 import { fetchPolygonAggs, yahooGet } from './yahoo-http';
+import { etDate } from './date';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -176,8 +177,8 @@ async function fetchSingleTickerCandles(ticker: string, tradingDays: number): Pr
   try {
     // Calculate date range — add buffer for weekends/holidays
     const calendarDays = Math.ceil(tradingDays * 1.5);
-    const toDateStr = new Date().toISOString().split('T')[0];
-    const fromDateStr = new Date(now - calendarDays * 86400000).toISOString().split('T')[0];
+    const toDateStr = etDate();
+    const fromDateStr = etDate(new Date(now - calendarDays * 86400000));
 
     console.log(`[CandleCache] Fetching ${upperTicker} via Polygon (${tradingDays} trading days)`);
 
@@ -399,8 +400,8 @@ export interface BenchmarkCandles {
 
 async function fetchBenchmarkCandles(ticker: string): Promise<BenchmarkCandles | null> {
   // Polygon.io primary
-  const today = new Date().toISOString().split('T')[0];
-  const fromDate = new Date(Date.now() - 400 * 86400000).toISOString().split('T')[0];
+  const today = etDate();
+  const fromDate = etDate(new Date(Date.now() - 400 * 86400000));
   const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
   if (pg && pg.closes.length >= 2) {
     const dates = pg.timestamps.map(t => new Date(t * 1000).toISOString().slice(0, 10));

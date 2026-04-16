@@ -7,6 +7,7 @@ import {
 } from '../utils/finance-math';
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
+import { etDate } from '../utils/date';
 import NodeCache from 'node-cache';
 
 const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
@@ -62,8 +63,8 @@ async function getDailyCandles(ticker: string): Promise<{ dateMs: number; close:
   const cached = dailyCandleCache.get<{ dateMs: number; close: number }[]>(cacheKey);
   if (cached) return cached;
 
-  const today = new Date().toISOString().split('T')[0];
-  const fromDate = new Date(Date.now() - 400 * 86400000).toISOString().split('T')[0]; // ~13 months back
+  const today = etDate();
+  const fromDate = etDate(new Date(Date.now() - 400 * 86400000)); // ~13 months back
   const pg = await fetchPolygonAggs(ticker, 1, 'day', fromDate, today);
   if (!pg || pg.closes.length === 0) return null;
 

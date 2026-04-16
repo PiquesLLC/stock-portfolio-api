@@ -6,6 +6,7 @@
  */
 import axios from 'axios';
 import NodeCache from 'node-cache';
+import { etDate } from './date';
 
 // ─── Polygon.io ─────────────────────────────────────────────────────────────
 
@@ -99,8 +100,8 @@ export async function fetchFinnhubCandles(
   toTimestamp: number,
   _resolution: string = 'D',
 ): Promise<PolygonCandleResult | null> {
-  const fromDate = new Date(fromTimestamp * 1000).toISOString().split('T')[0];
-  const toDate = new Date(toTimestamp * 1000).toISOString().split('T')[0];
+  const fromDate = etDate(new Date(fromTimestamp * 1000));
+  const toDate = etDate(new Date(toTimestamp * 1000));
   return fetchPolygonAggs(ticker, 1, 'day', fromDate, toDate);
 }
 

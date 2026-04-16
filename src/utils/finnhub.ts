@@ -3,6 +3,7 @@ import NodeCache from 'node-cache';
 import { config } from '../config';
 import { FinnhubQuote, Quote, SymbolSearchResult } from '../types';
 import { getMarketSession } from './market-hours';
+import { etDate } from './date';
 
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 
@@ -349,8 +350,8 @@ export async function getHistoricalCandles(ticker: string, years: number = 1): P
   const now = Date.now();
 
   try {
-    const toDateStr = new Date().toISOString().split('T')[0];
-    const fromDateStr = new Date(now - years * 365 * 86400000).toISOString().split('T')[0];
+    const toDateStr = etDate();
+    const fromDateStr = etDate(new Date(now - years * 365 * 86400000));
 
     const { fetchPolygonAggs } = await import('./yahoo-http');
     const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDateStr, toDateStr);
@@ -820,8 +821,8 @@ export async function queueAdvFetches(tickers: string[]): Promise<void> {
     // Fire and forget - don't await
     (async () => {
       try {
-        const toDate = new Date().toISOString().split('T')[0];
-        const fromDate = new Date(Date.now() - 45 * 86400000).toISOString().split('T')[0];
+        const toDate = etDate();
+        const fromDate = etDate(new Date(Date.now() - 45 * 86400000));
 
         const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDate, toDate);
 

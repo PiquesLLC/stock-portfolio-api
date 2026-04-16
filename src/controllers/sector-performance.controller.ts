@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import NodeCache from 'node-cache';
 import { fetchDailyCandles, fetchHourlyCandles, fetchIntradayCandles, fetchQuote, IntradayCandle } from '../services/market.service';
+import { etDate } from '../utils/date';
 
 type SectorPeriod = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y';
 
@@ -127,9 +128,8 @@ async function fetchCandlesForPeriod(ticker: string, period: SectorPeriod): Prom
     ));
     if (cleaned.length === 0) return [];
     // Extract the last trading day's candles
-    const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-    const lastDate = etDateFmt.format(new Date(cleaned[cleaned.length - 1].time));
-    return cleaned.filter(c => etDateFmt.format(new Date(c.time)) === lastDate);
+    const lastDate = etDate(new Date(cleaned[cleaned.length - 1].time));
+    return cleaned.filter(c => etDate(new Date(c.time)) === lastDate);
   }
   return fetchHourlyCandles(ticker, period);
 }

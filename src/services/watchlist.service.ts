@@ -1,6 +1,7 @@
 import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
+import { etDate } from '../utils/date';
 import NodeCache from 'node-cache';
 import { PlanLimitError } from '../utils/plan-limit.error';
 
@@ -43,7 +44,7 @@ interface TickerPerf { weekChangePercent: number; monthChangePercent: number; ye
 function dateDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0];
+  return etDate(d);
 }
 
 async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
@@ -51,7 +52,7 @@ async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
   const cached = perfCache.get<TickerPerf>(cacheKey);
   if (cached) return cached;
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = etDate();
   const yearAgo = dateDaysAgo(370); // slightly over 1yr to ensure we get data
 
   try {
