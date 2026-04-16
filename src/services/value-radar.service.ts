@@ -13,6 +13,7 @@ import prisma from '../utils/prisma';
 import { config } from '../config';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { subSectorGroups } from '../utils/sectors';
+import { etDate } from '../utils/date';
 import { fetchPrices } from './market.service';
 import { getMarketSession } from '../utils/market-hours';
 
@@ -200,8 +201,8 @@ async function fetchAnnualEPS(ticker: string): Promise<Map<number, number>> {
 async function fetchAnnualPrices(ticker: string): Promise<Map<number, number>> {
   try {
     const now = new Date();
-    const from = new Date(now.getFullYear() - 11, 0, 1).toISOString().split('T')[0];
-    const to = now.toISOString().split('T')[0];
+    const from = etDate(new Date(now.getFullYear() - 11, 0, 1));
+    const to = etDate(now);
 
     const candles = await fetchPolygonAggs(ticker, 1, 'year', from, to, 86400);
     if (!candles || candles.closes.length === 0) return new Map();

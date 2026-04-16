@@ -10,6 +10,7 @@ import prisma from '../utils/prisma';
 import { config } from '../config';
 import { fetchPolygonAggs, PolygonCandleResult } from '../utils/yahoo-http';
 import { subSectorGroups } from '../utils/sectors';
+import { etDate } from '../utils/date';
 
 const POLYGON_BASE = 'https://api.polygon.io';
 
@@ -69,7 +70,7 @@ async function fetchAnnualDividendForTicker(ticker: string): Promise<number | nu
   try {
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    const fromDate = oneYearAgo.toISOString().split('T')[0];
+    const fromDate = etDate(oneYearAgo);
 
     const url = `${POLYGON_BASE}/v3/reference/dividends`;
     const resp = await axios.get(url, {
@@ -111,13 +112,13 @@ function calculateBeta(
   // Build date-indexed maps for alignment
   const stockByDate = new Map<string, number>();
   for (let i = 0; i < stockCandles.timestamps.length; i++) {
-    const date = new Date(stockCandles.timestamps[i] * 1000).toISOString().split('T')[0];
+    const date = etDate(new Date(stockCandles.timestamps[i] * 1000));
     stockByDate.set(date, stockCandles.closes[i]);
   }
 
   const spyByDate = new Map<string, number>();
   for (let i = 0; i < spyCandles.timestamps.length; i++) {
-    const date = new Date(spyCandles.timestamps[i] * 1000).toISOString().split('T')[0];
+    const date = etDate(new Date(spyCandles.timestamps[i] * 1000));
     spyByDate.set(date, spyCandles.closes[i]);
   }
 
@@ -230,8 +231,8 @@ export async function backfillPolygonScreenerData(): Promise<void> {
   // Fetch SPY candles once for beta calculation
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-  const fromDate = oneYearAgo.toISOString().split('T')[0];
-  const toDate = new Date().toISOString().split('T')[0];
+  const fromDate = etDate(oneYearAgo);
+  const toDate = etDate();
 
   const spyCandles = await fetchPolygonAggs('SPY', 1, 'day', fromDate, toDate, 43200);
   if (!spyCandles || spyCandles.closes.length < 50) {

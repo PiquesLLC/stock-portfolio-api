@@ -4,6 +4,7 @@ import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsRe
 import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
 import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
+import { etDate } from '../utils/date';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
@@ -35,8 +36,8 @@ async function fetchStockDetailCandles(ticker: string): Promise<StockDetailsResp
   if (cached) return cached;
 
   // Polygon.io primary — 10 years of daily candles (paid plan)
-  const today = new Date().toISOString().split('T')[0];
-  const tenYearsAgo = new Date(Date.now() - 10 * 365.25 * 86400000).toISOString().split('T')[0];
+  const today = etDate();
+  const tenYearsAgo = etDate(new Date(Date.now() - 10 * 365.25 * 86400000));
   const pg = await fetchPolygonAggs(ticker, 1, 'day', tenYearsAgo, today);
   if (pg && pg.closes.length > 0) {
     const candles: StockDetailsResponse['candles'] = {
@@ -173,12 +174,12 @@ function getPeriodDays(period: CandlePeriod): number {
 }
 
 function getDateRange(period: CandlePeriod): { from: string; to: string } {
-  const to = new Date().toISOString().split('T')[0];
+  const to = etDate();
   if (period === 'YTD') {
     return { from: `${new Date().getFullYear()}-01-01`, to };
   }
 
-  const from = new Date(Date.now() - getPeriodDays(period) * 86400000).toISOString().split('T')[0];
+  const from = etDate(new Date(Date.now() - getPeriodDays(period) * 86400000));
   return { from, to };
 }
 
@@ -279,9 +280,8 @@ export async function fetchCandles(ticker: string, period: string, interval: str
 
   // For 1D period with intraday intervals, keep only the last trading day
   if (normalizedPeriod === '1D' && candles.length > 0 && normalizedInterval !== '1D' && normalizedInterval !== '1W' && normalizedInterval !== '1M') {
-    const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-    const lastDate = etDateFmt.format(new Date(candles[candles.length - 1].time));
-    candles = candles.filter(c => etDateFmt.format(new Date(c.time)) === lastDate);
+    const lastDate = etDate(new Date(candles[candles.length - 1].time));
+    candles = candles.filter(c => etDate(new Date(c.time)) === lastDate);
   }
 
   if (candles.length > 0) {
@@ -297,11 +297,9 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
   const cached = yahooIntradayCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
-  const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-
   // Fetch BOTH sources in parallel — pick whichever has better coverage
-  const today = new Date().toISOString().split('T')[0];
-  const daysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0];
+  const today = etDate();
+  const daysAgo = etDate(new Date(Date.now() - 5 * 86400000));
 
   const [pg, yahooCandles] = await Promise.all([
     fetchPolygonAggs(upperTicker, 5, 'minute', daysAgo, today, 60),
@@ -345,8 +343,8 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
       volume: pg.volumes[i],
     }));
     if (raw.length > 0) {
-      const lastDateET = etDateFmt.format(new Date(raw[raw.length - 1].time));
-      const todayOnly = raw.filter(c => etDateFmt.format(new Date(c.time)) === lastDateET);
+      const lastDateET = etDate(new Date(raw[raw.length - 1].time));
+      const todayOnly = raw.filter(c => etDate(new Date(c.time)) === lastDateET);
       polygonCandles = todayOnly.length > 0 ? todayOnly : raw;
     }
   }
@@ -374,9 +372,9 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
   if (cached) return cached;
 
   // Polygon.io primary — proper resolution per period
-  const today = new Date().toISOString().split('T')[0];
+  const today = etDate();
   const rangeDays = period === '1W' ? 7 : period === '1M' ? 30 : period === '3M' ? 90 : period === '6M' ? 180 : period === '1Y' ? 365 : Math.ceil((Date.now() - new Date(`${new Date().getFullYear()}-01-01`).getTime()) / 86400000) + 5;
-  const fromDate = period === 'YTD' ? `${new Date().getFullYear()}-01-01` : new Date(Date.now() - rangeDays * 86400000).toISOString().split('T')[0];
+  const fromDate = period === 'YTD' ? `${new Date().getFullYear()}-01-01` : etDate(new Date(Date.now() - rangeDays * 86400000));
   const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
 
   const pg = await fetchPolygonAggs(upperTicker, multiplier, timespan, fromDate, today, 300);
@@ -443,8 +441,8 @@ export async function fetchDailyCandles(ticker: string, days: number): Promise<I
   const cached = dailyCandleCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
-  const today = new Date().toISOString().split('T')[0];
-  const fromDate = new Date(Date.now() - (days + 10) * 86400000).toISOString().split('T')[0];
+  const today = etDate();
+  const fromDate = etDate(new Date(Date.now() - (days + 10) * 86400000));
 
   const pg = await fetchPolygonAggs(upperTicker, 1, 'day', fromDate, today);
   if (pg && pg.closes.length > 0) {

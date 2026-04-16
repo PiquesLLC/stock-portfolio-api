@@ -6,6 +6,7 @@ import prisma from '../utils/prisma';
 import { getPortfolioChartData } from './snapshot.service';
 import { getPortfolio } from './portfolio.service';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
+import { etDate } from '../utils/date';
 
 // Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
@@ -133,7 +134,6 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     return points;
   }
 
-  const etDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
   const etFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     hour: 'numeric',
@@ -150,7 +150,7 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     return {
       hourFloat: hour + minute / 60,
       isWeekday: !['Sat', 'Sun'].includes(weekday),
-      etDate: etDateFmt.format(d),
+      etDate: etDate(d),
     };
   }
 
@@ -191,7 +191,7 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
     return latestTradingDayPoints;
   }
 
-  const nowEtDate = etDateFmt.format(nowDate);
+  const nowEtDate = etDate(nowDate);
   const todayExpanded = points.filter(point => {
     const { etDate } = getEtHourFloat(new Date(point.time));
     return etDate === nowEtDate;

@@ -7,13 +7,10 @@ import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 import { replayDailyLedger } from './ledger/replay.service';
 import { LEDGER_SETTLEMENT_POLICY, TRADE_SETTLEMENT_POLICY, isValidLedgerEventType } from './ledger/settlement-policy';
 import { getMarketSession } from '../utils/market-hours';
+import { etDate } from '../utils/date';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
-
-/** Format a date as YYYY-MM-DD in ET (market timezone) to avoid UTC date rollover after 8 PM ET */
-const _etFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-function etDate(d: Date = new Date()): string { return _etFmt.format(d); }
 
 export type LedgerReplayGap = {
   start: string;
