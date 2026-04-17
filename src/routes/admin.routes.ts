@@ -1,4 +1,6 @@
 import { Router, Response } from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
 import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
@@ -79,13 +81,60 @@ router.get('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, 
   res.json(user);
 });
 
+// GET /admin/disk-info — list /data contents, DB pragmas, table row counts
+router.get('/disk-info', requireAuth, requireAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    const dataDir = '/data';
+    const files: Array<{ name: string; sizeMB: number }> = [];
+    try {
+      for (const name of fs.readdirSync(dataDir)) {
+        const full = path.join(dataDir, name);
+        try {
+          const st = fs.statSync(full);
+          if (st.isFile()) files.push({ name, sizeMB: +(st.size / 1024 / 1024).toFixed(2) });
+        } catch { /* skip */ }
+      }
+    } catch { /* /data may not exist locally */ }
+    files.sort((a, b) => b.sizeMB - a.sizeMB);
+
+    const pragma: Record<string, unknown> = {};
+    for (const p of ['page_count', 'page_size', 'freelist_count', 'auto_vacuum', 'journal_mode']) {
+      try {
+        const rows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(`PRAGMA ${p}`);
+        pragma[p] = rows?.[0] ? Object.values(rows[0])[0] : null;
+      } catch (e) {
+        pragma[p] = `err: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+
+    const tables = ['HoldingSnapshot', 'BackgroundJobRun', 'JobIdempotencyKey', 'RefreshToken', 'AnalyticsEvent', 'ApiUsageLog', 'ApiRequestLog'];
+    const rowCounts: Record<string, number | string> = {};
+    for (const t of tables) {
+      try {
+        const r = await prisma.$queryRawUnsafe<Array<{ n: bigint | number }>>(`SELECT COUNT(*) as n FROM "${t}"`);
+        rowCounts[t] = Number(r?.[0]?.n ?? 0);
+      } catch (e) {
+        rowCounts[t] = `err: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}`;
+      }
+    }
+
+    res.json({ files, pragma, rowCounts });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 // POST /admin/cleanup-db — prune old snapshots, expired tokens, old job runs
 // TEMPORARY endpoint for production disk cleanup. Remove after use.
+// Body: { confirm: 'cleanup-db', aggressive?: boolean }
+//   aggressive=true → truncate BackgroundJobRun/ApiUsageLog/AnalyticsEvent entirely
+//   and run PRAGMA incremental_vacuum (works when disk is too tight for full VACUUM).
 router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
   if (req.body?.confirm !== 'cleanup-db') {
     res.status(400).json({ error: 'Missing confirmation token' });
     return;
   }
+  const aggressive = req.body?.aggressive === true;
 
   const log: string[] = [];
   try {
@@ -96,42 +145,58 @@ router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, r
     const jk = await prisma.$executeRawUnsafe(`DELETE FROM "JobIdempotencyKey" WHERE "expiresAt" < CURRENT_TIMESTAMP`);
     log.push(`JobIdempotencyKey: deleted ${jk}`);
 
-    const jr = await prisma.$executeRawUnsafe(`DELETE FROM "BackgroundJobRun" WHERE "startedAt" < datetime('now', '-7 days')`);
-    log.push(`BackgroundJobRun: deleted ${jr}`);
+    if (aggressive) {
+      const jr = await prisma.$executeRawUnsafe(`DELETE FROM "BackgroundJobRun" WHERE "startedAt" < datetime('now', '-1 day')`);
+      log.push(`BackgroundJobRun (>1d): deleted ${jr}`);
+      const ae = await prisma.$executeRawUnsafe(`DELETE FROM "AnalyticsEvent"`);
+      log.push(`AnalyticsEvent (all): deleted ${ae}`);
+      const al = await prisma.$executeRawUnsafe(`DELETE FROM "ApiUsageLog"`);
+      log.push(`ApiUsageLog (all): deleted ${al}`);
+    } else {
+      const jr = await prisma.$executeRawUnsafe(`DELETE FROM "BackgroundJobRun" WHERE "startedAt" < datetime('now', '-7 days')`);
+      log.push(`BackgroundJobRun: deleted ${jr}`);
+      const ae = await prisma.$executeRawUnsafe(`DELETE FROM "AnalyticsEvent" WHERE "createdAt" < datetime('now', '-90 days')`);
+      log.push(`AnalyticsEvent: deleted ${ae}`);
+      const al = await prisma.$executeRawUnsafe(`DELETE FROM "ApiUsageLog" WHERE "createdAt" < datetime('now', '-90 days')`);
+      log.push(`ApiUsageLog: deleted ${al}`);
+    }
 
-    const ae = await prisma.$executeRawUnsafe(`DELETE FROM "AnalyticsEvent" WHERE "createdAt" < datetime('now', '-90 days')`);
-    log.push(`AnalyticsEvent: deleted ${ae}`);
-
-    const al = await prisma.$executeRawUnsafe(`DELETE FROM "ApiUsageLog" WHERE "createdAt" < datetime('now', '-90 days')`);
-    log.push(`ApiUsageLog: deleted ${al}`);
-
-    // Step 2: HoldingSnapshot > 30 days in chunks
+    // Step 2: HoldingSnapshot in chunks. Aggressive → keep last 7d only.
+    const snapshotCutoff = aggressive ? '-7 days' : '-30 days';
     let totalHs = 0;
     let chunk = 0;
     while (true) {
       const deleted = await prisma.$executeRawUnsafe(
-        `DELETE FROM "HoldingSnapshot" WHERE rowid IN (SELECT rowid FROM "HoldingSnapshot" WHERE "timestamp" < datetime('now', '-30 days') LIMIT 5000)`
+        `DELETE FROM "HoldingSnapshot" WHERE rowid IN (SELECT rowid FROM "HoldingSnapshot" WHERE "timestamp" < datetime('now', '${snapshotCutoff}') LIMIT 5000)`
       );
       totalHs += deleted;
       chunk++;
-      log.push(`HoldingSnapshot chunk ${chunk}: deleted ${deleted}`);
       if (deleted < 5000) break;
+      if (chunk > 500) break;
     }
-    log.push(`HoldingSnapshot total: deleted ${totalHs}`);
+    log.push(`HoldingSnapshot total (>${snapshotCutoff}): deleted ${totalHs} in ${chunk} chunks`);
 
     // Step 3: WAL checkpoint
     await prisma.$executeRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE)`);
     log.push('WAL checkpoint: done');
 
-    // Step 4: VACUUM (may fail if still tight)
+    // Step 4a: incremental_vacuum (works in tight-disk scenarios if auto_vacuum is INCREMENTAL)
+    try {
+      const iv = await prisma.$executeRawUnsafe(`PRAGMA incremental_vacuum`);
+      log.push(`incremental_vacuum: ${iv}`);
+    } catch (e: unknown) {
+      log.push(`incremental_vacuum: skipped (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`);
+    }
+
+    // Step 4b: full VACUUM (may fail if still tight)
     try {
       await prisma.$executeRawUnsafe(`VACUUM`);
       log.push('VACUUM: done');
     } catch (e: unknown) {
-      log.push(`VACUUM: skipped (${e instanceof Error ? e.message : String(e)})`);
+      log.push(`VACUUM: skipped (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`);
     }
 
-    res.json({ success: true, log });
+    res.json({ success: true, aggressive, log });
   } catch (e: unknown) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e), log });
   }
