@@ -379,6 +379,13 @@ export async function assertBillingDeploySafety(): Promise<void> {
   if (!config.stripeWebhookSecret) missing.push('STRIPE_WEBHOOK_SECRET');
   if (!config.stripeProMonthlyPriceId) missing.push('STRIPE_PRO_MONTHLY_PRICE_ID');
   if (!config.stripePremiumMonthlyPriceId) missing.push('STRIPE_PREMIUM_MONTHLY_PRICE_ID');
+  // Connect/creator webhook secret validation added Apr 26 after a 2-day silent
+  // signature mismatch on /creator/webhooks/stripe. Required when creator
+  // monetization is on; signature verification fails open with empty string
+  // otherwise, returning 400 on every delivery without surfacing the cause.
+  if (config.creatorMonetizationEnabled && !config.stripeConnectWebhookSecret) {
+    missing.push('STRIPE_CONNECT_WEBHOOK_SECRET');
+  }
 
   if (missing.length > 0) {
     throw new Error(`Billing is enabled but missing env vars: ${missing.join(', ')}`);
