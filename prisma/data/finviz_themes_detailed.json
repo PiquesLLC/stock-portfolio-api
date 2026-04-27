@@ -1,0 +1,3950 @@
+{
+  "generatedAt": "2026-02-25T11:16:23.568Z",
+  "themeCount": 40,
+  "themes": [
+    {
+      "theme": "Artificial Intelligence",
+      "subthemes": [
+        {
+          "name": "Compute",
+          "tickers": [
+            "NVDA",
+            "SMCI",
+            "AMD",
+            "TSM",
+            "AVGO",
+            "ARM",
+            "ASML",
+            "MU",
+            "ANET",
+            "AMAT",
+            "LRCX",
+            "KLAC",
+            "MRVL",
+            "INTC",
+            "GOOGL",
+            "MSFT"
+          ]
+        },
+        {
+          "name": "Cloud",
+          "tickers": [
+            "MSFT",
+            "AMZN",
+            "GOOGL",
+            "ORCL",
+            "SMCI",
+            "EQIX",
+            "DLR",
+            "IBM",
+            "HPE",
+            "DELL",
+            "VRT"
+          ]
+        },
+        {
+          "name": "Models",
+          "tickers": [
+            "MSFT",
+            "GOOGL",
+            "META",
+            "NVDA",
+            "AMZN",
+            "IBM",
+            "AI",
+            "PLTR",
+            "BIDU"
+          ]
+        },
+        {
+          "name": "Data",
+          "tickers": [
+            "SNOW",
+            "MSFT",
+            "PLTR",
+            "AMZN",
+            "GOOGL",
+            "MDB",
+            "AI",
+            "NVDA",
+            "CRM",
+            "INOD",
+            "SAP",
+            "NOW",
+            "DDOG"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "MSFT",
+            "GOOGL",
+            "ADBE",
+            "CRM",
+            "NOW",
+            "WDAY",
+            "SAP",
+            "PATH",
+            "ORCL",
+            "INTU"
+          ]
+        },
+        {
+          "name": "Networking",
+          "tickers": [
+            "NVDA",
+            "ANET",
+            "AVGO",
+            "SMCI",
+            "MRVL",
+            "NET",
+            "CSCO",
+            "HPE",
+            "IBM",
+            "MSFT"
+          ]
+        },
+        {
+          "name": "Security",
+          "tickers": [
+            "PANW",
+            "CRWD",
+            "ZS",
+            "S",
+            "FTNT",
+            "MSFT",
+            "CYBR",
+            "CHKP",
+            "CSCO",
+            "OKTA"
+          ]
+        },
+        {
+          "name": "Edge",
+          "tickers": [
+            "QCOM",
+            "ARM",
+            "AMBA",
+            "NXPI",
+            "SYNA",
+            "AAPL",
+            "CEVA",
+            "LSCC",
+            "INTC",
+            "NVDA",
+            "AMD"
+          ]
+        },
+        {
+          "name": "Robotics",
+          "tickers": [
+            "CGNX",
+            "ROK",
+            "TER",
+            "NVDA",
+            "ISRG",
+            "ZBRA",
+            "SYM",
+            "PATH",
+            "AMBA",
+            "AVAV",
+            "TSLA",
+            "IRBT"
+          ]
+        },
+        {
+          "name": "Applications",
+          "tickers": [
+            "PLTR",
+            "AI",
+            "BBAI",
+            "RXRX",
+            "UPST",
+            "CRNC",
+            "SOUN",
+            "CGNX",
+            "TSLA"
+          ]
+        },
+        {
+          "name": "Ads & Search",
+          "tickers": [
+            "GOOGL",
+            "META",
+            "AMZN",
+            "TTD",
+            "MSFT",
+            "APP",
+            "PINS",
+            "SNAP",
+            "BIDU",
+            "DV",
+            "MGNI",
+            "PUBM"
+          ]
+        },
+        {
+          "name": "Energy",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "GOOGL",
+            "D",
+            "ORCL",
+            "TLN",
+            "IBM",
+            "TSLA",
+            "PWR",
+            "BABA",
+            "AES",
+            "SMR",
+            "OKLO"
+          ]
+        },
+        {
+          "name": "AGI",
+          "tickers": [
+            "MSFT",
+            "GOOGL",
+            "META",
+            "NVDA",
+            "AMZN",
+            "AMD",
+            "IBM"
+          ]
+        }
+      ],
+      "tickerCount": 84
+    },
+    {
+      "theme": "Cloud Computing",
+      "subthemes": [
+        {
+          "name": "Hyperscalers",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "GOOGL",
+            "ORCL",
+            "IBM",
+            "BABA"
+          ]
+        },
+        {
+          "name": "Data Centers",
+          "tickers": [
+            "EQIX",
+            "DLR",
+            "IRM",
+            "DBRG"
+          ]
+        },
+        {
+          "name": "Databases",
+          "tickers": [
+            "SNOW",
+            "MDB",
+            "CFLT",
+            "ORCL",
+            "MSFT",
+            "AMZN",
+            "GOOGL",
+            "ESTC",
+            "IBM"
+          ]
+        },
+        {
+          "name": "DevOps",
+          "tickers": [
+            "DDOG",
+            "GTLB",
+            "DT",
+            "CSCO",
+            "MSFT",
+            "AMZN",
+            "ESTC",
+            "PD",
+            "GOOGL",
+            "FROG",
+            "IBM",
+            "ORCL"
+          ]
+        },
+        {
+          "name": "Security",
+          "tickers": [
+            "PANW",
+            "CRWD",
+            "ZS",
+            "FTNT",
+            "OKTA",
+            "MSFT",
+            "NET",
+            "S",
+            "AMZN",
+            "GOOGL"
+          ]
+        },
+        {
+          "name": "Hybrid Cloud",
+          "tickers": [
+            "IBM",
+            "MSFT",
+            "HPE",
+            "DELL",
+            "AMZN",
+            "GOOGL",
+            "ORCL",
+            "AVGO"
+          ]
+        },
+        {
+          "name": "Multi Cloud",
+          "tickers": [
+            "NTNX",
+            "ZS",
+            "RXT",
+            "MSFT",
+            "IBM",
+            "NET",
+            "FFIV",
+            "NOW",
+            "DDOG",
+            "ORCL"
+          ]
+        },
+        {
+          "name": "Serverless",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "GOOGL",
+            "NET",
+            "FSLY",
+            "BABA",
+            "IBM"
+          ]
+        },
+        {
+          "name": "PaaS",
+          "tickers": [
+            "MSFT",
+            "GOOGL",
+            "AMZN",
+            "DOCN",
+            "TWLO",
+            "ORCL",
+            "CRM",
+            "IBM",
+            "TEAM"
+          ]
+        },
+        {
+          "name": "Hardware",
+          "tickers": [
+            "SMCI",
+            "NVDA",
+            "DELL",
+            "HPE",
+            "ANET",
+            "CSCO",
+            "AMD",
+            "INTC",
+            "AVGO",
+            "MRVL",
+            "VRT"
+          ]
+        },
+        {
+          "name": "Edge",
+          "tickers": [
+            "NET",
+            "AKAM",
+            "FSLY",
+            "ZS",
+            "PANW",
+            "FTNT",
+            "MSFT",
+            "GOOGL",
+            "AMZN"
+          ]
+        },
+        {
+          "name": "H-SaaS",
+          "tickers": [
+            "CRM",
+            "TEAM",
+            "MSFT",
+            "NOW",
+            "ZM",
+            "GOOGL",
+            "HUBS",
+            "ADBE",
+            "INTU",
+            "SHOP",
+            "DOCU",
+            "DBX",
+            "MNDY",
+            "ASAN",
+            "WDAY"
+          ]
+        }
+      ],
+      "tickerCount": 57
+    },
+    {
+      "theme": "Semiconductors",
+      "subthemes": [
+        {
+          "name": "Compute",
+          "tickers": [
+            "NVDA",
+            "AMD",
+            "INTC",
+            "ARM",
+            "MRVL",
+            "QCOM",
+            "AVGO",
+            "TSM"
+          ]
+        },
+        {
+          "name": "Memory",
+          "tickers": [
+            "MU",
+            "WDC",
+            "STX",
+            "RMBS"
+          ]
+        },
+        {
+          "name": "Analog",
+          "tickers": [
+            "TXN",
+            "ADI",
+            "ON",
+            "MPWR",
+            "NXPI",
+            "MCHP",
+            "STM"
+          ]
+        },
+        {
+          "name": "Wireless",
+          "tickers": [
+            "QCOM",
+            "SWKS",
+            "QRVO",
+            "AVGO",
+            "MRVL",
+            "NXPI"
+          ]
+        },
+        {
+          "name": "Foundries",
+          "tickers": [
+            "TSM",
+            "GFS",
+            "UMC",
+            "INTC"
+          ]
+        },
+        {
+          "name": "Design Tools",
+          "tickers": [
+            "SNPS",
+            "CDNS",
+            "RMBS",
+            "PDFS",
+            "ARM",
+            "KEYS"
+          ]
+        },
+        {
+          "name": "Lithography",
+          "tickers": [
+            "ASML",
+            "AMAT",
+            "LRCX",
+            "KLAC",
+            "ACLS"
+          ]
+        },
+        {
+          "name": "Packaging",
+          "tickers": [
+            "TER",
+            "AMKR",
+            "COHU",
+            "FORM",
+            "ASX",
+            "CAMT"
+          ]
+        },
+        {
+          "name": "Next-Gen",
+          "tickers": [
+            "WOLF",
+            "LSCC",
+            "NVTS",
+            "STM",
+            "ON",
+            "POWI",
+            "IONQ",
+            "MRVL",
+            "NVEC",
+            "MRAM",
+            "SIMO",
+            "NVDA",
+            "AMD",
+            "INTC"
+          ]
+        }
+      ],
+      "tickerCount": 46
+    },
+    {
+      "theme": "Cybersecurity",
+      "subthemes": [
+        {
+          "name": "ZeroTrust",
+          "tickers": [
+            "ZS",
+            "NET",
+            "OKTA",
+            "PANW",
+            "CRWD",
+            "MSFT",
+            "FTNT",
+            "CSCO"
+          ]
+        },
+        {
+          "name": "Endpoint",
+          "tickers": [
+            "CRWD",
+            "S",
+            "PANW",
+            "MSFT",
+            "FTNT",
+            "CHKP"
+          ]
+        },
+        {
+          "name": "Network",
+          "tickers": [
+            "PANW",
+            "FTNT",
+            "CHKP",
+            "CSCO"
+          ]
+        },
+        {
+          "name": "Cloud",
+          "tickers": [
+            "PANW",
+            "ZS",
+            "CRWD",
+            "S",
+            "NET",
+            "MSFT",
+            "GOOGL",
+            "CHKP",
+            "AMZN",
+            "QLYS",
+            "TENB"
+          ]
+        },
+        {
+          "name": "Identity IAM",
+          "tickers": [
+            "OKTA",
+            "CYBR",
+            "MSFT",
+            "SAIL",
+            "PANW",
+            "CSCO",
+            "AVGO"
+          ]
+        },
+        {
+          "name": "ThreatOps",
+          "tickers": [
+            "CRWD",
+            "RPD",
+            "FTNT",
+            "PANW",
+            "ESTC",
+            "NET"
+          ]
+        },
+        {
+          "name": "SIEM",
+          "tickers": [
+            "IBM",
+            "PANW",
+            "MSFT",
+            "CSCO",
+            "CRWD",
+            "FTNT",
+            "RPD"
+          ]
+        },
+        {
+          "name": "App Security",
+          "tickers": [
+            "FFIV",
+            "NET",
+            "PANW",
+            "RPD",
+            "FTNT",
+            "CRWD",
+            "QLYS",
+            "CYBR",
+            "ZS"
+          ]
+        }
+      ],
+      "tickerCount": 21
+    },
+    {
+      "theme": "Software",
+      "subthemes": [
+        {
+          "name": "OS",
+          "tickers": [
+            "MSFT",
+            "AAPL",
+            "GOOGL"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "SAP",
+            "ORCL",
+            "WDAY",
+            "MSFT",
+            "CRM",
+            "INTU",
+            "ROP"
+          ]
+        },
+        {
+          "name": "CRM",
+          "tickers": [
+            "CRM",
+            "HUBS",
+            "ADBE",
+            "BRZE",
+            "MSFT",
+            "INTU",
+            "FRSH",
+            "ORCL",
+            "TWLO",
+            "SAP"
+          ]
+        },
+        {
+          "name": "Collaboration",
+          "tickers": [
+            "ZM",
+            "MSFT",
+            "TEAM",
+            "RNG",
+            "GOOGL",
+            "CSCO",
+            "CRM",
+            "DOCU",
+            "TWLO"
+          ]
+        },
+        {
+          "name": "Gaming",
+          "tickers": [
+            "EA",
+            "TTWO",
+            "RBLX",
+            "U",
+            "MSFT",
+            "SONY",
+            "NTES"
+          ]
+        },
+        {
+          "name": "E-Commerce",
+          "tickers": [
+            "SHOP",
+            "XYZ",
+            "MELI",
+            "AMZN",
+            "ETSY",
+            "CPNG",
+            "EBAY",
+            "BABA",
+            "PDD",
+            "JD",
+            "WMT"
+          ]
+        },
+        {
+          "name": "Design",
+          "tickers": [
+            "ADBE",
+            "ADSK",
+            "PTC",
+            "FIG",
+            "BSY",
+            "U",
+            "CDNS",
+            "SNPS",
+            "TRMB"
+          ]
+        },
+        {
+          "name": "Security",
+          "tickers": [
+            "PANW",
+            "CRWD",
+            "ZS",
+            "OKTA",
+            "CYBR",
+            "S",
+            "FTNT",
+            "MSFT",
+            "CHKP",
+            "NET",
+            "TENB",
+            "QLYS",
+            "CSCO",
+            "AVGO",
+            "IBM"
+          ]
+        },
+        {
+          "name": "DevOps",
+          "tickers": [
+            "DDOG",
+            "DT",
+            "GTLB",
+            "TEAM",
+            "NOW",
+            "FROG",
+            "PD",
+            "ESTC",
+            "MSFT",
+            "GOOGL",
+            "AMZN",
+            "CSCO"
+          ]
+        },
+        {
+          "name": "Data Analytics",
+          "tickers": [
+            "SNOW",
+            "MSFT",
+            "PLTR",
+            "GOOGL",
+            "MDB",
+            "ORCL",
+            "AMZN",
+            "MSTR",
+            "ESTC",
+            "TDC",
+            "DOMO",
+            "CSCO",
+            "IBM",
+            "CRM"
+          ]
+        },
+        {
+          "name": "H-SaaS",
+          "tickers": [
+            "MSFT",
+            "CRM",
+            "GOOGL",
+            "NOW",
+            "ADBE",
+            "WDAY",
+            "TEAM",
+            "ZM",
+            "HUBS",
+            "DOCU",
+            "SAP",
+            "INTU",
+            "ORCL",
+            "SHOP"
+          ]
+        },
+        {
+          "name": "V-SaaS",
+          "tickers": [
+            "VEEV",
+            "BLKB",
+            "TYL",
+            "GWRE",
+            "TOST",
+            "DOCS",
+            "PCOR",
+            "APPF",
+            "COUR",
+            "PTC"
+          ]
+        }
+      ],
+      "tickerCount": 78
+    },
+    {
+      "theme": "Hardware",
+      "subthemes": [
+        {
+          "name": "PCs & Devices",
+          "tickers": [
+            "AAPL",
+            "HPQ",
+            "DELL",
+            "LOGI",
+            "INTC",
+            "AMD",
+            "QCOM",
+            "MSFT",
+            "NVDA",
+            "STX"
+          ]
+        },
+        {
+          "name": "Servers",
+          "tickers": [
+            "DELL",
+            "HPE",
+            "SMCI",
+            "IBM",
+            "CSCO",
+            "NTAP",
+            "ANET"
+          ]
+        },
+        {
+          "name": "Networking",
+          "tickers": [
+            "CSCO",
+            "ANET",
+            "HPE",
+            "EXTR",
+            "UI",
+            "MRVL",
+            "AVGO"
+          ]
+        },
+        {
+          "name": "Storage",
+          "tickers": [
+            "NTAP",
+            "PSTG",
+            "WDC",
+            "STX",
+            "DELL",
+            "HPE",
+            "SMCI"
+          ]
+        },
+        {
+          "name": "Data Centers",
+          "tickers": [
+            "VRT",
+            "ETN",
+            "MOD",
+            "NVT",
+            "SMCI",
+            "DELL"
+          ]
+        },
+        {
+          "name": "Electronics",
+          "tickers": [
+            "SONY",
+            "LOGI",
+            "AAPL",
+            "MSFT",
+            "GRMN",
+            "HPQ",
+            "DELL"
+          ]
+        },
+        {
+          "name": "Gaming",
+          "tickers": [
+            "META",
+            "SONY",
+            "AAPL",
+            "IMMR",
+            "CRSR",
+            "LOGI",
+            "TBCH",
+            "HPQ"
+          ]
+        },
+        {
+          "name": "Printing",
+          "tickers": [
+            "HPQ",
+            "DDD",
+            "SSYS",
+            "XRX",
+            "MTLS",
+            "NNDM"
+          ]
+        },
+        {
+          "name": "Telecom",
+          "tickers": [
+            "NOK",
+            "ERIC",
+            "CIEN",
+            "CSCO",
+            "LITE",
+            "COMM",
+            "ADTN",
+            "VIAV",
+            "MSI",
+            "HPE"
+          ]
+        },
+        {
+          "name": "Industrial IoT",
+          "tickers": [
+            "ZBRA",
+            "HON",
+            "ROK",
+            "IOT",
+            "EMR",
+            "TRMB",
+            "ADI",
+            "TEL",
+            "PI",
+            "TXN",
+            "AME"
+          ]
+        },
+        {
+          "name": "Next-Gen",
+          "tickers": [
+            "NVDA",
+            "IONQ",
+            "ISRG",
+            "QBTS",
+            "RGTI",
+            "AVAV",
+            "KTOS",
+            "MBLY",
+            "AMD",
+            "DDD",
+            "SSYS",
+            "TSLA",
+            "TSM",
+            "AAPL",
+            "ASML"
+          ]
+        }
+      ],
+      "tickerCount": 66
+    },
+    {
+      "theme": "Quantum Computing",
+      "subthemes": [
+        {
+          "name": "Hardware",
+          "tickers": [
+            "IONQ",
+            "RGTI",
+            "IBM",
+            "GOOGL",
+            "QBTS",
+            "QUBT",
+            "HON"
+          ]
+        },
+        {
+          "name": "Cloud",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "IBM",
+            "IONQ",
+            "QBTS",
+            "GOOGL",
+            "RGTI",
+            "NVDA"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "MSFT",
+            "IBM",
+            "NVDA",
+            "GOOGL",
+            "QBTS",
+            "IONQ",
+            "QUBT"
+          ]
+        },
+        {
+          "name": "Enabling Tech",
+          "tickers": [
+            "KEYS",
+            "NVDA",
+            "AMD",
+            "INTC",
+            "HON",
+            "RGTI"
+          ]
+        },
+        {
+          "name": "Networking",
+          "tickers": [
+            "ARQQ",
+            "LAES",
+            "IBM",
+            "MSFT",
+            "NET",
+            "AMZN",
+            "HON"
+          ]
+        },
+        {
+          "name": "Applications",
+          "tickers": [
+            "IBM",
+            "MSFT",
+            "AMZN",
+            "QBTS",
+            "GOOGL",
+            "IONQ",
+            "NVDA",
+            "HON"
+          ]
+        }
+      ],
+      "tickerCount": 16
+    },
+    {
+      "theme": "Virtual & Augmented Reality",
+      "subthemes": [
+        {
+          "name": "Hardware",
+          "tickers": [
+            "META",
+            "AAPL",
+            "VUZI",
+            "QCOM",
+            "KOPN",
+            "MSFT",
+            "LITE",
+            "COHR",
+            "NVDA",
+            "AMD",
+            "HPQ"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "AAPL",
+            "META",
+            "MSFT",
+            "U",
+            "GOOGL",
+            "SNAP",
+            "SONY"
+          ]
+        },
+        {
+          "name": "Applications",
+          "tickers": [
+            "RBLX",
+            "U",
+            "META",
+            "MSFT",
+            "SNAP",
+            "TTWO",
+            "EA",
+            "AAPL",
+            "AXON",
+            "ADBE",
+            "ADSK"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "NVDA",
+            "GOOGL",
+            "U",
+            "QCOM",
+            "FSLY"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "PTC",
+            "MSFT",
+            "U",
+            "VRAR",
+            "TRMB",
+            "NVDA",
+            "ADSK",
+            "AXON"
+          ]
+        }
+      ],
+      "tickerCount": 26
+    },
+    {
+      "theme": "Biometrics",
+      "subthemes": [
+        {
+          "name": "Hardware",
+          "tickers": [
+            "AAPL",
+            "QCOM",
+            "BKYI",
+            "SYNA",
+            "GRMN",
+            "EVLV",
+            "CGNX",
+            "AWRE"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "MITK",
+            "AUID",
+            "AWRE",
+            "MSFT",
+            "GOOGL",
+            "IDN",
+            "NVDA",
+            "PLTR",
+            "META",
+            "BBAI"
+          ]
+        },
+        {
+          "name": "Identity",
+          "tickers": [
+            "AWRE",
+            "YOU",
+            "MITK",
+            "BKYI",
+            "AUID",
+            "OKTA",
+            "MSFT",
+            "AAPL",
+            "IDN"
+          ]
+        },
+        {
+          "name": "Gov & Defense",
+          "tickers": [
+            "LDOS",
+            "AWRE",
+            "MITK",
+            "IDN",
+            "BKYI",
+            "AUID",
+            "LHX",
+            "SPCB",
+            "NOC",
+            "ACN",
+            "PSN",
+            "LMT"
+          ]
+        }
+      ],
+      "tickerCount": 26
+    },
+    {
+      "theme": "Big Data",
+      "subthemes": [
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "SNOW",
+            "MSFT",
+            "AMZN",
+            "GOOGL",
+            "MDB",
+            "ORCL",
+            "PSTG",
+            "NVDA",
+            "STX",
+            "WDC",
+            "SMCI",
+            "NTAP",
+            "DELL",
+            "HPE",
+            "EQIX",
+            "DLR"
+          ]
+        },
+        {
+          "name": "Analytics & BI",
+          "tickers": [
+            "MSFT",
+            "CRM",
+            "DOMO",
+            "MSTR",
+            "PLTR",
+            "TDC",
+            "SAP",
+            "CSCO",
+            "ORCL",
+            "ESTC",
+            "DDOG"
+          ]
+        },
+        {
+          "name": "Providers",
+          "tickers": [
+            "SPGI",
+            "RELX",
+            "TRI",
+            "MCO",
+            "MSCI",
+            "VRSK",
+            "EFX",
+            "IQV",
+            "TRU",
+            "ICE",
+            "FDS",
+            "CSGP"
+          ]
+        },
+        {
+          "name": "AI Platforms",
+          "tickers": [
+            "MSFT",
+            "PLTR",
+            "AMZN",
+            "GOOGL",
+            "AI",
+            "CRM",
+            "NVDA",
+            "SAP",
+            "NICE",
+            "NOW",
+            "AMD"
+          ]
+        }
+      ],
+      "tickerCount": 41
+    },
+    {
+      "theme": "Electric Vehicles",
+      "subthemes": [
+        {
+          "name": "Manufacturers",
+          "tickers": [
+            "TSLA",
+            "RIVN",
+            "NIO",
+            "LCID",
+            "XPEV",
+            "LI",
+            "PSNY",
+            "GM",
+            "F"
+          ]
+        },
+        {
+          "name": "Batteries",
+          "tickers": [
+            "ALB",
+            "SQM",
+            "LAC",
+            "QS",
+            "SLDP",
+            "MP",
+            "MVST",
+            "SES",
+            "ENVX",
+            "TE",
+            "ABAT"
+          ]
+        },
+        {
+          "name": "Charging",
+          "tickers": [
+            "CHPT",
+            "TSLA",
+            "EVGO",
+            "BLNK",
+            "ETN",
+            "WBX",
+            "BEEM",
+            "NEE"
+          ]
+        },
+        {
+          "name": "Chips",
+          "tickers": [
+            "WOLF",
+            "ON",
+            "NVTS",
+            "STM",
+            "NXPI",
+            "NVDA",
+            "TXN",
+            "QCOM"
+          ]
+        },
+        {
+          "name": "Suppliers",
+          "tickers": [
+            "MBLY",
+            "BWA",
+            "APTV",
+            "LAZR",
+            "MGA",
+            "INVZ",
+            "DAN",
+            "NVDA",
+            "LEA",
+            "THRM",
+            "QCOM",
+            "NXPI",
+            "AMBA"
+          ]
+        },
+        {
+          "name": "Self-Driving",
+          "tickers": [
+            "MBLY",
+            "NVDA",
+            "TSLA",
+            "LAZR",
+            "QCOM",
+            "AUR",
+            "INVZ",
+            "GOOGL",
+            "HSAI",
+            "APTV"
+          ]
+        },
+        {
+          "name": "Fleets",
+          "tickers": [
+            "IOT",
+            "NVVE",
+            "AIOT",
+            "UBER",
+            "TRMB",
+            "LYFT",
+            "BEEM",
+            "VZ"
+          ]
+        }
+      ],
+      "tickerCount": 55
+    },
+    {
+      "theme": "Industrial Automation",
+      "subthemes": [
+        {
+          "name": "Robotics",
+          "tickers": [
+            "SYM",
+            "NVDA",
+            "ROK",
+            "NOVT",
+            "ZBRA",
+            "TER"
+          ]
+        },
+        {
+          "name": "Automation",
+          "tickers": [
+            "ROK",
+            "EMR",
+            "HON",
+            "ETN",
+            "NOVT",
+            "RRX"
+          ]
+        },
+        {
+          "name": "Machine Vision",
+          "tickers": [
+            "CGNX",
+            "TDY",
+            "ON",
+            "NOVT",
+            "ZBRA",
+            "TXN",
+            "ST",
+            "AMBA",
+            "OUST",
+            "AME"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "PTC",
+            "ADSK",
+            "NVDA",
+            "BSY",
+            "MSFT",
+            "SNPS",
+            "CDNS"
+          ]
+        },
+        {
+          "name": "IoT",
+          "tickers": [
+            "IOT",
+            "CSCO",
+            "MSFT",
+            "HON",
+            "DGII",
+            "PTC",
+            "ZBRA",
+            "PANW",
+            "ROK",
+            "FTNT",
+            "EMR"
+          ]
+        },
+        {
+          "name": "Logistics",
+          "tickers": [
+            "SYM",
+            "AMZN",
+            "MANH",
+            "FDX",
+            "UPS",
+            "ZBRA",
+            "HON",
+            "CGNX",
+            "GXO",
+            "ROK",
+            "ORCL"
+          ]
+        },
+        {
+          "name": "3D Printing",
+          "tickers": [
+            "DDD",
+            "SSYS",
+            "PRLB",
+            "MTLS",
+            "NNDM",
+            "XMTR",
+            "GE",
+            "CRS"
+          ]
+        }
+      ],
+      "tickerCount": 43
+    },
+    {
+      "theme": "Defense & Aerospace",
+      "subthemes": [
+        {
+          "name": "Drones",
+          "tickers": [
+            "AVAV",
+            "KTOS",
+            "RTX",
+            "RCAT",
+            "LHX",
+            "LMT",
+            "TXT",
+            "NOC",
+            "ONDS",
+            "BA"
+          ]
+        },
+        {
+          "name": "Missiles",
+          "tickers": [
+            "RTX",
+            "LMT",
+            "NOC",
+            "LHX",
+            "BWXT",
+            "GD",
+            "BA"
+          ]
+        },
+        {
+          "name": "SpaceTech",
+          "tickers": [
+            "RKLB",
+            "LMT",
+            "IRDM",
+            "NOC",
+            "VSAT",
+            "PL",
+            "RTX",
+            "LHX",
+            "SPIR",
+            "AMZN",
+            "BKSY"
+          ]
+        },
+        {
+          "name": "CyberDefense",
+          "tickers": [
+            "RTX",
+            "LHX",
+            "LDOS",
+            "NOC",
+            "CACI",
+            "LMT",
+            "BAH",
+            "MRCY",
+            "PLTR",
+            "PSN",
+            "GD"
+          ]
+        },
+        {
+          "name": "Weapons",
+          "tickers": [
+            "LMT",
+            "RTX",
+            "OLN",
+            "GD",
+            "NOC",
+            "LHX",
+            "AVAV",
+            "BA"
+          ]
+        },
+        {
+          "name": "Aviation",
+          "tickers": [
+            "LMT",
+            "NOC",
+            "RTX",
+            "GE",
+            "BA",
+            "HEI",
+            "TDG",
+            "TXT"
+          ]
+        },
+        {
+          "name": "Manufacturing",
+          "tickers": [
+            "MP",
+            "HWM",
+            "ATI",
+            "BWXT",
+            "HXL",
+            "CRS",
+            "RTX",
+            "GE",
+            "TDG",
+            "NOC",
+            "HEI",
+            "CW",
+            "GD",
+            "LMT"
+          ]
+        }
+      ],
+      "tickerCount": 35
+    },
+    {
+      "theme": "Transportation & Logistics",
+      "subthemes": [
+        {
+          "name": "Rail",
+          "tickers": [
+            "UNP",
+            "CSX",
+            "NSC",
+            "CNI",
+            "CP",
+            "WAB"
+          ]
+        },
+        {
+          "name": "Trucking",
+          "tickers": [
+            "ODFL",
+            "SAIA",
+            "XPO",
+            "ARCB",
+            "KNX",
+            "JBHT",
+            "WERN",
+            "TFII",
+            "SNDR",
+            "FDX",
+            "UPS",
+            "LSTR"
+          ]
+        },
+        {
+          "name": "Air Cargo",
+          "tickers": [
+            "FDX",
+            "UPS",
+            "FWRD",
+            "UAL"
+          ]
+        },
+        {
+          "name": "Maritime",
+          "tickers": [
+            "ZIM",
+            "MATX",
+            "GNK",
+            "SBLK",
+            "DAC",
+            "GSL",
+            "KEX"
+          ]
+        },
+        {
+          "name": "Warehousing",
+          "tickers": [
+            "GXO",
+            "CHRW",
+            "EXPD",
+            "MANH",
+            "HUBG",
+            "R",
+            "COLD",
+            "UPS",
+            "FWRD"
+          ]
+        },
+        {
+          "name": "Air Travel",
+          "tickers": [
+            "DAL",
+            "UAL",
+            "AAL",
+            "LUV",
+            "ALK",
+            "ALGT",
+            "JOBY",
+            "ACHR"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "CMI",
+            "PCAR",
+            "TRMB",
+            "CAT",
+            "CSX",
+            "UNP",
+            "MANH",
+            "OSK",
+            "GE",
+            "DE",
+            "APTV",
+            "WNC",
+            "CLNE",
+            "TXT",
+            "UPS",
+            "FDX"
+          ]
+        },
+        {
+          "name": "Next-Gen",
+          "tickers": [
+            "UBER",
+            "TSLA",
+            "RIVN",
+            "MBLY",
+            "AUR",
+            "LYFT",
+            "SERV",
+            "NVDA",
+            "LI",
+            "GOOGL",
+            "JOBY",
+            "LCID",
+            "GM"
+          ]
+        }
+      ],
+      "tickerCount": 64
+    },
+    {
+      "theme": "Space Tech",
+      "subthemes": [
+        {
+          "name": "Launch",
+          "tickers": [
+            "RKLB",
+            "FLY",
+            "LUNR",
+            "MNTS",
+            "LMT",
+            "NOC",
+            "BA",
+            "SPCE",
+            "VSAT"
+          ]
+        },
+        {
+          "name": "Satellites",
+          "tickers": [
+            "IRDM",
+            "GSAT",
+            "VSAT",
+            "TSAT",
+            "ASTS",
+            "SATS"
+          ]
+        },
+        {
+          "name": "Data Analytics",
+          "tickers": [
+            "PL",
+            "BKSY",
+            "SPIR",
+            "RDW",
+            "RKLB",
+            "LDOS"
+          ]
+        },
+        {
+          "name": "Defense",
+          "tickers": [
+            "NOC",
+            "LMT",
+            "LHX",
+            "RTX",
+            "KTOS",
+            "GD",
+            "RKLB"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "LUNR",
+            "RDW",
+            "RKLB",
+            "SPCE",
+            "BA"
+          ]
+        }
+      ],
+      "tickerCount": 23
+    },
+    {
+      "theme": "Robotics",
+      "subthemes": [
+        {
+          "name": "Automation",
+          "tickers": [
+            "ROK",
+            "SYM",
+            "CGNX",
+            "EMR",
+            "ZBRA",
+            "HON",
+            "TER",
+            "NVDA"
+          ]
+        },
+        {
+          "name": "Logistics",
+          "tickers": [
+            "SYM",
+            "AMZN",
+            "ZBRA",
+            "CGNX",
+            "HON",
+            "TER",
+            "ROK"
+          ]
+        },
+        {
+          "name": "AV & Mobility",
+          "tickers": [
+            "NVDA",
+            "MBLY",
+            "GOOGL",
+            "TSLA",
+            "AUR",
+            "QCOM",
+            "LAZR",
+            "APTV"
+          ]
+        },
+        {
+          "name": "Machine Vision",
+          "tickers": [
+            "NVDA",
+            "CGNX",
+            "AMBA",
+            "OUST",
+            "ON",
+            "QCOM",
+            "INVZ",
+            "LITE",
+            "ZBRA",
+            "TDY",
+            "LSCC"
+          ]
+        },
+        {
+          "name": "Medical",
+          "tickers": [
+            "ISRG",
+            "SYK",
+            "MDT",
+            "PRCT",
+            "ZBH",
+            "GMED",
+            "JNJ",
+            "ARAY"
+          ]
+        },
+        {
+          "name": "Consumer",
+          "tickers": [
+            "IRBT",
+            "AMZN",
+            "TSLA",
+            "YYGH",
+            "ZBRA",
+            "PATH",
+            "AAPL"
+          ]
+        }
+      ],
+      "tickerCount": 35
+    },
+    {
+      "theme": "Telecommunications",
+      "subthemes": [
+        {
+          "name": "Wireless",
+          "tickers": [
+            "VZ",
+            "TMUS",
+            "T",
+            "CMCSA",
+            "CHTR"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "AMT",
+            "CCI",
+            "SBAC",
+            "GLW",
+            "CIEN",
+            "CSCO",
+            "COMM",
+            "MSI"
+          ]
+        },
+        {
+          "name": "Cloud & Edge",
+          "tickers": [
+            "AMZN",
+            "MSFT",
+            "GOOGL",
+            "AKAM",
+            "NET",
+            "FSLY",
+            "EQIX",
+            "VZ",
+            "T",
+            "ANET"
+          ]
+        },
+        {
+          "name": "5G",
+          "tickers": [
+            "QCOM",
+            "SWKS",
+            "AVGO",
+            "MRVL",
+            "QRVO",
+            "ADI",
+            "INTC"
+          ]
+        },
+        {
+          "name": "Satcom",
+          "tickers": [
+            "IRDM",
+            "GSAT",
+            "VSAT",
+            "TSAT",
+            "ASTS",
+            "SATS",
+            "AMZN"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "MSFT",
+            "ZM",
+            "RNG",
+            "CSCO",
+            "TWLO",
+            "EGHT",
+            "CXDO",
+            "VZ"
+          ]
+        }
+      ],
+      "tickerCount": 39
+    },
+    {
+      "theme": "Nanotechnology",
+      "subthemes": [
+        {
+          "name": "Materials",
+          "tickers": [
+            "MMM",
+            "DD",
+            "PPG",
+            "HON",
+            "NNDM",
+            "NVEC"
+          ]
+        },
+        {
+          "name": "Medicine",
+          "tickers": [
+            "MRNA",
+            "ARCT",
+            "LQDA",
+            "NBTX",
+            "CLNN",
+            "PFE",
+            "JNJ",
+            "BMY",
+            "TMO",
+            "ABT",
+            "MRK",
+            "REGN"
+          ]
+        },
+        {
+          "name": "Electronics",
+          "tickers": [
+            "TSM",
+            "ASML",
+            "AMAT",
+            "LRCX",
+            "INTC",
+            "KLAC",
+            "NVDA",
+            "AMD",
+            "ATOM"
+          ]
+        },
+        {
+          "name": "Energy",
+          "tickers": [
+            "QS",
+            "FSLR",
+            "SLDP",
+            "DD",
+            "ASPN",
+            "TSLA",
+            "PLUG",
+            "AMAT",
+            "ENPH",
+            "XYL",
+            "ECL"
+          ]
+        },
+        {
+          "name": "Products",
+          "tickers": [
+            "EL",
+            "MMM",
+            "DD",
+            "PG",
+            "SEE",
+            "CL",
+            "NKE"
+          ]
+        },
+        {
+          "name": "Research Tools",
+          "tickers": [
+            "TMO",
+            "KLAC",
+            "BRKR",
+            "AMAT",
+            "ONTO",
+            "DHR",
+            "A",
+            "KEYS",
+            "VECO"
+          ]
+        }
+      ],
+      "tickerCount": 47
+    },
+    {
+      "theme": "Internet of Things",
+      "subthemes": [
+        {
+          "name": "Edge Devices",
+          "tickers": [
+            "TXN",
+            "ADI",
+            "NXPI",
+            "QCOM",
+            "MCHP",
+            "GRMN",
+            "PI",
+            "HON",
+            "INTC",
+            "LSCC",
+            "SMTC",
+            "CSCO"
+          ]
+        },
+        {
+          "name": "Networking",
+          "tickers": [
+            "VZ",
+            "IRDM",
+            "T",
+            "TMUS",
+            "GSAT",
+            "VSAT",
+            "QCOM",
+            "CSCO",
+            "SMTC"
+          ]
+        },
+        {
+          "name": "Hardware",
+          "tickers": [
+            "NVDA",
+            "INTC",
+            "QCOM",
+            "AMD",
+            "SMCI",
+            "NXPI",
+            "CSCO"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "MSFT",
+            "AMZN",
+            "PTC",
+            "GOOGL",
+            "IOT",
+            "IBM",
+            "PLTR",
+            "ORCL",
+            "CSCO",
+            "DDOG"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "ROK",
+            "PTC",
+            "IOT",
+            "EMR",
+            "HON",
+            "CSCO",
+            "DGII",
+            "GE",
+            "CAT",
+            "AI"
+          ]
+        },
+        {
+          "name": "Security",
+          "tickers": [
+            "PANW",
+            "MSFT",
+            "FTNT",
+            "CRWD",
+            "BB",
+            "CSCO",
+            "NET",
+            "OKTA",
+            "TENB"
+          ]
+        }
+      ],
+      "tickerCount": 43
+    },
+    {
+      "theme": "Autonomous Systems",
+      "subthemes": [
+        {
+          "name": "AV & Mobility",
+          "tickers": [
+            "MBLY",
+            "NVDA",
+            "AUR",
+            "GOOGL",
+            "TSLA",
+            "GM",
+            "LAZR"
+          ]
+        },
+        {
+          "name": "Industrial",
+          "tickers": [
+            "SYM",
+            "ROK",
+            "MANH",
+            "HON",
+            "AMZN",
+            "TER",
+            "ZBRA",
+            "EMR",
+            "DE",
+            "PATH"
+          ]
+        },
+        {
+          "name": "Defense",
+          "tickers": [
+            "AVAV",
+            "LMT",
+            "NOC",
+            "KTOS",
+            "RTX",
+            "LHX",
+            "RCAT",
+            "PLTR",
+            "BBAI"
+          ]
+        },
+        {
+          "name": "Machine Vision",
+          "tickers": [
+            "NVDA",
+            "MBLY",
+            "AMBA",
+            "LAZR",
+            "OUST",
+            "QCOM",
+            "ON",
+            "INVZ",
+            "AMD",
+            "CGNX"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "NVDA",
+            "MSFT",
+            "AMZN",
+            "GOOGL",
+            "AUR",
+            "PLTR",
+            "MBLY",
+            "QCOM",
+            "ORCL",
+            "AMBA"
+          ]
+        },
+        {
+          "name": "Specialized",
+          "tickers": [
+            "DE",
+            "CAT",
+            "TRMB",
+            "OII",
+            "AGCO",
+            "TXT",
+            "TDY",
+            "KVHI"
+          ]
+        }
+      ],
+      "tickerCount": 42
+    },
+    {
+      "theme": "E-commerce",
+      "subthemes": [
+        {
+          "name": "Marketplaces",
+          "tickers": [
+            "AMZN",
+            "EBAY",
+            "WMT",
+            "ETSY",
+            "MELI",
+            "SHOP",
+            "TGT"
+          ]
+        },
+        {
+          "name": "Platforms",
+          "tickers": [
+            "SHOP",
+            "WIX",
+            "PDD",
+            "VTEX",
+            "XYZ",
+            "ADBE",
+            "LSPD",
+            "CRM"
+          ]
+        },
+        {
+          "name": "Ads & Media",
+          "tickers": [
+            "AMZN",
+            "WMT",
+            "GOOGL",
+            "TTD",
+            "CRTO",
+            "ROKU",
+            "CART",
+            "TGT",
+            "KR",
+            "DASH",
+            "MGNI",
+            "PUBM",
+            "CVS",
+            "BBY",
+            "HD"
+          ]
+        },
+        {
+          "name": "Logistics",
+          "tickers": [
+            "UPS",
+            "FDX",
+            "AMZN",
+            "GXO",
+            "DASH",
+            "SYM",
+            "MANH",
+            "UBER",
+            "PLD",
+            "HON",
+            "TRMB"
+          ]
+        },
+        {
+          "name": "Social",
+          "tickers": [
+            "META",
+            "PINS",
+            "GOOGL",
+            "AMZN",
+            "SHOP",
+            "SNAP",
+            "ETSY"
+          ]
+        },
+        {
+          "name": "Omnichannel",
+          "tickers": [
+            "WMT",
+            "TGT",
+            "HD",
+            "BBY",
+            "KR",
+            "LULU",
+            "COST",
+            "M",
+            "SHOP"
+          ]
+        },
+        {
+          "name": "Grocery",
+          "tickers": [
+            "CART",
+            "WMT",
+            "DASH",
+            "KR",
+            "AMZN",
+            "TGT",
+            "ACI",
+            "UBER",
+            "CPNG",
+            "SFM"
+          ]
+        },
+        {
+          "name": "Secondhand",
+          "tickers": [
+            "EBAY",
+            "TDUP",
+            "REAL",
+            "ETSY"
+          ]
+        },
+        {
+          "name": "DTC",
+          "tickers": [
+            "CHWY",
+            "HIMS",
+            "NKE",
+            "LULU",
+            "BIRD",
+            "LEVI",
+            "EL",
+            "WRBY"
+          ]
+        }
+      ],
+      "tickerCount": 53
+    },
+    {
+      "theme": "Social Media",
+      "subthemes": [
+        {
+          "name": "Networks",
+          "tickers": [
+            "META",
+            "RDDT",
+            "SNAP",
+            "PINS",
+            "GOOGL",
+            "MSFT"
+          ]
+        },
+        {
+          "name": "Visual Content",
+          "tickers": [
+            "GOOGL",
+            "SNAP",
+            "META",
+            "PINS",
+            "VMEO"
+          ]
+        },
+        {
+          "name": "Advertising",
+          "tickers": [
+            "META",
+            "GOOGL",
+            "TTD",
+            "SNAP",
+            "PINS",
+            "RDDT",
+            "CRTO",
+            "PUBM",
+            "MGNI",
+            "DSP",
+            "DV",
+            "IAS"
+          ]
+        },
+        {
+          "name": "Gaming",
+          "tickers": [
+            "RBLX",
+            "MSFT",
+            "AMZN",
+            "SONY",
+            "META",
+            "TTWO",
+            "U"
+          ]
+        },
+        {
+          "name": "Niche",
+          "tickers": [
+            "MTCH",
+            "BMBL",
+            "RDDT",
+            "MSFT"
+          ]
+        }
+      ],
+      "tickerCount": 21
+    },
+    {
+      "theme": "Digital Entertainment",
+      "subthemes": [
+        {
+          "name": "Video",
+          "tickers": [
+            "NFLX",
+            "GOOGL",
+            "ROKU",
+            "DIS",
+            "AMZN",
+            "PSKY",
+            "WBD"
+          ]
+        },
+        {
+          "name": "Music",
+          "tickers": [
+            "SPOT",
+            "TME",
+            "AAPL",
+            "SIRI",
+            "AMZN",
+            "GOOGL",
+            "WMG",
+            "SONY"
+          ]
+        },
+        {
+          "name": "Gaming",
+          "tickers": [
+            "TTWO",
+            "EA",
+            "MSFT",
+            "NTES",
+            "RBLX",
+            "PLTK",
+            "DDI",
+            "U"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "NVDA",
+            "MSFT",
+            "AMZN",
+            "AMD",
+            "AKAM",
+            "GOOGL",
+            "NET",
+            "ANET",
+            "INTC",
+            "AVGO",
+            "U"
+          ]
+        },
+        {
+          "name": "Betting",
+          "tickers": [
+            "DKNG",
+            "FLUT",
+            "GENI",
+            "SRAD",
+            "RSI",
+            "MGM",
+            "CZR",
+            "PENN",
+            "ICE"
+          ]
+        },
+        {
+          "name": "Gambling",
+          "tickers": [
+            "RSI",
+            "DKNG",
+            "FLUT",
+            "SGHC",
+            "MGM",
+            "CZR",
+            "PENN",
+            "BYD",
+            "CHDN",
+            "BALY",
+            "INSE",
+            "SRAD"
+          ]
+        }
+      ],
+      "tickerCount": 42
+    },
+    {
+      "theme": "Real Estate & REITs",
+      "subthemes": [
+        {
+          "name": "IT & Telecom",
+          "tickers": [
+            "EQIX",
+            "DLR",
+            "AMT",
+            "CCI",
+            "SBAC",
+            "UNIT",
+            "IRM"
+          ]
+        },
+        {
+          "name": "Warehousing",
+          "tickers": [
+            "PLD",
+            "COLD",
+            "REXR",
+            "EGP",
+            "TRNO",
+            "STAG"
+          ]
+        },
+        {
+          "name": "Healthcare",
+          "tickers": [
+            "WELL",
+            "VTR",
+            "HR",
+            "OHI",
+            "DOC",
+            "SBRA",
+            "MPW"
+          ]
+        },
+        {
+          "name": "Housing",
+          "tickers": [
+            "AVB",
+            "EQR",
+            "INVH",
+            "MAA",
+            "AMH",
+            "SUI",
+            "ELS",
+            "UMH"
+          ]
+        },
+        {
+          "name": "Tourism",
+          "tickers": [
+            "VICI",
+            "HST",
+            "GLPI",
+            "PK",
+            "RHP",
+            "PEB",
+            "LVS",
+            "MAR",
+            "HLT"
+          ]
+        },
+        {
+          "name": "Retail",
+          "tickers": [
+            "REG",
+            "KIM",
+            "ADC",
+            "FRT",
+            "SKT",
+            "BRX",
+            "O",
+            "PECO",
+            "SPG",
+            "NNN",
+            "MAC",
+            "EPRT",
+            "KRG",
+            "UE",
+            "FCPT"
+          ]
+        },
+        {
+          "name": "Office",
+          "tickers": [
+            "ARE",
+            "BXP",
+            "SLG",
+            "KRC",
+            "CUZ",
+            "VNO",
+            "HIW"
+          ]
+        }
+      ],
+      "tickerCount": 59
+    },
+    {
+      "theme": "Consumer Goods",
+      "subthemes": [
+        {
+          "name": "Food",
+          "tickers": [
+            "CELH",
+            "BYND",
+            "HAIN",
+            "VITL",
+            "UNFI",
+            "PEP",
+            "GIS",
+            "SFM",
+            "ADM",
+            "KO",
+            "MNST",
+            "MDLZ"
+          ]
+        },
+        {
+          "name": "Apparel",
+          "tickers": [
+            "NKE",
+            "LULU",
+            "DECK",
+            "LEVI",
+            "UAA",
+            "ETSY",
+            "ANF",
+            "AMZN",
+            "SFIX",
+            "SHOP",
+            "VFC"
+          ]
+        },
+        {
+          "name": "Luxury",
+          "tickers": [
+            "RACE",
+            "EL",
+            "RH",
+            "RL",
+            "CPRI",
+            "TPR",
+            "LUXE",
+            "REAL",
+            "VFC",
+            "SIG"
+          ]
+        },
+        {
+          "name": "Farm-Direct",
+          "tickers": [
+            "VITL",
+            "FDP",
+            "CVGW",
+            "SFM",
+            "AMZN",
+            "UNFI",
+            "WMT",
+            "HAIN"
+          ]
+        },
+        {
+          "name": "Household",
+          "tickers": [
+            "ALRM",
+            "SONO",
+            "AMZN",
+            "REZI",
+            "SN",
+            "WHR",
+            "HON",
+            "HD",
+            "W",
+            "TSLA"
+          ]
+        },
+        {
+          "name": "Secondhand",
+          "tickers": [
+            "EBAY",
+            "ABNB",
+            "CVNA",
+            "TDUP",
+            "UBER",
+            "REAL",
+            "RENT",
+            "CPRT",
+            "ETSY"
+          ]
+        }
+      ],
+      "tickerCount": 51
+    },
+    {
+      "theme": "Smart Home",
+      "subthemes": [
+        {
+          "name": "Devices",
+          "tickers": [
+            "AMZN",
+            "GOOGL",
+            "ARLO",
+            "REZI",
+            "SONO",
+            "AAPL",
+            "WHR",
+            "ADT",
+            "HON"
+          ]
+        },
+        {
+          "name": "Automation",
+          "tickers": [
+            "ALRM",
+            "REZI",
+            "GOOGL",
+            "AMZN",
+            "AAPL",
+            "CARR",
+            "ADT",
+            "HON",
+            "ALLE",
+            "NRG"
+          ]
+        },
+        {
+          "name": "Security",
+          "tickers": [
+            "ADT",
+            "ALRM",
+            "ARLO",
+            "AMZN",
+            "REZI",
+            "ALLE",
+            "AAPL",
+            "JCI"
+          ]
+        },
+        {
+          "name": "Energy",
+          "tickers": [
+            "ENPH",
+            "SEDG",
+            "ITRI",
+            "STEM",
+            "ETN",
+            "GNRC",
+            "HON",
+            "AEIS"
+          ]
+        },
+        {
+          "name": "Networking",
+          "tickers": [
+            "NTGR",
+            "UI",
+            "QCOM",
+            "AVGO",
+            "CMCSA",
+            "CHTR",
+            "COMM"
+          ]
+        },
+        {
+          "name": "Voice & AI",
+          "tickers": [
+            "AMZN",
+            "GOOGL",
+            "AAPL",
+            "SOUN",
+            "MSFT"
+          ]
+        }
+      ],
+      "tickerCount": 30
+    },
+    {
+      "theme": "Wearables",
+      "subthemes": [
+        {
+          "name": "Smartwatches",
+          "tickers": [
+            "AAPL",
+            "GRMN",
+            "GOOGL",
+            "MASI"
+          ]
+        },
+        {
+          "name": "Medical",
+          "tickers": [
+            "DXCM",
+            "ABT",
+            "IRTC",
+            "MASI",
+            "MDT",
+            "AAPL",
+            "GOOGL",
+            "GEHC"
+          ]
+        },
+        {
+          "name": "Immersive",
+          "tickers": [
+            "QCOM",
+            "SYNA",
+            "ADI",
+            "TXN",
+            "STM",
+            "AVGO",
+            "NXPI",
+            "ON",
+            "MCHP"
+          ]
+        },
+        {
+          "name": "Software",
+          "tickers": [
+            "AAPL",
+            "GOOGL",
+            "GRMN",
+            "QCOM",
+            "META"
+          ]
+        },
+        {
+          "name": "Sport",
+          "tickers": [
+            "GRMN",
+            "AAPL",
+            "NKE",
+            "PTON",
+            "GOOGL",
+            "UAA",
+            "LULU"
+          ]
+        }
+      ],
+      "tickerCount": 23
+    },
+    {
+      "theme": "Education Technology",
+      "subthemes": [
+        {
+          "name": "Platforms",
+          "tickers": [
+            "COUR",
+            "UDMY",
+            "DUOL",
+            "LRN",
+            "SKIL",
+            "CHGG"
+          ]
+        },
+        {
+          "name": "Workforce",
+          "tickers": [
+            "SKIL",
+            "UDMY",
+            "COUR",
+            "ATGE",
+            "UTI",
+            "DCBO",
+            "LINC",
+            "PRDO",
+            "LAUR",
+            "LRN"
+          ]
+        },
+        {
+          "name": "Curriculum",
+          "tickers": [
+            "PSO",
+            "MH",
+            "WLY",
+            "LRN",
+            "COUR",
+            "BNED",
+            "GHC",
+            "UDMY",
+            "DUOL",
+            "TAL",
+            "ATGE"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "ZM",
+            "MSFT",
+            "GOOGL",
+            "COUR",
+            "SKIL",
+            "ADBE",
+            "LRN",
+            "CHGG"
+          ]
+        }
+      ],
+      "tickerCount": 22
+    },
+    {
+      "theme": "Energy Renewable",
+      "subthemes": [
+        {
+          "name": "Solar",
+          "tickers": [
+            "FSLR",
+            "ENPH",
+            "SEDG",
+            "CSIQ",
+            "RUN",
+            "BEP",
+            "JKS",
+            "NEE",
+            "NXT",
+            "SPWR",
+            "DQ"
+          ]
+        },
+        {
+          "name": "Wind",
+          "tickers": [
+            "NEE",
+            "BEP",
+            "CWEN",
+            "ENLT",
+            "XIFR",
+            "AES",
+            "CDLR",
+            "GEV",
+            "AMSC",
+            "ACA",
+            "D",
+            "ENB"
+          ]
+        },
+        {
+          "name": "Hydrogen",
+          "tickers": [
+            "PLUG",
+            "BE",
+            "APD",
+            "FCEL",
+            "BLDP",
+            "LIN",
+            "GTLS",
+            "HTOO",
+            "CMI"
+          ]
+        },
+        {
+          "name": "Geothermal",
+          "tickers": [
+            "ORA",
+            "CEG",
+            "BRK-B",
+            "SLB"
+          ]
+        },
+        {
+          "name": "Utilities",
+          "tickers": [
+            "CEG",
+            "NEE",
+            "EXC",
+            "DUK",
+            "SO",
+            "CWEN",
+            "XEL",
+            "PEG",
+            "VST",
+            "PPL",
+            "AEP"
+          ]
+        },
+        {
+          "name": "Batteries",
+          "tickers": [
+            "FLNC",
+            "STEM",
+            "TSLA",
+            "NRGV",
+            "EOSE",
+            "GWH",
+            "ENPH",
+            "GNRC",
+            "NEE",
+            "ENS",
+            "VST"
+          ]
+        },
+        {
+          "name": "Smart Grid",
+          "tickers": [
+            "PWR",
+            "ITRI",
+            "ETN",
+            "NEE",
+            "EXC",
+            "NGG",
+            "HUBB",
+            "GEV",
+            "MPWR"
+          ]
+        },
+        {
+          "name": "Materials",
+          "tickers": [
+            "ALB",
+            "FCX",
+            "SQM",
+            "MP",
+            "SCCO",
+            "LAC",
+            "BHP",
+            "RIO"
+          ]
+        },
+        {
+          "name": "Biofuels",
+          "tickers": [
+            "CLNE",
+            "DAR",
+            "GEVO",
+            "OPAL",
+            "AMTX",
+            "MNTK",
+            "VLO",
+            "CVX",
+            "CLMT",
+            "GPRE"
+          ]
+        }
+      ],
+      "tickerCount": 74
+    },
+    {
+      "theme": "Energy Traditional",
+      "subthemes": [
+        {
+          "name": "Oil Production",
+          "tickers": [
+            "COP",
+            "EOG",
+            "DVN",
+            "XOM",
+            "CVX",
+            "OXY",
+            "FANG",
+            "SHEL",
+            "TTE",
+            "APA"
+          ]
+        },
+        {
+          "name": "Oil Refining",
+          "tickers": [
+            "EPD",
+            "ENB",
+            "MPC",
+            "KMI",
+            "WMB",
+            "OKE",
+            "ET",
+            "PSX",
+            "PAA",
+            "VLO",
+            "DINO"
+          ]
+        },
+        {
+          "name": "Oil Services",
+          "tickers": [
+            "SLB",
+            "HAL",
+            "BKR",
+            "FTI",
+            "NOV",
+            "OII",
+            "PTEN"
+          ]
+        },
+        {
+          "name": "Thermal",
+          "tickers": [
+            "CNR",
+            "ARLP",
+            "BTU",
+            "HNRG",
+            "METC",
+            "AEP",
+            "DUK",
+            "DTE",
+            "NRG",
+            "HCC",
+            "AMR"
+          ]
+        },
+        {
+          "name": "Nuclear",
+          "tickers": [
+            "CEG",
+            "BWXT",
+            "SMR",
+            "OKLO",
+            "LEU",
+            "CCJ",
+            "VST",
+            "UEC",
+            "NEE",
+            "GEV"
+          ]
+        },
+        {
+          "name": "Majors",
+          "tickers": [
+            "SHEL",
+            "TTE",
+            "XOM",
+            "CVX",
+            "BP",
+            "EQNR",
+            "E"
+          ]
+        },
+        {
+          "name": "Utilities",
+          "tickers": [
+            "SO",
+            "DUK",
+            "AEP",
+            "D",
+            "XEL",
+            "CEG",
+            "ETR",
+            "VST",
+            "SRE"
+          ]
+        }
+      ],
+      "tickerCount": 57
+    },
+    {
+      "theme": "Commodities Energy",
+      "subthemes": [
+        {
+          "name": "Oil",
+          "tickers": [
+            "XOM",
+            "CVX",
+            "COP",
+            "EOG",
+            "OXY",
+            "FANG",
+            "BP",
+            "SHEL",
+            "DVN",
+            "MPC"
+          ]
+        },
+        {
+          "name": "Gas & LNG",
+          "tickers": [
+            "LNG",
+            "EQT",
+            "EXE",
+            "CQP",
+            "AR",
+            "KMI",
+            "WMB",
+            "CTRA",
+            "ET",
+            "NEXT",
+            "OKE",
+            "SRE"
+          ]
+        },
+        {
+          "name": "Uranium",
+          "tickers": [
+            "CCJ",
+            "UUUU",
+            "LEU",
+            "UEC",
+            "NXE",
+            "URG",
+            "DNN",
+            "BWXT",
+            "SMR"
+          ]
+        },
+        {
+          "name": "Biofuels",
+          "tickers": [
+            "DAR",
+            "AMTX",
+            "CLNE",
+            "GEVO",
+            "OPAL",
+            "VLO",
+            "CLMT",
+            "MNTK"
+          ]
+        }
+      ],
+      "tickerCount": 39
+    },
+    {
+      "theme": "Commodities Metals",
+      "subthemes": [
+        {
+          "name": "Gold",
+          "tickers": [
+            "NEM",
+            "AEM",
+            "WPM",
+            "FNV",
+            "RGLD",
+            "B",
+            "KGC",
+            "GFI",
+            "AU",
+            "PAAS",
+            "CDE"
+          ]
+        },
+        {
+          "name": "Silver",
+          "tickers": [
+            "AG",
+            "EXK",
+            "HL",
+            "PAAS",
+            "SVM",
+            "DVS",
+            "WPM"
+          ]
+        },
+        {
+          "name": "Precious",
+          "tickers": [
+            "NEM",
+            "FNV",
+            "WPM",
+            "AEM",
+            "RGLD",
+            "SBSW",
+            "B",
+            "PAAS",
+            "HL",
+            "TFPM",
+            "MTA",
+            "BVN"
+          ]
+        },
+        {
+          "name": "Industrial",
+          "tickers": [
+            "FCX",
+            "SCCO",
+            "NUE",
+            "STLD",
+            "AA",
+            "CMC",
+            "BHP",
+            "RIO",
+            "ERO",
+            "CLF",
+            "VALE",
+            "CENX"
+          ]
+        },
+        {
+          "name": "Battery",
+          "tickers": [
+            "ALB",
+            "SQM",
+            "LAR",
+            "LAC",
+            "SGML",
+            "NMG",
+            "ATLX",
+            "VALE",
+            "TECK",
+            "MP",
+            "WWR"
+          ]
+        },
+        {
+          "name": "Rare Earth",
+          "tickers": [
+            "MP",
+            "IPX",
+            "NB",
+            "USAR",
+            "CTGO",
+            "UUUU",
+            "LXFR",
+            "AREC"
+          ]
+        },
+        {
+          "name": "Recycling",
+          "tickers": [
+            "NUE",
+            "STLD",
+            "CMC",
+            "ABAT",
+            "LKQ"
+          ]
+        }
+      ],
+      "tickerCount": 51
+    },
+    {
+      "theme": "Commodities Agriculture",
+      "subthemes": [
+        {
+          "name": "Grains",
+          "tickers": [
+            "ADM",
+            "BG",
+            "AGRO",
+            "ANDE"
+          ]
+        },
+        {
+          "name": "Softs",
+          "tickers": [
+            "CSAN",
+            "DOLE",
+            "FDP",
+            "AGRO",
+            "HSY",
+            "SJM"
+          ]
+        },
+        {
+          "name": "Livestock",
+          "tickers": [
+            "TSN",
+            "JBS",
+            "PPC",
+            "HRL",
+            "CALM"
+          ]
+        },
+        {
+          "name": "Fertilizers",
+          "tickers": [
+            "CTVA",
+            "CF",
+            "MOS",
+            "NTR",
+            "FMC"
+          ]
+        },
+        {
+          "name": "Biofuels",
+          "tickers": [
+            "GPRE",
+            "DAR",
+            "REX",
+            "AMTX",
+            "GEVO",
+            "FF",
+            "ADM",
+            "VLO",
+            "ANDE"
+          ]
+        }
+      ],
+      "tickerCount": 26
+    },
+    {
+      "theme": "Agriculture & FoodTech",
+      "subthemes": [
+        {
+          "name": "Smart Farming",
+          "tickers": [
+            "DE",
+            "TRMB",
+            "AGCO",
+            "CNH",
+            "LNN",
+            "UAVS"
+          ]
+        },
+        {
+          "name": "Crop Inputs",
+          "tickers": [
+            "CTVA",
+            "MOS",
+            "NTR",
+            "CF",
+            "FMC",
+            "UAN",
+            "BIOX",
+            "CBUS"
+          ]
+        },
+        {
+          "name": "Indoor Farming",
+          "tickers": [
+            "LOCL",
+            "HYFM",
+            "VFF",
+            "UGRO"
+          ]
+        },
+        {
+          "name": "Alt Protein",
+          "tickers": [
+            "BYND",
+            "OTLY",
+            "MLEC",
+            "STKH",
+            "INGR",
+            "DNA",
+            "ADM",
+            "LSF"
+          ]
+        },
+        {
+          "name": "Processing",
+          "tickers": [
+            "ADM",
+            "BG",
+            "SYY",
+            "PFGC",
+            "TSN",
+            "USFD",
+            "UNFI",
+            "DAR",
+            "ANDE",
+            "PPC"
+          ]
+        }
+      ],
+      "tickerCount": 35
+    },
+    {
+      "theme": "Environmental Sustainability",
+      "subthemes": [
+        {
+          "name": "Water",
+          "tickers": [
+            "XYL",
+            "AWK",
+            "PNR",
+            "WTRG",
+            "AWR",
+            "CWT",
+            "CWCO",
+            "MSEX",
+            "WTS",
+            "ECL",
+            "AOS"
+          ]
+        },
+        {
+          "name": "Waste",
+          "tickers": [
+            "WM",
+            "RSG",
+            "WCN",
+            "GFL",
+            "CLH",
+            "CWST",
+            "BALL",
+            "SON",
+            "LNZA",
+            "MEG"
+          ]
+        },
+        {
+          "name": "Air Quality",
+          "tickers": [
+            "CECO",
+            "DCI",
+            "HON",
+            "ECL",
+            "CMI",
+            "GTLS",
+            "FTEK",
+            "AME",
+            "VLTO",
+            "ERII"
+          ]
+        },
+        {
+          "name": "Climate",
+          "tickers": [
+            "LIN",
+            "JCI",
+            "OXY",
+            "ORGN",
+            "AES",
+            "NEE",
+            "BEPC",
+            "FSLR",
+            "HON",
+            "RNW",
+            "OC",
+            "LNZA",
+            "NPWR"
+          ]
+        },
+        {
+          "name": "Agriculture",
+          "tickers": [
+            "JCI",
+            "LIN",
+            "NEE",
+            "FSLR",
+            "ORGN",
+            "BEPC",
+            "OXY",
+            "AES",
+            "RNW",
+            "HON",
+            "OC",
+            "NPWR",
+            "LNZA"
+          ]
+        }
+      ],
+      "tickerCount": 41
+    },
+    {
+      "theme": "Healthcare & Biotech",
+      "subthemes": [
+        {
+          "name": "Next-Gen",
+          "tickers": [
+            "MRNA",
+            "BNTX",
+            "CRSP",
+            "NTLA",
+            "BEAM",
+            "VRTX",
+            "ALNY",
+            "REGN"
+          ]
+        },
+        {
+          "name": "Oncology",
+          "tickers": [
+            "BMY",
+            "MRK",
+            "GH",
+            "AZN",
+            "ILMN",
+            "BNTX",
+            "GILD",
+            "EXEL",
+            "TNGX",
+            "ABBV",
+            "AMGN",
+            "JNJ",
+            "PFE"
+          ]
+        },
+        {
+          "name": "Metabolic",
+          "tickers": [
+            "LLY",
+            "NVO",
+            "VKTX",
+            "GPCR",
+            "ALT",
+            "AMGN",
+            "PFE",
+            "MRK"
+          ]
+        },
+        {
+          "name": "Diagnostics",
+          "tickers": [
+            "TMO",
+            "ILMN",
+            "GH",
+            "DHR",
+            "NTRA",
+            "EXAS",
+            "TXG",
+            "PACB",
+            "LH",
+            "DGX",
+            "BIO",
+            "QDEL"
+          ]
+        },
+        {
+          "name": "Genomics",
+          "tickers": [
+            "ILMN",
+            "PACB",
+            "CRSP",
+            "NTLA",
+            "GH",
+            "TXG",
+            "TEM",
+            "TWST",
+            "TMO",
+            "VRTX",
+            "SEER",
+            "CDNA"
+          ]
+        },
+        {
+          "name": "Devices",
+          "tickers": [
+            "MDT",
+            "ISRG",
+            "SYK",
+            "EW",
+            "BSX",
+            "ABT",
+            "DXCM",
+            "GEHC",
+            "TNDM",
+            "BDX",
+            "RMD"
+          ]
+        },
+        {
+          "name": "Telemedicine",
+          "tickers": [
+            "TDOC",
+            "DXCM",
+            "HIMS",
+            "ABT",
+            "DOCS",
+            "AMWL",
+            "AMZN",
+            "MDT",
+            "AAPL",
+            "PRVA",
+            "LFST",
+            "IRTC",
+            "OSCR"
+          ]
+        },
+        {
+          "name": "IT & Data",
+          "tickers": [
+            "IQV",
+            "UNH",
+            "VEEV",
+            "ORCL",
+            "HCAT",
+            "HQY",
+            "PHR",
+            "DOCS",
+            "EVH",
+            "WAY",
+            "OMCL",
+            "GDRX"
+          ]
+        },
+        {
+          "name": "Therapeutics",
+          "tickers": [
+            "MNMD",
+            "ATAI",
+            "MESO",
+            "FATE",
+            "CMPS",
+            "SANA",
+            "CYBN",
+            "CGC",
+            "TLRY",
+            "CRSP",
+            "GHRS",
+            "JAZZ",
+            "CRON",
+            "GILD"
+          ]
+        }
+      ],
+      "tickerCount": 83
+    },
+    {
+      "theme": "Aging Population & Longevity",
+      "subthemes": [
+        {
+          "name": "Healthcare",
+          "tickers": [
+            "MDT",
+            "ABT",
+            "ZBH",
+            "SYK",
+            "GEHC",
+            "BSX",
+            "DXCM",
+            "BAX"
+          ]
+        },
+        {
+          "name": "Aging Pharma",
+          "tickers": [
+            "LLY",
+            "NVO",
+            "BIIB",
+            "PFE",
+            "JNJ",
+            "MRK",
+            "GERN",
+            "BMY",
+            "CRSP"
+          ]
+        },
+        {
+          "name": "Senior Living",
+          "tickers": [
+            "WELL",
+            "VTR",
+            "OHI",
+            "NHI",
+            "ENSG",
+            "BKD",
+            "SBRA",
+            "EHC"
+          ]
+        },
+        {
+          "name": "Healthy Aging",
+          "tickers": [
+            "ABT",
+            "HIMS",
+            "CELH",
+            "DXCM",
+            "NUS",
+            "SFM",
+            "BODI",
+            "CHD"
+          ]
+        }
+      ],
+      "tickerCount": 31
+    },
+    {
+      "theme": "Healthy Food & Nutrition",
+      "subthemes": [
+        {
+          "name": "Alt Protein",
+          "tickers": [
+            "BYND",
+            "OTLY",
+            "K",
+            "STKL",
+            "HAIN",
+            "INGR",
+            "GIS",
+            "BG",
+            "SFM",
+            "KHC",
+            "KR"
+          ]
+        },
+        {
+          "name": "Retailers",
+          "tickers": [
+            "SFM",
+            "NGVC",
+            "AMZN",
+            "KR",
+            "COST",
+            "UNFI",
+            "ACI",
+            "WMT"
+          ]
+        },
+        {
+          "name": "Supplements",
+          "tickers": [
+            "HLF",
+            "SMPL",
+            "BRBR",
+            "HLN",
+            "CELH",
+            "NATR",
+            "NUS",
+            "CHD"
+          ]
+        },
+        {
+          "name": "Meal Delivery",
+          "tickers": [
+            "DASH",
+            "UBER",
+            "AMZN",
+            "WMT",
+            "KR",
+            "SFM"
+          ]
+        }
+      ],
+      "tickerCount": 27
+    },
+    {
+      "theme": "FinTech",
+      "subthemes": [
+        {
+          "name": "Payments",
+          "tickers": [
+            "V",
+            "MA",
+            "PYPL",
+            "XYZ",
+            "TOST",
+            "FISV",
+            "GPN",
+            "FOUR",
+            "AXP",
+            "AFRM",
+            "ACIW",
+            "DLO"
+          ]
+        },
+        {
+          "name": "Neobanks",
+          "tickers": [
+            "SOFI",
+            "NU",
+            "XYZ",
+            "ALLY",
+            "DAVE",
+            "MQ"
+          ]
+        },
+        {
+          "name": "Lending",
+          "tickers": [
+            "UPST",
+            "AFRM",
+            "LC",
+            "XYZ",
+            "PYPL",
+            "SOFI"
+          ]
+        },
+        {
+          "name": "Trading",
+          "tickers": [
+            "HOOD",
+            "IBKR",
+            "ETOR",
+            "SCHW",
+            "SOFI",
+            "ORLY",
+            "VIRT"
+          ]
+        },
+        {
+          "name": "Blockchain",
+          "tickers": [
+            "COIN",
+            "RIOT",
+            "MARA",
+            "CLSK",
+            "XYZ",
+            "MSTR",
+            "NVDA"
+          ]
+        },
+        {
+          "name": "Exchanges",
+          "tickers": [
+            "CME",
+            "ICE",
+            "NDAQ",
+            "CBOE",
+            "MKTX",
+            "TW",
+            "COIN"
+          ]
+        },
+        {
+          "name": "Insurance",
+          "tickers": [
+            "LMND",
+            "ROOT",
+            "HIPO",
+            "TRUP",
+            "OSCR",
+            "GWRE",
+            "SLQT",
+            "EVER"
+          ]
+        }
+      ],
+      "tickerCount": 45
+    },
+    {
+      "theme": "Crypto & Blockchain",
+      "subthemes": [
+        {
+          "name": "Platforms",
+          "tickers": [
+            "COIN",
+            "HOOD",
+            "XYZ",
+            "BKKT",
+            "PYPL"
+          ]
+        },
+        {
+          "name": "Infrastructure",
+          "tickers": [
+            "XYZ",
+            "IBM",
+            "AMZN",
+            "COIN"
+          ]
+        },
+        {
+          "name": "Payments",
+          "tickers": [
+            "XYZ",
+            "JPM",
+            "PYPL",
+            "V",
+            "MA",
+            "COIN"
+          ]
+        },
+        {
+          "name": "Enterprise",
+          "tickers": [
+            "IBM",
+            "ORCL",
+            "ACN",
+            "MSFT",
+            "AMZN",
+            "WMT",
+            "CRM"
+          ]
+        },
+        {
+          "name": "Tokenization",
+          "tickers": [
+            "BLK",
+            "COIN",
+            "XYZ",
+            "WT",
+            "NDAQ",
+            "IBM",
+            "TROW",
+            "MSFT"
+          ]
+        },
+        {
+          "name": "Mining",
+          "tickers": [
+            "MARA",
+            "RIOT",
+            "CLSK",
+            "CORZ",
+            "IREN",
+            "CIFR",
+            "HUT",
+            "BTDR",
+            "COIN"
+          ]
+        }
+      ],
+      "tickerCount": 27
+    }
+  ]
+}

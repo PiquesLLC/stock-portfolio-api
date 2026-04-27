@@ -474,6 +474,19 @@ export async function getHeatmapHandler(req: Request, res: Response): Promise<vo
   }
 }
 
+// ── Screener (broader universe than heatmap) ──────────────────
+import { getScreenerData } from '../services/market-screener.service';
+
+export async function getMarketScreenerHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const data = await getScreenerData();
+    res.json(data);
+  } catch (error: unknown) {
+    console.error('[Market] getScreener error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to fetch screener data' });
+  }
+}
+
 export async function getMarketSentimentHandler(_req: Request, res: Response): Promise<void> {
   try {
     const sentiment = await getMarketSentiment();

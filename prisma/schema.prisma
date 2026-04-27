@@ -1087,6 +1087,22 @@ model AppleIAPWebhookEvent {
   processedAt     DateTime @default(now())
 }
 
+// ─── Screener Universe ───────────────────────────────────────────────
+// Master list of tickers eligible for the Screener tab. Decoupled from the
+// hand-curated `subSectorGroups` (used by Sectors / Top 100 heatmap) so we
+// can expand to thousands of tickers without changing the heatmap blast radius.
+// Sector / name / market cap come from FundamentalsCache.overviewJson at read
+// time — no duplication here.
+model ScreenerUniverse {
+  ticker     String   @id
+  themesJson String?  // JSON: [{ theme: "AI", subthemes: ["Compute", "Cloud"] }, ...] from Finviz
+  source     String   @default("finviz") // "finviz" | "curated" | "polygon"
+  addedAt    DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([source])
+}
+
 // ─── Polygon Screener Fundamentals Cache ─────────────────────────────
 
 model ScreenerCache {

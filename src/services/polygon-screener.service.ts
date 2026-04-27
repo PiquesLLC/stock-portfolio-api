@@ -184,14 +184,23 @@ function calculate52WeekRange(candles: PolygonCandleResult): { high: number; low
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
-function collectAllScreenerTickers(): string[] {
-  const tickers: string[] = [];
+async function collectAllScreenerTickers(): Promise<string[]> {
+  const tickers = new Set<string>();
   for (const sector of Object.values(subSectorGroups)) {
     for (const list of Object.values(sector)) {
-      for (const t of list) tickers.push(t.toUpperCase());
+      for (const t of list) tickers.add(t.toUpperCase());
     }
   }
-  return Array.from(new Set(tickers));
+  // Union with the broader ScreenerUniverse table (Finviz themes ingest, etc)
+  // so newly-added tickers also get P/E / dividend / beta / 52W populated.
+  try {
+    const universe = await prisma.screenerUniverse.findMany({ select: { ticker: true } });
+    for (const row of universe) tickers.add(row.ticker.toUpperCase());
+  } catch (e) {
+    // ScreenerUniverse may not exist yet on a brand-new deploy — degrade to curated only.
+    console.warn('[Polygon Screener] ScreenerUniverse query failed, using curated universe only:', e instanceof Error ? e.message : String(e));
+  }
+  return Array.from(tickers);
 }
 
 /**
@@ -204,7 +213,7 @@ export async function backfillPolygonScreenerData(): Promise<void> {
     return;
   }
 
-  const tickers = collectAllScreenerTickers();
+  const tickers = await collectAllScreenerTickers();
   console.log(`[Polygon Screener] Starting backfill for ${tickers.length} tickers`);
 
   // Check which tickers need refresh (stale > 12 hours)
