@@ -11,6 +11,7 @@ import {
   resolveAppealHandler,
   unsuspendUserHandler,
 } from '../controllers/moderation.controller';
+import { pruneBackupsToKeep, BACKUP_DIR } from '../services/backup.service';
 
 const router = Router();
 
@@ -199,6 +200,26 @@ router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, r
     res.json({ success: true, aggressive, log });
   } catch (e: unknown) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e), log });
+  }
+});
+
+// POST /admin/prune-data-backups — delete all but the N most recent file-system
+// backups in /data/backups/. Use when nala.db backups have accumulated past
+// MAX_BACKUPS due to retention being sized larger than the volume. This does
+// NOT touch the live DB or any SQL state — pure filesystem operation. Safe at
+// any disk pressure level.
+// Body: { confirm: 'prune-data-backups', keep?: 1 }
+router.post('/prune-data-backups', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  if (req.body?.confirm !== 'prune-data-backups') {
+    res.status(400).json({ error: 'Missing confirmation token' });
+    return;
+  }
+  const keep = Number.isInteger(req.body?.keep) && req.body.keep >= 0 ? req.body.keep : 1;
+  try {
+    const result = pruneBackupsToKeep(keep);
+    res.json({ success: true, backupDir: BACKUP_DIR, keep, ...result });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

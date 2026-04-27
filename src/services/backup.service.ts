@@ -1,10 +1,56 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const DB_PATH = process.env.DATABASE_URL?.replace('file:', '') || '/data/nala.db';
-const BACKUP_DIR = process.env.NODE_ENV === 'production' ? '/data/backups' : path.join(process.cwd(), 'prisma', 'backups');
-const MAX_BACKUPS = 3; // Keep 3 daily backups
+export const DB_PATH = process.env.DATABASE_URL?.replace('file:', '') || '/data/nala.db';
+export const BACKUP_DIR = process.env.NODE_ENV === 'production' ? '/data/backups' : path.join(process.cwd(), 'prisma', 'backups');
+// Each backup ≈ same size as live DB. With a 5GB volume and ~1.4GB DB, keeping
+// >1 backup means stable state requires >2× DB-size of free space, which we
+// don't have. Lowered from 3 to 1 after Apr 26 incident — see
+// railway-volume-cleanup memory. Push to S3/R2 if longer retention is needed.
+const MAX_BACKUPS = 1;
 const MIN_FREE_SPACE_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Delete all but the `keep` most recent backups (by filename, which is date-stamped).
+ * Returns the list of deleted filenames and the bytes freed. Safe to call from
+ * an admin endpoint; does not depend on `backupDatabase()` running.
+ */
+export function pruneBackupsToKeep(keep: number): { deleted: { name: string; sizeMB: number }[]; freedMB: number; remaining: { name: string; sizeMB: number }[] } {
+  const deleted: { name: string; sizeMB: number }[] = [];
+  let freedBytes = 0;
+
+  if (!fs.existsSync(BACKUP_DIR)) {
+    return { deleted, freedMB: 0, remaining: [] };
+  }
+
+  const all = fs.readdirSync(BACKUP_DIR)
+    .filter(f => f.startsWith('nala-') && f.endsWith('.db'))
+    .sort()
+    .reverse();
+
+  for (const name of all.slice(Math.max(0, keep))) {
+    const full = path.join(BACKUP_DIR, name);
+    try {
+      const size = fs.statSync(full).size;
+      fs.unlinkSync(full);
+      deleted.push({ name, sizeMB: +(size / 1024 / 1024).toFixed(2) });
+      freedBytes += size;
+    } catch (e) {
+      console.warn(`[Backup] Failed to delete ${name}: ${(e as Error).message}`);
+    }
+  }
+
+  const remaining = all.slice(0, Math.max(0, keep)).map(name => {
+    try {
+      const size = fs.statSync(path.join(BACKUP_DIR, name)).size;
+      return { name, sizeMB: +(size / 1024 / 1024).toFixed(2) };
+    } catch {
+      return { name, sizeMB: 0 };
+    }
+  });
+
+  return { deleted, freedMB: +(freedBytes / 1024 / 1024).toFixed(2), remaining };
+}
 
 function getDataVolumeFreeBytes(): number | null {
   if (!fs.existsSync('/data')) {
