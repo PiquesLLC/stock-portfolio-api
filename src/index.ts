@@ -17,6 +17,7 @@ import { refreshEconomicIndicators, refreshInternationalIndicators } from './ser
 import { refreshFundamentalsForTicker } from './services/polygon-fundamentals.service';
 import { backfillHeatmapFundamentals } from './services/market-heatmap-fundamentals.service';
 import { backfillPolygonScreenerData } from './services/polygon-screener.service';
+import { bootstrapScreenerUniverseIfEmpty } from './services/screener-bootstrap.service';
 import { backfillValueRadar } from './services/value-radar.service';
 import { evaluateValueRadarAlerts, sendValueRadarDigest } from './services/value-radar-alerts.service';
 import { sendEarningsAlerts } from './services/notifications.service';
@@ -635,6 +636,10 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     runJob({ name: 'heatmap_fundamentals', fn: backfillHeatmapFundamentals });
   }, 24 * 60 * 60 * 1000);
+
+  // Screener Universe bootstrap — first-deploy ingest of bundled Finviz themes
+  // into ScreenerUniverse. Idempotent: skips if rows exist. Fire-and-forget.
+  setTimeout(() => { void bootstrapScreenerUniverseIfEmpty(); }, 5000);
 
   // Polygon Screener backfill — fetch EPS, dividends, beta, 52W range on startup + every 12 hours
   console.log('[Polygon Screener] Backfill scheduled');

@@ -288,18 +288,29 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     }
   }
 
-  // Yahoo fallback for missing fundamentals — fire-and-forget on cold start.
-  // Name/market cap will be filled on next cached hit (120s later).
-  // Only block on Yahoo if we have very few missing tickers (< 30).
-  const missingTickers = uniqueTickers.filter(t => !fundamentalsMap.has(t));
-  if (missingTickers.length > 0 && missingTickers.length < 30) {
-    const yahooFallbacks = await fetchYahooFundamentalsBatch(missingTickers);
+  // Yahoo fallback for missing market caps. Two cases:
+  //   (a) Ticker has no FundamentalsCache row at all (cold start).
+  //   (b) Row exists but its overviewJson has marketCap:null — common for ADRs
+  //       (TSM, ASML, ARM, BABA…) where Polygon's tickerDetails.market_cap is null.
+  // Both cases used to silently fall through to a `?? 1` stub on the row builder,
+  // surfacing as "$1B" in the Screener and breaking the cap filter / sort.
+  const tickersNeedingCap = uniqueTickers.filter(t => {
+    const overview = fundamentalsMap.get(t);
+    return resolveMarketCapB(overview) == null;
+  });
+  if (tickersNeedingCap.length > 0 && tickersNeedingCap.length < 30) {
+    const yahooFallbacks = await fetchYahooFundamentalsBatch(tickersNeedingCap);
     for (const [ticker, data] of yahooFallbacks) {
-      fundamentalsMap.set(ticker, { companyName: data.name, marketCapB: data.marketCapB });
+      const existing = fundamentalsMap.get(ticker) ?? {};
+      fundamentalsMap.set(ticker, {
+        ...existing,
+        companyName: existing.companyName ?? existing.name ?? data.name,
+        marketCapB: data.marketCapB,
+      });
     }
-  } else if (missingTickers.length >= 30) {
+  } else if (tickersNeedingCap.length >= 30) {
     // Too many missing — fetch in background without blocking response
-    void fetchYahooFundamentalsBatch(missingTickers).catch(() => {});
+    void fetchYahooFundamentalsBatch(tickersNeedingCap).catch(() => {});
   }
 
   const sectors: HeatmapSector[] = Object.entries(subSectorGroups).map(([sectorName, subSectors]) => {
@@ -317,8 +328,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const upper = ticker.toUpperCase();
         const quote = quotes.get(upper);
         const overview = fundamentalsMap.get(upper);
-        const marketCapFromOverview = resolveMarketCapB(overview);
-        const marketCapB = marketCapFromOverview ?? 1;
+        const marketCapB = resolveMarketCapB(overview) ?? 0;
 
         // For 1D: prefer live quote changePercent when non-zero, fall back to candle data.
         // After midnight or with Polygon free tier, live changePercent is 0 — candle data is reliable.
