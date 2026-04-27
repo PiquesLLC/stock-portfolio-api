@@ -1,4 +1,5 @@
-﻿import app from './app';
+﻿import crypto from 'crypto';
+import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached, restoreCandleCache, persistCandleCache } from './utils/candle-cache';
 import { persistQuoteCache, restoreQuoteCache } from './utils/polygon';
@@ -448,6 +449,13 @@ const server = app.listen(config.port, async () => {
     await assertBillingDeploySafety();
     if (config.billingEnabled) {
       console.log('[Init] Billing deploy safety check passed');
+      // Log first-8 hex of SHA-256 of each loaded webhook secret so a future
+      // mismatch with Stripe's dashboard fingerprint is detectable in 30s
+      // instead of 2 days. Hash is non-reversible; safe to log. Added Apr 26
+      // after the silent creator-webhook signature outage.
+      const sha8 = (s: string): string =>
+        s ? crypto.createHash('sha256').update(s).digest('hex').slice(0, 8) : 'EMPTY';
+      console.log(`[Init] Stripe webhook secret fingerprints — billing=${sha8(config.stripeWebhookSecret)} connect=${sha8(config.stripeConnectWebhookSecret)}`);
     } else {
       console.log('[Init] Billing routes disabled');
     }

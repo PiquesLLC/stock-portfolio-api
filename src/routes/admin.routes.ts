@@ -11,7 +11,7 @@ import {
   resolveAppealHandler,
   unsuspendUserHandler,
 } from '../controllers/moderation.controller';
-import { pruneBackupsToKeep, BACKUP_DIR } from '../services/backup.service';
+import { pruneBackupsToKeep, BACKUP_DIR, DB_PATH } from '../services/backup.service';
 
 const router = Router();
 
@@ -92,7 +92,23 @@ router.get('/disk-info', requireAuth, requireAdmin, async (_req: AuthRequest, re
         const full = path.join(dataDir, name);
         try {
           const st = fs.statSync(full);
-          if (st.isFile()) files.push({ name, sizeMB: +(st.size / 1024 / 1024).toFixed(2) });
+          if (st.isFile()) {
+            files.push({ name, sizeMB: +(st.size / 1024 / 1024).toFixed(2) });
+          } else if (st.isDirectory()) {
+            // Recurse one level — sums file sizes inside the subdir so phantom
+            // space (e.g. /data/backups/) is visible from disk-info instead of
+            // requiring code-spelunking like the Apr 26 incident.
+            let dirBytes = 0;
+            try {
+              for (const child of fs.readdirSync(full)) {
+                try {
+                  const cst = fs.statSync(path.join(full, child));
+                  if (cst.isFile()) dirBytes += cst.size;
+                } catch { /* skip child */ }
+              }
+            } catch { /* skip dir */ }
+            files.push({ name: name + '/', sizeMB: +(dirBytes / 1024 / 1024).toFixed(2) });
+          }
         } catch { /* skip */ }
       }
     } catch { /* /data may not exist locally */ }
@@ -190,9 +206,30 @@ router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, r
     }
 
     // Step 4b: full VACUUM (may fail if still tight)
+    // Safety guard added Apr 26: VACUUM rewrites the entire DB and needs
+    // ~1× DB size in free space. Running it at tight disk hung prod for
+    // ~10 min until forced restart. Skip if free disk < 1.2× DB size.
     try {
-      await prisma.$executeRawUnsafe(`VACUUM`);
-      log.push('VACUUM: done');
+      let skipVacuumReason: string | null = null;
+      try {
+        const dbBytes = fs.statSync(DB_PATH).size;
+        const stats = fs.statfsSync('/data');
+        const freeBytes = stats.bsize * stats.bavail;
+        if (freeBytes < dbBytes * 1.2) {
+          const dbMB = (dbBytes / 1024 / 1024).toFixed(0);
+          const freeMB = (freeBytes / 1024 / 1024).toFixed(0);
+          skipVacuumReason = `disk too tight (free=${freeMB}MB < 1.2× DB=${dbMB}MB)`;
+        }
+      } catch (e) {
+        // If we can't check, fall back to running VACUUM (preserves prior behavior in dev/local)
+        log.push(`VACUUM precheck unavailable: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}`);
+      }
+      if (skipVacuumReason) {
+        log.push(`VACUUM: skipped (${skipVacuumReason})`);
+      } else {
+        await prisma.$executeRawUnsafe(`VACUUM`);
+        log.push('VACUUM: done');
+      }
     } catch (e: unknown) {
       log.push(`VACUUM: skipped (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`);
     }
