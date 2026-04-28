@@ -36,6 +36,7 @@ import postRoutes from './post.routes';
 import billionaireRoutes from './billionaire.routes';
 import adminRoutes from './admin.routes';
 import jobAdminRoutes from './job-admin.routes';
+import discoverRoutes from './discover.routes';
 import { config } from '../config';
 
 const router = Router();
@@ -80,5 +81,6 @@ router.use('/analytics', analyticsRoutes);
 router.use('/admin/analytics', analyticsRoutes);
 router.use('/admin', adminRoutes);
 router.use('/admin', jobAdminRoutes);
+router.use('/discover', discoverRoutes);
 
 export default router;
