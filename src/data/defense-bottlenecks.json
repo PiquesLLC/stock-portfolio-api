@@ -1,0 +1,1024 @@
+{
+  "generatedAt": "2026-04-28T00:00:00Z",
+  "entries": [
+    {
+      "id": "gd-155mm-shells",
+      "name": "155mm Artillery Shell Reconstitution",
+      "sector": "Defense",
+      "layer": "Munitions",
+      "primaryTicker": "GD",
+      "relatedTickers": [
+        "NOC",
+        "LMT",
+        "RTX"
+      ],
+      "thesisShort": "The US is racing to triple 155mm shell output by 2026, and General Dynamics owns the largest slice of the projectile and propellant supply chain.",
+      "thesisLong": "Russia's invasion of Ukraine exposed a gaping hole in the Western artillery base: NATO consumed shells faster than it could make them. The US Army has spent four years and over $4B reindustrializing the 155mm value chain, lifting monthly output from ~14,000 rounds in early 2022 to roughly 40,000 by late 2024 and ~55,000 by Q1 2026. The official goal is 100,000/month (1.2M/yr) by mid-2026, with a stretch target of 1M+ rounds delivered in calendar 2026.\n\nGeneral Dynamics Ordnance and Tactical Systems (GD-OTS) is the single largest beneficiary. The company opened a new 155mm load-assemble-pack facility in Camden, Arkansas in April 2025 designed to produce 50,000 completed HE projectiles per month at full rate, and is relocating modular charge production from Valleyfield (Quebec) to new American Ordnance plants in Middletown, Iowa. GD also runs Scranton Army Ammunition Plant, the primary source of forged steel shell bodies.\n\nThe Army has signed multi-year procurement contracts with GD-OTS exceeding $2B and a separate $640M deal in September 2025 specifically for 155mm ammunition. With Ukraine consuming an estimated 6,000-10,000 rounds per day at peak and US/allied stockpiles still well below war-reserve targets, demand visibility extends through at least 2030.\n\nRisks include the Army's Q4 2025 cure notice to GD-OTS over poor performance at the Mesquite, TX modular metal parts facility, and the possibility that a Ukraine ceasefire compresses the production ramp before peak rates are reached. But the strategic mandate to rebuild Western magazine depth is bipartisan and survives most political scenarios.",
+      "chokepointMetrics": [
+        {
+          "label": "US 155mm production (Q1 2026)",
+          "value": "~55k/month"
+        },
+        {
+          "label": "Late 2024 baseline",
+          "value": "40k/month"
+        },
+        {
+          "label": "Army target (mid-2026)",
+          "value": "100k/month (1.2M/yr)"
+        },
+        {
+          "label": "GD Camden, AR LAP capacity",
+          "value": "50k projectiles/month at full rate"
+        },
+        {
+          "label": "Sept 2025 GD-OTS contract",
+          "value": "$640M for 155mm"
+        }
+      ],
+      "catalysts": [
+        "Camden, AR facility reaching 50k/month full-rate production",
+        "FY26 supplemental defense appropriations for munitions",
+        "Multi-year procurement contracts replacing annual buys",
+        "European NATO members signing on to GD's IM-compliant shells",
+        "30,000/yr cluster (DPICM) variant program ramp"
+      ],
+      "risks": [
+        "Cure notice on Mesquite, TX modular metal parts facility",
+        "Ukraine ceasefire compressing demand curve",
+        "Workforce/skilled-labor constraints at new plants",
+        "Continuing resolution delaying multi-year contract awards"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "lmt-javelin-stinger",
+      "name": "Javelin & Next-Gen Anti-Armor Missiles",
+      "sector": "Defense",
+      "layer": "Munitions",
+      "primaryTicker": "LMT",
+      "relatedTickers": [
+        "RTX",
+        "GD",
+        "NOC"
+      ],
+      "thesisShort": "The Javelin joint venture between Lockheed and RTX is in a multi-year capacity expansion, lifting annual output by more than 50% to feed Ukraine, US Army, and NATO restocks.",
+      "thesisLong": "The FGM-148 Javelin became the iconic infantry weapon of the Ukraine war, with the US shipping over 10,000 units to Kyiv in the first 18 months of the conflict. Pre-war annual production sat at ~2,100 missiles. The Javelin Joint Venture (JJV) — co-owned by Lockheed Martin and RTX/Raytheon — now operates at ~2,400 missiles/year and is on track to reach 3,960/year by late 2026, a 50%+ ramp.\n\nThe Pike County Production Facility in Troy, Alabama added new continuity test stations, automated tooling, and supply-chain capacity in 2025. Lockheed handles the Command Launch Unit and final integration; Raytheon provides the seeker and warhead. Demand visibility is anchored by US Army multi-year contracts plus FMS orders from Poland, Germany, the UK, Norway, and a half-dozen others rebuilding their anti-armor inventories.\n\nStingers are the parallel story: legacy production lines were cold for nearly 20 years until the Ukraine war forced restart. RTX is delivering interim Stingers while developing the Next-Generation Short Range Interceptor (NGSRI), with Lockheed competing for the same MANPADS modernization program. The dollar values per unit — ~$200K Javelin, ~$400K Stinger — make these high-margin programs for both primes.\n\nThe key risk is that hypersonic and loitering munitions partially substitute for Javelin/Stinger in the medium term. But the unit economics, deployed-base inertia, and NATO standardization make this a multi-decade demand stream regardless.",
+      "chokepointMetrics": [
+        {
+          "label": "Javelin production (2025)",
+          "value": "~2,400/year"
+        },
+        {
+          "label": "Late 2026 target",
+          "value": "3,960/year (+65%)"
+        },
+        {
+          "label": "Pre-war baseline",
+          "value": "~2,100/year"
+        },
+        {
+          "label": "Javelin unit cost",
+          "value": "~$200K"
+        },
+        {
+          "label": "Javelins delivered to Ukraine",
+          "value": ">10,000 units"
+        }
+      ],
+      "catalysts": [
+        "Pike County, AL capacity ramp completing late 2026",
+        "Stinger replacement program (NGSRI) award",
+        "Polish, German, UK multi-year FMS contracts",
+        "Multi-year procurement authority from Congress",
+        "Block 2 Javelin upgrade contract"
+      ],
+      "risks": [
+        "Loitering munitions partially displacing anti-armor missiles",
+        "Component supplier bottlenecks (seekers, propellant)",
+        "Ukraine ceasefire reducing urgency of restock orders"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "rtx-patriot-pac3",
+      "name": "Patriot/PAC-3 Air & Missile Defense",
+      "sector": "Defense",
+      "layer": "Munitions",
+      "primaryTicker": "RTX",
+      "relatedTickers": [
+        "LMT",
+        "BA",
+        "NOC"
+      ],
+      "thesisShort": "PAC-3 production is targeted to triple by 2030 as Patriot becomes the most-demanded air defense system on the planet — RTX makes the radar and launcher, Lockheed makes the interceptor.",
+      "thesisLong": "The Patriot system is the global gold standard for tactical ballistic missile defense, and demand has exploded since 2022. Lockheed Martin's PAC-3 MSE interceptor production hit a record 600+ units in 2025 (up 20% YoY), with capacity at ~650/year. In January 2026, the Pentagon and Lockheed announced a framework agreement to triple production to 2,000/year by end of 2030 — the largest air-defense industrial expansion in US history.\n\nLockheed manufactures the PAC-3 MSE at Camden, Arkansas (where an 85,000-sq-ft expansion completed in 2022). Boeing has separately committed to tripling PAC-3 seeker production. RTX supplies the AN/MPQ-65 radar, the engagement control station, the launcher, and the legacy PAC-2 GEM-T interceptor — roughly 50%+ of total Patriot system value by some measures.\n\nFMS demand is the bigger story: Germany, Poland, Romania, the Netherlands, Sweden, Saudi Arabia, UAE, Japan, and Taiwan have all placed Patriot orders or expansions since 2023. Total FMS pipeline exceeds $35B. Ukraine's success intercepting Russian Kinzhal and Iskander missiles has cemented Patriot's reputation as the only proven system against modern Russian ballistic threats.\n\nRisks include the Pentagon's framework deal still requiring contract definitization (initial award expected in FY26), potential allocation conflicts between US war reserves and FMS deliveries, and competition from emerging systems like SM-6 and THAAD for the high-end interception mission.",
+      "chokepointMetrics": [
+        {
+          "label": "PAC-3 MSE delivered (2025)",
+          "value": "600+ (record)"
+        },
+        {
+          "label": "Current capacity",
+          "value": "~650/year"
+        },
+        {
+          "label": "2030 target",
+          "value": "2,000/year (3x ramp)"
+        },
+        {
+          "label": "Pre-war baseline (2021)",
+          "value": "~250/year"
+        },
+        {
+          "label": "FMS pipeline",
+          "value": ">$35B across 12+ countries"
+        }
+      ],
+      "catalysts": [
+        "FY26 contract definitization for the 7-year tripling framework",
+        "Boeing seeker capacity ramp",
+        "European Sky Shield Initiative orders",
+        "Saudi Arabia / Gulf States renewing PAC-3 inventory",
+        "Long-range LTAMDS radar production (replacing AN/MPQ-65)"
+      ],
+      "risks": [
+        "Framework agreement contract still pending",
+        "Allocation tension between US war reserves and FMS",
+        "Cost growth on the 7-year ramp",
+        "SM-6 and THAAD encroaching on high-end role"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "hii-submarine-shipyard",
+      "name": "Submarine Shipyard Capacity (Newport News)",
+      "sector": "Defense",
+      "layer": "Shipyards",
+      "primaryTicker": "HII",
+      "relatedTickers": [
+        "GD",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "HII's Newport News is one of only two US yards qualified to build nuclear submarines — and the entire Virginia-class and Columbia-class pipeline runs through it.",
+      "thesisLong": "The US nuclear submarine industrial base is a duopoly: General Dynamics Electric Boat in Connecticut and Rhode Island, and HII's Newport News Shipbuilding in Virginia. There are no other yards capable of building nuclear-powered submarines in the United States. Newport News is also the sole builder of US aircraft carriers (Ford-class), and the only yard refueling Nimitz-class CVNs.\n\nHII closed Q2 2025 with a $56.9B backlog — roughly five years of revenue. Virginia-class Block VI and Columbia-class Build II contracts are being negotiated through late 2025 and into 2026, both representing tens of billions in future awards. Columbia is the SSBN replacement for the aging Ohio class, and the Navy has zero tolerance for delay: any slip cascades into a strategic deterrent gap.\n\nThe submarine industrial base bottleneck is real and structural. The Navy wants to build 2 Virginia-class boats per year (currently averaging ~1.2-1.4) plus 1 Columbia-class — and AUKUS adds a commitment to sell 3-5 Virginia-class boats to Australia in the early 2030s. Workforce is the binding constraint: HII and EB are collectively trying to add 100,000+ skilled tradespeople over the next decade. Both companies have launched massive recruiting and training programs, with federal subsidies for trade school pipelines.\n\nNear-term risk: the Trump administration's federal workforce cuts have created uncertainty around supplemental shipyard funding, and Q3 2025 commentary from HII flagged a possible Block VI sub-procurement slip into FY27. But the strategic imperative is bipartisan: the US cannot reduce submarine production without ceding undersea dominance to China.",
+      "chokepointMetrics": [
+        {
+          "label": "HII total backlog (Q2 2025)",
+          "value": "$56.9B"
+        },
+        {
+          "label": "Virginia-class delivery rate",
+          "value": "~1.3/yr (target: 2/yr)"
+        },
+        {
+          "label": "Columbia-class commitment",
+          "value": "12 boats"
+        },
+        {
+          "label": "AUKUS Virginia-class to Australia",
+          "value": "3-5 boats early 2030s"
+        },
+        {
+          "label": "Submarine yards qualified in US",
+          "value": "2 (HII + EB)"
+        }
+      ],
+      "catalysts": [
+        "Virginia-class Block VI contract close (late 2025/2026)",
+        "Columbia-class Build II contract close",
+        "AUKUS Pillar 1 multi-year funding",
+        "Ford-class CVN-80 (Enterprise) delivery 2028",
+        "Mission Technologies (drones) ramp"
+      ],
+      "risks": [
+        "Workforce constraints (need ~100K new tradespeople)",
+        "Block VI procurement potentially slipping to FY27",
+        "Federal workforce reductions cascading into yard funding",
+        "Cost overruns on first-in-class Columbia"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "gd-electric-boat",
+      "name": "Electric Boat & Combat Systems",
+      "sector": "Defense",
+      "layer": "Shipyards",
+      "primaryTicker": "GD",
+      "relatedTickers": [
+        "HII",
+        "LMT",
+        "RTX"
+      ],
+      "thesisShort": "GD's Electric Boat is the prime contractor for both Virginia-class and Columbia-class submarines, and Marine Systems is the highest-margin segment of the company.",
+      "thesisLong": "General Dynamics Electric Boat (Groton, CT and Quonset Point, RI) is the prime contractor for the Columbia-class SSBN program — the most strategically critical defense program in the US, replacing the sea leg of the nuclear triad. EB is also co-prime with HII Newport News on Virginia-class SSNs, with EB delivering roughly 60% of each Virginia hull.\n\nGD's Marine Systems segment generated ~$15B in 2025 revenue with steadily expanding margins. The Columbia-class lead boat (USS District of Columbia, SSBN-826) is over 30% complete with delivery targeted for 2027. EB has spent $4B+ on facility expansion at Quonset Point, including the new South Yard module assembly facility specifically built for Columbia-class hull modules.\n\nBeyond submarines, GD owns Bath Iron Works (Arleigh Burke-class destroyers, ~2/yr at $2B each), NASSCO (auxiliary ships and oilers), and the Combat Systems segment that includes the Abrams tank, Stryker, and ammunition (GD-OTS). This portfolio diversification gives GD a more resilient defense profile than pure-play submarine bets.\n\nRisks: Columbia first-of-class cost growth (already ~15% over baseline), workforce constraints similar to HII, and supplier base fragility — many critical sub components have only 1-2 qualified suppliers. The AUKUS Virginia-class transfers to Australia could also strain US Navy delivery schedules unless industrial base expands faster.",
+      "chokepointMetrics": [
+        {
+          "label": "GD Marine Systems revenue (2025)",
+          "value": "~$15B"
+        },
+        {
+          "label": "Columbia-class lead boat completion",
+          "value": ">30%, deliver 2027"
+        },
+        {
+          "label": "Quonset Point expansion investment",
+          "value": "$4B+"
+        },
+        {
+          "label": "Virginia-class hull share (EB)",
+          "value": "~60% of each boat"
+        },
+        {
+          "label": "Total Marine Systems backlog",
+          "value": "~$50B"
+        }
+      ],
+      "catalysts": [
+        "Columbia-class Build II multi-year contract",
+        "Virginia-class Block VI contract definitization",
+        "AUKUS-related industrial base funding",
+        "Bath Iron Works DDG(X) next-gen destroyer award",
+        "Marine Systems margin expansion to 9%+"
+      ],
+      "risks": [
+        "Columbia first-of-class cost growth",
+        "Critical supplier single-points-of-failure",
+        "AUKUS straining domestic delivery schedule",
+        "Workforce skilled-trades shortage"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "ge-aerospace-engines",
+      "name": "GE Aerospace Military Engines (F404/F414/T901)",
+      "sector": "Defense",
+      "layer": "Aerospace & Engines",
+      "primaryTicker": "GE",
+      "relatedTickers": [
+        "RTX",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "GE Aerospace's F414 (Super Hornet, KAAN, Tejas, Gripen) and T901 (Apache/Black Hawk) engines are in multi-year demand surges as Western air forces re-arm.",
+      "thesisLong": "GE Aerospace separated from GE in April 2024 and is now a pure-play aerospace propulsion company. The military side accounts for ~25% of revenue but is structurally underweighted vs the cycle ahead. The F414 powers the F/A-18 Super Hornet, EA-18G Growler, Saab Gripen E, Indian Tejas, Korean KAI T-50/FA-50, and is selected for Turkey's KAAN fifth-gen fighter.\n\nGE has committed over $1B to expanding US manufacturing capacity, with delivery backlogs expected to clear by end of 2026. The India F414 deal — currently in final negotiation through mid-2026 — is the marquee win: 80% technology transfer for an initial 140 engines for Tejas Mk2, with potential to expand to 250+ engines including the AMCA Mk1 fifth-generation program.\n\nThe T901 Improved Turbine Engine Program (ITEP) is the next big driver. T901 replaces the T700 across the entire AH-64 Apache and UH-60 Black Hawk fleets — over 4,000 helicopters globally. Initial Operational Capability is targeted for 2027 with a fleet retrofit lasting into the 2040s. Each helicopter takes two engines.\n\nGE is also the engine for the LCA Tejas, the Korean KF-21 Boramae (in partnership with Hanwha), and a finalist for Australia's MQ-28 Ghost Bat loyal wingman. Adaptive engine work (XA102) for sixth-generation NGAD remains on hold but represents long-term option value. Risks include the F404/F414 supply chain dependency on India for technology transfer execution, and Pratt & Whitney's continued dominance of the F-35 propulsion contract.",
+      "chokepointMetrics": [
+        {
+          "label": "GE military revenue share",
+          "value": "~25% of total"
+        },
+        {
+          "label": "India F414 deal (under negotiation)",
+          "value": "140 engines (initial); 250+ potential"
+        },
+        {
+          "label": "T901 retrofit fleet",
+          "value": ">4,000 helos x 2 engines"
+        },
+        {
+          "label": "US manufacturing capex commitment",
+          "value": ">$1B"
+        },
+        {
+          "label": "Backlog clearance target",
+          "value": "End of 2026"
+        }
+      ],
+      "catalysts": [
+        "India F414 ToT closure (mid-2026)",
+        "T901 production decision and full-rate ramp",
+        "Korean KF-21 production engines order",
+        "Turkey KAAN fifth-gen engine selection finalization",
+        "NGAD adaptive engine program restart"
+      ],
+      "risks": [
+        "P&W maintaining F-35 propulsion monopoly",
+        "India ToT negotiation delays",
+        "Adaptive engine (XA100/XA102) program funding limbo",
+        "Supply-chain bottlenecks slowing backlog burn"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "rtx-pratt-whitney-f135",
+      "name": "Pratt & Whitney F135 (F-35 Engine)",
+      "sector": "Defense",
+      "layer": "Aerospace & Engines",
+      "primaryTicker": "RTX",
+      "relatedTickers": [
+        "LMT",
+        "GE",
+        "NOC"
+      ],
+      "thesisShort": "Pratt & Whitney has the F-35 propulsion monopoly through 2070+. The Engine Core Upgrade (ECU) is a $40B+ multi-decade program that locks in single-source supply.",
+      "thesisLong": "The F135 engine, built by RTX subsidiary Pratt & Whitney, is the sole propulsion system for all three F-35 variants. P&W has delivered over 1,400 production F135 engines to date, with the global F-35 fleet approaching 1,300 aircraft across 20 nations. Lots 18-19 were definitized in March 2026 at $6.6B, covering 141 propulsion systems for delivery through February 2028.\n\nThe Engine Core Upgrade (ECU), worth ~$40B over the life of the program, is the strategic prize. ECU enables Block 4 capabilities (more cooling for sensors, more power for directed-energy weapons, longer range). The Pentagon selected ECU over GE Aerospace's competing XA100 adaptive engine in 2023, locking P&W in as the sole F-35 propulsion vendor through the program's life.\n\nThe binding constraint is delivery cadence, not bookings. Every F135 engine delivered in 2024 was late, with an average 238-day delay. P&W has invested over $1B in production capacity over the past five years and lifted production rates 20% above prior contract levels, but supply-chain pressures persist. With Lockheed delivering a record 191 F-35s in 2025 and a 416-jet backlog, engine throughput is one of the binding constraints on aircraft delivery.\n\nThe broader RTX picture also includes military engines for the F-22 (F119), V-22 Osprey (T406), and various international platforms. Pratt's commercial engine struggles (GTF powdered-metal recall, Airbus damages claim) have weighed on the stock but are gradually being worked through.",
+      "chokepointMetrics": [
+        {
+          "label": "F135 engines delivered (cumulative)",
+          "value": ">1,400"
+        },
+        {
+          "label": "Lots 18-19 contract value (Mar 2026)",
+          "value": "$6.6B for 141 systems"
+        },
+        {
+          "label": "Avg 2024 delivery delay",
+          "value": "238 days late"
+        },
+        {
+          "label": "Production rate increase",
+          "value": "+20% over prior contract"
+        },
+        {
+          "label": "ECU program lifetime value",
+          "value": "~$40B"
+        }
+      ],
+      "catalysts": [
+        "ECU production cut-in (Block 4 enablement)",
+        "Backlog burn-down through 2026",
+        "F-35 sales to Saudi Arabia (potential)",
+        "Lots 20-21 contract negotiations",
+        "Engine Enhancement Package (EEP) follow-on"
+      ],
+      "risks": [
+        "Continued late deliveries blocking F-35 ramp",
+        "GTF commercial engine cash drag (Airbus damages)",
+        "Supplier base fragility (single-source castings)",
+        "Sustainment cost growth pressuring DoD"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "lmt-f35-airframe",
+      "name": "F-35 Airframe & Block 4 Modernization",
+      "sector": "Defense",
+      "layer": "Aerospace & Engines",
+      "primaryTicker": "LMT",
+      "relatedTickers": [
+        "RTX",
+        "NOC",
+        "BA"
+      ],
+      "thesisShort": "Lockheed delivered a record 191 F-35s in 2025, but a 416-jet backlog and TR-3/Block 4 modernization create a decade of high-margin work.",
+      "thesisLong": "The F-35 Lightning II is the largest weapons program in history, with total lifecycle cost projected above $1.7T. Lockheed Martin Aeronautics delivered 191 F-35s in 2025 — a record, achieved by clearing the TR-3 software/hardware backlog that had grounded deliveries through 2023-2024. The current production rate is ~156/year baseline, but 2025 deliveries included 35+ aircraft from the parked TR-3 backlog.\n\nThe ordered backlog still stands at 416 jets, with total planned production approaching 3,000 aircraft. Foreign Military Sales remains the growth engine: Germany (35 F-35As), Romania, Czech Republic, Greece, Israel (additional batch), Switzerland, Finland, and Singapore are all in active production or contract phases. The fleet has reached ~1,300 delivered aircraft across 20 nations.\n\nBlock 4 modernization is the next decade of upgrades, adding 80+ new capabilities (sensor fusion, weapons integration, electronic warfare). It depends on the Tech Refresh 3 (TR-3) hardware that caused the 2023-24 delivery freeze. Lockheed and the JPO are now past the worst of TR-3 stabilization, and Block 4 cut-in is accelerating through 2026-2027. Skunk Works is also bidding for the F-47/NGAD program (Boeing was selected as prime in March 2025, but Lockheed retains significant subcontract exposure).\n\nKey risks: cost-per-flight-hour remains stubbornly high (~$33K/hr vs $25K target), Saudi F-35 sale would unlock Gulf demand but is politically fraught, and the loss of NGAD prime to Boeing was a strategic blow. But the installed base, unit margins, and modernization runway make F-35 the most predictable cash machine in the defense sector through 2040.",
+      "chokepointMetrics": [
+        {
+          "label": "F-35 deliveries (2025)",
+          "value": "191 (record)"
+        },
+        {
+          "label": "Production rate baseline",
+          "value": "~156/year"
+        },
+        {
+          "label": "Order backlog",
+          "value": "416 jets"
+        },
+        {
+          "label": "Total planned production",
+          "value": "~3,000 aircraft"
+        },
+        {
+          "label": "Global delivered fleet",
+          "value": "~1,300 across 20 nations"
+        }
+      ],
+      "catalysts": [
+        "Block 4 capabilities cut-in",
+        "TR-3 stabilization fully complete",
+        "Saudi Arabia F-35 sale (potential)",
+        "Lot 20+ multi-year procurement",
+        "European FMS expansion (Germany +35, others)"
+      ],
+      "risks": [
+        "Cost-per-flight-hour above target ($33K vs $25K goal)",
+        "F-47/NGAD prime lost to Boeing",
+        "Engine deliveries (P&W) gating airframe rate",
+        "Sustainment cost political pressure"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "heico-aftermarket",
+      "name": "HEICO Aftermarket & Mission-Critical Components",
+      "sector": "Defense",
+      "layer": "Aerospace & Engines",
+      "primaryTicker": "HEI",
+      "relatedTickers": [
+        "TDG",
+        "GE",
+        "RTX"
+      ],
+      "thesisShort": "HEICO is the dominant FAA-approved aftermarket parts manufacturer (PMA), with a defense electronics arm that's quietly compounding through missile-defense and ISR demand.",
+      "thesisLong": "HEICO Corporation operates two segments: Flight Support Group (~70% of revenue) makes FAA-PMA replacement parts for jet engines and airframes at 30-50% discount to OEM-priced components. Electronic Technologies Group (~30% of revenue) is a portfolio of acquired specialty defense electronics businesses serving missile defense, space, EW, and ISR markets.\n\nFiscal 2025 (year ended Oct 31, 2025) was a record year: net income up 34% to $690M, Q3 sales up 19.3% to $1.21B, with organic growth of 13.5%. Aftermarket parts and distribution (post-Wencor acquisition) is growing 16% organically. Defense — particularly missile defense components and EW subsystems — is a quietly accelerating tailwind, benefiting from rising US and allied government orders.\n\nHEICO's moat is regulatory and structural: PMA approval takes years per part number, and the company holds 12,000+ approved PMAs that competitors would take a generation to replicate. The acquisition strategy is famously disciplined — the Mendelson family (CEO Larry, sons Eric and Victor) has compounded the stock at >20% CAGR for three decades by buying small specialty businesses at ~7-9x EBITDA and integrating them.\n\nDefense angle is underappreciated by generalists: HEICO's Electronic Technologies Group makes microwave components, RF amplifiers, EMI/EMC filters, fiber-optic interconnects, and laser products for nearly every major US defense platform — Aegis, THAAD, Patriot, F-35, B-21, Trident, GMD. Risks include integration risk on Wencor, multiple compression from rich valuation (~50x earnings), and commercial aftermarket cyclicality if airline traffic stalls.",
+      "chokepointMetrics": [
+        {
+          "label": "FY25 net income",
+          "value": "$690M (+34% YoY)"
+        },
+        {
+          "label": "Q3 organic growth",
+          "value": "+13.5% YoY"
+        },
+        {
+          "label": "Aftermarket parts growth",
+          "value": "+16% organic"
+        },
+        {
+          "label": "Approved PMA part numbers",
+          "value": ">12,000"
+        },
+        {
+          "label": "Flight Support / Electronics mix",
+          "value": "70% / 30%"
+        }
+      ],
+      "catalysts": [
+        "Wencor acquisition synergies fully realized",
+        "Missile defense electronics demand surge",
+        "Airline fleet aging driving PMA demand",
+        "Tuck-in M&A pipeline (8-12 deals/yr)",
+        "Defense budget supplementals"
+      ],
+      "risks": [
+        "Premium valuation (~50x earnings)",
+        "Commercial aerospace traffic cyclicality",
+        "OEM pushback on PMA penetration",
+        "Wencor integration execution"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "rklb-launch-cadence",
+      "name": "Rocket Lab Launch & Spacecraft Manufacturing",
+      "sector": "Defense",
+      "layer": "Space Launch",
+      "primaryTicker": "RKLB",
+      "relatedTickers": [
+        "ASTS",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "Rocket Lab is the only Western pure-play small/medium launcher with demonstrated cadence, and Neutron's 2026 debut unlocks a $50M-per-launch market dominated today by SpaceX.",
+      "thesisLong": "Rocket Lab USA closed Q4 2025 with a record $1.85B backlog and launched 21 Electron missions in 2025 from three launch sites (Mahia 1A, 1B in New Zealand and Wallops 2 in Virginia) — making Electron the second-most-flown US-launched orbital rocket after SpaceX Falcon 9. Electron's contracted backlog stands at 49 launches, with management guiding ~37% of total backlog to convert within 12 months.\n\nThe strategic catalyst is Neutron, RKLB's medium-lift partially-reusable rocket designed for constellations and national security launch. Neutron's debut has slipped to Q4 2026 after a Q4 2025 tank-test failure, but the first flight vehicle is targeted to ship to Wallops in Q1 2026 for integration. Two Neutron missions are firmly priced in backlog at $50-55M each — far above Electron's ~$8M list price.\n\nRocket Lab's spacecraft business is the underappreciated component: the Photon bus, Sinclair Interplanetary reaction wheels, ASI solar arrays, and SolAero panels make RKLB a vertically-integrated space company, not just a launcher. Space Systems revenue was the larger of two segments in 2025 and has higher margin than launch.\n\nNational security demand is the binding catalyst: SDA Tranche 3, NSSL Phase 3 Lane 1 (where RKLB qualified), MDA HBTSS, and Space Force responsive-launch programs all feed RKLB's pipeline. Risks: Neutron delays continue (already 18+ months behind original schedule), ULA Vulcan and Blue Origin New Glenn compete for medium-lift NSSL slots, and the stock trades at ~25x revenue with profitability still 2-3 years out.",
+      "chokepointMetrics": [
+        {
+          "label": "Backlog (Q4 2025)",
+          "value": "$1.85B"
+        },
+        {
+          "label": "Electron launches (2025)",
+          "value": "21 (second only to F9)"
+        },
+        {
+          "label": "Electron backlog",
+          "value": "49 missions"
+        },
+        {
+          "label": "Neutron debut",
+          "value": "Q4 2026 (slipped from mid-2026)"
+        },
+        {
+          "label": "Neutron price per launch",
+          "value": "$50-55M"
+        }
+      ],
+      "catalysts": [
+        "Neutron first flight (Q4 2026)",
+        "SDA Tranche 3 contract awards",
+        "NSSL Phase 3 Lane 1 missions",
+        "Photon spacecraft production ramp",
+        "Mynaric/SolAero acquisitions integration"
+      ],
+      "risks": [
+        "Further Neutron delays into 2027",
+        "ULA Vulcan / New Glenn medium-lift competition",
+        "Premium valuation (~25x revenue)",
+        "Profitability still 2-3 years away"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "asts-bluebird-constellation",
+      "name": "AST SpaceMobile BlueBird Direct-to-Cell",
+      "sector": "Defense",
+      "layer": "Space Launch",
+      "primaryTicker": "ASTS",
+      "relatedTickers": [
+        "RKLB",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "AST SpaceMobile is building the only space-based cellular broadband network compatible with unmodified phones — a capability the Pentagon has explicitly funded as a backup to terrestrial comms.",
+      "thesisLong": "AST SpaceMobile is deploying a low-earth-orbit constellation of large phased-array satellites (~2,400 sq ft each) that provide direct-to-cell broadband to standard unmodified smartphones. BlueBird 6 deployed December 2025 from India's GSLV; BlueBird 7 launched April 2026 on Blue Origin New Glenn from Cape Canaveral. The company targets 45-60 satellites in orbit by end of 2026, with a launch every 1-2 months.\n\nThe defense angle is significant: AST has Space Development Agency contracts and a separate prime contract with the US government for direct-to-device tactical communications. The Pentagon views D2D as a critical resilience layer when traditional MILSATCOM or terrestrial networks are denied or degraded — a lesson reinforced repeatedly in Ukraine. ASTS has stated that government contract revenue will be a meaningful portion of revenue in early years of constellation operations.\n\nCommercial backbone: 10-year agreement with stc group (Saudi Arabia + regional) including $175M prepayment in October 2025; new TELUS deal in Canada; existing partnerships with Verizon, AT&T, Vodafone, Rakuten, Bell Canada, Orange, Telefonica, and MTN — total addressable subscribers of 2.8B+. 2026 revenue guidance is $150-200M against $1.2B in contracted commitments.\n\nKey risk events: BlueBird 7 experienced a partial deployment anomaly in April 2026 (still under investigation), demonstrating the operational risk of large unfurling arrays. SpaceX Starlink Direct-to-Cell is the most credible competitor with much faster deployment cadence. Capital intensity is enormous — ASTS must launch 100+ satellites for global coverage. But the defense and emerging-market commercial demand stories are real and largely uncorrelated with terrestrial telecom CapEx.",
+      "chokepointMetrics": [
+        {
+          "label": "Satellites in orbit (Apr 2026)",
+          "value": "7+ BlueBirds"
+        },
+        {
+          "label": "End-2026 deployment target",
+          "value": "45-60 satellites"
+        },
+        {
+          "label": "Phased array size",
+          "value": "~2,400 sq ft per satellite"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "$150-200M"
+        },
+        {
+          "label": "Contracted commitments",
+          "value": "$1.2B"
+        }
+      ],
+      "catalysts": [
+        "Launch cadence reaching 1 per 6 weeks",
+        "Pentagon direct-to-device tactical contract expansion",
+        "Verizon/AT&T commercial service activation",
+        "stc group $175M prepayment milestones",
+        "FCC spectrum approval for full commercial ops"
+      ],
+      "risks": [
+        "BlueBird 7 deployment anomaly investigation",
+        "SpaceX Starlink D2C competition",
+        "Capital intensity (need 100+ satellites for global)",
+        "Launch vehicle availability bottleneck"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "mp-rare-earth-magnets",
+      "name": "MP Materials Mine-to-Magnet Vertical Integration",
+      "sector": "Defense",
+      "layer": "Rare Earths & Critical Minerals",
+      "primaryTicker": "MP",
+      "relatedTickers": [
+        "USAR",
+        "LMT",
+        "RTX"
+      ],
+      "thesisShort": "MP Materials runs the only fully-integrated rare earth mine-to-magnet operation in North America and was named DoD's primary domestic supplier for NdFeB magnets.",
+      "thesisLong": "MP Materials owns and operates the Mountain Pass mine and processing facility in California — the only integrated rare earth mining and processing operation in the Western Hemisphere. In 2024 Mountain Pass produced 45,000+ metric tons of rare earth oxides in concentrate (an all-time US primary-production record) and ~1,300 metric tons of separated NdPr oxide. The Independence facility in Fort Worth, TX began commercial NdPr metal production and trial NdFeB magnet production in late 2025, ramping toward 1,000 metric tons of finished magnets per year.\n\nThe Department of War (formerly DoD) struck a landmark partnership with MP in mid-2025: a multi-hundred-million preferred equity investment, a price floor on NdPr at $110/kg (vs current ~$60/kg market), and a 10-year offtake agreement for 100% of magnets produced at the new 10X facility planned for Northlake, Texas. The 10X campus is a $1.25B build that will commission in 2028 and add multiple thousand tons of additional NdFeB capacity. This is the most aggressive direct US government industrial-policy intervention since the Strategic Petroleum Reserve.\n\nThe defense use case is critical: every F-35 contains ~920 lbs of rare earth materials, every Virginia-class submarine contains ~9,200 lbs, and every Arleigh Burke destroyer contains ~5,200 lbs. Precision-guided munitions, EW systems, sonar transducers, and electric motors all depend on Nd-Fe-B magnets. China currently controls >85% of global rare earth processing and >90% of magnet production — a chokehold the US has explicitly committed to breaking by 2030.\n\nRisks: NdPr price volatility could test the DoW price floor mechanism politically; commercial magnet market is dominated by China at structurally lower cost; and MP's customer concentration (GM is the lead commercial offtaker) creates concentration risk. But the strategic mandate is bipartisan, well-funded, and supports MP regardless of commercial demand.",
+      "chokepointMetrics": [
+        {
+          "label": "Mountain Pass REO production (2024)",
+          "value": "45,000 MT (record)"
+        },
+        {
+          "label": "NdPr oxide production (2024)",
+          "value": "~1,300 MT"
+        },
+        {
+          "label": "Independence (TX) magnet capacity",
+          "value": "1,000 MT/yr"
+        },
+        {
+          "label": "DoW price floor on NdPr",
+          "value": "$110/kg"
+        },
+        {
+          "label": "10X campus (Northlake) commissioning",
+          "value": "2028"
+        }
+      ],
+      "catalysts": [
+        "Independence facility full-rate production",
+        "DoW 10-year magnet offtake activation",
+        "10X Northlake campus groundbreaking and ramp",
+        "GM and Apple commercial magnet shipments",
+        "Heavy rare earth (Dy/Tb) processing capability addition"
+      ],
+      "risks": [
+        "NdPr price volatility vs DoW floor mechanism",
+        "Customer concentration (GM)",
+        "China dumping to undermine US industrial base",
+        "10X facility execution timeline (2028 ambitious)"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "usar-heavy-rare-earths",
+      "name": "USA Rare Earth Heavy REE & Stillwater Magnets",
+      "sector": "Defense",
+      "layer": "Rare Earths & Critical Minerals",
+      "primaryTicker": "USAR",
+      "relatedTickers": [
+        "MP",
+        "LMT",
+        "RTX"
+      ],
+      "thesisShort": "USA Rare Earth controls the Round Top heavy rare earth deposit (dysprosium, terbium) and is racing to commission the Stillwater magnet plant — the missing piece in US heavy-REE independence.",
+      "thesisLong": "USA Rare Earth (USAR) is the second leg of the US rare earth industrial buildout. Where MP Materials dominates light REEs (Nd, Pr) from Mountain Pass, USAR controls the Round Top Mountain deposit in West Texas — one of the largest heavy rare earth resources in North America, containing significant dysprosium, terbium, gallium, beryllium, and lithium. Heavy REEs are the binding chokepoint for high-temperature defense magnets (used in jet engine motors, missile actuators, EW) where Chinese supply control is even tighter than light REE.\n\nIn January 2025 USAR produced its first dysprosium oxide samples at 99.1% purity and its first sintered NdFeB magnet at the Stillwater Innovations Lab. The full Stillwater, Oklahoma plant — 310,000 sq ft — is targeted for commissioning starting Q1 2026, with eventual capacity of 4,800 metric tons of finished magnets per year (5x MP's Independence facility nameplate).\n\nUSAR raised $75M PIPE in 2025, secured ~$1.6B in federal funding for the Stillwater facility, and made the transformative $100M-plus acquisition of Less Common Metals (UK) in September 2025 — instantly adding rare earth metals and alloys manufacturing capability that would have taken years to build organically. In April 2026 USAR announced a $3B acquisition in South America (white-house-backed) further extending its mine-to-magnet vertical integration.\n\nUSAR is the higher-risk, higher-beta way to play the rare earth thesis vs MP. Stillwater commissioning execution is the binding near-term catalyst. Round Top mine permitting and capex remain the long-term wild cards. Risks: production timeline slippage (already accelerated by 2 years which raises execution bar), heavy capex requirements, and dependence on continued federal funding.",
+      "chokepointMetrics": [
+        {
+          "label": "Stillwater facility size",
+          "value": "310,000 sq ft"
+        },
+        {
+          "label": "Stillwater eventual capacity",
+          "value": "4,800 MT magnets/yr"
+        },
+        {
+          "label": "Commissioning start",
+          "value": "Q1 2026"
+        },
+        {
+          "label": "Federal funding secured",
+          "value": "~$1.6B"
+        },
+        {
+          "label": "First dysprosium oxide purity",
+          "value": "99.1%"
+        }
+      ],
+      "catalysts": [
+        "Stillwater first commercial magnet production",
+        "Round Top mine permitting progress",
+        "Less Common Metals integration synergies",
+        "DoW heavy REE offtake agreement",
+        "South American acquisition closing"
+      ],
+      "risks": [
+        "Aggressive 2-year-pulled-forward production timeline",
+        "Heavy capex needs vs current cash position",
+        "Round Top permitting timeline uncertain",
+        "Heavy reliance on federal/policy support"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "pltr-defense-software",
+      "name": "Palantir Maven & TITAN — Defense AI Operating System",
+      "sector": "Defense",
+      "layer": "Cyber & Defense Software",
+      "primaryTicker": "PLTR",
+      "relatedTickers": [
+        "LDOS",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "Palantir is the de facto AI operating system for the US military, with the Maven Smart System now a $2B+ program of record and a $10B Army enterprise agreement consolidating 75 contracts.",
+      "thesisLong": "Palantir Technologies has emerged as the dominant defense software company in the US, with a position no traditional prime can replicate. The Maven Smart System (MSS) — an AI-enabled command-and-control platform that ingests data from 150+ sources and generates 1,000+ targeting recommendations per hour — was elevated to a Pentagon program of record in 2025. The Maven contract ceiling went from $480M (May 2024) to $1.3B (May 2025) to ~$2.1B after a $795M modification later in 2025.\n\nIn August 2025 Palantir won a $10B Army enterprise agreement consolidating 75 separate active Palantir contracts under a single 10-year framework — the largest software contract in DoD history. The TITAN deep-sensing program (Tactical Intelligence Targeting Access Node) delivered first vehicles to the Army in Q1 2026 under a $178M prototype contract; the Army rated it a top-performing program, setting up a multi-billion-dollar production decision.\n\nFinancials reflect the inflection: Q4 2025 revenue grew 70% YoY to $1.4B; full-year 2025 revenue was $4.48B, up 56%. US Commercial revenue grew 137% in Q4 (the AI Platform / AIP wave is the commercial leg) and government TCV grew 66% YoY to $1.5B in the quarter. Defense revenue is now ~55% of total bookings.\n\nThe moat is structural: Palantir's Foundry/Gotham platforms are the only software certified to ingest classified data across DoD/IC enclaves at scale, and the network effect of every new platform deployment makes the next one easier. Risks include extreme valuation (>200x earnings), key-person concentration around CTO Shyam Sankar, and political vulnerability if a future administration reverses defense-AI procurement policies.",
+      "chokepointMetrics": [
+        {
+          "label": "Maven Smart System contract ceiling",
+          "value": "~$2.1B"
+        },
+        {
+          "label": "Army Enterprise Agreement",
+          "value": "$10B over 10 years"
+        },
+        {
+          "label": "Q4 2025 revenue",
+          "value": "$1.4B (+70% YoY)"
+        },
+        {
+          "label": "FY25 revenue",
+          "value": "$4.48B (+56% YoY)"
+        },
+        {
+          "label": "Defense share of bookings",
+          "value": "~55%"
+        }
+      ],
+      "catalysts": [
+        "TITAN production decision (multi-billion)",
+        "Maven program-of-record annual budget growth",
+        "NATO/AUKUS allied software adoption",
+        "Warp Speed AI munitions production initiative",
+        "AIP commercial expansion"
+      ],
+      "risks": [
+        "Extreme valuation (~200x earnings)",
+        "Political dependency on current administration's AI policy",
+        "Key-person concentration",
+        "Pricing pressure as DoD demands more for less"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "crwd-federal-cyber",
+      "name": "CrowdStrike Federal Zero Trust & DoW Cyber",
+      "sector": "Defense",
+      "layer": "Cyber & Defense Software",
+      "primaryTicker": "CRWD",
+      "relatedTickers": [
+        "PLTR",
+        "PANW",
+        "S"
+      ],
+      "thesisShort": "CrowdStrike's Falcon platform is FedRAMP High and DoD IL-5 authorized, and federal/defense cyber is on a path to multi-billion-dollar revenue as zero-trust mandates accelerate.",
+      "thesisLong": "CrowdStrike Holdings sells Falcon, the dominant cloud-native endpoint detection and response (EDR) and extended detection and response (XDR) platform. The product holds FedRAMP authorization since 2018, was upgraded to FedRAMP High in March 2025, and the Gov-2 environment carries a Provisional Authorization at DoD Impact Level 5 (IL-5) — meaning Falcon can protect classified and sensitive defense workloads.\n\n25 of 50 US states have standardized on Falcon at the enterprise level. CISA (Cybersecurity & Infrastructure Security Agency) uses Falcon as the backbone of the Federal Civilian Executive Branch endpoint protection initiative. The Department of War uses CrowdStrike to support zero-trust architecture mandates under OMB M-21-31 and DoD's own zero-trust strategy targeting full deployment by 2027.\n\nThe federal/defense business is still small as a percentage of CRWD's $4B+ ARR but is growing faster than the corporate average. Documented contracts include a $3M State Department Falcon Intelligence award via NASA SEWP and multi-tens-of-millions DoD allocations through the JWCC cloud vehicle. Analyst estimates put federal/defense as a multi-billion-dollar revenue stream within 2-3 years as zero-trust deadlines force agency-wide deployments.\n\nThe July 2024 outage — caused by a faulty Falcon sensor update that crashed millions of Windows machines globally — created lasting brand and litigation overhang. CrowdStrike has invested heavily in post-incident process changes and has retained virtually all major federal customers, but the event remains a competitive talking point for Microsoft, SentinelOne, and Palo Alto. Risks: federal sales cycles are long, competition is intense (Microsoft Defender bundling is the structural threat), and the stock trades at premium multiples.",
+      "chokepointMetrics": [
+        {
+          "label": "FedRAMP authorization",
+          "value": "High (March 2025)"
+        },
+        {
+          "label": "DoD authorization",
+          "value": "Impact Level 5"
+        },
+        {
+          "label": "US states standardized on Falcon",
+          "value": "25 of 50"
+        },
+        {
+          "label": "Total ARR",
+          "value": "$4B+"
+        },
+        {
+          "label": "Zero Trust mandate deadline",
+          "value": "2027"
+        }
+      ],
+      "catalysts": [
+        "Federal zero-trust deployment deadlines (2027)",
+        "DoD JWCC cloud allocation expansion",
+        "Identity Protection module attach rates",
+        "Charlotte AI federal authorization",
+        "Recovery from July 2024 outage overhang"
+      ],
+      "risks": [
+        "Microsoft Defender E5 bundling competition",
+        "July 2024 outage litigation tail",
+        "Long federal procurement cycles",
+        "Premium valuation on AI-cyber narrative"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "ldos-isr-space",
+      "name": "Leidos ISR, Space Sensing & Air Defense",
+      "sector": "Defense",
+      "layer": "Satellites & ISR",
+      "primaryTicker": "LDOS",
+      "relatedTickers": [
+        "NOC",
+        "LMT",
+        "BAH"
+      ],
+      "thesisShort": "Leidos closed FY2025 with a record $49B backlog (2.9x revenue), driven by ISR, space-sensing, and air defense programs that align directly with the Pentagon's top spending priorities.",
+      "thesisLong": "Leidos Holdings is the largest pure-play defense services and integration company in the US, with a $49B record backlog at the end of FY25 against $17.2B annual revenue (2.9x book-to-revenue). Of that backlog, $9.7B is funded — already authorized and appropriated by customers. Q3 2025 net bookings of $5.9B produced a 1.3 book-to-bill, indicating accelerating top-line growth into 2026.\n\nThe Defense Systems segment grew 10% in Q2 2025 driven by space sensing and integrated air defense — the two highest-priority modernization areas for the Pentagon. Notable 2025 awards include: a 5-year $2.2B Air Base Air Defense contract; a $617M Army air defense award; positions on the Missile Defense Agency's $151B SHIELD program; and a 6-year $455M Air Force cloud contract. Leidos was also selected for the Defense Microelectronics Activities $25B IDIQ.\n\nLeidos provides airborne and ground ISR systems including signals intelligence, electro-optical/infrared sensing, geospatial intelligence, and full-motion video processing. The company integrates payloads onto manned platforms (P-8, MC-12), unmanned aircraft, and space-based sensors. Its Dynetics subsidiary builds hypersonic glide bodies for the Army's Long-Range Hypersonic Weapon (LRHW) program and Conventional Prompt Strike — positioning it at the center of the Pentagon's hypersonic acceleration push.\n\nRisks: services-business margins remain mid-single-digit despite scale; defense services consolidation (Booz Allen, SAIC, CACI competition) constantly pressures pricing; and Trump administration efficiency initiatives could compress incumbent service contract values. But the backlog provides exceptional visibility, and hypersonic / missile-defense / SHIELD positioning offers genuine growth optionality.",
+      "chokepointMetrics": [
+        {
+          "label": "FY25 backlog (record)",
+          "value": "$49.0B"
+        },
+        {
+          "label": "Backlog / revenue ratio",
+          "value": "2.9x"
+        },
+        {
+          "label": "FY25 revenue",
+          "value": "$17.2B"
+        },
+        {
+          "label": "Q3 2025 book-to-bill",
+          "value": "1.3"
+        },
+        {
+          "label": "MDA SHIELD program ceiling",
+          "value": "$151B"
+        }
+      ],
+      "catalysts": [
+        "MDA SHIELD task orders ramping",
+        "Dynetics hypersonic glide body production",
+        "Air Base Air Defense $2.2B execution",
+        "Defense Microelectronics Activities task orders",
+        "Trusted Mission Cloud expansion"
+      ],
+      "risks": [
+        "Services margin compression (mid-single-digit)",
+        "Booz Allen / SAIC / CACI competitive pressure",
+        "Federal efficiency initiatives compressing rates",
+        "Hypersonic program execution risk"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "ktos-valkyrie-cca",
+      "name": "Kratos Valkyrie CCA & Tactical Drones",
+      "sector": "Defense",
+      "layer": "Satellites & ISR",
+      "primaryTicker": "KTOS",
+      "relatedTickers": [
+        "AVAV",
+        "LMT",
+        "NOC"
+      ],
+      "thesisShort": "Kratos' XQ-58 Valkyrie was selected by the Marines as their first Collaborative Combat Aircraft, putting the company at the center of the Pentagon's loyal-wingman push.",
+      "thesisLong": "Kratos Defense & Security Solutions builds the XQ-58A Valkyrie, an autonomous low-cost loyal-wingman fighter designed to fly alongside manned platforms. On January 8, 2026, the US Marine Corps officially selected Northrop Grumman + Kratos to develop its first operational Collaborative Combat Aircraft (CCA) — the Valkyrie — making Kratos the lead manufacturer with Northrop as autonomy software prime.\n\nKratos took the unusual step of self-funding serial production of 24 Valkyries before securing a contract, then began acquiring long-lead items for an additional 24 jets — a total runway of 48 production aircraft including multiple variants (runway-independent original, conventional takeoff/landing, and a European-specific design). Kratos expects 15-20 deliveries in calendar 2026, with the Marine Corps contract award the binding catalyst.\n\nInternational opportunities are accelerating: Airbus partnered with Kratos in July 2025 to develop a UCCA based on XQ-58 for the German Air Force (combat-ready by 2029). Kratos showed a full-scale Valkyrie at BEDEX 2026 in Brussels in March, pitching to European NATO allies. Australia and Japan are evaluating CCA buys.\n\nBeyond Valkyrie, Kratos owns target drones (BQM-167, MQM-178), turbojet engines (Florida Turbine Technologies — supplying everyone from Anduril to Kratos itself), space and satellite training systems, and a microwave electronics business. The company is one of the few profitable small-cap defense names with multi-product franchise depth. Risks: Marine Corps CCA contract value undefined, Air Force CCA Increment 1 selected General Atomics + Anduril (Kratos lost), and engine supply through FTT could become a bottleneck.",
+      "chokepointMetrics": [
+        {
+          "label": "Valkyrie self-funded production",
+          "value": "24 jets + 24 long-lead"
+        },
+        {
+          "label": "2026 delivery target",
+          "value": "15-20 Valkyries"
+        },
+        {
+          "label": "USMC CCA selection",
+          "value": "Jan 2026 (Northrop + Kratos)"
+        },
+        {
+          "label": "Airbus/German UCCA",
+          "value": "Combat-ready 2029"
+        },
+        {
+          "label": "Total Valkyrie production runway",
+          "value": "48 aircraft"
+        }
+      ],
+      "catalysts": [
+        "USMC CCA contract definitization",
+        "European customer first orders",
+        "FTT engine supply ramp",
+        "USAF CCA Increment 2 competition (potential Kratos re-entry)",
+        "Target drone fleet recapitalization"
+      ],
+      "risks": [
+        "USAF CCA Increment 1 lost to Anduril/General Atomics",
+        "Valkyrie unit economics unproven at scale",
+        "FTT engine supply bottleneck",
+        "Microcap volatility / capital raises"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "avav-switchblade-loitering",
+      "name": "AeroVironment Switchblade & Loitering Munitions",
+      "sector": "Defense",
+      "layer": "Drones & Autonomous Systems",
+      "primaryTicker": "AVAV",
+      "relatedTickers": [
+        "KTOS",
+        "LMT",
+        "RTX"
+      ],
+      "thesisShort": "AeroVironment is the dominant Western maker of small loitering munitions, with Switchblade production scaling from ~40/month pre-war to a target of several thousand per month by 2027.",
+      "thesisLong": "AeroVironment makes the Switchblade family of loitering munitions — Switchblade 300 (anti-personnel, ~5 lb) and Switchblade 600 (anti-armor, ~50 lb). Switchblade became the iconic small-loitering munition of the Ukraine war, with the Block 1 version of Switchblade 600 the most-deployed variant in combat. AVAV has built ~3,000 Switchblade 600 Block 1 units to date.\n\nProduction scale-up is dramatic: from ~40 systems per month pre-war to ~240/month current, with a target of ~1,200/month at the new Salt Lake City facility opening late 2026 / early 2027. The new plant is sized to eventually exceed 2,000+ Switchblades per month — over 50x pre-war capacity.\n\nContract visibility is excellent: a 2024 prime contract worth up to $990M for Switchblade 300/600 deliveries through 2029; a February 2026 Army order valued at $186M; an $874M IDIQ for export and counter-UAS systems. Block 2 Switchblade 600 (M-code GPS, secondary payload bay, automated target recognition) begins delivery to the US military in early 2026; a Switchblade 300 update is in Army qualification with target completion in 2026.\n\nAVAV also makes the Puma small UAS (the most-deployed US military hand-launched ISR drone), Jump 20 medium UAS, and is expanding into VTOL drone designs and counter-UAS systems via the BlueHalo acquisition (closed 2025). Risks: cheaper Chinese DJI-class FPV drones provide an asymmetric cost challenge, and Anduril is a fierce competitor in the autonomous-systems software stack. But AVAV's installed base and US qualification status are hard to displace in DoD procurement.",
+      "chokepointMetrics": [
+        {
+          "label": "Switchblade 600 cumulative production",
+          "value": "~3,000 units"
+        },
+        {
+          "label": "Pre-war monthly rate",
+          "value": "~40/month"
+        },
+        {
+          "label": "Current monthly rate",
+          "value": "~240/month"
+        },
+        {
+          "label": "Salt Lake City target",
+          "value": "1,200+/month"
+        },
+        {
+          "label": "2024 multi-year contract ceiling",
+          "value": "$990M"
+        }
+      ],
+      "catalysts": [
+        "Salt Lake City facility opening (late 2026)",
+        "Switchblade 600 Block 2 deliveries beginning",
+        "BlueHalo integration (counter-UAS portfolio)",
+        "European FMS expansion post-Ukraine",
+        "Jump 20 and Puma fleet recapitalization"
+      ],
+      "risks": [
+        "Chinese FPV drone cost asymmetry",
+        "Anduril Lattice software competition",
+        "Capacity ramp execution at new Salt Lake plant",
+        "BlueHalo acquisition integration"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "ati-titanium-aerospace",
+      "name": "ATI Titanium & Specialty Aerospace Alloys",
+      "sector": "Defense",
+      "layer": "Specialty Metals",
+      "primaryTicker": "ATI",
+      "relatedTickers": [
+        "CRS",
+        "HWM",
+        "BA"
+      ],
+      "thesisShort": "ATI is the largest US producer of aerospace-grade titanium and specialty alloys, with 70%+ of revenue now from aerospace and defense.",
+      "thesisLong": "ATI Inc. (formerly Allegheny Technologies) is one of the world's leading specialty metals producers, focused on titanium, nickel-based superalloys, stainless and specialty steels, and refractory metals (zirconium, hafnium, niobium, tungsten). Aerospace and defense now represents over 70% of total revenue — a deliberate multi-year shift from commodity stainless/oil-and-gas exposure to high-margin aerospace.\n\nQ3 2025 sales were $1.13B (+7% YoY) with A&D specifically at $793M (70% of mix). ATI raised full-year 2025 guidance to adjusted EPS $3.15-3.21, EBITDA $848-858M, and free cash flow $330-370M. The company extended its long-term titanium products agreement with Boeing in 2025 and serves as a top supplier to Airbus for titanium flat-rolled and long products.\n\nThe defense angle is structural and accelerating: every F-35 contains roughly 2,400 lbs of titanium; every Virginia-class submarine contains tens of tons of specialty steel and titanium; F119 (F-22) and F135 (F-35) engines use ATI superalloy castings throughout the hot section. The Sentinel ICBM, Columbia-class SSBN, and B-21 Raider all consume large quantities of ATI specialty metals.\n\nRussia's invasion of Ukraine eliminated VSMPO-AVISMA (the world's largest titanium producer) as a Western supplier, creating a structural opportunity for ATI to capture share in commercial aerospace too. ATI has invested in additive-manufacturing-grade titanium powder and is one of three qualified Western producers of high-purity titanium sponge — the upstream feedstock the West historically depended on Russia for. Risks: titanium pricing has been volatile, commercial aerospace cyclicality remains a swing factor, and labor cost inflation pressures margins.",
+      "chokepointMetrics": [
+        {
+          "label": "Aerospace & Defense share of revenue",
+          "value": ">70%"
+        },
+        {
+          "label": "Q3 2025 A&D sales",
+          "value": "$793M"
+        },
+        {
+          "label": "FY25 EPS guidance",
+          "value": "$3.15-3.21"
+        },
+        {
+          "label": "FY25 EBITDA guidance",
+          "value": "$848-858M"
+        },
+        {
+          "label": "Boeing titanium agreement",
+          "value": "Extended/expanded 2025"
+        }
+      ],
+      "catalysts": [
+        "VSMPO-AVISMA share recapture (commercial aerospace)",
+        "F-35 production ramp consuming more titanium",
+        "Sentinel ICBM solid rocket motor casings",
+        "Additive manufacturing titanium powder ramp",
+        "Boeing 737 MAX/787 production rate increases"
+      ],
+      "risks": [
+        "Titanium price volatility",
+        "Commercial aerospace cyclical risk",
+        "Labor cost inflation",
+        "Energy intensity / cost of vacuum melt operations"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    },
+    {
+      "id": "crs-titanium-superalloy",
+      "name": "Carpenter Technology Titanium Powder & Superalloys",
+      "sector": "Defense",
+      "layer": "Specialty Metals",
+      "primaryTicker": "CRS",
+      "relatedTickers": [
+        "ATI",
+        "HWM",
+        "GE"
+      ],
+      "thesisShort": "Carpenter Technology is the niche specialty alloy leader for jet engine hot-section parts and one of the few qualified producers of titanium powder for additive manufacturing.",
+      "thesisLong": "Carpenter Technology is a global leader in high-performance specialty alloy materials and process solutions for aerospace & defense, medical, and energy markets. The company was reclassified into the GICS Aerospace & Defense sector in 2025 — a recognition that its end-market mix has shifted decisively toward aerospace engines and defense applications.\n\nBacklog stands at approximately $1.9B — 2.5x pre-COVID levels — providing exceptional visibility. Management is targeting fiscal 2026 operating income of $660-700M against ~$700M in fiscal 2025. The company differentiates at the melt: vacuum induction melting (VIM) and vacuum arc remelting (VAR) systems produce aerospace-grade titanium with the tight chemistries that jet engine hot-section components require.\n\nThe defense and aerospace use cases are mission-critical: Carpenter's nickel-based superalloys (e.g., Custom Age 625 Plus, Pyromet 718) are used in turbine disks, blades, and combustors for the F135 (F-35), F404/F414 (Super Hornet, Tejas), GE9X (777X), and LEAP (737 MAX, A320neo) engines. Carpenter is also one of three qualified Western producers of titanium powder for laser powder bed fusion additive manufacturing — a small but rapidly growing niche the DoD has prioritized for hypersonic, missile, and sustainment supply chains.\n\nUnlike ATI, Carpenter is more focused (single-segment specialty alloys) and trades at a premium multiple. Risks include execution on Athens, Alabama operational efficiency initiatives (which drove the FY25 margin expansion), commercial aerospace cyclicality, and energy-intensity exposure. But the fact that you cannot build a modern jet engine without Carpenter's superalloys makes this one of the most defensible aerospace supply-chain positions in the public market.",
+      "chokepointMetrics": [
+        {
+          "label": "Order backlog",
+          "value": "~$1.9B (2.5x pre-COVID)"
+        },
+        {
+          "label": "FY26 operating income guidance",
+          "value": "$660-700M"
+        },
+        {
+          "label": "Aerospace & defense share",
+          "value": "Majority of revenue (sector reclassified 2025)"
+        },
+        {
+          "label": "Qualified Ti powder producers (West)",
+          "value": "3 (CRS one of them)"
+        },
+        {
+          "label": "Athens, AL specialty alloys plant",
+          "value": "Lead margin-expansion driver"
+        }
+      ],
+      "catalysts": [
+        "Athens AL operational efficiency continuing",
+        "Additive manufacturing titanium powder ramp",
+        "Sentinel ICBM and Columbia-class superalloy demand",
+        "GE LEAP and F135 production rate increases",
+        "Premium Power Metals expansion"
+      ],
+      "risks": [
+        "Premium valuation vs sector",
+        "Commercial aerospace cyclical risk",
+        "Energy-intensive vacuum melt operations",
+        "Operational execution risk on margin ramp"
+      ],
+      "featured": false,
+      "lastUpdated": "2026-04-28"
+    }
+  ]
+}
