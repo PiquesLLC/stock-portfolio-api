@@ -330,14 +330,29 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const overview = fundamentalsMap.get(upper);
         const marketCapB = resolveMarketCapB(overview) ?? 0;
 
-        // For 1D: prefer live quote changePercent when non-zero, fall back to candle data.
-        // After midnight or with Polygon free tier, live changePercent is 0 — candle data is reliable.
-        // For other periods: always use candle-based periodChanges.
-        // 1D during trading hours → live quote. 1D when market closed → candle change
-        // (periodChanges was populated by fetchOneDayChangesFromCandles). Non-1D → candles.
+        // 1D changePercent priority — preserve extended-hours moves across all sessions:
+        //   1. extendedPrice + extendedChangePercent set (live PRE/POST) → total change from
+        //      previousClose using extendedPrice. Mirrors themes-heatmap.service.ts.
+        //   2. quote.changePercent non-zero (Yahoo overlay path at market.service.ts:896-900
+        //      preserves the AH close in changePercent during ALL sessions including CLOSED,
+        //      so the tile keeps showing the extended-hours move overnight until the next
+        //      session begins). This is what makes Finviz-style "stay green after hours" work.
+        //   3. periodChanges fallback (weekend/holiday with stale snapshot, candle-based 1D
+        //      from fetchOneDayChangesFromCandles).
+        // Non-1D periods → candle-based periodChanges; extended-hours ignored.
         let changePercent: number;
-        if (period === '1D' && !use1DCandles && quote?.changePercent) {
-          changePercent = quote.changePercent;
+        let useExtendedForRow = false;
+        if (period === '1D') {
+          const hasExtended = quote?.extendedChangePercent != null && quote?.extendedPrice != null;
+          if (hasExtended && (quote?.previousClose ?? 0) > 0) {
+            // Total change from previous close, NOT just the after-hours delta.
+            changePercent = ((quote!.extendedPrice! - quote!.previousClose) / quote!.previousClose) * 100;
+            useExtendedForRow = true;
+          } else if (quote?.changePercent) {
+            changePercent = quote.changePercent;
+          } else {
+            changePercent = periodChanges?.get(upper) ?? 0;
+          }
         } else {
           changePercent = periodChanges?.get(upper) ?? (quote?.changePercent ?? 0);
         }
@@ -345,9 +360,14 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           ? (quote?.change ?? 0)
           : 0; // dayChange only meaningful for 1D
 
-        // Compute P/E and dividend yield from ScreenerCache + live price
+        // Compute P/E and dividend yield from ScreenerCache + live price.
+        // currentPrice keeps the regular-session price so fundamentals math stays
+        // anchored to the regular close. displayPrice is what we show on the tile —
+        // it tracks extendedPrice during extended hours so the tooltip is consistent
+        // with the displayed change.
         const screener = screenerMap.get(upper);
         const currentPrice = quote?.currentPrice ?? 0;
+        const displayPrice = useExtendedForRow ? (quote?.extendedPrice ?? currentPrice) : currentPrice;
 
         let pe: number | null = overview?.peRatio ?? null;
         let dividendYield: number | null = overview?.dividendYield ?? null;
@@ -372,7 +392,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         return {
           ticker: upper,
           name: resolveName(overview, upper),
-          price: currentPrice,
+          price: displayPrice,
           changePercent,
           dayChange,
           weekChangePercent: weekChanges?.get(upper) ?? 0,
