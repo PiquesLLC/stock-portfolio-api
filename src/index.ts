@@ -601,13 +601,25 @@ const server = app.listen(config.port, async () => {
     runJob({ name: 'analyst_updates', fn: runAnalystUpdatesJob });
   }, 24 * 60 * 60 * 1000);
 
-  // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls)
+  // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls).
+  // Idempotency key bucketed to 24h prevents the post-deploy startup cron from
+  // double-spawning while a previous run is still mid-flight (orphaned by deploy).
   console.log('[AV Economic] Running daily');
   setTimeout(() => {
-    runJob({ name: 'economic_indicators', fn: refreshEconomicIndicators });
+    runJob({
+      name: 'economic_indicators',
+      fn: refreshEconomicIndicators,
+      idempotencyKey: buildTimeBucketIdempotencyKey('economic_indicators', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 60000);
   setInterval(() => {
-    runJob({ name: 'economic_indicators', fn: refreshEconomicIndicators });
+    runJob({
+      name: 'economic_indicators',
+      fn: refreshEconomicIndicators,
+      idempotencyKey: buildTimeBucketIdempotencyKey('economic_indicators', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 24 * 60 * 60 * 1000);
 
   // World Bank: International economic indicators â€” refresh daily (6 API calls, no key needed)
