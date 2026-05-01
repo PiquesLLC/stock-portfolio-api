@@ -592,13 +592,24 @@ const server = app.listen(config.port, async () => {
     runJob({ name: 'price_alert_eval', fn: evaluatePriceAlerts, maxAttempts: 1 });
   }, 60000);
 
-  // Analyst updates â€” check once per day (every 24 hours)
+  // Analyst updates â€” check once per day. 24h idempotency key prevents
+  // post-deploy startup cron from double-spawning while a run is mid-flight.
   console.log('[Analyst Scheduler] Running every 24 hours');
   setTimeout(() => {
-    runJob({ name: 'analyst_updates', fn: runAnalystUpdatesJob });
+    runJob({
+      name: 'analyst_updates',
+      fn: runAnalystUpdatesJob,
+      idempotencyKey: buildTimeBucketIdempotencyKey('analyst_updates', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 30000);
   setInterval(() => {
-    runJob({ name: 'analyst_updates', fn: runAnalystUpdatesJob });
+    runJob({
+      name: 'analyst_updates',
+      fn: runAnalystUpdatesJob,
+      idempotencyKey: buildTimeBucketIdempotencyKey('analyst_updates', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 24 * 60 * 60 * 1000);
 
   // Alpha Vantage: Economic indicators â€” refresh daily (5 API calls).
@@ -622,13 +633,24 @@ const server = app.listen(config.port, async () => {
     });
   }, 24 * 60 * 60 * 1000);
 
-  // World Bank: International economic indicators â€” refresh daily (6 API calls, no key needed)
+  // World Bank: International economic indicators â€” refresh daily (6 API calls, no key needed).
+  // 24h idempotency key prevents post-deploy startup cron from double-spawning mid-flight.
   console.log('[WB International] Running daily');
   setTimeout(() => {
-    runJob({ name: 'international_indicators', fn: refreshInternationalIndicators });
+    runJob({
+      name: 'international_indicators',
+      fn: refreshInternationalIndicators,
+      idempotencyKey: buildTimeBucketIdempotencyKey('international_indicators', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 90000);
   setInterval(() => {
-    runJob({ name: 'international_indicators', fn: refreshInternationalIndicators });
+    runJob({
+      name: 'international_indicators',
+      fn: refreshInternationalIndicators,
+      idempotencyKey: buildTimeBucketIdempotencyKey('international_indicators', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
   }, 24 * 60 * 60 * 1000);
 
   // Polygon Fundamentals: refresh all held tickers every 12 hours (unlimited API calls)
