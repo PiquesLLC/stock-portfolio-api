@@ -1,0 +1,27 @@
+name: Mirror main to master
+
+# Why: Railway's GitHub App is configured to auto-deploy from `master`, but all
+# development happens on `main`. On 2026-05-01 this divergence stranded prod on
+# a 4-day-old build with no Apr 30 sidebar redesign. This workflow fast-forwards
+# `master` to every new `main` commit so they cannot drift again, regardless of
+# Railway's branch-tracking config.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: mirror-main-to-master
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward master to main
+        run: git push origin HEAD:master
