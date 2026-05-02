@@ -22,7 +22,11 @@ echo "VITE_API_URL=" > .env.production
 [ -n "$VITE_GOOGLE_CLIENT_ID" ] && echo "VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID" >> .env.production
 [ -n "$VITE_APPLE_CLIENT_ID" ] && echo "VITE_APPLE_CLIENT_ID=$VITE_APPLE_CLIENT_ID" >> .env.production
 [ -n "$VITE_APPLE_REDIRECT_URI" ] && echo "VITE_APPLE_REDIRECT_URI=$VITE_APPLE_REDIRECT_URI" >> .env.production
-npm install
+# --include=dev: Railway sets NODE_ENV=production, which makes npm skip
+# devDependencies. Vite + plugin-react live in devDependencies, so without
+# this flag `npx vite build` runs against an empty install. Broke prod
+# builds Apr 28 → May 1.
+npm install --include=dev
 npx vite build
 
 # Copy built UI to the API's client directory

@@ -1,0 +1,5 @@
+# Force LF on shell scripts so Windows checkouts (with core.autocrlf=true)
+# don't ship CRLF to Linux builders. Required because `railway up --detach`
+# uploads the local working tree directly, and bash chokes on \r.
+*.sh   text eol=lf
+*.bash text eol=lf
