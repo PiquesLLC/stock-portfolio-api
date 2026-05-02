@@ -54,6 +54,7 @@ vi.mock('../controllers/market.controller', () => {
     askStockQuestionHandler: ok,
     getHistoricalCAGRHandler: ok,
     getHeatmapHandler: ok,
+    getMarketScreenerHandler: ok,
     getMarketSentimentHandler: ok,
     getThemesHeatmapHandler: ok,
     getEtfHeatmapHandler: ok,
