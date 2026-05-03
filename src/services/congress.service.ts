@@ -1,5 +1,6 @@
 import prisma from '../utils/prisma';
 import { config } from '../config';
+import { resolvePolitician } from './politician.service';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 
@@ -81,6 +82,15 @@ export async function syncLatestCongressTrades(): Promise<number> {
     if (!t.transactionDate || !t.lastName || !t.symbol) continue;
     const politician = `${t.firstName} ${t.lastName}`.trim();
     const { low, high } = parseAmountRange(t.amount);
+    const chamber = inferChamber(t.district);
+    // Resolve to a stable Bioguide ID so the UI can deep-link to the
+    // member's Capitol Trades / Congress.gov page. null when unmatched
+    // (new member roster hasn't been refreshed yet, or unusual name).
+    const politicianBioguideId = await resolvePolitician({
+      firstName: t.firstName,
+      lastName: t.lastName,
+      chamber: chamber as 'Senate' | 'House',
+    });
     try {
       await prisma.congressTrade.upsert({
         where: {
@@ -98,10 +108,11 @@ export async function syncLatestCongressTrades(): Promise<number> {
           assetName: t.assetDescription || null,
           ownerType: t.owner || null,
           fetchedAt: new Date(),
+          politicianBioguideId,
         },
         create: {
           politician,
-          chamber: inferChamber(t.district),
+          chamber,
           ticker: t.symbol.toUpperCase(),
           transactionType: t.type || 'Unknown',
           amountFrom: low,
@@ -111,6 +122,7 @@ export async function syncLatestCongressTrades(): Promise<number> {
           assetName: t.assetDescription || null,
           ownerType: t.owner || null,
           source: 'fmp',
+          politicianBioguideId,
         },
       });
       upserted++;

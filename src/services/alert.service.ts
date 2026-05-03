@@ -270,6 +270,10 @@ export async function checkCongressTradeAlerts(): Promise<void> {
               transactionType: t.transactionType,
               chamber: t.chamber,
               tradeDate: t.tradeDate,
+              // bioguideId lets the UI render the politician name as a link
+              // to Capitol Trades. May be null for unresolved politicians;
+              // UI should fall back to plain text when missing.
+              bioguideId: t.politicianBioguideId,
             })),
           }),
         },

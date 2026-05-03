@@ -1278,24 +1278,51 @@ model AnalyticsEvent {
 }
 
 model CongressTrade {
-  id              String   @id @default(uuid())
-  politician      String
-  chamber         String   // Senate, House
-  ticker          String
-  transactionType String   // Purchase, Sale, Sale (Partial), Exchange
-  amountFrom      Float
-  amountTo        Float
-  tradeDate       DateTime
-  filingDate      DateTime
-  assetName       String?
-  ownerType       String?  // Self, Spouse, Joint, Child, etc.
-  source          String   @default("finnhub") // finnhub, quiverquant
-  fetchedAt       DateTime @default(now())
+  id                   String      @id @default(uuid())
+  politician           String
+  chamber              String   // Senate, House
+  ticker               String
+  transactionType      String   // Purchase, Sale, Sale (Partial), Exchange
+  amountFrom           Float
+  amountTo             Float
+  tradeDate            DateTime
+  filingDate           DateTime
+  assetName            String?
+  ownerType            String?  // Self, Spouse, Joint, Child, etc.
+  source               String   @default("finnhub") // finnhub, quiverquant
+  fetchedAt            DateTime @default(now())
+  // Resolved Bioguide ID (e.g. W000805 for Mark Warner). Set by the
+  // politician resolver during ingestion; null when no match was found.
+  // Drives the clickable Capitol Trades / Congress.gov link in the UI.
+  politicianBioguideId String?
+  resolvedPolitician   Politician? @relation(fields: [politicianBioguideId], references: [bioguideId])
 
   @@unique([politician, ticker, tradeDate, transactionType])
   @@index([ticker])
   @@index([tradeDate])
   @@index([fetchedAt])
+  @@index([politicianBioguideId])
+}
+
+// Canonical roster of US Congress members, keyed by Bioguide ID. Seeded /
+// refreshed weekly from `unitedstates/congress-legislators` (the open community
+// dataset that powers GovTrack, ProPublica, Capitol Trades, etc.). Used to
+// resolve free-form FMP politician strings (e.g. "Mark Warner") to a stable ID
+// so we can deep-link CongressTrade notifications to the official member page.
+model Politician {
+  bioguideId    String   @id
+  canonicalName String   @unique
+  firstName     String?
+  lastName      String?
+  chamber       String?  // "Senate" or "House"
+  party         String?  // "Democrat", "Republican", "Independent"
+  state         String?  // 2-letter postal code
+  // JSON array of alias strings (nicknames, alt spellings) for fuzzy match.
+  nameAliases   String   @default("[]")
+  refreshedAt   DateTime @default(now())
+  trades        CongressTrade[]
+
+  @@index([lastName])
 }
 
 // ─── Verified Performance Profiles (Phase 2) ─────────────────────────
