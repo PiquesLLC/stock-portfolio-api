@@ -30,10 +30,12 @@ import { evaluateWebhookThresholds } from './utils/webhook-metrics';
 import { startFundamentalsPrefetch, stopFundamentalsPrefetch } from './services/fundamentals-prefetch.service';
 import { runJob, pruneOldJobRuns, healOrphanedJobs, pruneExpiredIdempotencyKeys, registerJobHandler } from './services/job-runner.service';
 import { preGenerateDailyReports } from './services/perplexity-daily-report.service';
+import { getMarketStateET } from './utils/market-state';
 import { runWeeklyBriefCycle, runMonthlyBriefCycle } from './services/brief-scheduler.service';
 import { cleanupOldEvents as cleanupOldAnalyticsEvents } from './services/analytics.service';
 import { checkCongressTradeAlerts } from './services/alert.service';
 import { syncLatestCongressTrades } from './services/congress.service';
+import { refreshPoliticianRoster } from './services/politician.service';
 import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
@@ -327,6 +329,7 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('deep_research_poller', pollActiveResearchJobs);
   registerJobHandler('congress_sync', syncLatestCongressTrades);
   registerJobHandler('congress_alert_eval', checkCongressTradeAlerts);
+  registerJobHandler('politician_refresh', refreshPoliticianRoster);
   registerJobHandler('profile_stats_refresh', runProfileStatsRefreshForAllUsers);
   registerJobHandler('billionaire_refresh', refreshAllBillionaires);
   registerJobHandler('billionaire_snapshot', snapshotBillionaires);
@@ -810,6 +813,18 @@ const server = app.listen(config.port, async () => {
     runJob({ name: 'congress_alert_eval', fn: checkCongressTradeAlerts, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('congress_alert_eval', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
   }, 2 * 60 * 60 * 1000);
 
+  // Politician roster refresh — pull latest legislators-current.json from
+  // unitedstates/congress-legislators every 7 days. Also runs once 90s after
+  // boot so a brand-new instance gets the roster without waiting a week.
+  console.log('[Politician Refresh] Running weekly (7d), seed run at +90s');
+  const POLITICIAN_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+  setTimeout(() => {
+    runJob({ name: 'politician_refresh', fn: refreshPoliticianRoster, maxAttempts: 2, idempotencyKey: buildTimeBucketIdempotencyKey('politician_refresh', POLITICIAN_REFRESH_MS), idempotencyTtlMs: POLITICIAN_REFRESH_MS });
+  }, 90 * 1000);
+  setInterval(() => {
+    runJob({ name: 'politician_refresh', fn: refreshPoliticianRoster, maxAttempts: 2, idempotencyKey: buildTimeBucketIdempotencyKey('politician_refresh', POLITICIAN_REFRESH_MS), idempotencyTtlMs: POLITICIAN_REFRESH_MS });
+  }, POLITICIAN_REFRESH_MS);
+
   // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
   setInterval(() => {
     runJob({ name: 'webhook_threshold_eval', fn: runWebhookThresholdEvalJob, maxAttempts: 1 });
@@ -861,27 +876,22 @@ const server = app.listen(config.port, async () => {
     });
   }, 24 * 60 * 60 * 1000);
 
-  // Daily Report pre-generation — warm cache so reports load instantly
-  // Runs 2 min after startup + every 4 hours (aligns with 8h cache TTL)
-  console.log('[Daily Report Pre-Gen] Scheduled: startup + every 4 hours');
-  setTimeout(() => {
+  // Daily Report pre-generation — gated by market state
+  console.log('[Daily Report Pre-Gen] Scheduled: every 5 min, state-aware (intraday=20min bucket, otherwise=4h bucket)');
+  const TRIGGER_PREGEN = () => {
+    const state = getMarketStateET();
+    if (state === 'weekend') return;
+    const bucketMs = state === 'intraday' ? 20 * 60 * 1000 : 4 * 60 * 60 * 1000;
     runJob({
       name: 'daily_report_pregen',
       fn: preGenerateDailyReports,
       maxAttempts: 1,
-      idempotencyKey: buildTimeBucketIdempotencyKey('daily_report_pregen', 4 * 60 * 60 * 1000),
-      idempotencyTtlMs: 4 * 60 * 60 * 1000,
+      idempotencyKey: buildTimeBucketIdempotencyKey(`daily_report_pregen:${state}`, bucketMs),
+      idempotencyTtlMs: bucketMs,
     });
-  }, 120000); // 2 min after startup
-  setInterval(() => {
-    runJob({
-      name: 'daily_report_pregen',
-      fn: preGenerateDailyReports,
-      maxAttempts: 1,
-      idempotencyKey: buildTimeBucketIdempotencyKey('daily_report_pregen', 4 * 60 * 60 * 1000),
-      idempotencyTtlMs: 4 * 60 * 60 * 1000,
-    });
-  }, 4 * 60 * 60 * 1000);
+  };
+  setTimeout(TRIGGER_PREGEN, 120_000);          // 2 min after startup
+  setInterval(TRIGGER_PREGEN, 5 * 60 * 1000);   // every 5 min thereafter
 
   // Weekly + monthly brief pre-generation. Runs every hour; each cycle finds
   // users whose local time is Sunday 06:00-06:59 (weekly) or the 1st at
