@@ -51,7 +51,7 @@ export async function updateAlert(alertId: string, data: { threshold?: number | 
 }
 
 export async function getAlertEvents(userId: string, limit = 50) {
-  return prisma.alertEvent.findMany({
+  const events = await prisma.alertEvent.findMany({
     where: {
       alert: { userId },
     },
@@ -59,6 +59,79 @@ export async function getAlertEvents(userId: string, limit = 50) {
     take: limit,
     include: { alert: { select: { type: true } } },
   });
+
+  // Enrich congress_trade events with politicianBioguideId so the UI can
+  // render the Capitol Trades link, even for events created BEFORE we added
+  // bioguideId to the data JSON. Two-stage lookup:
+  //   1. Join with the underlying CongressTrade row (already-resolved trades).
+  //   2. If the trade itself isn't resolved yet, fall back to a name lookup
+  //      via resolvePolitician — covers the gap between deploy and the next
+  //      congress_sync backfill.
+  const congressEvents = events.filter(
+    (e) => e.alert?.type === 'congress_trade' && e.data,
+  );
+  if (congressEvents.length === 0) return events;
+
+  // Stage 1: collect tradeIds and look them up in one query
+  const allTradeIds = new Set<string>();
+  for (const e of congressEvents) {
+    try {
+      const d = JSON.parse(e.data!);
+      if (d?.tradeIds?.[0]) allTradeIds.add(d.tradeIds[0]);
+    } catch {
+      // skip malformed
+    }
+  }
+  const trades = allTradeIds.size
+    ? await prisma.congressTrade.findMany({
+        where: { id: { in: Array.from(allTradeIds) } },
+        select: { id: true, politicianBioguideId: true, politician: true, chamber: true },
+      })
+    : [];
+  const tradeMap = new Map(trades.map((t) => [t.id, t]));
+
+  // Stage 2: for trades without resolved bioguideId, batch a name lookup once.
+  const nameCache = new Map<string, string | null>();
+  const { resolvePolitician } = await import('./politician.service');
+  async function lookupByName(politician: string, chamber: string): Promise<string | null> {
+    const key = `${politician}::${chamber}`;
+    if (nameCache.has(key)) return nameCache.get(key) ?? null;
+    const parts = politician.trim().split(/\s+/);
+    const lastName = parts[parts.length - 1];
+    const firstName = parts.slice(0, -1).join(' ');
+    const id = await resolvePolitician({
+      firstName,
+      lastName,
+      chamber: chamber as 'Senate' | 'House',
+    });
+    nameCache.set(key, id);
+    return id;
+  }
+
+  // Attach bioguideId to each congress event's data JSON in-place.
+  return Promise.all(
+    events.map(async (e) => {
+      if (e.alert?.type !== 'congress_trade' || !e.data) return e;
+      try {
+        const parsed = JSON.parse(e.data);
+        const firstTradeId = parsed?.tradeIds?.[0];
+        const trade = firstTradeId ? tradeMap.get(firstTradeId) : null;
+        let bioguideId: string | null = trade?.politicianBioguideId ?? null;
+        if (!bioguideId && trade) {
+          bioguideId = await lookupByName(trade.politician, trade.chamber);
+        }
+        if (bioguideId && Array.isArray(parsed.trades) && parsed.trades.length > 0) {
+          parsed.trades = parsed.trades.map((t: Record<string, unknown>, i: number) =>
+            i === 0 ? { ...t, bioguideId } : t,
+          );
+          return { ...e, data: JSON.stringify(parsed) };
+        }
+      } catch {
+        // skip malformed JSON
+      }
+      return e;
+    }),
+  );
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {
