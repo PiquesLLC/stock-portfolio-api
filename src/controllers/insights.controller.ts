@@ -9,7 +9,10 @@ import {
 import { getIncomeInsights, IncomeWindow } from '../services/income-insights.service';
 import { getPortfolioBriefing, explainBriefingSection } from '../services/perplexity-briefing.service';
 import { getBehaviorInsights } from '../services/perplexity-behavior.service';
-import { getDailyReport, regenerateDailyReport } from '../services/perplexity-daily-report.service';
+import { getDailyReport, regenerateDailyReport, applyLivePositionMoveData, detectDirectionMismatch, shouldAutoRegenerate } from '../services/perplexity-daily-report.service';
+import { applyTenseRewriteIfLive } from '../services/tense-rewrite';
+import { getMarketStateET } from '../utils/market-state';
+import { getPortfolio } from '../services/portfolio.service';
 import { getEarningsSummary } from '../services/earnings-summary.service';
 import { getYtdDividendBreakdown, dismissDividend, restoreDividend } from '../services/ytd-dividend-breakdown.service';
 import { AuthRequest } from '../types/auth';
@@ -222,7 +225,35 @@ export async function getDailyReportHandler(req: AuthRequest, res: Response): Pr
     if (!requirePremium(res)) return;
     const portfolioId = req.query.portfolioId as string | undefined;
     await validatePortfolioOwnership(portfolioId, req.user!.userId);
-    const report = await getDailyReport(req.user!.userId, portfolioId);
+    let report = await getDailyReport(req.user!.userId, portfolioId);
+    // Only reconcile against live portfolio when (a) there are position moves to reconcile
+    // and (b) the cached report is old enough that drift matters. Fresh reports already
+    // captured live numbers at generation time; the extra DB+quote fetch isn't worth it.
+    // A holding that flips direction within the threshold will show stale prose until the
+    // next refetch — acceptable since cache TTL is 20 min during RTH and the prose heals
+    // when the user reopens the modal.
+    const ts = Date.parse(report.generatedAt);
+    const reportAgeMs = Number.isFinite(ts) ? Date.now() - ts : Infinity;
+    const STALENESS_THRESHOLD_MS = 2 * 60 * 1000;
+    if (report.positionMoves?.length && reportAgeMs > STALENESS_THRESHOLD_MS) {
+      try {
+        const portfolio = await getPortfolio(req.user!.userId, { portfolioId });
+        if (detectDirectionMismatch(report, portfolio) && shouldAutoRegenerate(req.user!.userId, portfolioId)) {
+          // Fire-and-forget: the live overlay below already fixes the user-visible numbers
+          // for this response. The prose heals on the next fetch when the new cache lands.
+          console.warn(`[Daily Report] Direction mismatch detected, regenerating in background userId=${req.user!.userId}`);
+          void regenerateDailyReport(req.user!.userId, portfolioId).catch(err => {
+            console.error('[Daily Report] Background regenerate failed:', err);
+          });
+        }
+        report = applyLivePositionMoveData(report, portfolio);
+      } catch (portfolioError) {
+        console.warn('[Daily Report] Live portfolio reconciliation failed, returning report as-is:', portfolioError);
+      }
+    }
+    // Final guarantee: mechanically rewrite past-tense session verbs to present forms when
+    // the market is open or pre-open. The LLM does not reliably honor present-tense prompts.
+    report = applyTenseRewriteIfLive(report, getMarketStateET());
     res.json(report);
   } catch (error) {
     if (error instanceof EmailVerificationRequiredError) {

@@ -9,9 +9,15 @@ import { getEconomicDashboard } from './economic.service';
 import { getEarningsSummary } from './earnings-summary.service';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
 import { JobExecutionError, type JobFailureCategory } from './job-runner.service';
+import { getMarketStateET, getETDateBucket, type MarketState } from '../utils/market-state';
 
-// Cache daily reports for 8 hours (28800s) — news doesn't shift fast enough to justify 4h
-const reportCache = new NodeCache({ stdTTL: 28800 });
+const reportCache = new NodeCache();
+
+function ttlForState(state: MarketState): number {
+  if (state === 'intraday') return 20 * 60;        // 20 min
+  if (state === 'weekend')  return 24 * 60 * 60;   // 24 h
+  return 4 * 60 * 60;                               // pre_open / post_close
+}
 
 // Strip internal prompt section tags that Perplexity sometimes echoes back
 const LEAKED_TAGS = /\[(?:ECONOMIC SNAPSHOT|MARKET HEADLINES|UPCOMING EARNINGS|MY PORTFOLIO)\]/gi;
@@ -36,6 +42,7 @@ export interface DailyReportResponse {
   positionMoves?: {
     ticker: string;
     changePercent: number;
+    changeDollar?: number;
     reason: string;
   }[];
   topStories: {
@@ -58,24 +65,22 @@ interface DailyReportOptions {
   portfolioId?: string;
 }
 
-const SYSTEM_PROMPT = `You are a Wall Street morning desk analyst writing a premium daily brief. This must feel like a paid Bloomberg terminal note — specific, data-rich, and actionable.
-
-Return ONLY valid JSON with this structure:
+const SCHEMA_BLOCK = `Return ONLY valid JSON with this structure:
 {
   "greeting": "One-sentence market headline. Do NOT include the date, 'morning brief', 'recap', or 'good morning' — just the key market theme and portfolio impact.",
-  "marketOverview": "4-6 sentences covering: major index moves with exact percentages, key macro drivers (yields, oil, dollar, VIX), geopolitical catalysts, and what's driving sentiment today. Include specific numbers — Fed rate, 10Y yield level, oil price, VIX level. This should read like the opening paragraph of a Goldman Sachs morning note.",
-  "portfolioSummary": "4-6 sentences analyzing the user's specific holdings: which positions drove gains/losses and WHY (not just that they moved), how the portfolio performed vs SPY, any notable sector rotation affecting holdings, and one forward-looking insight. Reference specific company news, analyst actions, or earnings that affected their stocks TODAY.",
+  "marketOverview": "4-6 sentences covering: major index moves with exact percentages, key macro drivers (yields, oil, dollar, VIX), geopolitical catalysts, and the dominant theme. Include specific numbers — Fed rate, 10Y yield level, oil price, VIX level. Tone should match a premium institutional desk note.",
+  "portfolioSummary": "4-6 sentences analyzing the user's specific holdings: which positions are responsible for gains/losses and WHY (not just the magnitude of the move), how the portfolio compares to SPY, any notable sector rotation impacting holdings, and one forward-looking insight. Reference specific company news, analyst actions, or earnings tied to their stocks.",
   "positionMoves": [
     {
       "ticker": "AAPL",
       "changePercent": -2.34,
-      "reason": "1-2 sentences explaining the SPECIFIC catalyst that moved this stock today. Name the news event, analyst action, or macro factor."
+      "reason": "1-2 sentences explaining the SPECIFIC catalyst behind this stock's move. Name the news event, analyst action, or macro factor."
     }
   ],
   "topStories": [
     {
       "headline": "Specific, punchy headline with a number — max 100 chars",
-      "body": "3-4 sentences of real analysis. Name the companies involved, the specific catalyst (earnings beat, analyst upgrade, FDA decision, trade policy), the magnitude of the move, and what it means for the investor's portfolio. Every story must connect back to either a holding or a macro theme affecting their positions.",
+      "body": "3-4 sentences of real analysis. Name the companies involved, the specific catalyst (earnings beat, analyst upgrade, FDA decision, trade policy), the magnitude of the move, and what it means for the investor's portfolio. Every story must connect back to either a holding or a macro theme touching their positions.",
       "sentiment": "positive|negative|neutral",
       "relatedTickers": ["AAPL", "MSFT"]
     }
@@ -94,18 +99,69 @@ Return ONLY valid JSON with this structure:
 QUALITY REQUIREMENTS:
 - marketOverview: MUST include at least 4 specific data points (index %, yield level, oil price, VIX)
 - portfolioSummary: MUST reference at least 3 of the user's actual holdings by ticker with specific % moves
-- positionMoves: Pick the 3-5 holdings with the LARGEST absolute % moves. For each, explain the specific catalyst (earnings, analyst action, sector rotation, macro event). Use the actual changePercent from the portfolio data provided. This is the most important section — users want to know WHY their money moved.
+- positionMoves: Pick the 3-5 holdings with the LARGEST absolute % moves. For each, explain the specific catalyst (earnings, analyst action, sector rotation, macro event). Use the actual changePercent from the portfolio data provided. This is the most important section — users want to know WHY their money is moving.
 - topStories: Write 5-7 stories, each 3-4 sentences with specific catalysts and numbers
 - questionsOfTheDay: Write 2 insightful observations. One should be a historical/statistical market insight relevant to today. The other should be a specific observation about the user's portfolio (concentration risk, correlation, sector exposure, etc). Make them thought-provoking and educational.
 - watchToday: REQUIRED — 3-5 items. Each must have a specific time (e.g. "8:30 AM ET"), what's happening, consensus/expected value, and how it could affect the user's holdings. Include economic data releases, earnings reports, Fed speeches, or major corporate events. This section must NEVER be empty.
-- Every section must have TODAY's actual data — never generic filler
-- If a holding moved >2%, explain exactly WHY with a specific news catalyst
+- Every section must use real, current data — never generic filler
+- For any holding with a >2% absolute move, explain exactly WHY with a specific news catalyst
 - Include at least one story about sector rotation or money flow patterns
-- Reference analyst upgrades/downgrades if any occurred for the user's holdings`;
+- Reference analyst upgrades/downgrades if any are relevant to the user's holdings`;
 
-function isWeekendET(): boolean {
-  const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
-  return etDay === 'Sat' || etDay === 'Sun';
+const SHARED_OPENER = `You are a Wall Street desk analyst writing a premium briefing for an institutional client. This must feel like a paid Bloomberg terminal note — specific, data-rich, and actionable.`;
+
+// Negative-verb list lives in this system-prompt voice block, not in the user message.
+// In the system prompt the model treats it as a rule; in the user message it tends to
+// echo banned words back as content.
+const VOICE_INTRADAY = `=== TENSE OVERRIDE (highest priority) ===
+MARKETS ARE OPEN RIGHT NOW. The trading session is in progress. WRITE EVERY SENTENCE IN PRESENT TENSE.
+
+REQUIRED phrasing — use present-tense and present-progressive throughout:
+- "the S&P is trading at..." / "the S&P is up X%"
+- "the VIX is sitting at..."
+- "AMZN is climbing X%" / "AMZN is down X% in the session"
+- "yields are holding at 4.25%"
+- "your portfolio is up X% so far today"
+- Pepper in "so far today", "currently", "intraday", "in the session", "live", "as of now"
+
+CATEGORICALLY FORBIDDEN — the session has not ended.
+- No past-tense verbs for the regular-session action: do NOT use simple past forms of advance, rise, fall, drop, climb, slide, gain, lose, post, hold, finish, end, settle, wrap, or any synonym describing a completed market move. Convert every such verb to present-progressive ("is climbing") or simple present ("is up").
+- No language framing the day, the week, or a session as a completed period. The trading day is unfinished. The week is still in progress.
+- No references to a settlement print, an ending bell, or any kind of session wrap-up.
+- Do not describe the user's portfolio with finished-action verbs ("posted", "ended", "finished") — use present forms ("is up", "is down", "is sitting at", "is outperforming SPY by X%").
+
+If you slip into past tense or end-of-session framing, that response is wrong. Re-read every sentence and convert before returning the JSON.`;
+
+const VOICE_PRE_OPEN = `=== TENSE OVERRIDE (highest priority) ===
+THE REGULAR SESSION HAS NOT YET OPENED. Write in forward-looking and pre-market framing.
+
+REQUIRED phrasing:
+- Reference S&P futures (ES), Nasdaq futures (NQ), overnight Asian/European moves, pre-market gappers
+- "futures point to", "opens at", "set to open", "pre-market", "overnight", "ahead of the open"
+- Past tense is OK ONLY for overnight / yesterday's close as historical context. The current session's action does not exist yet.
+
+FORBIDDEN: do not write past-tense statements about today's regular session as if it has happened.`;
+
+const VOICE_POST_CLOSE = `You are on the morning desk writing the post-close recap of the previous trading day.
+
+VOICE: post-close recap. Use phrases like "closed today", "today's close", "at the close", "finished the day".`;
+
+const VOICE_WEEKEND = `You are writing a WEEKEND brief. The session is closed for the weekend — recap the week that ended Friday and preview Monday's open.
+
+VOICE: "this week", "last week", "Monday", "next week", "recap", "week ahead". Past tense for last week's action.`;
+
+export function buildSystemPrompt(state: MarketState): string {
+  let voice: string;
+  switch (state) {
+    case 'intraday':   voice = VOICE_INTRADAY;   break;
+    case 'pre_open':   voice = VOICE_PRE_OPEN;   break;
+    case 'weekend':    voice = VOICE_WEEKEND;    break;
+    case 'post_close':
+    default:           voice = VOICE_POST_CLOSE; break;
+  }
+  // Voice block last: LLMs weight late-prompt instructions more heavily, and the schema
+  // block above carries strong behavioral pull on its own.
+  return `${SHARED_OPENER}\n\n${SCHEMA_BLOCK}\n\n${voice}`;
 }
 
 /** Quick fallback when deadline hits before data is even gathered */
@@ -127,8 +183,13 @@ function buildFallbackReport(
   sortedHoldings: any[],
   news: any[],
   upcomingEarnings: string[],
-  weekend: boolean,
+  marketState: MarketState,
 ): DailyReportResponse {
+  const weekend = marketState === 'weekend';
+  const isLive = marketState === 'intraday' || marketState === 'pre_open';
+  const verbUp = isLive ? 'is up' : 'gained';
+  const verbDown = isLive ? 'is down' : 'lost';
+  const todayWord = isLive ? 'so far today' : 'today';
   const dayChange = portfolio.dayChangePercent ?? 0;
   const totalValue = portfolio.netEquity ?? 0;
   const dollarChange = portfolio.dayChange ?? 0;
@@ -146,7 +207,7 @@ function buildFallbackReport(
   if (movers.length > 0) {
     fallbackStories.unshift({
       headline: `Portfolio movers: ${movers.map((m: any) => `${m.ticker} ${m.dayChangePercent >= 0 ? '+' : ''}${m.dayChangePercent.toFixed(1)}%`).join(', ')}`,
-      body: `Your biggest moves today among your ${portfolio.holdings.length} holdings.`,
+      body: `Your biggest moves ${todayWord} among your ${portfolio.holdings.length} holdings.`,
       sentiment: movers[0].dayChangePercent >= 0 ? 'positive' as const : 'negative' as const,
       relatedTickers: movers.map((m: any) => m.ticker),
     });
@@ -170,14 +231,14 @@ function buildFallbackReport(
   const positionMoves = allMovers.map((h: any) => ({
     ticker: h.ticker,
     changePercent: h.dayChangePercent ?? 0,
-    reason: `${h.ticker} ${h.dayChangePercent >= 0 ? 'gained' : 'lost'} ${Math.abs(h.dayChangePercent).toFixed(1)}% today.`,
+    reason: `${h.ticker} ${h.dayChangePercent >= 0 ? verbUp : verbDown} ${Math.abs(h.dayChangePercent).toFixed(1)}% ${todayWord}.`,
   }));
 
   return {
     generatedAt: new Date().toISOString(),
     greeting: weekend ? 'Happy weekend!' : 'Good morning!',
     marketOverview: 'Your AI briefing is generating — refresh in a moment for the full report.',
-    portfolioSummary: `Your portfolio ($${totalValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}) is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% ($${Math.abs(dollarChange).toFixed(0)}) today.`,
+    portfolioSummary: `Your portfolio ($${totalValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}) is ${dayChange >= 0 ? 'up' : 'down'} ${Math.abs(dayChange).toFixed(2)}% ($${Math.abs(dollarChange).toFixed(0)}) ${todayWord}.`,
     topStories: fallbackStories.slice(0, 5),
     watchToday,
     positionMoves,
@@ -359,7 +420,9 @@ function classifyDailyReportError(error: unknown): JobFailureCategory {
 async function getDailyReportInternal(userId: string, options: DailyReportOptions): Promise<DailyReportResponse> {
   await ensureEmailVerifiedForAi(userId);
   const portfolioId = options.portfolioId;
-  const cacheKey = `daily-report:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
+  const etBucket = getETDateBucket();
+  const marketState = getMarketStateET();
+  const cacheKey = `daily-report:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
   const strictFailures = options.strictFailures === true;
@@ -368,7 +431,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
   // Gemini 2.5 Flash can take 15-25s for rich daily reports + needs retry room for 503s.
   const HARD_DEADLINE_MS = 55000;
   const startTime = Date.now();
-  const weekend = isWeekendET();
+  const weekend = marketState === 'weekend';
 
   const fullPipeline = (async (): Promise<DailyReportResponse> => {
     // Gather data in parallel — 5s timeout per source (these are local/cached, should be fast)
@@ -468,21 +531,43 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       ? `Earnings: ${upcomingEarnings.join(', ')}`
       : '';
 
-    const fallbackReport = buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, weekend);
+    const fallbackReport = buildFallbackReport(portfolio, sortedHoldings, news, upcomingEarnings, marketState);
 
     const weekendNote = weekend
       ? `Weekend. Recap last week, preview next week.\n`
       : '';
 
+    const stateLabel: Record<MarketState, string> = {
+      pre_open: 'Pre-market',
+      intraday: 'Intraday',
+      post_close: 'Post-close',
+      weekend: 'Weekend',
+    };
+
+    const intradayTimestamp = marketState === 'intraday'
+      ? new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' }) + ' ET'
+      : '';
+    const intradayPrefix = marketState === 'intraday'
+      ? `*** MARKETS ARE OPEN RIGHT NOW. Current time: ${intradayTimestamp}. The trading session is in progress — WRITE IN PRESENT TENSE THROUGHOUT. ***\nLive snapshot at ${intradayTimestamp}:\n`
+      : '';
+    const preOpenPrefix = marketState === 'pre_open'
+      ? `*** PRE-MARKET — the regular session has NOT opened yet. Reference futures and overnight moves; do not describe today's regular trading in past tense. ***\n`
+      : '';
+
     const userMessage =
-      `${formattedDate}. ${weekend ? 'Weekend' : 'Daily'} briefing.\n` +
+      `${formattedDate}. ${stateLabel[marketState]} briefing.\n` +
       weekendNote +
+      intradayPrefix +
+      preOpenPrefix +
       `Portfolio: ${portfolio.holdings.length} holdings, $${portfolio.netEquity.toFixed(0)}, ${portfolio.dayChangePercent >= 0 ? '+' : ''}${portfolio.dayChangePercent.toFixed(1)}% ($${portfolio.dayChange.toFixed(0)})\n` +
       `Top: ${holdingsSummary}\n` +
       `News:\n${newsSummary}\n` +
       (economicSummary ? `Macro: ${economicSummary}\n` : '') +
       earningsSummaryLine +
-      `\nIMPORTANT: You MUST include "positionMoves" in your JSON response. Pick the 3-5 holdings with the largest absolute % moves from the portfolio data above and explain the specific catalyst for each.`;
+      `\nIMPORTANT: You MUST include "positionMoves" in your JSON response. Pick the 3-5 holdings with the largest absolute % moves from the portfolio data above and explain the specific catalyst for each.` +
+      (marketState === 'intraday'
+        ? `\n\nFINAL REMINDER: every sentence in your response must be in present tense. The trading session is in progress.`
+        : '');
 
     // How much time is left for Perplexity after data gathering?
     const elapsedSoFar = Date.now() - startTime;
@@ -491,7 +576,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     let resp;
     try {
       resp = await callAI([
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(marketState) },
         { role: 'user', content: userMessage },
       ], { timeout: perplexityTimeout, feature: 'daily-report', userId });
     } catch (perplexityError: unknown) {
@@ -540,7 +625,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       // Let pipeline finish in background and cache
       fullPipeline.then(aiResult => {
         if (aiResult.topStories.length > 0 && !(aiResult as any)._fallback) {
-          reportCache.set(cacheKey, aiResult);
+          reportCache.set(cacheKey, aiResult, ttlForState(marketState));
           console.log(`[Daily Report] Background generation complete, cached`);
         }
       }).catch(() => {});
@@ -550,7 +635,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
     const result = raceResult;
     // Only cache AI-generated reports, never fallback reports
     if (result.topStories.length > 0 && !(result as any)._fallback) {
-      reportCache.set(cacheKey, result);
+      reportCache.set(cacheKey, result, ttlForState(marketState));
     }
     console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms${(result as any)._fallback ? ' (fallback — not cached)' : ''}`);
     // Strip internal _fallback flag before returning to client
@@ -570,7 +655,10 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 }
 
 export async function regenerateDailyReport(userId: string, portfolioId?: string): Promise<DailyReportResponse> {
-  reportCache.del(`daily-report:${userId}${portfolioId ? `:${portfolioId}` : ''}`);
+  const etBucket = getETDateBucket();
+  const marketState = getMarketStateET();
+  const cacheKey = `daily-report:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
+  reportCache.del(cacheKey);
   return getDailyReportInternal(userId, { portfolioId });
 }
 
@@ -598,9 +686,12 @@ export async function preGenerateDailyReports(): Promise<void> {
     UNKNOWN: 0,
   };
 
+  const etBucket = getETDateBucket();
+  const marketState = getMarketStateET();
+
   for (const { userId } of users) {
     if (!userId) continue;
-    const cacheKey = `daily-report:${userId}`;
+    const cacheKey = `daily-report:${userId}:_:${etBucket}:${marketState}`;
     if (reportCache.has(cacheKey)) {
       skippedCached++;
       continue; // Already cached, skip
@@ -633,4 +724,70 @@ export async function preGenerateDailyReports(): Promise<void> {
     `[Daily Report Pre-Gen] Summary users=${users.length} success=${successCount} failed=${failureCount} skippedCached=${skippedCached} ` +
     `failuresByCategory=${JSON.stringify(failureByCategory)}`,
   );
+}
+
+export function applyLivePositionMoveData(
+  report: DailyReportResponse,
+  livePortfolio: { holdings: { ticker: string; dayChangePercent: number; dayChange: number }[] },
+): DailyReportResponse {
+  if (!report.positionMoves) return report;
+  const byTicker = new Map(
+    livePortfolio.holdings.map(h => [h.ticker.toUpperCase(), h]),
+  );
+  // Drop position moves for tickers no longer in the live portfolio (sold, delisted,
+  // or LLM hallucination) — showing a stale percent for a non-position is misleading.
+  const refreshed = report.positionMoves.flatMap(m => {
+    const live = byTicker.get(m.ticker.toUpperCase());
+    if (!live) return [];
+    return [{ ...m, changePercent: live.dayChangePercent, changeDollar: live.dayChange }];
+  });
+  return { ...report, positionMoves: refreshed };
+}
+
+export function detectDirectionMismatch(
+  report: DailyReportResponse,
+  livePortfolio: { holdings: { ticker: string; dayChangePercent: number }[] },
+): boolean {
+  if (!report.positionMoves || report.positionMoves.length === 0) return false;
+  const byTicker = new Map(
+    livePortfolio.holdings.map(h => [h.ticker.toUpperCase(), h.dayChangePercent]),
+  );
+  // EPS in percent units. Asymmetric: we only suppress when the *live* side is below
+  // the noise floor (genuinely flat). If the cached side is flat (LLM wrote "roughly
+  // flat") but live shows a real opposite move, that prose is wrong and we want regen.
+  const EPS = 0.25;
+  return report.positionMoves.some(m => {
+    const live = byTicker.get(m.ticker.toUpperCase());
+    if (live == null) return false;
+    if (Math.abs(live) < EPS) return false;
+    return Math.sign(live) !== Math.sign(m.changePercent);
+  });
+}
+
+// Per-user-portfolio cooldown for auto-regenerations triggered by direction mismatch.
+// Without this, every fetch by every user during a volatile session could trigger a fresh
+// Perplexity call, blocking the HTTP response and stampeding the upstream.
+const autoRegenLastAt = new Map<string, number>();
+const AUTO_REGEN_COOLDOWN_MS = 5 * 60 * 1000;
+
+function pruneAutoRegenMap(now: number): void {
+  const cutoff = now - AUTO_REGEN_COOLDOWN_MS * 2;
+  for (const [k, ts] of autoRegenLastAt) {
+    if (ts < cutoff) autoRegenLastAt.delete(k);
+  }
+}
+
+export function shouldAutoRegenerate(userId: string, portfolioId?: string): boolean {
+  const now = Date.now();
+  pruneAutoRegenMap(now);
+  const key = `${userId}:${portfolioId ?? '_'}`;
+  const last = autoRegenLastAt.get(key) ?? 0;
+  if (now - last < AUTO_REGEN_COOLDOWN_MS) return false;
+  autoRegenLastAt.set(key, now);
+  return true;
+}
+
+// Test seam — clear the cooldown map between unit tests.
+export function _resetAutoRegenCooldownForTests(): void {
+  autoRegenLastAt.clear();
 }
