@@ -14,6 +14,10 @@ import {
   submitFollowUp,
   cancelJob,
   listUserJobs,
+  archiveJob,
+  unarchiveJob,
+  deleteJob,
+  clearFinishedJobs,
   ConcurrentLimitError,
   MonthlyLimitError,
   FeatureDisabledError,
@@ -37,6 +41,10 @@ function handleServiceError(err: unknown, res: Response): void {
     return;
   }
   if (err instanceof Error && err.message.startsWith('Cannot cancel')) {
+    res.status(400).json({ error: err.message });
+    return;
+  }
+  if (err instanceof Error && err.message.startsWith('Cannot delete')) {
     res.status(400).json({ error: err.message });
     return;
   }
@@ -166,6 +174,64 @@ export async function listJobsHandler(req: AuthRequest, res: Response): Promise<
 
     const userId = req.user!.userId;
     const result = await listUserJobs(userId, queryParsed.data);
+    res.json(result);
+  } catch (err) {
+    handleServiceError(err, res);
+  }
+}
+
+export async function archiveHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const paramsParsed = jobIdParamSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      res.status(400).json({ error: 'Invalid job ID' });
+      return;
+    }
+
+    const userId = req.user!.userId;
+    const result = await archiveJob(paramsParsed.data.id, userId);
+    res.json(result);
+  } catch (err) {
+    handleServiceError(err, res);
+  }
+}
+
+export async function unarchiveHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const paramsParsed = jobIdParamSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      res.status(400).json({ error: 'Invalid job ID' });
+      return;
+    }
+
+    const userId = req.user!.userId;
+    const result = await unarchiveJob(paramsParsed.data.id, userId);
+    res.json(result);
+  } catch (err) {
+    handleServiceError(err, res);
+  }
+}
+
+export async function deleteHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const paramsParsed = jobIdParamSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      res.status(400).json({ error: 'Invalid job ID' });
+      return;
+    }
+
+    const userId = req.user!.userId;
+    const result = await deleteJob(paramsParsed.data.id, userId);
+    res.json(result);
+  } catch (err) {
+    handleServiceError(err, res);
+  }
+}
+
+export async function clearFinishedHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const result = await clearFinishedJobs(userId);
     res.json(result);
   } catch (err) {
     handleServiceError(err, res);

@@ -6,9 +6,13 @@ import {
   followUpHandler,
   cancelHandler,
   listJobsHandler,
+  archiveHandler,
+  unarchiveHandler,
+  deleteHandler,
+  clearFinishedHandler,
 } from '../controllers/deep-research.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { heavyReadLimiter, aiLimiter, deepResearchLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, aiLimiter, deepResearchLimiter, mutationLimiter } from '../middleware/rateLimiter';
 import { requirePlan } from '../middleware/plan.middleware';
 
 const router = Router();
@@ -18,6 +22,11 @@ router.post('/start', deepResearchLimiter, requireAuth, requirePlan('premium'), 
 
 // GET / — List user's research jobs
 router.get('/', heavyReadLimiter, requireAuth, requirePlan('premium'), listJobsHandler);
+
+// DELETE /clear-finished — Bulk-delete all completed/failed/cancelled jobs.
+// Must be declared BEFORE the `/:id` routes so Express doesn't treat
+// "clear-finished" as a job ID and fail the UUID validator.
+router.delete('/clear-finished', mutationLimiter, requireAuth, requirePlan('premium'), clearFinishedHandler);
 
 // GET /:id/status — Check job status
 router.get('/:id/status', heavyReadLimiter, requireAuth, requirePlan('premium'), getStatusHandler);
@@ -30,5 +39,14 @@ router.post('/:id/followup', deepResearchLimiter, requireAuth, requirePlan('prem
 
 // POST /:id/cancel — Cancel an active job
 router.post('/:id/cancel', aiLimiter, requireAuth, requirePlan('premium'), cancelHandler);
+
+// POST /:id/archive — Soft-archive a finished job (hides from default list)
+router.post('/:id/archive', mutationLimiter, requireAuth, requirePlan('premium'), archiveHandler);
+
+// POST /:id/unarchive — Restore a previously archived job
+router.post('/:id/unarchive', mutationLimiter, requireAuth, requirePlan('premium'), unarchiveHandler);
+
+// DELETE /:id — Hard-delete a finished job (must be cancelled first if active)
+router.delete('/:id', mutationLimiter, requireAuth, requirePlan('premium'), deleteHandler);
 
 export default router;
