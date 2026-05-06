@@ -1035,7 +1035,7 @@ export async function cancelJob(
 
 export async function listUserJobs(
   userId: string,
-  opts: { page?: number; limit?: number; status?: string }
+  opts: { page?: number; limit?: number; status?: string; includeArchived?: boolean }
 ): Promise<{
   jobs: Array<{
     id: string;
@@ -1045,6 +1045,7 @@ export async function listUserJobs(
     status: string;
     createdAt: Date;
     completedAt: Date | null;
+    archived: boolean;
   }>;
   total: number;
   page: number;
@@ -1056,6 +1057,9 @@ export async function listUserJobs(
 
   const where: Record<string, unknown> = { userId };
   if (opts.status) where.status = opts.status;
+  // Default: hide archived rows. Pass `includeArchived` to opt in (used by the
+  // "Archived" view in the UI).
+  if (!opts.includeArchived) where.archived = false;
 
   const [jobs, total] = await Promise.all([
     prisma.deepResearchJob.findMany({
@@ -1068,6 +1072,7 @@ export async function listUserJobs(
         status: true,
         createdAt: true,
         completedAt: true,
+        archived: true,
       },
       orderBy: { createdAt: 'desc' },
       skip,
@@ -1077,6 +1082,82 @@ export async function listUserJobs(
   ]);
 
   return { jobs, total, page, limit };
+}
+
+/**
+ * Soft-archive a job. Hides it from the default list while preserving the
+ * row + result data so the user can restore later.
+ */
+export async function archiveJob(
+  jobId: string,
+  userId: string
+): Promise<{ id: string; archived: boolean }> {
+  const job = await prisma.deepResearchJob.findFirst({
+    where: { id: jobId, userId },
+    select: { id: true },
+  });
+  if (!job) throw new Error('Job not found');
+  const updated = await prisma.deepResearchJob.update({
+    where: { id: job.id },
+    data: { archived: true, archivedAt: new Date() },
+    select: { id: true, archived: true },
+  });
+  return updated;
+}
+
+/** Reverse of archiveJob — un-hides the row in the default list. */
+export async function unarchiveJob(
+  jobId: string,
+  userId: string
+): Promise<{ id: string; archived: boolean }> {
+  const job = await prisma.deepResearchJob.findFirst({
+    where: { id: jobId, userId },
+    select: { id: true },
+  });
+  if (!job) throw new Error('Job not found');
+  const updated = await prisma.deepResearchJob.update({
+    where: { id: job.id },
+    data: { archived: false, archivedAt: null },
+    select: { id: true, archived: true },
+  });
+  return updated;
+}
+
+/**
+ * Hard-delete a job. Refuses to delete an in-flight job (queued/submitted/
+ * in_progress) — caller should cancel first to avoid orphaned Gemini sessions.
+ */
+export async function deleteJob(
+  jobId: string,
+  userId: string
+): Promise<{ id: string }> {
+  const job = await prisma.deepResearchJob.findFirst({
+    where: { id: jobId, userId },
+    select: { id: true, status: true },
+  });
+  if (!job) throw new Error('Job not found');
+  if (['queued', 'submitted', 'in_progress'].includes(job.status)) {
+    throw new Error(`Cannot delete job with status "${job.status}" — cancel it first`);
+  }
+  await prisma.deepResearchJob.delete({ where: { id: job.id } });
+  return { id: job.id };
+}
+
+/**
+ * Bulk-clear all of a user's completed/failed/cancelled jobs at once. Active
+ * jobs are skipped, AND archived jobs are skipped — the UI confirm copy
+ * promises archived rows are preserved, so the query honors that contract.
+ * Returns the number of rows deleted so the UI can toast.
+ */
+export async function clearFinishedJobs(userId: string): Promise<{ deleted: number }> {
+  const result = await prisma.deepResearchJob.deleteMany({
+    where: {
+      userId,
+      archived: false,
+      status: { in: ['completed', 'failed', 'cancelled'] },
+    },
+  });
+  return { deleted: result.count };
 }
 
 // ─── Background Poller (with DB row locking) ────────────────────────
