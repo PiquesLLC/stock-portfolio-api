@@ -41,6 +41,35 @@ import { refreshAllBillionaires, snapshotBillionaires } from './services/billion
 import { backupDatabase } from './services/backup.service';
 import { cleanupStaleData } from './services/cleanup.service';
 
+function assertSingleReplicaRefreshRotationSafety(): void {
+  const replicaCountRaw = process.env.RAILWAY_REPLICA_COUNT;
+
+  if (!replicaCountRaw) {
+    if (process.env.RAILWAY_REPLICA_ID) {
+      console.warn(
+        '[Auth] Refresh-token rotation uses a process-local 30s grace cache. ' +
+        'Railway exposes RAILWAY_REPLICA_ID but not an official replica-count variable. ' +
+        'Set RAILWAY_REPLICA_COUNT manually and keep the service Deploy replica count at 1.'
+      );
+    }
+    return;
+  }
+
+  const replicaCount = Number.parseInt(replicaCountRaw, 10);
+  if (!Number.isInteger(replicaCount) || replicaCount < 1) {
+    throw new Error(
+      `Invalid RAILWAY_REPLICA_COUNT="${replicaCountRaw}". Set it to an integer >= 1 to enforce single-replica auth refresh safety.`
+    );
+  }
+  if (replicaCount > 1) {
+    throw new Error(
+      `Auth refresh rotation grace cache is process-local and cannot run safely with ${replicaCount} Railway replicas. Scale the service back to 1 replica.`
+    );
+  }
+}
+
+assertSingleReplicaRefreshRotationSafety();
+
 // Dedicated seed/system user — must NOT collide with any real user account.
 // Previously this was Jon's real Piques account which caused his account to be
 // renamed to '_system' during DB rebuilds. Changed 2026-03-01 to a dedicated UUID.

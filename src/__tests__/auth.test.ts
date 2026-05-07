@@ -1,6 +1,7 @@
 ﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import request from 'supertest';
 import { generateTestToken, generateExpiredToken, generateInvalidToken, testUser } from './helpers';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
@@ -32,6 +33,7 @@ import {
   generateRefreshToken,
   rotateRefreshToken,
   revokeAllRefreshTokens,
+  resetPasswordWithCode,
 } from '../services/auth.service';
 
 import { requireAuth, optionalAuth, requireOwnership } from '../middleware/auth.middleware';
@@ -49,6 +51,8 @@ describe('Auth Service', () => {
     prismaMock.mfaMethod.count.mockResolvedValue(0);
     // Default: no grace-period token for refresh rotation
     prismaMock.refreshToken.findFirst.mockResolvedValue(null);
+    prismaMock.emailOtpCode.findFirst.mockResolvedValue(null);
+    prismaMock.notificationAuditLog.count.mockResolvedValue(0);
     // Default: waitlist not blocking signup
     (prismaMock as any).waitlist.findUnique.mockResolvedValue({ status: 'approved' });
     // Default: no existing user in case-insensitive username lookup
@@ -462,6 +466,228 @@ describe('Auth Service', () => {
       );
     });
 
+    it('should revoke the family when a recently rotated token is replayed after a cache miss', async () => {
+      const oldToken = 'refresh-stolen-after-restart';
+      const oldTokenHash = crypto.createHash('sha256').update(oldToken).digest('hex');
+      const user = {
+        id: 'user-1',
+        username: 'alice',
+        plan: 'free',
+        planExpiresAt: null,
+        emailVerified: true,
+      };
+
+      vi.resetModules();
+      const firstService = await import('../services/auth.service');
+      const firstPrismaModule = await import('../utils/prisma');
+      const firstPrisma = firstPrismaModule.__mockPrisma;
+      vi.clearAllMocks();
+
+      firstPrisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-rotate-1',
+        token: oldTokenHash,
+        userId: user.id,
+        family: 'family-rotate-1',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user,
+      });
+      firstPrisma.refreshToken.updateMany.mockImplementation(async ({ where }: any) => {
+        if (where?.id === 'rt-rotate-1') return { count: 1 };
+        return { count: 0 };
+      });
+      firstPrisma.refreshToken.create.mockResolvedValue({ token: 'new-refresh-token' });
+
+      const firstRotation = await firstService.rotateRefreshToken(oldToken);
+      expect(firstRotation).not.toBeNull();
+
+      vi.resetModules();
+      const replayService = await import('../services/auth.service');
+      const replayPrismaModule = await import('../utils/prisma');
+      const replayPrisma = replayPrismaModule.__mockPrisma;
+      vi.clearAllMocks();
+
+      replayPrisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-rotate-1',
+        token: oldTokenHash,
+        userId: user.id,
+        family: 'family-rotate-1',
+        revokedAt: new Date(Date.now() - 10_000),
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user,
+      });
+      replayPrisma.refreshToken.updateMany.mockImplementation(async ({ where }: any) => {
+        if (where?.userId === user.id && where?.family === 'family-rotate-1' && where?.revokedAt === null) {
+          return { count: 1 };
+        }
+        return { count: 0 };
+      });
+
+      const replayResult = await replayService.rotateRefreshToken(oldToken);
+
+      expect(replayResult).toBeNull();
+      expect(replayPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: user.id, family: 'family-rotate-1', revokedAt: null }),
+        })
+      );
+    });
+
+    it('should not revoke the family when a loser checks before the winner settles the rotation cache', async () => {
+      const deferred = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((res) => {
+          resolve = res;
+        });
+        return { promise, resolve };
+      };
+      const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+      const originalRefreshToken = 'refresh-race-precache-gap';
+      const originalRefreshHash = sha256(originalRefreshToken);
+      const userRecord = {
+        id: 'user-race-gap-1',
+        username: 'gapuser',
+        plan: 'free',
+        planExpiresAt: null,
+        emailVerified: true,
+      };
+      const tokenRows = new Map<
+        string,
+        {
+          id: string;
+          token: string;
+          userId: string;
+          family: string;
+          revokedAt: Date | null;
+          expiresAt: Date;
+          user: typeof userRecord;
+        }
+      >();
+
+      tokenRows.set(originalRefreshHash, {
+        id: 'rt-race-gap-1',
+        token: originalRefreshHash,
+        userId: userRecord.id,
+        family: 'family-race-gap-1',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: userRecord,
+      });
+
+      const winnerEnteredRevoke = deferred();
+      const allowWinnerApplyRevoke = deferred();
+      const winnerAppliedRevoke = deferred();
+      const releaseWinnerRevoke = deferred();
+      const loserEnteredRevoke = deferred();
+      const loserSawCacheGap = deferred();
+      const winnerStartedCreate = deferred();
+      const releaseWinnerCreate = deferred();
+      const familyRevokeCalls: any[] = [];
+      let originalRevokeAttempts = 0;
+      let replacementCreateCount = 0;
+
+      prismaMock.refreshToken.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.token) {
+          return tokenRows.get(where.token) ?? null;
+        }
+        if (where?.id) {
+          return Array.from(tokenRows.values()).find((row) => row.id === where.id) ?? null;
+        }
+        return null;
+      });
+      prismaMock.refreshToken.findFirst.mockImplementation(async ({ where }: any) => {
+        return (
+          Array.from(tokenRows.values())
+            .filter((row) =>
+              row.userId === where?.userId &&
+              row.family === where?.family &&
+              row.revokedAt === null &&
+              row.expiresAt > new Date()
+            )
+            .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0] ?? null
+        );
+      });
+      prismaMock.refreshToken.updateMany.mockImplementation(async ({ where, data }: any) => {
+        if (where?.id && Object.prototype.hasOwnProperty.call(where, 'revokedAt')) {
+          const row = Array.from(tokenRows.values()).find((candidate) => candidate.id === where.id) ?? null;
+          originalRevokeAttempts += 1;
+
+          if (originalRevokeAttempts === 1) {
+            winnerEnteredRevoke.resolve();
+            await allowWinnerApplyRevoke.promise;
+
+            if (!row || row.revokedAt !== null) {
+              return { count: 0 };
+            }
+
+            row.revokedAt = data.revokedAt;
+            winnerAppliedRevoke.resolve();
+            await releaseWinnerRevoke.promise;
+            return { count: 1 };
+          }
+
+          loserEnteredRevoke.resolve();
+          await winnerAppliedRevoke.promise;
+          loserSawCacheGap.resolve();
+          if (!row || row.revokedAt !== null) {
+            return { count: 0 };
+          }
+          return { count: 1 };
+        }
+
+        if (where?.userId && where?.family && Object.prototype.hasOwnProperty.call(where, 'revokedAt')) {
+          familyRevokeCalls.push({ where, data });
+          let count = 0;
+          for (const row of tokenRows.values()) {
+            if (row.userId === where.userId && row.family === where.family && row.revokedAt === null) {
+              row.revokedAt = data.revokedAt;
+              count += 1;
+            }
+          }
+          return { count };
+        }
+
+        return { count: 0 };
+      });
+      prismaMock.refreshToken.create.mockImplementation(async ({ data }: any) => {
+        replacementCreateCount += 1;
+        winnerStartedCreate.resolve();
+        await releaseWinnerCreate.promise;
+
+        tokenRows.set(data.token, {
+          id: `rt-race-gap-new-${replacementCreateCount}`,
+          token: data.token,
+          userId: data.userId,
+          family: data.family,
+          revokedAt: null,
+          expiresAt: data.expiresAt,
+          user: userRecord,
+        });
+
+        return { token: data.token };
+      });
+
+      const winnerPromise = rotateRefreshToken(originalRefreshToken);
+      await winnerEnteredRevoke.promise;
+
+      const loserPromise = rotateRefreshToken(originalRefreshToken);
+      await loserEnteredRevoke.promise;
+      allowWinnerApplyRevoke.resolve();
+      await loserSawCacheGap.promise;
+
+      await winnerAppliedRevoke.promise;
+      releaseWinnerRevoke.resolve();
+      await winnerStartedCreate.promise;
+      releaseWinnerCreate.resolve();
+
+      const [winnerResult, loserResult] = await Promise.all([winnerPromise, loserPromise]);
+
+      expect(winnerResult).not.toBeNull();
+      expect(loserResult).not.toBeNull();
+      expect(loserResult!.refreshToken).toBe(winnerResult!.refreshToken);
+      expect(familyRevokeCalls).toHaveLength(0);
+    });
+
     it('should return null for expired refresh token', async () => {
       prismaMock.refreshToken.findUnique.mockResolvedValue({
         id: 'rt-3',
@@ -486,6 +712,32 @@ describe('Auth Service', () => {
       await revokeAllRefreshTokens('user-1');
       expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-1', revokedAt: null },
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      });
+    });
+  });
+
+  describe('resetPasswordWithCode', () => {
+    it('should revoke active refresh tokens during a successful password reset', async () => {
+      const passwordHash = await bcrypt.hash('OldPass123', 10);
+      prismaMock.user.findUnique.mockResolvedValue({ id: 'user-reset-1' });
+      prismaMock.emailOtpCode.findFirst.mockResolvedValue({
+        id: 'otp-1',
+        userId: 'user-reset-1',
+        codeHash: passwordHash,
+        createdAt: new Date(Date.now() - 1_000),
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      });
+      prismaMock.emailOtpCode.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.user.update.mockResolvedValue({ id: 'user-reset-1' });
+      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await resetPasswordWithCode('reset@example.com', 'OldPass123', 'NewPass123');
+
+      expect(result).toEqual({ success: true, remainingAttempts: 5 });
+      expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-reset-1', revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       });
     });
@@ -1234,6 +1486,222 @@ describe('Auth Routes (Integration)', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.code).toBe('TOKEN_INVALID');
+    });
+
+    it('should clear auth cookies when the refresh token does not exist', async () => {
+      prismaMock.refreshToken.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      const res = await request(app)
+        .post('/auth/refresh')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', ['authToken=stale-access', 'refreshToken=missing-refresh']);
+
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('TOKEN_INVALID');
+      const cookies = res.headers['set-cookie'];
+      expect(cookies).toBeDefined();
+      const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
+      expect(cookieStr).toContain('authToken=');
+      expect(cookieStr).toContain('refreshToken=');
+    });
+
+    it('should allow two concurrent refreshes on the same token without revoking the family', async () => {
+      const deferred = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((res) => {
+          resolve = res;
+        });
+        return { promise, resolve };
+      };
+      const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+      const originalRefreshToken = 'refresh-race-original';
+      const originalRefreshHash = sha256(originalRefreshToken);
+      const userRecord = {
+        id: 'user-race-1',
+        username: 'raceuser',
+        plan: 'free',
+        planExpiresAt: null,
+        emailVerified: true,
+      };
+      const tokenRows = new Map<
+        string,
+        {
+          id: string;
+          token: string;
+          userId: string;
+          family: string;
+          revokedAt: Date | null;
+          replacedByTokenId: string | null;
+          expiresAt: Date;
+          user: typeof userRecord;
+        }
+      >();
+
+      tokenRows.set(originalRefreshHash, {
+        id: 'rt-race-1',
+        token: originalRefreshHash,
+        userId: userRecord.id,
+        family: 'family-race-1',
+        revokedAt: null,
+        replacedByTokenId: null,
+        expiresAt: new Date(Date.now() + 86400000),
+        user: userRecord,
+      });
+
+      const blockedFirstRevoke = deferred();
+      const secondRevokeReached = deferred();
+      const replacementCreated = deferred();
+      const observedRevokedStates: Array<Date | null> = [];
+      let originalRevokeAttempts = 0;
+      let replacementCreateCount = 0;
+
+      prismaMock.refreshToken.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.token) {
+          const row = tokenRows.get(where.token) ?? null;
+          if (where.token === originalRefreshHash && row) {
+            observedRevokedStates.push(row.revokedAt);
+          }
+          return row;
+        }
+        if (where?.id) {
+          return Array.from(tokenRows.values()).find((row) => row.id === where.id) ?? null;
+        }
+        return null;
+      });
+      prismaMock.refreshToken.findFirst.mockImplementation(async ({ where }: any) => {
+        return (
+          Array.from(tokenRows.values())
+            .filter((row) =>
+              row.userId === where?.userId &&
+              row.family === where?.family &&
+              row.revokedAt === null &&
+              row.expiresAt > new Date()
+            )
+            .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0] ?? null
+        );
+      });
+
+      prismaMock.refreshToken.updateMany.mockImplementation(async ({ where, data }: any) => {
+        if (where?.id && Object.prototype.hasOwnProperty.call(where, 'revokedAt')) {
+          const row = Array.from(tokenRows.values()).find((candidate) => candidate.id === where.id) ?? null;
+          originalRevokeAttempts += 1;
+
+          if (originalRevokeAttempts === 1) {
+            await secondRevokeReached.promise;
+            await blockedFirstRevoke.promise;
+          } else {
+            secondRevokeReached.resolve();
+          }
+
+          if (!row || row.revokedAt !== null) {
+            return { count: 0 };
+          }
+
+          row.revokedAt = data.revokedAt;
+          return { count: 1 };
+        }
+
+        if (where?.userId && where?.family && Object.prototype.hasOwnProperty.call(where, 'revokedAt')) {
+          let count = 0;
+          for (const row of tokenRows.values()) {
+            if (row.userId === where.userId && row.family === where.family && row.revokedAt === null) {
+              row.revokedAt = data.revokedAt;
+              count += 1;
+            }
+          }
+          return { count };
+        }
+
+        return { count: 0 };
+      });
+
+      prismaMock.refreshToken.create.mockImplementation(async ({ data }: any) => {
+        replacementCreateCount += 1;
+        const replacementRow = {
+          id: `rt-race-${tokenRows.size + 1}`,
+          token: data.token,
+          userId: data.userId,
+          family: data.family,
+          revokedAt: null,
+          replacedByTokenId: null,
+          expiresAt: data.expiresAt,
+          user: userRecord,
+        };
+        const originalRow = tokenRows.get(originalRefreshHash);
+        if (originalRow && !originalRow.replacedByTokenId) {
+          originalRow.replacedByTokenId = replacementRow.id;
+        }
+        tokenRows.set(replacementRow.token, replacementRow);
+        replacementCreated.resolve();
+        return replacementRow;
+      });
+
+      prismaMock.user.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.id === userRecord.id) {
+          return {
+            id: userRecord.id,
+            username: userRecord.username,
+            displayName: 'Race User',
+            emailVerified: true,
+          };
+        }
+        return null;
+      });
+
+      const firstRefreshPromise = request(app)
+          .post('/auth/refresh')
+          .set('Origin', 'capacitor://localhost')
+          .set('X-Nala-Native', '1')
+          .set('Cookie', `refreshToken=${originalRefreshToken}`)
+          .then((res) => res);
+      const secondRefreshPromise = request(app)
+          .post('/auth/refresh')
+          .set('Origin', 'capacitor://localhost')
+          .set('X-Nala-Native', '1')
+          .set('Cookie', `refreshToken=${originalRefreshToken}`)
+          .then((res) => res);
+
+      await secondRevokeReached.promise;
+      await replacementCreated.promise;
+      blockedFirstRevoke.resolve();
+
+      const [firstRes, secondRes] = await Promise.all([firstRefreshPromise, secondRefreshPromise]);
+
+      expect(firstRes.status).toBe(200);
+      expect(secondRes.status).toBe(200);
+      expect(firstRes.body.accessToken).toEqual(expect.any(String));
+      expect(secondRes.body.accessToken).toEqual(expect.any(String));
+      expect(firstRes.body.refreshToken).toEqual(expect.any(String));
+      expect(secondRes.body.refreshToken).toEqual(expect.any(String));
+      expect(secondRes.body.refreshToken).toBe(firstRes.body.refreshToken);
+      expect(observedRevokedStates).toEqual([null, null]);
+      expect(originalRevokeAttempts).toBe(2);
+      expect(replacementCreateCount).toBe(1);
+
+      const familyRows = Array.from(tokenRows.values()).filter((row) => row.family === 'family-race-1');
+      expect(familyRows.some((row) => row.revokedAt === null)).toBe(true);
+
+      const meWithFirstAccessToken = await request(app)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${firstRes.body.accessToken}`);
+      expect(meWithFirstAccessToken.status).toBe(200);
+
+      const meWithSecondAccessToken = await request(app)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${secondRes.body.accessToken}`);
+      expect(meWithSecondAccessToken.status).toBe(200);
+
+      const followupRefresh = await request(app)
+        .post('/auth/refresh')
+        .set('Origin', 'capacitor://localhost')
+        .set('X-Nala-Native', '1')
+        .set('Cookie', `refreshToken=${firstRes.body.refreshToken}`);
+
+      expect(followupRefresh.status).toBe(200);
+      expect(followupRefresh.body.accessToken).toEqual(expect.any(String));
+      expect(followupRefresh.body.refreshToken).toEqual(expect.any(String));
     });
   });
 

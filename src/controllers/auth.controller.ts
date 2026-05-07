@@ -1,5 +1,6 @@
 ﻿import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
+import crypto from 'crypto';
 import {
   loginWithPassword,
   setPassword,
@@ -21,6 +22,7 @@ import {
   generateAccessToken,
   generateRefreshToken,
   isReservedUsername,
+  REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS,
 } from '../services/auth.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
@@ -67,7 +69,6 @@ const NATIVE_ORIGINS = [
   'ionic://localhost',
   'app://localhost',
 ];
-
 export function isCapacitorRequest(req: Request): boolean {
   const origin = req.headers.origin;
 
@@ -825,7 +826,35 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     const result = await rotateRefreshToken(token);
 
     if (!result) {
-      clearAllAuthCookies(res, req);
+      const storedToken = await prisma.refreshToken.findUnique({
+        where: { token: crypto.createHash('sha256').update(token).digest('hex') },
+        select: { id: true, userId: true, family: true, expiresAt: true, revokedAt: true },
+      });
+      const nowMs = Date.now();
+      let shouldPreserveCookies = false;
+
+      if (
+        storedToken &&
+        storedToken.revokedAt &&
+        nowMs - storedToken.revokedAt.getTime() <= REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS
+      ) {
+        const tokenFamily = storedToken.family ?? storedToken.id;
+        const activeFamilyToken = await prisma.refreshToken.findFirst({
+          where: {
+            userId: storedToken.userId,
+            family: tokenFamily,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        shouldPreserveCookies = !!activeFamilyToken;
+      }
+
+      const shouldClearCookies = !shouldPreserveCookies;
+      if (shouldClearCookies) {
+        clearAllAuthCookies(res, req);
+      }
       res.status(401).json({ error: 'Invalid or expired refresh token', code: 'TOKEN_INVALID' });
       return;
     }
