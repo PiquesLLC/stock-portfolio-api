@@ -12,6 +12,29 @@ import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmai
 const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+export const REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS = 30_000;
+
+type RefreshRotationResult = { accessToken: string; refreshToken: string; payload: JwtPayload };
+type PendingRefreshRotationCacheEntry = {
+  status: 'pending';
+  userId: string;
+  family: string;
+  createdAtMs: number;
+  settled: Promise<RefreshRotationResult | null>;
+  resolve: (value: RefreshRotationResult | null) => void;
+  reject: (reason?: unknown) => void;
+};
+type SettledRefreshRotationCacheEntry = {
+  status: 'settled';
+  userId: string;
+  family: string;
+  createdAtMs: number;
+  payload: RefreshRotationResult;
+};
+type RefreshRotationCacheEntry = PendingRefreshRotationCacheEntry | SettledRefreshRotationCacheEntry;
+// Process-local. Startup asserts a manual single-replica guard when configured.
+// If we ever run multiple replicas, replace this with shared storage.
+const recentRefreshRotations = new Map<string, RefreshRotationCacheEntry>();
 
 /** Hash a refresh token for storage — raw token is only returned to the client. */
 function hashRefreshToken(token: string): string {
@@ -28,6 +51,160 @@ function normalizeEmail(email: string): string {
 
 function generateEmailOtpCode(): string {
   return String(crypto.randomInt(100000, 1000000));
+}
+
+function isWithinRefreshGraceWindow(revokedAt: Date | null | undefined, nowMs: number): boolean {
+  if (!revokedAt) return false;
+  return nowMs - revokedAt.getTime() <= REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS;
+}
+
+function pruneRecentRefreshRotations(nowMs = Date.now()): void {
+  for (const [tokenHash, entry] of recentRefreshRotations.entries()) {
+    if (nowMs - entry.createdAtMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) {
+      recentRefreshRotations.delete(tokenHash);
+    }
+  }
+}
+
+function rememberPendingRefreshRotation(
+  oldTokenHash: string,
+  userId: string,
+  family: string
+): PendingRefreshRotationCacheEntry {
+  const nowMs = Date.now();
+  let resolve!: (value: RefreshRotationResult | null) => void;
+  let reject!: (reason?: unknown) => void;
+  const settled = new Promise<RefreshRotationResult | null>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  const entry: PendingRefreshRotationCacheEntry = {
+    status: 'pending',
+    userId,
+    family,
+    createdAtMs: nowMs,
+    settled,
+    resolve,
+    reject,
+  };
+
+  recentRefreshRotations.set(oldTokenHash, entry);
+  pruneRecentRefreshRotations(nowMs);
+  return entry;
+}
+
+function settleRefreshRotation(
+  oldTokenHash: string,
+  pending: PendingRefreshRotationCacheEntry,
+  payload: RefreshRotationResult
+): void {
+  recentRefreshRotations.set(oldTokenHash, {
+    status: 'settled',
+    userId: pending.userId,
+    family: pending.family,
+    createdAtMs: pending.createdAtMs,
+    payload,
+  });
+  pending.resolve(payload);
+}
+
+function clearPendingRefreshRotation(oldTokenHash: string, pending: PendingRefreshRotationCacheEntry): void {
+  const current = recentRefreshRotations.get(oldTokenHash);
+  if (current === pending) {
+    recentRefreshRotations.delete(oldTokenHash);
+  }
+  pending.resolve(null);
+}
+
+function invalidateRecentRefreshRotations(params: { userId?: string; family?: string }): void {
+  const { userId, family } = params;
+  if (!userId && !family) return;
+
+  for (const [tokenHash, entry] of recentRefreshRotations.entries()) {
+    const matchesUser = !!userId && entry.userId === userId;
+    const matchesFamily = !!family && entry.family === family;
+    if (matchesUser || matchesFamily) {
+      recentRefreshRotations.delete(tokenHash);
+    }
+  }
+}
+
+async function recoverRecentRefreshRotation(
+  oldTokenHash: string,
+  userId: string,
+  family: string,
+  payload: JwtPayload
+): Promise<RefreshRotationResult | null> {
+  const cached = recentRefreshRotations.get(oldTokenHash);
+  if (!cached) return null;
+  if (cached.userId !== userId || cached.family !== family) return null;
+  if (Date.now() - cached.createdAtMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) {
+    recentRefreshRotations.delete(oldTokenHash);
+    return null;
+  }
+
+  if (cached.status === 'pending') {
+    try {
+      const resolved = await Promise.race<RefreshRotationResult | null>([
+        cached.settled,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+      ]);
+      if (!resolved) {
+        return null;
+      }
+      return {
+        accessToken: generateAccessToken(payload),
+        refreshToken: resolved.refreshToken,
+        payload,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const activeFamilyToken = await prisma.refreshToken.findFirst({
+    where: {
+      userId,
+      family,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!activeFamilyToken) {
+    recentRefreshRotations.delete(oldTokenHash);
+    return null;
+  }
+
+  return {
+    accessToken: generateAccessToken(payload),
+    refreshToken: cached.payload.refreshToken,
+    payload,
+  };
+}
+
+async function recoverRecentRefreshRotationWithRetry(
+  oldTokenHash: string,
+  userId: string,
+  family: string,
+  payload: JwtPayload,
+  timeoutMs = 100,
+  pollIntervalMs = 10
+): Promise<RefreshRotationResult | null> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const recovered = await recoverRecentRefreshRotation(oldTokenHash, userId, family, payload);
+    if (recovered) {
+      return recovered;
+    }
+    if (Date.now() >= deadline) {
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
 }
 
 async function issueEmailVerificationCode(userId: string, email: string): Promise<void> {
@@ -129,14 +306,17 @@ export async function generateRefreshToken(userId: string, family?: string): Pro
  */
 export async function rotateRefreshToken(
   oldToken: string
-): Promise<{ accessToken: string; refreshToken: string; payload: JwtPayload } | null> {
+): Promise<RefreshRotationResult | null> {
   const oldTokenHash = hashRefreshToken(oldToken);
   const stored = await prisma.refreshToken.findUnique({
     where: { token: oldTokenHash },
     include: { user: { select: { id: true, username: true, plan: true, planExpiresAt: true, emailVerified: true } } },
   });
 
-  if (!stored || stored.expiresAt < new Date()) {
+  const now = new Date();
+  const nowMs = now.getTime();
+
+  if (!stored || stored.expiresAt < now) {
     return null;
   }
   const tokenFamily = stored.family ?? stored.id;
@@ -148,16 +328,24 @@ export async function rotateRefreshToken(
     planExpiresAt: stored.user.planExpiresAt ? stored.user.planExpiresAt.toISOString() : null,
     emailVerified: stored.user.emailVerified ?? false,
   });
+  const payload = buildPayload();
 
   if (stored.revokedAt) {
-    // Token was revoked by a previous rotation. Revoke the entire family
-    // to prevent replay attacks. This forces re-login on all devices in
-    // this family, which is the security-correct behavior.
-    // Concurrent legitimate requests are handled by the revoked.count === 0
-    // branch below (atomic CAS on revokedAt prevents double-revoke).
+    // Loser of a refresh race can recover within 30s via in-memory cache.
+    // Tradeoff: a stolen, already-rotated refresh token can yield one more
+    // access token plus the same replacement refresh token during that window.
+    // Acceptable for cross-tab UX; outside the window we revoke the family.
+    if (isWithinRefreshGraceWindow(stored.revokedAt, nowMs)) {
+      const recovered = await recoverRecentRefreshRotation(oldTokenHash, stored.userId, tokenFamily, payload);
+      if (recovered) {
+        return recovered;
+      }
+    }
+
+    invalidateRecentRefreshRotations({ userId: stored.userId, family: tokenFamily });
     await prisma.refreshToken.updateMany({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: now },
     });
     return null;
   }
@@ -165,21 +353,42 @@ export async function rotateRefreshToken(
   // Atomically revoke the old token — only one concurrent request succeeds
   const revoked = await prisma.refreshToken.updateMany({
     where: { id: stored.id, revokedAt: null },
-    data: { revokedAt: new Date() },
+    data: { revokedAt: now },
   });
 
   if (revoked.count === 0) {
-    // Another concurrent request already revoked and rotated this token.
-    // Return null — the client should use the token from the other request's response.
-    // Do NOT issue additional tokens (prevents token proliferation).
+    if (stored.expiresAt >= now) {
+      const recovered = await recoverRecentRefreshRotationWithRetry(
+        oldTokenHash,
+        stored.userId,
+        tokenFamily,
+        payload
+      );
+      if (recovered) {
+        return recovered;
+      }
+    }
+
+    invalidateRecentRefreshRotations({ userId: stored.userId, family: tokenFamily });
+    await prisma.refreshToken.updateMany({
+      where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
+      data: { revokedAt: now },
+    });
     return null;
   }
 
-  const payload = buildPayload();
-  const accessToken = generateAccessToken(payload);
-  const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
+  const pendingRotation = rememberPendingRefreshRotation(oldTokenHash, stored.userId, tokenFamily);
 
-  return { accessToken, refreshToken, payload };
+  try {
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = await generateRefreshToken(stored.userId, tokenFamily);
+    const result = { accessToken, refreshToken, payload };
+    settleRefreshRotation(oldTokenHash, pendingRotation, result);
+    return result;
+  } catch (error) {
+    clearPendingRefreshRotation(oldTokenHash, pendingRotation);
+    throw error;
+  }
 }
 
 /**
@@ -194,6 +403,7 @@ export async function revokeRefreshTokenFamily(refreshTokenValue: string): Promi
   if (!stored) return;
 
   const family = stored.family ?? stored.id;
+  invalidateRecentRefreshRotations({ userId: stored.userId, family });
   await prisma.refreshToken.updateMany({
     where: { userId: stored.userId, family, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -204,6 +414,7 @@ export async function revokeRefreshTokenFamily(refreshTokenValue: string): Promi
  * Revoke all refresh tokens for a user (e.g., on password change)
  */
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
+  invalidateRecentRefreshRotations({ userId });
   await prisma.refreshToken.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -994,6 +1205,7 @@ export async function resetPasswordWithCode(
       data: { revokedAt: now },
     }),
   ]);
+  invalidateRecentRefreshRotations({ userId: user.id });
 
   return { success: true, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS };
 }

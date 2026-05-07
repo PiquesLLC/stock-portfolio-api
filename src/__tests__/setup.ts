@@ -52,7 +52,7 @@ vi.mock('../utils/prisma', () => {
     mfaBackupCode: { deleteMany: vi.fn() },
     // Consent & email OTP
     consentRecord: { create: vi.fn(), deleteMany: vi.fn() },
-    emailOtpCode: { create: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+    emailOtpCode: { create: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
     // Plaid
     plaidItem: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     plaidAccount: { deleteMany: vi.fn() },
@@ -69,7 +69,7 @@ vi.mock('../utils/prisma', () => {
     // Insights & notifications
     milestoneEvent: { deleteMany: vi.fn() },
     anomalyEvent: { deleteMany: vi.fn() },
-    notificationAuditLog: { create: vi.fn(), deleteMany: vi.fn() },
+    notificationAuditLog: { create: vi.fn(), count: vi.fn(), deleteMany: vi.fn() },
     pushSubscription: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
