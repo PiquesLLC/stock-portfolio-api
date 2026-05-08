@@ -13,6 +13,12 @@ import { getMarketStateET, getETDateBucket, type MarketState } from '../utils/ma
 
 const reportCache = new NodeCache();
 
+// Bump this whenever the editorial schema, prompt template, or fallback shape
+// changes — every running replica's NodeCache is process-local and won't
+// otherwise drop pre-deploy entries until TTL elapses, leaving users on stale
+// payloads (missing fields, old layout shape) until the bucket flips.
+const REPORT_SCHEMA_VERSION = 'v2-2026-05-07';
+
 function ttlForState(state: MarketState): number {
   if (state === 'intraday') return 20 * 60;        // 20 min
   if (state === 'weekend')  return 24 * 60 * 60;   // 24 h
@@ -422,7 +428,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
   const portfolioId = options.portfolioId;
   const etBucket = getETDateBucket();
   const marketState = getMarketStateET();
-  const cacheKey = `daily-report:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
+  const cacheKey = `daily-report:${REPORT_SCHEMA_VERSION}:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
   const cached = reportCache.get<DailyReportResponse>(cacheKey);
   if (cached) return { ...cached, cached: true };
   const strictFailures = options.strictFailures === true;
@@ -657,7 +663,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 export async function regenerateDailyReport(userId: string, portfolioId?: string): Promise<DailyReportResponse> {
   const etBucket = getETDateBucket();
   const marketState = getMarketStateET();
-  const cacheKey = `daily-report:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
+  const cacheKey = `daily-report:${REPORT_SCHEMA_VERSION}:${userId}:${portfolioId ?? '_'}:${etBucket}:${marketState}`;
   reportCache.del(cacheKey);
   return getDailyReportInternal(userId, { portfolioId });
 }
@@ -691,7 +697,7 @@ export async function preGenerateDailyReports(): Promise<void> {
 
   for (const { userId } of users) {
     if (!userId) continue;
-    const cacheKey = `daily-report:${userId}:_:${etBucket}:${marketState}`;
+    const cacheKey = `daily-report:${REPORT_SCHEMA_VERSION}:${userId}:_:${etBucket}:${marketState}`;
     if (reportCache.has(cacheKey)) {
       skippedCached++;
       continue; // Already cached, skip
