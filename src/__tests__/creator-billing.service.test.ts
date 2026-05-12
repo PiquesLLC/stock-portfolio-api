@@ -4,12 +4,16 @@ import { __mockPrisma as prismaMock } from '../utils/prisma';
 const {
   checkoutCreateMock,
   chargesRetrieveMock,
+  getPayoutBalanceFromLedgerMock,
   invoicesRetrieveMock,
+  transfersCreateMock,
   subscriptionsUpdateMock,
 } = vi.hoisted(() => ({
   checkoutCreateMock: vi.fn(),
   chargesRetrieveMock: vi.fn(),
+  getPayoutBalanceFromLedgerMock: vi.fn(),
   invoicesRetrieveMock: vi.fn(),
+  transfersCreateMock: vi.fn(),
   subscriptionsUpdateMock: vi.fn(),
 }));
 
@@ -32,6 +36,9 @@ vi.mock('stripe', () => {
     customers = {
       create: vi.fn(),
     };
+    transfers = {
+      create: transfersCreateMock,
+    };
     accounts = {
       create: vi.fn(),
     };
@@ -49,6 +56,10 @@ vi.mock('stripe', () => {
   };
 });
 
+vi.mock('../services/creator.service', () => ({
+  getPayoutBalanceFromLedger: getPayoutBalanceFromLedgerMock,
+}));
+
 vi.mock('../config', () => ({
   config: {
     stripeSecretKey: 'sk_test_123',
@@ -62,6 +73,7 @@ vi.mock('../config', () => ({
 import {
   createCreatorCheckoutSession,
   handleCreatorWebhookEvent,
+  requestPayout,
 } from '../services/creator-billing.service';
 
 function fixtureFactory(seed = '1') {
@@ -179,6 +191,7 @@ function ensureCreatorMockShape(): void {
 
   p.creatorPayout ??= {};
   p.creatorPayout.updateMany ??= vi.fn();
+  p.creatorPayout.update ??= vi.fn();
   p.creatorPayout.aggregate ??= vi.fn();
   p.creatorPayout.count ??= vi.fn();
   p.creatorPayout.create ??= vi.fn();
@@ -218,6 +231,12 @@ describe('creator billing webhooks', () => {
     (prismaMock as any).creatorWalletLedger.findFirst.mockResolvedValue(null);
     (prismaMock as any).creatorWalletLedger.create.mockResolvedValue({});
     (prismaMock as any).creatorPayout.updateMany.mockResolvedValue({ count: 1 });
+    (prismaMock as any).creatorPayout.update.mockResolvedValue({});
+    (prismaMock as any).creatorPayout.create.mockResolvedValue({ id: 'payout_1', amountCents: 8000 });
+    (prismaMock as any).creatorPayout.count.mockResolvedValue(0);
+    (prismaMock as any).creatorPayout.aggregate.mockResolvedValue({ _sum: { amountCents: 0 } });
+    getPayoutBalanceFromLedgerMock.mockResolvedValue(10000);
+    transfersCreateMock.mockResolvedValue({ id: 'tr_1' });
 
     chargesRetrieveMock.mockResolvedValue({
       id: 'ch_1',
@@ -281,6 +300,38 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
   });
 
+  it('allocates odd-cent invoice revenue using Stripe fee amounts from the webhook payload', async () => {
+    const fx = fixtureFactory('odd_invoice');
+    await handleCreatorWebhookEvent({
+      id: 'evt_paid_odd_invoice',
+      type: 'invoice.paid',
+      data: {
+        object: {
+          amount_paid: 10001,
+          application_fee_amount: 2000,
+          subscription: fx.ids.stripeSubscriptionId,
+        },
+      },
+    } as any);
+
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_odd_invoice:creator_share',
+          amountCents: 8001,
+        }),
+      })
+    );
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_odd_invoice:platform_fee',
+          amountCents: 2000,
+        }),
+      })
+    );
+  });
+
   it('sets past_due on invoice.payment_failed', async () => {
     const fx = fixtureFactory('failed');
     await handleCreatorWebhookEvent(fx.event.invoicePaymentFailed());
@@ -318,6 +369,41 @@ describe('creator billing webhooks', () => {
       })
     );
     expect((prismaMock as any).creatorSubscription.update).not.toHaveBeenCalled();
+  });
+
+  it('rounds partial refunds by flooring creator share and giving the residual cent to platform', async () => {
+    const fx = fixtureFactory('odd_refund');
+    chargesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeChargeId,
+      object: 'charge',
+      amount: 10001,
+      amount_refunded: 3001,
+      application_fee_amount: 2000,
+      invoice: fx.ids.stripeInvoiceId,
+    });
+    invoicesRetrieveMock.mockResolvedValueOnce({
+      id: fx.ids.stripeInvoiceId,
+      subscription: fx.ids.stripeSubscriptionId,
+    });
+
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_refund_odd', 10001, 3001));
+
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: `stripe_event:evt_refund_odd:charge:${fx.ids.stripeChargeId}:refund_creator`,
+          amountCents: -2400,
+        }),
+      })
+    );
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: `stripe_event:evt_refund_odd:charge:${fx.ids.stripeChargeId}:refund_platform`,
+          amountCents: -601,
+        }),
+      })
+    );
   });
 
   it('full refund cancels subscription and writes cancel event', async () => {
@@ -662,6 +748,64 @@ describe('creator billing webhooks', () => {
     );
     expect(refundLedger.length).toBeGreaterThan(0);
     expect(paidLedger.length).toBeGreaterThan(0);
+  });
+
+  it('serializes concurrent payout requests so only one can reserve the balance', async () => {
+    const transactionQueue: Promise<unknown>[] = [];
+    const state = {
+      pendingCount: 0,
+      pendingAmount: 0,
+    };
+    const tx = {
+      creatorPayout: {
+        count: vi.fn(async () => state.pendingCount),
+        aggregate: vi.fn(async () => ({ _sum: { amountCents: state.pendingAmount } })),
+        create: vi.fn(async ({ data }: any) => {
+          state.pendingCount += 1;
+          state.pendingAmount += data.amountCents;
+          return { id: `payout_${state.pendingCount}`, amountCents: data.amountCents };
+        }),
+        update: vi.fn(async () => ({})),
+      },
+      creatorWalletLedger: {
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => ({})),
+      },
+    };
+
+    (prismaMock as any).creator.findUnique.mockResolvedValue({
+      stripeConnectId: 'acct_123',
+      status: 'active',
+    });
+    (prismaMock as any).creatorWalletLedger.findMany.mockImplementation(async () => {
+      throw new Error('global ledger read should not happen inside payout transaction');
+    });
+    (prismaMock as any).creatorPayout.aggregate.mockImplementation(async () => {
+      throw new Error('global payout aggregate should not happen inside payout transaction');
+    });
+    (prismaMock as any).$transaction = vi.fn(async (callback: any) => {
+      const previous = transactionQueue[transactionQueue.length - 1] ?? Promise.resolve();
+      let release!: () => void;
+      const done = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      transactionQueue.push(done);
+      await previous;
+      try {
+        return await callback(tx);
+      } finally {
+        release();
+      }
+    });
+
+    const [first, second] = await Promise.allSettled([
+      requestPayout('creator_1'),
+      requestPayout('creator_1'),
+    ]);
+
+    expect(first.status).toBe('fulfilled');
+    expect(second.status).toBe('rejected');
+    expect(second.status === 'rejected' ? second.reason.message : '').toContain('Existing payout request is still pending');
   });
 
   it('handles subscription.updated before checkout.session.completed gracefully', async () => {

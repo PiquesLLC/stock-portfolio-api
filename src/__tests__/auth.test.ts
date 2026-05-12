@@ -533,6 +533,111 @@ describe('Auth Service', () => {
       );
     });
 
+    it('should allow only one cached recovery for a recently rotated refresh token', async () => {
+      const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+      const originalRefreshToken = 'refresh-one-time-recovery';
+      const originalRefreshHash = sha256(originalRefreshToken);
+      const replacementToken = 'replacement-refresh-token';
+      const replacementHash = sha256(replacementToken);
+      const userRecord = {
+        id: 'user-one-time-1',
+        username: 'one-time-user',
+        plan: 'free',
+        planExpiresAt: null,
+        emailVerified: true,
+      };
+      const tokenRows = new Map<
+        string,
+        {
+          id: string;
+          token: string;
+          userId: string;
+          family: string;
+          revokedAt: Date | null;
+          expiresAt: Date;
+          user: typeof userRecord;
+        }
+      >();
+
+      tokenRows.set(originalRefreshHash, {
+        id: 'rt-one-time-old',
+        token: originalRefreshHash,
+        userId: userRecord.id,
+        family: 'family-one-time-1',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: userRecord,
+      });
+
+      prismaMock.refreshToken.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.token) return tokenRows.get(where.token) ?? null;
+        return null;
+      });
+      prismaMock.refreshToken.findFirst.mockImplementation(async ({ where }: any) => {
+        return (
+          Array.from(tokenRows.values()).find(
+            (row) =>
+              row.userId === where?.userId &&
+              row.family === where?.family &&
+              row.revokedAt === null &&
+              row.expiresAt > new Date()
+          ) ?? null
+        );
+      });
+      prismaMock.refreshToken.updateMany.mockImplementation(async ({ where, data }: any) => {
+        if (where?.id === 'rt-one-time-old' && where?.revokedAt === null) {
+          const row = tokenRows.get(originalRefreshHash);
+          if (!row || row.revokedAt) return { count: 0 };
+          row.revokedAt = data.revokedAt;
+          return { count: 1 };
+        }
+
+        if (where?.userId === userRecord.id && where?.family === 'family-one-time-1' && where?.revokedAt === null) {
+          let count = 0;
+          for (const row of tokenRows.values()) {
+            if (row.userId === where.userId && row.family === where.family && row.revokedAt === null) {
+              row.revokedAt = data.revokedAt;
+              count += 1;
+            }
+          }
+          return { count };
+        }
+
+        return { count: 0 };
+      });
+      prismaMock.refreshToken.create.mockImplementation(async ({ data }: any) => {
+        tokenRows.set(replacementHash, {
+          id: 'rt-one-time-new',
+          token: data.token,
+          userId: data.userId,
+          family: data.family,
+          revokedAt: null,
+          expiresAt: data.expiresAt,
+          user: userRecord,
+        });
+        return { token: data.token };
+      });
+
+      const firstRotation = await rotateRefreshToken(originalRefreshToken);
+      expect(firstRotation).not.toBeNull();
+
+      const recoveredReplay = await rotateRefreshToken(originalRefreshToken);
+      expect(recoveredReplay).not.toBeNull();
+      expect(recoveredReplay!.refreshToken).toBe(firstRotation!.refreshToken);
+
+      const secondReplay = await rotateRefreshToken(originalRefreshToken);
+      expect(secondReplay).toBeNull();
+      expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: userRecord.id,
+            family: 'family-one-time-1',
+            revokedAt: null,
+          }),
+        })
+      );
+    });
+
     it('should not revoke the family when a loser checks before the winner settles the rotation cache', async () => {
       const deferred = () => {
         let resolve!: () => void;

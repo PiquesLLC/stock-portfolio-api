@@ -30,6 +30,7 @@ type SettledRefreshRotationCacheEntry = {
   family: string;
   createdAtMs: number;
   payload: RefreshRotationResult;
+  consumed: boolean;
 };
 type RefreshRotationCacheEntry = PendingRefreshRotationCacheEntry | SettledRefreshRotationCacheEntry;
 // Process-local. Startup asserts a manual single-replica guard when configured.
@@ -105,6 +106,7 @@ function settleRefreshRotation(
     family: pending.family,
     createdAtMs: pending.createdAtMs,
     payload,
+    consumed: false,
   });
   pending.resolve(payload);
 }
@@ -163,6 +165,11 @@ async function recoverRecentRefreshRotation(
     }
   }
 
+  if (cached.consumed) {
+    recentRefreshRotations.delete(oldTokenHash);
+    return null;
+  }
+
   const activeFamilyToken = await prisma.refreshToken.findFirst({
     where: {
       userId,
@@ -177,6 +184,8 @@ async function recoverRecentRefreshRotation(
     recentRefreshRotations.delete(oldTokenHash);
     return null;
   }
+
+  cached.consumed = true;
 
   return {
     accessToken: generateAccessToken(payload),
