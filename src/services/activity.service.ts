@@ -2,6 +2,22 @@
 import { getFollowingIds } from './follow.service';
 import { getBlockedUserIds } from './block.service';
 
+const CREATOR_SUBSCRIPTION_BOOTSTRAP_WINDOW_MS = 60 * 60 * 1000;
+
+function buildCreatorAccessWhere(now: Date) {
+  return {
+    status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+    OR: [
+      { trialEnd: { gt: now } },
+      {
+        status: { in: ['active', 'trialing'] },
+        currentPeriodEnd: null,
+        createdAt: { gt: new Date(Date.now() - CREATOR_SUBSCRIPTION_BOOTSTRAP_WINDOW_MS) },
+      },
+      { currentPeriodEnd: { gt: now } },
+    ],
+  };
+}
 
 export type ActivityType = 'holding_added' | 'holding_removed' | 'holding_updated';
 
@@ -84,12 +100,7 @@ export async function getFeed(
       where: {
         subscriberUserId: userId,
         creatorUserId: { in: [...paidCreatorIds] },
-        status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
-        OR: [
-          { trialEnd: { gt: nowDate } },
-          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-          { currentPeriodEnd: { gt: nowDate } },
-        ],
+        ...buildCreatorAccessWhere(nowDate),
       },
       select: { creatorUserId: true },
     });

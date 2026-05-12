@@ -129,7 +129,7 @@ describe('billing webhook handling', () => {
     expect(prismaMock.billingWebhookEvent.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('processes customer.subscription.updated and updates plan', async () => {
+  it('processes customer.subscription.updated and updates plan for active subscriptions', async () => {
     const event = {
       id: 'evt_sub_updated_1',
       type: 'customer.subscription.updated',
@@ -137,6 +137,7 @@ describe('billing webhook handling', () => {
         object: {
           id: 'sub_2',
           customer: 'cus_2',
+          status: 'active',
           start_date: 1700000000,
           items: {
             data: [
@@ -158,6 +159,42 @@ describe('billing webhook handling', () => {
         data: expect.objectContaining({
           plan: 'premium',
           stripeSubscriptionId: 'sub_2',
+        }),
+      })
+    );
+  });
+
+  it('downgrades unpaid customer.subscription.updated to free immediately', async () => {
+    const event = {
+      id: 'evt_sub_updated_unpaid_1',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_unpaid_1',
+          customer: 'cus_unpaid_1',
+          status: 'unpaid',
+          start_date: 1700000000,
+          items: {
+            data: [
+              {
+                price: { id: 'price_premium' },
+                current_period_end: 1735000000,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    await handleWebhookEvent(event as any);
+
+    expect(prismaMock.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { stripeCustomerId: 'cus_unpaid_1' },
+        data: expect.objectContaining({
+          plan: 'free',
+          stripeSubscriptionId: 'sub_unpaid_1',
+          planExpiresAt: null,
         }),
       })
     );
@@ -186,7 +223,7 @@ describe('billing webhook handling', () => {
     });
   });
 
-  it('processes invoice.payment_failed and sets grace-period expiry', async () => {
+  it('processes invoice.payment_failed and downgrades plan access immediately', async () => {
     const event = {
       id: 'evt_invoice_failed_1',
       type: 'invoice.payment_failed',
@@ -203,7 +240,8 @@ describe('billing webhook handling', () => {
       expect.objectContaining({
         where: { stripeCustomerId: 'cus_4', plan: { not: 'free' } },
         data: expect.objectContaining({
-          planExpiresAt: expect.any(Date),
+          plan: 'free',
+          planExpiresAt: null,
         }),
       })
     );

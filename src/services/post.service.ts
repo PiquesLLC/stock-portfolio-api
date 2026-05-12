@@ -2,6 +2,22 @@ import prisma from '../utils/prisma';
 import { sendPushToUser, sendNativePushToUser } from './push.service';
 import { sanitizeContent, filterContent } from '../utils/content-filter';
 import { getBlockedUserIds } from './block.service';
+const CREATOR_SUBSCRIPTION_BOOTSTRAP_WINDOW_MS = 60 * 60 * 1000;
+
+function buildCreatorAccessWhere(now: Date) {
+  return {
+    status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
+    OR: [
+      { trialEnd: { gt: now } },
+      {
+        status: { in: ['active', 'trialing'] },
+        currentPeriodEnd: null,
+        createdAt: { gt: new Date(Date.now() - CREATOR_SUBSCRIPTION_BOOTSTRAP_WINDOW_MS) },
+      },
+      { currentPeriodEnd: { gt: now } },
+    ],
+  };
+}
 
 // ── Social Notifications ──────────────────────────────────────
 
@@ -143,12 +159,7 @@ export async function getUserPosts(userId: string, limit = 20, before?: string, 
             where: {
               subscriberUserId: viewerUserId,
               creatorUserId: userId,
-              status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
-              OR: [
-                { trialEnd: { gt: now } },
-                { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-                { currentPeriodEnd: { gt: now } },
-              ],
+              ...buildCreatorAccessWhere(now),
             },
           })
         : null;
@@ -373,12 +384,7 @@ export async function getEnhancedFeed(userId: string, limit = 30, before?: strin
       where: {
         subscriberUserId: userId,
         creatorUserId: { in: [...paidCreatorIds] },
-        status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
-        OR: [
-          { trialEnd: { gt: now } },
-          { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-          { currentPeriodEnd: { gt: now } },
-        ],
+        ...buildCreatorAccessWhere(now),
       },
       select: { creatorUserId: true },
     });
@@ -521,12 +527,7 @@ export async function getTrendingTickers(hours = 24, limit = 10, viewerUserId?: 
         where: {
           subscriberUserId: viewerUserId,
           creatorUserId: { in: paidIds },
-          status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
-          OR: [
-            { trialEnd: { gt: now } },
-            { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-            { currentPeriodEnd: { gt: now } },
-          ],
+          ...buildCreatorAccessWhere(now),
         },
         select: { creatorUserId: true },
       });
@@ -593,12 +594,7 @@ export async function getCommunityTradeActivity(hours = 168, limit = 6, viewerUs
         where: {
           subscriberUserId: viewerUserId,
           creatorUserId: { in: paidIds },
-          status: { in: ['active', 'canceled', 'trialing', 'past_due'] },
-          OR: [
-            { trialEnd: { gt: now } },
-            { currentPeriodEnd: null, createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
-            { currentPeriodEnd: { gt: now } },
-          ],
+          ...buildCreatorAccessWhere(now),
         },
         select: { creatorUserId: true },
       });

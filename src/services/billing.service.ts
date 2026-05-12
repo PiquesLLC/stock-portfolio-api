@@ -90,6 +90,24 @@ function resolvePlanFromPriceId(priceId: string | null): PlanTier {
   return 'free';
 }
 
+function resolveBillingAccessState(
+  subscriptionStatus: string | null | undefined,
+  priceId: string | null,
+  periodEnd: Date | null
+): { plan: PlanTier; planExpiresAt: Date | null } {
+  if (subscriptionStatus === 'active' || subscriptionStatus === 'trialing') {
+    return {
+      plan: resolvePlanFromPriceId(priceId),
+      planExpiresAt: periodEnd,
+    };
+  }
+
+  return {
+    plan: 'free',
+    planExpiresAt: null,
+  };
+}
+
 async function resolvePlanFromSubscription(
   stripe: Stripe,
   subscriptionId: string
@@ -258,15 +276,15 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         if (!stripeCustomerId) return;
         const firstItem = subscription.items.data[0];
         const priceId = firstItem?.price?.id ?? null;
-        const plan = resolvePlanFromPriceId(priceId);
         const periodEnd = firstItem?.current_period_end
           ? new Date(firstItem.current_period_end * 1000)
           : null;
+        const accessState = resolveBillingAccessState(subscription.status, priceId, periodEnd);
 
         await updateUserPlanByCustomer(stripeCustomerId, {
-          plan,
+          plan: accessState.plan,
           stripeSubscriptionId: subscription.id,
-          planExpiresAt: periodEnd,
+          planExpiresAt: accessState.planExpiresAt,
           planStartedAt: new Date(subscription.start_date * 1000),
         });
         return;
@@ -349,10 +367,9 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         const invoice = event.data.object as Stripe.Invoice;
         const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : null;
         if (!stripeCustomerId) return;
-        const gracePeriodEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
         await prisma.user.updateMany({
           where: { stripeCustomerId, plan: { not: 'free' } },
-          data: { planExpiresAt: gracePeriodEnd },
+          data: { plan: 'free', planExpiresAt: null },
         });
         return;
       }

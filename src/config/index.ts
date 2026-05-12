@@ -111,6 +111,7 @@ export const config = {
   stripeConnectWebhookSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
   billingEnabled: process.env.BILLING_ENABLED !== 'false',
   creatorMonetizationEnabled: process.env.CREATOR_MONETIZATION_ENABLED === 'true',
+  payoutMinCents: parseInt(process.env.PAYOUT_MIN_CENTS || '5000', 10),
   creatorAdminUserIds: (process.env.CREATOR_ADMIN_USER_IDS || '')
     .split(',')
     .map((id) => id.trim())

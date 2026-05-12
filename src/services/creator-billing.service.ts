@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
+import { Prisma } from '../generated/prisma/client';
 import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
 
@@ -395,8 +396,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         });
         if (alreadyCredited) return;
 
-        const creatorShare = Math.round(amountPaid * 0.8);
-        const platformShare = amountPaid - creatorShare;
+        const invoiceWithFee = invoice as Stripe.Invoice & { application_fee_amount?: number | null };
+        const { creatorCents: creatorShare, platformCents: platformShare } = splitCreatorRevenueCents(
+          amountPaid,
+          invoiceWithFee.application_fee_amount
+        );
 
         await prisma.$transaction([
           prisma.creatorWalletLedger.create({
@@ -472,7 +476,6 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         });
         if (!sub) return;
 
-        const amount = typeof charge.amount === 'number' ? charge.amount : 0;
         const cumulativeRefunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
         if (cumulativeRefunded <= 0) return;
 
@@ -488,12 +491,22 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           select: { amountCents: true },
         });
         const previouslyDebitedCreator = previousRefundEntries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
-        const totalCreatorShare = Math.round(cumulativeRefunded * 0.8);
+        const totalCreatorShare = getCumulativeCreatorRefundCents(charge);
         const incrementalCreator = totalCreatorShare - previouslyDebitedCreator;
         if (incrementalCreator <= 0) return; // Already fully accounted for
 
-        const incrementalTotal = incrementalCreator / 0.8;
-        const incrementalPlatform = Math.round(incrementalTotal) - incrementalCreator;
+        const previousPlatformRefundEntries = await prisma.creatorWalletLedger.findMany({
+          where: {
+            creatorUserId: sub.creatorUserId,
+            type: 'platform_fee',
+            description: { contains: `charge:${chargeId}:refund_platform` },
+          },
+          select: { amountCents: true },
+        });
+        const previouslyDebitedPlatform = previousPlatformRefundEntries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        const totalPlatformRefund = cumulativeRefunded - totalCreatorShare;
+        const incrementalPlatform = totalPlatformRefund - previouslyDebitedPlatform;
+        if (incrementalPlatform < 0) return;
 
         const creatorRefund = -incrementalCreator;
         const platformRefund = -incrementalPlatform;
@@ -521,6 +534,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           }),
         ]);
 
+        const amount = typeof charge.amount === 'number' ? charge.amount : 0;
         if (amount > 0 && cumulativeRefunded >= amount) {
           await prisma.creatorSubscription.update({
             where: { id: sub.id },
@@ -823,15 +837,80 @@ function computeReservedBalanceCents(entries: Array<{ type: string; amountCents:
   return reserved;
 }
 
-export async function getPayoutBalance(userId: string): Promise<{ availableCents: number; reservedCents: number }> {
+function splitCreatorRevenueCents(
+  grossCents: number,
+  explicitPlatformFeeCents?: number | null
+): { creatorCents: number; platformCents: number } {
+  if (!Number.isFinite(grossCents) || grossCents <= 0) {
+    return { creatorCents: 0, platformCents: 0 };
+  }
+
+  if (typeof explicitPlatformFeeCents === 'number' && Number.isFinite(explicitPlatformFeeCents)) {
+    const platformCents = Math.max(0, Math.min(grossCents, explicitPlatformFeeCents));
+    return {
+      creatorCents: grossCents - platformCents,
+      platformCents,
+    };
+  }
+
+  const creatorCents = Math.floor(grossCents * 0.8);
+  return {
+    creatorCents,
+    platformCents: grossCents - creatorCents,
+  };
+}
+
+function getCumulativeCreatorRefundCents(charge: Stripe.Charge): number {
+  const grossCents = typeof charge.amount === 'number' ? charge.amount : 0;
+  const refundedCents = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
+  if (grossCents <= 0 || refundedCents <= 0) return 0;
+
+  const explicitPlatformFeeCents =
+    typeof charge.application_fee_amount === 'number' ? charge.application_fee_amount : null;
+  if (typeof explicitPlatformFeeCents === 'number') {
+    const { creatorCents: creatorGrossCents } = splitCreatorRevenueCents(grossCents, explicitPlatformFeeCents);
+    return Math.floor((refundedCents * creatorGrossCents) / grossCents);
+  }
+
+  return splitCreatorRevenueCents(refundedCents).creatorCents;
+}
+
+type PayoutPrismaClient = Pick<typeof prisma, 'creatorWalletLedger' | 'creatorPayout'>;
+
+async function getLedgerBalanceFromClient(
+  userId: string,
+  client: PayoutPrismaClient
+): Promise<number> {
+  if (client === prisma) {
+    return getPayoutBalanceFromLedger(userId);
+  }
+
+  const entries = await client.creatorWalletLedger.findMany({
+    where: { creatorUserId: userId },
+    select: { type: true, amountCents: true },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  let balance = 0;
+  for (const entry of entries) {
+    if (entry.type === 'earning') balance += Math.abs(entry.amountCents);
+    if (entry.type === 'payout' || entry.type === 'refund') balance -= Math.abs(entry.amountCents);
+  }
+  return balance;
+}
+
+export async function getPayoutBalance(
+  userId: string,
+  client: PayoutPrismaClient = prisma
+): Promise<{ availableCents: number; reservedCents: number }> {
   const [entries, balance, pendingPayoutAgg] = await Promise.all([
-    prisma.creatorWalletLedger.findMany({
+    client.creatorWalletLedger.findMany({
       where: { creatorUserId: userId },
       select: { type: true, amountCents: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
-    getPayoutBalanceFromLedger(userId),
-    prisma.creatorPayout.aggregate({
+    getLedgerBalanceFromClient(userId, client),
+    client.creatorPayout.aggregate({
       where: { creatorUserId: userId, status: 'pending' },
       _sum: { amountCents: true },
     }),
@@ -861,9 +940,9 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       throw new Error('Existing payout request is still pending');
     }
 
-    const { availableCents } = await getPayoutBalance(userId);
-    if (availableCents < 500) {
-      throw new Error('Minimum payout is $5');
+    const { availableCents } = await getPayoutBalance(userId, tx);
+    if (availableCents < config.payoutMinCents) {
+      throw new Error(`Minimum payout is $${(config.payoutMinCents / 100).toFixed(0)}`);
     }
 
     const payout = await tx.creatorPayout.create({
@@ -885,6 +964,8 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     });
 
     return { payoutId: payout.id, amountCents: payout.amountCents };
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
 
   // Initiate actual Stripe transfer to the creator's Connect account
