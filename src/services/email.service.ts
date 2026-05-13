@@ -120,6 +120,35 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   });
 }
 
+/**
+ * Notify the OLD email address that the account's primary email was changed.
+ * Sent best-effort after confirmEmailChange succeeds — failures must not roll
+ * back the change. We never include the new full address in the notice (only
+ * a masked hint) to avoid disclosing the destination if the message is
+ * intercepted at the old mailbox.
+ */
+export async function sendEmailChangedNotice(to: string, maskedNewEmail: string): Promise<void> {
+  const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — email-changed notice for ${to}; new is ${maskedNewEmail}`);
+    return;
+  }
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to,
+    subject: 'Your Nala email address was changed',
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
+        <h2 style="color: #00c805; margin: 0 0 24px;">Nala</h2>
+        <p style="color: #333; font-size: 16px; margin: 0 0 8px;">The primary email for your account was changed to <strong>${escapeHtml(maskedNewEmail)}</strong>.</p>
+        <p style="color: #666; font-size: 14px; margin: 16px 0 0;">If you did this, no action is needed. If you did <em>not</em> do this, your account may be compromised — sign in immediately at nalaai.com to change your password and contact support@nalaai.com.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+        <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendEmailChangeVerification(to: string, code: string): Promise<void> {
   // Non-production capture so CI / local smoke tests can read the code.
   if (process.env.NODE_ENV !== 'production') {

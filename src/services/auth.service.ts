@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
-import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail, sendEmailChangeVerification } from './email.service';
+import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail, sendEmailChangeVerification, sendEmailChangedNotice } from './email.service';
 
 
 
@@ -1307,10 +1307,25 @@ export async function requestEmailChange(
   return { success: true };
 }
 
+/** Mask an email address for display in notifications (e.g. j***@example.com). */
+function maskEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at <= 0) return email;
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  const visible = local.slice(0, 1);
+  return `${visible}${'*'.repeat(Math.max(1, local.length - 1))}${domain}`;
+}
+
 /**
  * Two-step "change primary email" — step 2: verify the 6-digit code and apply
  * the email change atomically. Sets emailVerified=true on success since the
  * code itself proves control of the new address.
+ *
+ * On success we also (a) revoke all other refresh tokens — the account's
+ * recovery channel just changed, so any extant session is no longer trusted —
+ * and (b) best-effort notify the OLD address so a stolen-password takeover
+ * leaves an audit trail outside the attacker's reach.
  */
 export async function confirmEmailChange(
   userId: string,
@@ -1359,28 +1374,61 @@ export async function confirmEmailChange(
     };
   }
 
-  // Race-safe: someone else may have claimed this email between request and confirm.
-  // The User.email unique constraint will throw — catch it and report cleanly.
+  // Capture the old email BEFORE the update so we can notify it after.
+  const userBefore = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  const oldEmail = userBefore?.email ?? null;
+
+  // Atomic apply: the conditional updateMany on `usedAt: null` guards against
+  // a concurrent confirm racing the pending row (e.g. double-click + retry).
+  // The User.email unique constraint catches the race against another user
+  // claiming the same address between request and confirm.
   const now = new Date();
   try {
-    await prisma.$transaction([
-      prisma.pendingEmailChange.update({
-        where: { id: pending.id },
+    const result = await prisma.$transaction(async (tx) => {
+      const consumed = await tx.pendingEmailChange.updateMany({
+        where: { id: pending.id, usedAt: null },
         data: { usedAt: now },
-      }),
-      prisma.user.update({
+      });
+      if (consumed.count === 0) {
+        // Another concurrent confirm already used this code. Treat as already-consumed.
+        return 'ALREADY_CONSUMED' as const;
+      }
+      await tx.user.update({
         where: { id: userId },
         data: { email: pending.newEmail, emailVerified: true },
         select: { id: true },
-      }),
-    ]);
+      });
+      // Email change rotates the recovery channel — revoke all sessions so
+      // anyone who was riding the old credential has to re-authenticate.
+      await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      return 'OK' as const;
+    });
+    if (result === 'ALREADY_CONSUMED') {
+      return { success: false, remainingAttempts: 0, error: 'INVALID_OR_EXPIRED' };
+    }
   } catch (e: unknown) {
     // Prisma unique-constraint violation code is P2002.
-    const code = (e as { code?: string })?.code;
-    if (code === 'P2002') {
+    const errCode = (e as { code?: string })?.code;
+    if (errCode === 'P2002') {
       return { success: false, remainingAttempts: remainingBefore, error: 'EMAIL_TAKEN' };
     }
     throw e;
+  }
+
+  invalidateRecentRefreshRotations({ userId });
+
+  // Best-effort notice to the OLD address so a stolen-password takeover leaves
+  // an audit trail outside the attacker's reach. Must not fail the flow.
+  if (oldEmail) {
+    sendEmailChangedNotice(oldEmail, maskEmail(pending.newEmail)).catch((err) => {
+      console.warn('[EmailChange] Failed to notify old address:', err instanceof Error ? err.message : String(err));
+    });
   }
 
   return { success: true, remainingAttempts: EMAIL_CHANGE_MAX_ATTEMPTS, email: pending.newEmail };
