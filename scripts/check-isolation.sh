@@ -34,24 +34,25 @@ else
 fi
 
 # ── 3. No optional userId in service function signatures ─────────────────────
-# Allowlist: services where optional userId is legitimately a query selector
+# Allowlist: cases where optional userId is legitimately a query selector
 # rather than a data-isolation risk.
 #   - anomaly-detection / dividend-fetch / dividend-post / analyst.service:
 #     run as system-wide crons; optional userId scopes a batch op to one user.
-#   - auth.service: invalidateRecentRefreshRotations({ userId?, family? }) is
-#     an in-memory cache cleanup, not a DB query. Takes userId OR family,
-#     guarded by `if (!userId && !family) return`. No cross-user data path.
+#   - invalidateRecentRefreshRotations: in-memory cache cleanup, not a DB
+#     query. Takes userId OR family, early-returns if both missing. The
+#     allowlist entry is the function name (not the file) so any *other*
+#     userId?: string added to auth.service.ts will still be flagged.
 echo "Checking for optional userId in services..."
 if grep -Pn 'userId\?\s*:\s*string' "$SRC/services/"*.ts 2>/dev/null \
   | grep -v 'anomaly-detection' \
   | grep -v 'dividend-fetch' \
   | grep -v 'dividend-post' \
   | grep -v 'analyst.service' \
-  | grep -v 'auth.service'; then
+  | grep -v 'invalidateRecentRefreshRotations'; then
   red "FAIL: Optional userId found in service signatures"
   FAIL=1
 else
-  green "OK: No optional userId in services (allowlisted: anomaly-detection, dividend-fetch, dividend-post, analyst.service, auth.service)"
+  green "OK: No optional userId in services (allowlisted: anomaly-detection, dividend-fetch, dividend-post, analyst.service, invalidateRecentRefreshRotations)"
 fi
 
 # ── 4. Advisory: unscoped findMany in user-scoped services (warn only) ───────
