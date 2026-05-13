@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
-import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail } from './email.service';
+import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail, sendEmailChangeVerification } from './email.service';
 
 
 
@@ -45,6 +45,8 @@ const EMAIL_VERIFY_MAX_ATTEMPTS = 5;
 const EMAIL_RESEND_LIMIT_PER_HOUR = 3;
 const PASSWORD_RESET_MAX_ATTEMPTS = 5;
 const PASSWORD_RESET_REQUEST_LIMIT_PER_HOUR = 3;
+const EMAIL_CHANGE_MAX_ATTEMPTS = 5;
+const EMAIL_CHANGE_REQUEST_LIMIT_PER_HOUR = 3;
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -1217,5 +1219,170 @@ export async function resetPasswordWithCode(
   invalidateRecentRefreshRotations({ userId: user.id });
 
   return { success: true, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS };
+}
+
+/**
+ * Two-step "change primary email" — step 1: verify current password, send a
+ * 6-digit code to the proposed new address. The User row is NOT modified until
+ * confirmEmailChange() succeeds. Errors are returned as discriminated codes so
+ * the controller can map them to status codes.
+ */
+export async function requestEmailChange(
+  userId: string,
+  currentPassword: string,
+  newEmail: string
+): Promise<
+  | { success: true }
+  | { success: false; error: 'USER_NOT_FOUND' | 'NO_PASSWORD' | 'INVALID_PASSWORD' | 'SAME_EMAIL' | 'EMAIL_TAKEN' | 'RATE_LIMITED' }
+> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, passwordHash: true },
+  });
+  if (!user) return { success: false, error: 'USER_NOT_FOUND' };
+  if (!user.passwordHash) return { success: false, error: 'NO_PASSWORD' };
+
+  const passwordValid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!passwordValid) return { success: false, error: 'INVALID_PASSWORD' };
+
+  const normalizedNew = normalizeEmail(newEmail);
+  if (user.email && normalizeEmail(user.email) === normalizedNew) {
+    return { success: false, error: 'SAME_EMAIL' };
+  }
+
+  // Pre-check the global uniqueness constraint. Race-safe: we recheck at confirm time
+  // inside the transaction, but blocking obviously-taken addresses up front gives
+  // the user a clear error rather than a confusing "code accepted, then 409".
+  const taken = await prisma.user.findUnique({
+    where: { email: normalizedNew },
+    select: { id: true },
+  });
+  if (taken && taken.id !== user.id) {
+    return { success: false, error: 'EMAIL_TAKEN' };
+  }
+
+  // Per-user rate limit on requests (mirrors password reset).
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const requestCount = await prisma.notificationAuditLog.count({
+    where: {
+      userId: user.id,
+      type: 'email_change_requested',
+      sentAt: { gte: oneHourAgo },
+    },
+  });
+  if (requestCount >= EMAIL_CHANGE_REQUEST_LIMIT_PER_HOUR) {
+    return { success: false, error: 'RATE_LIMITED' };
+  }
+
+  const code = generateEmailOtpCode();
+  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+
+  // Invalidate any prior pending changes for this user so only the newest is live.
+  await prisma.pendingEmailChange.updateMany({
+    where: { userId: user.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  await prisma.pendingEmailChange.create({
+    data: { userId: user.id, newEmail: normalizedNew, codeHash, expiresAt },
+  });
+
+  try {
+    await sendEmailChangeVerification(normalizedNew, code);
+  } catch {
+    console.error('Email-change verification send failed');
+  }
+
+  await prisma.notificationAuditLog.create({
+    data: {
+      userId: user.id,
+      type: 'email_change_requested',
+      status: 'sent',
+      channel: 'email',
+      refKey: crypto.randomUUID(),
+    },
+  });
+
+  return { success: true };
+}
+
+/**
+ * Two-step "change primary email" — step 2: verify the 6-digit code and apply
+ * the email change atomically. Sets emailVerified=true on success since the
+ * code itself proves control of the new address.
+ */
+export async function confirmEmailChange(
+  userId: string,
+  code: string
+): Promise<{
+  success: boolean;
+  remainingAttempts: number;
+  error?: 'INVALID_OR_EXPIRED' | 'TOO_MANY_ATTEMPTS' | 'EMAIL_TAKEN';
+  email?: string;
+}> {
+  const pending = await prisma.pendingEmailChange.findFirst({
+    where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!pending) {
+    return { success: false, remainingAttempts: 0, error: 'INVALID_OR_EXPIRED' };
+  }
+
+  const failedAttempts = await prisma.notificationAuditLog.count({
+    where: {
+      userId,
+      type: 'email_change_failed',
+      sentAt: { gte: pending.createdAt },
+    },
+  });
+  const remainingBefore = EMAIL_CHANGE_MAX_ATTEMPTS - failedAttempts;
+  if (remainingBefore <= 0) {
+    return { success: false, remainingAttempts: 0, error: 'TOO_MANY_ATTEMPTS' };
+  }
+
+  const match = await bcrypt.compare(code, pending.codeHash);
+  if (!match) {
+    await prisma.notificationAuditLog.create({
+      data: {
+        userId,
+        type: 'email_change_failed',
+        status: 'failed',
+        channel: 'email',
+        refKey: crypto.randomUUID(),
+      },
+    });
+    return {
+      success: false,
+      remainingAttempts: Math.max(0, remainingBefore - 1),
+      error: 'INVALID_OR_EXPIRED',
+    };
+  }
+
+  // Race-safe: someone else may have claimed this email between request and confirm.
+  // The User.email unique constraint will throw — catch it and report cleanly.
+  const now = new Date();
+  try {
+    await prisma.$transaction([
+      prisma.pendingEmailChange.update({
+        where: { id: pending.id },
+        data: { usedAt: now },
+      }),
+      prisma.user.update({
+        where: { id: userId },
+        data: { email: pending.newEmail, emailVerified: true },
+        select: { id: true },
+      }),
+    ]);
+  } catch (e: unknown) {
+    // Prisma unique-constraint violation code is P2002.
+    const code = (e as { code?: string })?.code;
+    if (code === 'P2002') {
+      return { success: false, remainingAttempts: remainingBefore, error: 'EMAIL_TAKEN' };
+    }
+    throw e;
+  }
+
+  return { success: true, remainingAttempts: EMAIL_CHANGE_MAX_ATTEMPTS, email: pending.newEmail };
 }
 

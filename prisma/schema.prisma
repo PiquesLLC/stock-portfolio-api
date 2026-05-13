@@ -125,6 +125,7 @@ model User {
   mfaChallenges          MfaChallenge[]
   mfaBackupCodes         MfaBackupCode[]
   emailOtpCodes          EmailOtpCode[]
+  pendingEmailChanges    PendingEmailChange[]
   leaderboardCaches      LeaderboardCache[]
   priceAlerts            PriceAlert[]
   stockFollows           StockFollow[]
@@ -309,6 +310,24 @@ model EmailOtpCode {
   id        String    @id @default(uuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Pending primary-email change for two-step verify flow.
+// Distinct from EmailOtpCode because we need to remember the *target* email
+// to apply once the code is verified (the User row still holds the old email
+// until confirmation succeeds).
+model PendingEmailChange {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  newEmail  String    // normalized lowercase; not @unique because the same address could legitimately appear as a pending target for retries
   codeHash  String
   expiresAt DateTime
   usedAt    DateTime?

@@ -19,6 +19,8 @@ import {
   requestPasswordReset,
   requestUsernameReminder,
   resetPasswordWithCode,
+  requestEmailChange,
+  confirmEmailChange,
   generateAccessToken,
   generateRefreshToken,
   isReservedUsername,
@@ -37,6 +39,8 @@ import {
   forgotPasswordSchema,
   forgotUsernameSchema,
   resetPasswordSchema,
+  requestEmailChangeSchema,
+  confirmEmailChangeSchema,
   formatZodError,
 } from '../validators/auth.validators';
 import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
@@ -537,6 +541,98 @@ export async function checkUsernameHandler(req: Request, res: Response): Promise
   } catch (error: unknown) {
     console.error('Check username error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to check username' });
+  }
+}
+
+/**
+ * POST /auth/request-email-change
+ * Step 1 of the two-step email change. Verifies the current password and emails
+ * a 6-digit code to the proposed new address. The User row is unchanged until
+ * /auth/confirm-email-change is called.
+ */
+export async function requestEmailChangeHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const parsed = requestEmailChangeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const { currentPassword, newEmail } = parsed.data;
+    const result = await requestEmailChange(req.user.userId, currentPassword, newEmail);
+
+    if (!result.success) {
+      switch (result.error) {
+        case 'INVALID_PASSWORD':
+          res.status(401).json({ error: 'Current password is incorrect' });
+          return;
+        case 'NO_PASSWORD':
+          res.status(400).json({ error: 'Set a password on this account before changing email' });
+          return;
+        case 'SAME_EMAIL':
+          res.status(400).json({ error: 'New email must be different from your current email' });
+          return;
+        case 'EMAIL_TAKEN':
+          res.status(409).json({ error: 'That email is already in use' });
+          return;
+        case 'RATE_LIMITED':
+          res.status(429).json({ error: 'Too many email-change requests. Try again later.' });
+          return;
+        default:
+          res.status(404).json({ error: 'User not found' });
+          return;
+      }
+    }
+
+    res.json({ message: 'Verification code sent. Enter it to confirm the change.' });
+  } catch (error: unknown) {
+    console.error('Request email change error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to start email change' });
+  }
+}
+
+/**
+ * POST /auth/confirm-email-change
+ * Step 2 of the two-step email change. Verifies the 6-digit code and applies
+ * the email change atomically. Sets emailVerified=true on success.
+ */
+export async function confirmEmailChangeHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const parsed = confirmEmailChangeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: formatZodError(parsed.error) });
+      return;
+    }
+
+    const result = await confirmEmailChange(req.user.userId, parsed.data.code);
+
+    if (!result.success) {
+      if (result.error === 'TOO_MANY_ATTEMPTS') {
+        res.status(429).json({ error: 'Too many verification attempts', remainingAttempts: 0 });
+        return;
+      }
+      if (result.error === 'EMAIL_TAKEN') {
+        res.status(409).json({ error: 'That email was claimed by another account before you confirmed' });
+        return;
+      }
+      res.status(400).json({ error: 'Invalid or expired code', remainingAttempts: result.remainingAttempts });
+      return;
+    }
+
+    res.json({ message: 'Email updated successfully', email: result.email });
+  } catch (error: unknown) {
+    console.error('Confirm email change error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to confirm email change' });
   }
 }
 

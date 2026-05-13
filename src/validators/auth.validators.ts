@@ -124,6 +124,15 @@ export const resetPasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 
+export const requestEmailChangeSchema = z.object({
+  currentPassword: z.string({ error: 'Current password is required' }).min(1, 'Current password is required'),
+  newEmail: z.string({ error: 'New email is required' }).email('Please enter a valid email address').max(255),
+});
+
+export const confirmEmailChangeSchema = z.object({
+  code: z.string({ error: 'Code is required' }).regex(/^\d{6}$/, 'Code must be 6 digits'),
+});
+
 /**
  * Format a ZodError into a single error string (first issue message).
  */
