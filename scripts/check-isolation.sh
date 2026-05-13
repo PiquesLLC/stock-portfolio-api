@@ -34,18 +34,24 @@ else
 fi
 
 # ── 3. No optional userId in service function signatures ─────────────────────
-# Allowlist: batch-operation services that optionally scope to a single user
-# (anomaly-detection, dividend-fetch, dividend-post run as system-wide crons)
+# Allowlist: services where optional userId is legitimately a query selector
+# rather than a data-isolation risk.
+#   - anomaly-detection / dividend-fetch / dividend-post / analyst.service:
+#     run as system-wide crons; optional userId scopes a batch op to one user.
+#   - auth.service: invalidateRecentRefreshRotations({ userId?, family? }) is
+#     an in-memory cache cleanup, not a DB query. Takes userId OR family,
+#     guarded by `if (!userId && !family) return`. No cross-user data path.
 echo "Checking for optional userId in services..."
 if grep -Pn 'userId\?\s*:\s*string' "$SRC/services/"*.ts 2>/dev/null \
   | grep -v 'anomaly-detection' \
   | grep -v 'dividend-fetch' \
   | grep -v 'dividend-post' \
-  | grep -v 'analyst.service'; then
+  | grep -v 'analyst.service' \
+  | grep -v 'auth.service'; then
   red "FAIL: Optional userId found in service signatures"
   FAIL=1
 else
-  green "OK: No optional userId in services (allowlisted: anomaly-detection, dividend-fetch, dividend-post)"
+  green "OK: No optional userId in services (allowlisted: anomaly-detection, dividend-fetch, dividend-post, analyst.service, auth.service)"
 fi
 
 # ── 4. Advisory: unscoped findMany in user-scoped services (warn only) ───────
