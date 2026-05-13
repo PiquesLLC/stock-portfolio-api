@@ -1262,16 +1262,21 @@ export async function requestEmailChange(
   }
 
   // Per-user rate limit on requests (mirrors password reset).
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const requestCount = await prisma.notificationAuditLog.count({
-    where: {
-      userId: user.id,
-      type: 'email_change_requested',
-      sentAt: { gte: oneHourAgo },
-    },
-  });
-  if (requestCount >= EMAIL_CHANGE_REQUEST_LIMIT_PER_HOUR) {
-    return { success: false, error: 'RATE_LIMITED' };
+  // Admins (WAITLIST_ADMIN_USER_IDS) skip this service-level cap. The IP-level
+  // limiter also bypasses for them, so dev accounts can iterate freely.
+  const isAdmin = config.waitlistAdminUserIds.includes(user.id);
+  if (!isAdmin) {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const requestCount = await prisma.notificationAuditLog.count({
+      where: {
+        userId: user.id,
+        type: 'email_change_requested',
+        sentAt: { gte: oneHourAgo },
+      },
+    });
+    if (requestCount >= EMAIL_CHANGE_REQUEST_LIMIT_PER_HOUR) {
+      return { success: false, error: 'RATE_LIMITED' };
+    }
   }
 
   const code = generateEmailOtpCode();
