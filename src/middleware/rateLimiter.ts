@@ -1,5 +1,8 @@
 import { Request } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
+import { config } from '../config';
+import { JwtPayload } from '../types/auth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,6 +37,33 @@ function isTrustedTraffic(req: Request): boolean {
   if (req.path === '/health') return true;
 
   return false;
+}
+
+/**
+ * Skip rate limiting for admin user IDs by decoding+verifying the JWT directly
+ * from cookies/headers, BEFORE any auth middleware has run. This lets the
+ * limiter keep running first (preserves CPU-DoS protection on bad tokens)
+ * while still letting admin accounts iterate freely.
+ *
+ * Bound to specific dedicated limiters below — do NOT attach this to shared
+ * limiters reused on unauthenticated routes like /auth/reset-password.
+ * Signature verification is required: bare jwt.decode would let an attacker
+ * forge a payload claiming admin and bypass the limit.
+ */
+function isAdminBypassFromToken(req: Request): boolean {
+  try {
+    const authHeader = req.headers.authorization;
+    const bearer = authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+    const cookieToken = (req as { cookies?: { authToken?: string } }).cookies?.authToken;
+    const token = bearer || cookieToken;
+    if (!token || typeof token !== 'string') return false;
+    const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    return config.waitlistAdminUserIds.includes(payload.userId);
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +139,32 @@ export const mfaSendLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: ipOnlyKey,
+});
+
+/**
+ * Change-email-only variants. Same limits and IP keying as the shared
+ * mfaSend/Verify limiters, but with admin bypass via signed-JWT decode.
+ * Kept as separate exports so the bypass cannot accidentally leak onto
+ * unauthenticated reset-password / forgot-password flows.
+ */
+export const mfaSendLimiterChangeEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProd ? 3 : 50,
+  message: { error: 'Too many code requests. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipOnlyKey,
+  skip: isAdminBypassFromToken,
+});
+
+export const mfaVerifyLimiterChangeEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProd ? 5 : 50,
+  message: { error: 'Too many verification attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipOnlyKey,
+  skip: isAdminBypassFromToken,
 });
 
 /** Waitlist join. 2/hour prod per IP. */
