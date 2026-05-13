@@ -21,7 +21,7 @@ import {
   testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
 import { requireAuthAllowUnverified } from '../middleware/auth.middleware';
-import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter } from '../middleware/rateLimiter';
+import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter, mfaSendLimiterChangeEmail, mfaVerifyLimiterChangeEmail } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
 import oauthRoutes from './oauth.routes';
 
@@ -83,11 +83,14 @@ router.post('/change-password', mutationLimiter, requireAuthAllowUnverified, cha
 // POST /auth/change-username - Change username and reissue auth cookies
 router.post('/change-username', mutationLimiter, requireAuthAllowUnverified, changeUsernameHandler);
 
-// POST /auth/request-email-change - Step 1: verify current password, email a code to the new address
-router.post('/request-email-change', mfaSendLimiter, requireAuthAllowUnverified, requestEmailChangeHandler);
+// POST /auth/request-email-change - Step 1: verify current password, email a code to the new address.
+// Limiter first (matches reset-password / forgot-password ordering — protects CPU on bad tokens).
+// Uses a dedicated mfaSendLimiterChangeEmail whose admin-bypass decodes the JWT inline; the bypass
+// cannot leak onto reset-password because that route uses the un-bypassed mfaSendLimiter.
+router.post('/request-email-change', mfaSendLimiterChangeEmail, requireAuthAllowUnverified, requestEmailChangeHandler);
 
-// POST /auth/confirm-email-change - Step 2: verify the code and apply the new email
-router.post('/confirm-email-change', mfaVerifyLimiter, requireAuthAllowUnverified, confirmEmailChangeHandler);
+// POST /auth/confirm-email-change - Step 2: verify the code and apply the new email.
+router.post('/confirm-email-change', mfaVerifyLimiterChangeEmail, requireAuthAllowUnverified, confirmEmailChangeHandler);
 
 // DELETE /auth/delete-account - Permanently delete account (allow unverified)
 router.delete('/delete-account', mutationLimiter, requireAuthAllowUnverified, deleteAccountHandler);
