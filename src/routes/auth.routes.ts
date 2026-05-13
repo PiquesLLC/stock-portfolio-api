@@ -9,6 +9,8 @@ import {
   checkUsernameHandler,
   changePasswordHandler,
   changeUsernameHandler,
+  requestEmailChangeHandler,
+  confirmEmailChangeHandler,
   deleteAccountHandler,
   refreshHandler,
   verifyEmailHandler,
@@ -80,6 +82,12 @@ router.post('/change-password', mutationLimiter, requireAuthAllowUnverified, cha
 
 // POST /auth/change-username - Change username and reissue auth cookies
 router.post('/change-username', mutationLimiter, requireAuthAllowUnverified, changeUsernameHandler);
+
+// POST /auth/request-email-change - Step 1: verify current password, email a code to the new address
+router.post('/request-email-change', mfaSendLimiter, requireAuthAllowUnverified, requestEmailChangeHandler);
+
+// POST /auth/confirm-email-change - Step 2: verify the code and apply the new email
+router.post('/confirm-email-change', mfaVerifyLimiter, requireAuthAllowUnverified, confirmEmailChangeHandler);
 
 // DELETE /auth/delete-account - Permanently delete account (allow unverified)
 router.delete('/delete-account', mutationLimiter, requireAuthAllowUnverified, deleteAccountHandler);
