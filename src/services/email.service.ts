@@ -120,6 +120,37 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
   });
 }
 
+export async function sendEmailChangeVerification(to: string, code: string): Promise<void> {
+  // Non-production capture so CI / local smoke tests can read the code.
+  if (process.env.NODE_ENV !== 'production') {
+    capturedEmailVerificationCodes.set(to.trim().toLowerCase(), {
+      code,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+  }
+
+  const r = getResend();
+  if (!r) {
+    console.log(`[Email] Dev mode — email-change verification code for ${to}: ${code}`);
+    return;
+  }
+  await r.emails.send({
+    from: `Nala <${config.resendFromEmail}>`,
+    to,
+    subject: 'Confirm your new Nala email address',
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
+        <h2 style="color: #00c805; margin: 0 0 24px;">Nala</h2>
+        <p style="color: #333; font-size: 16px; margin: 0 0 8px;">Confirm this address with the following code:</p>
+        <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #111; margin: 16px 0; font-family: monospace;">${code}</p>
+        <p style="color: #666; font-size: 14px; margin: 16px 0 0;">This code expires in 10 minutes. If you didn't request this, you can safely ignore this email — your existing account is unchanged until you enter the code.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+        <p style="color: #999; font-size: 12px; margin: 0;">Piques LLC</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendUsernameReminderEmail(to: string, username: string): Promise<void> {
   const safeUsername = escapeHtml(username);
   const r = getResend();
