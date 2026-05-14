@@ -12,7 +12,10 @@ import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmai
 const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
-export const REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS = 30_000;
+// Was 30s. Bumped to 5 min so users mid-rotation across a deploy (which wipes
+// the in-memory cache) still have a wide window for the DB-backed fallback to
+// recover them — see RefreshRotationCache.
+export const REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS = 5 * 60 * 1000;
 
 type RefreshRotationResult = { accessToken: string; refreshToken: string; payload: JwtPayload };
 type PendingRefreshRotationCacheEntry = {
@@ -111,6 +114,91 @@ function settleRefreshRotation(
     consumed: false,
   });
   pending.resolve(payload);
+  // Mirror the settled rotation to the DB so a concurrent refresh that arrives
+  // AFTER a redeploy (in-memory cache empty) can still find it. Fire-and-forget
+  // — must never block the rotation response.
+  persistSettledRotationToDB(oldTokenHash, payload, pending.userId, pending.family).catch(() => {
+    // non-fatal; in-memory cache still satisfies same-process concurrent requests
+  });
+}
+
+/**
+ * Mirror a settled rotation to the DB. Uses upsert so a retry of the same
+ * rotation (same oldTokenHash) refreshes the row instead of erroring.
+ * Plaintext newToken on disk is acceptable: it already lives in the in-memory
+ * cache for the same window, and lifetime is bounded to one grace window.
+ */
+async function persistSettledRotationToDB(
+  oldTokenHash: string,
+  payload: RefreshRotationResult,
+  userId: string,
+  family: string
+): Promise<void> {
+  await prisma.refreshRotationCache.upsert({
+    where: { oldTokenHash },
+    create: {
+      oldTokenHash,
+      newToken: payload.refreshToken,
+      payloadJson: JSON.stringify(payload.payload),
+      userId,
+      family,
+      consumed: false,
+    },
+    update: {
+      newToken: payload.refreshToken,
+      payloadJson: JSON.stringify(payload.payload),
+      userId,
+      family,
+      consumed: false,
+      createdAt: new Date(),
+    },
+  });
+  // Opportunistic cleanup of rows older than 2 grace windows.
+  const cutoff = new Date(Date.now() - REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS * 2);
+  await prisma.refreshRotationCache.deleteMany({ where: { createdAt: { lt: cutoff } } });
+}
+
+/**
+ * DB-backed fallback for `recoverRecentRefreshRotation` when the in-memory
+ * cache misses (e.g. after a redeploy). Verifies the cached row is for the
+ * correct user/family, not consumed, within the grace window, AND that an
+ * active sibling refresh token still exists in the family. Marks the row
+ * consumed on success to prevent unbounded replay.
+ */
+async function recoverRefreshRotationFromDB(
+  oldTokenHash: string,
+  userId: string,
+  family: string,
+  payload: JwtPayload
+): Promise<RefreshRotationResult | null> {
+  const row = await prisma.refreshRotationCache.findUnique({ where: { oldTokenHash } });
+  if (!row) return null;
+  if (row.userId !== userId || row.family !== family) return null;
+  if (row.consumed) return null;
+  const ageMs = Date.now() - row.createdAt.getTime();
+  if (ageMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) return null;
+
+  // Belt and suspenders: confirm there's still an active token in the family.
+  // If the family has been fully revoked (e.g., changePassword/resetPassword),
+  // we should NOT resurrect the session.
+  const activeFamilyToken = await prisma.refreshToken.findFirst({
+    where: { userId, family, revokedAt: null, expiresAt: { gt: new Date() } },
+    select: { id: true },
+  });
+  if (!activeFamilyToken) return null;
+
+  // Atomic consume: only one concurrent request wins.
+  const claim = await prisma.refreshRotationCache.updateMany({
+    where: { id: row.id, consumed: false },
+    data: { consumed: true },
+  });
+  if (claim.count === 0) return null;
+
+  return {
+    accessToken: generateAccessToken(payload),
+    refreshToken: row.newToken,
+    payload,
+  };
 }
 
 function clearPendingRefreshRotation(oldTokenHash: string, pending: PendingRefreshRotationCacheEntry): void {
@@ -132,6 +220,11 @@ function invalidateRecentRefreshRotations(params: { userId?: string; family?: st
       recentRefreshRotations.delete(tokenHash);
     }
   }
+  // Mirror invalidation to the DB. Non-fatal on failure.
+  const where: Record<string, string> = {};
+  if (userId) where.userId = userId;
+  if (family) where.family = family;
+  prisma.refreshRotationCache.deleteMany({ where }).catch(() => {});
 }
 
 async function recoverRecentRefreshRotation(
@@ -141,7 +234,11 @@ async function recoverRecentRefreshRotation(
   payload: JwtPayload
 ): Promise<RefreshRotationResult | null> {
   const cached = recentRefreshRotations.get(oldTokenHash);
-  if (!cached) return null;
+  if (!cached) {
+    // In-memory cache miss (typical after a redeploy). Fall through to the
+    // DB-backed cache so cross-deploy rotation races don't kill sessions.
+    return recoverRefreshRotationFromDB(oldTokenHash, userId, family, payload);
+  }
   if (cached.userId !== userId || cached.family !== family) return null;
   if (Date.now() - cached.createdAtMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) {
     recentRefreshRotations.delete(oldTokenHash);

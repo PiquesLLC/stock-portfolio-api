@@ -319,6 +319,34 @@ model EmailOtpCode {
   @@index([expiresAt])
 }
 
+// Persistent cache for in-flight refresh-token rotations.
+//
+// The auth service has an in-memory Map of recently-settled rotations so that
+// concurrent refresh requests from multiple tabs can all receive the same new
+// refresh token. That Map is process-local and wiped on every redeploy, which
+// caused waves of sign-outs whenever we shipped frequently. Mirroring the
+// settled rotations to this table lets the recovery path survive container
+// restarts: a tab whose refresh request lands seconds after a deploy can still
+// look up the cached new token instead of getting 401'd.
+//
+// Rows live only as long as REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS (5 min) and
+// are pruned opportunistically by `cleanupExpiredRefreshRotations()` on every
+// rotation call. Plaintext `newToken` is acceptable because the same plaintext
+// already lives in the in-memory cache; on-disk lifetime is short by design.
+model RefreshRotationCache {
+  id            String   @id @default(uuid())
+  oldTokenHash  String   @unique
+  newToken      String   // plaintext rotation result — short-lived
+  payloadJson   String   // serialized JwtPayload for re-issuing access tokens
+  userId        String
+  family        String
+  consumed      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
 // Pending primary-email change for two-step verify flow.
 // Distinct from EmailOtpCode because we need to remember the *target* email
 // to apply once the code is verified (the User row still holds the old email
