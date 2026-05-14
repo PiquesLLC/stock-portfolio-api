@@ -75,6 +75,11 @@ export const config = {
   // JWT Authentication
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  // 30 days. Refresh tokens slide on every rotation, so for active users this
+  // is effectively a never-expiring session. The hard cap only matters for
+  // users idle for the full window. Kept at 30d (not bumped) to avoid widening
+  // the blast radius of any stolen refresh token; the rotation-cache fix is
+  // what stops deploy-driven signouts.
   refreshTokenExpiresInDays: parseInt(process.env.REFRESH_TOKEN_EXPIRES_IN_DAYS || '30', 10),
 
   // Alpha Vantage API
