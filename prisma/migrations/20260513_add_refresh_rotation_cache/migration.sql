@@ -2,12 +2,13 @@
 CREATE TABLE "RefreshRotationCache" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "oldTokenHash" TEXT NOT NULL,
-    "newToken" TEXT NOT NULL,
+    "newTokenCipher" TEXT NOT NULL,
     "payloadJson" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "family" TEXT NOT NULL,
     "consumed" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "RefreshRotationCache_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateIndex

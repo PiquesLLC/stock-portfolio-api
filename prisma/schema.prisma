@@ -126,6 +126,7 @@ model User {
   mfaBackupCodes         MfaBackupCode[]
   emailOtpCodes          EmailOtpCode[]
   pendingEmailChanges    PendingEmailChange[]
+  refreshRotationCache   RefreshRotationCache[]
   leaderboardCaches      LeaderboardCache[]
   priceAlerts            PriceAlert[]
   stockFollows           StockFollow[]
@@ -336,9 +337,14 @@ model EmailOtpCode {
 model RefreshRotationCache {
   id            String   @id @default(uuid())
   oldTokenHash  String   @unique
-  newToken      String   // plaintext rotation result — short-lived
-  payloadJson   String   // serialized JwtPayload for re-issuing access tokens
+  // AES-256-GCM ciphertext of the new refresh token (iv || tag || ciphertext,
+  // base64-encoded). Key is derived from JWT_SECRET. DB backups / replicas
+  // therefore never carry plaintext refresh tokens, only ciphertext that's
+  // useless without the JWT secret.
+  newTokenCipher String
+  payloadJson   String   // serialized JwtPayload (pre-stringified) for re-issuing access tokens
   userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   family        String
   consumed      Boolean  @default(false)
   createdAt     DateTime @default(now())
