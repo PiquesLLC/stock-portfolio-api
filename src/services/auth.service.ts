@@ -12,7 +12,10 @@ import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmai
 const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
-export const REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS = 30_000;
+// Was 30s. Bumped to 5 min so users mid-rotation across a deploy (which wipes
+// the in-memory cache) still have a wide window for the DB-backed fallback to
+// recover them — see RefreshRotationCache.
+export const REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS = 5 * 60 * 1000;
 
 type RefreshRotationResult = { accessToken: string; refreshToken: string; payload: JwtPayload };
 type PendingRefreshRotationCacheEntry = {
@@ -111,6 +114,145 @@ function settleRefreshRotation(
     consumed: false,
   });
   pending.resolve(payload);
+  // Mirror the settled rotation to the DB so a concurrent refresh that arrives
+  // AFTER a redeploy (in-memory cache empty) can still find it. Fire-and-forget
+  // — must never block the rotation response.
+  persistSettledRotationToDB(oldTokenHash, payload, pending.userId, pending.family).catch(() => {
+    // non-fatal; in-memory cache still satisfies same-process concurrent requests
+  });
+}
+
+/**
+ * Derive a 32-byte AES key from JWT_SECRET. Using a labeled domain separator so
+ * the same secret can't be misused as both signing key and KEK without intent.
+ */
+function deriveRotationCacheKey(): Buffer {
+  return crypto.createHash('sha256').update(config.jwtSecret).update('rotation-cache:v1').digest();
+}
+
+/** AES-256-GCM encrypt a refresh token. Returns base64(iv || authTag || ciphertext). */
+function encryptRotationToken(plain: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', deriveRotationCacheKey(), iv);
+  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ct]).toString('base64');
+}
+
+/** Inverse of encryptRotationToken. Returns null on tamper/corruption. */
+function decryptRotationToken(encoded: string): string | null {
+  try {
+    const buf = Buffer.from(encoded, 'base64');
+    if (buf.length < 12 + 16 + 1) return null;
+    const iv = buf.subarray(0, 12);
+    const tag = buf.subarray(12, 28);
+    const ct = buf.subarray(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', deriveRotationCacheKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Throttle the opportunistic cleanup of expired rotation-cache rows. SQLite is
+// single-writer; without throttling, every settled rotation under high QPS
+// would queue a deleteMany, contending for the write lock.
+let lastRotationCacheCleanupMs = 0;
+const ROTATION_CACHE_CLEANUP_INTERVAL_MS = 60_000;
+
+/**
+ * Mirror a settled rotation to the DB. The plaintext refresh token is
+ * encrypted at rest with a key derived from JWT_SECRET, so DB backups /
+ * replicas don't carry usable tokens.
+ */
+async function persistSettledRotationToDB(
+  oldTokenHash: string,
+  payload: RefreshRotationResult,
+  userId: string,
+  family: string
+): Promise<void> {
+  const cipher = encryptRotationToken(payload.refreshToken);
+  await prisma.refreshRotationCache.upsert({
+    where: { oldTokenHash },
+    create: {
+      oldTokenHash,
+      newTokenCipher: cipher,
+      payloadJson: JSON.stringify(payload.payload),
+      userId,
+      family,
+      consumed: false,
+    },
+    update: {
+      newTokenCipher: cipher,
+      payloadJson: JSON.stringify(payload.payload),
+      userId,
+      family,
+      consumed: false,
+      createdAt: new Date(),
+    },
+  });
+  // Throttled opportunistic cleanup of rows older than 2 grace windows.
+  const nowMs = Date.now();
+  if (nowMs - lastRotationCacheCleanupMs >= ROTATION_CACHE_CLEANUP_INTERVAL_MS) {
+    lastRotationCacheCleanupMs = nowMs;
+    const cutoff = new Date(nowMs - REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS * 2);
+    prisma.refreshRotationCache
+      .deleteMany({ where: { createdAt: { lt: cutoff } } })
+      .catch((err) => {
+        console.warn('[rotation-cache] cleanup failed:', err instanceof Error ? err.message : String(err));
+      });
+  }
+}
+
+/**
+ * DB-backed fallback for `recoverRecentRefreshRotation` when the in-memory
+ * cache misses (e.g. after a redeploy). Verifies the cached row is for the
+ * correct user/family, not consumed, within the grace window, AND that an
+ * active sibling refresh token still exists in the family. Marks the row
+ * consumed on success to prevent unbounded replay.
+ */
+async function recoverRefreshRotationFromDB(
+  oldTokenHash: string,
+  userId: string,
+  family: string,
+  payload: JwtPayload
+): Promise<RefreshRotationResult | null> {
+  const row = await prisma.refreshRotationCache.findUnique({ where: { oldTokenHash } });
+  if (!row) return null;
+  if (row.userId !== userId || row.family !== family) return null;
+  if (row.consumed) return null;
+  const ageMs = Date.now() - row.createdAt.getTime();
+  if (ageMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) return null;
+
+  // Belt and suspenders: confirm there's still an active token in the family.
+  // If the family has been fully revoked (e.g., changePassword/resetPassword),
+  // we should NOT resurrect the session.
+  const activeFamilyToken = await prisma.refreshToken.findFirst({
+    where: { userId, family, revokedAt: null, expiresAt: { gt: new Date() } },
+    select: { id: true },
+  });
+  if (!activeFamilyToken) return null;
+
+  // Atomic consume: only one concurrent request wins.
+  const claim = await prisma.refreshRotationCache.updateMany({
+    where: { id: row.id, consumed: false },
+    data: { consumed: true },
+  });
+  if (claim.count === 0) return null;
+
+  const plaintext = decryptRotationToken(row.newTokenCipher);
+  if (!plaintext) {
+    // Decryption failure means the row was written under a different secret
+    // or got corrupted — refuse to resurrect rather than handing back garbage.
+    return null;
+  }
+
+  return {
+    accessToken: generateAccessToken(payload),
+    refreshToken: plaintext,
+    payload,
+  };
 }
 
 function clearPendingRefreshRotation(oldTokenHash: string, pending: PendingRefreshRotationCacheEntry): void {
@@ -132,6 +274,14 @@ function invalidateRecentRefreshRotations(params: { userId?: string; family?: st
       recentRefreshRotations.delete(tokenHash);
     }
   }
+  // Mirror invalidation to the DB. Non-fatal on failure but logged — a silent
+  // swallow could let a row persist that another replica then resurrects.
+  const where: Record<string, string> = {};
+  if (userId) where.userId = userId;
+  if (family) where.family = family;
+  prisma.refreshRotationCache.deleteMany({ where }).catch((err) => {
+    console.warn('[rotation-cache] invalidate mirror failed:', err instanceof Error ? err.message : String(err));
+  });
 }
 
 async function recoverRecentRefreshRotation(
@@ -141,7 +291,11 @@ async function recoverRecentRefreshRotation(
   payload: JwtPayload
 ): Promise<RefreshRotationResult | null> {
   const cached = recentRefreshRotations.get(oldTokenHash);
-  if (!cached) return null;
+  if (!cached) {
+    // In-memory cache miss (typical after a redeploy). Fall through to the
+    // DB-backed cache so cross-deploy rotation races don't kill sessions.
+    return recoverRefreshRotationFromDB(oldTokenHash, userId, family, payload);
+  }
   if (cached.userId !== userId || cached.family !== family) return null;
   if (Date.now() - cached.createdAtMs > REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS) {
     recentRefreshRotations.delete(oldTokenHash);
@@ -188,6 +342,15 @@ async function recoverRecentRefreshRotation(
   }
 
   cached.consumed = true;
+  // Mirror the consume to the DB row (if any) so a subsequent recover
+  // attempt against the same oldTokenHash on another container after a
+  // redeploy can't replay it again. Fire-and-forget; the in-memory
+  // consume is the source of truth for same-process protection.
+  prisma.refreshRotationCache
+    .updateMany({ where: { oldTokenHash, consumed: false }, data: { consumed: true } })
+    .catch((err) => {
+      console.warn('[rotation-cache] mirror-consume failed:', err instanceof Error ? err.message : String(err));
+    });
 
   return {
     accessToken: generateAccessToken(payload),
@@ -342,7 +505,8 @@ export async function rotateRefreshToken(
   const payload = buildPayload();
 
   if (stored.revokedAt) {
-    // Loser of a refresh race can recover within 30s via in-memory cache.
+    // Loser of a refresh race can recover within the grace window via the
+    // rotation cache (in-memory + DB-backed fallback for cross-deploy recovery).
     // Tradeoff: a stolen, already-rotated refresh token can yield one more
     // access token plus the same replacement refresh token during that window.
     // Acceptable for cross-tab UX; outside the window we revoke the family.

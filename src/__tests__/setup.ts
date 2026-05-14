@@ -30,6 +30,13 @@ vi.mock('../utils/prisma', () => {
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
+    refreshRotationCache: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     portfolio: { findFirst: vi.fn().mockResolvedValue({ id: 'default-portfolio-id', name: 'Default', isDefault: true, userId: 'test-user-1' }), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     holding: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), upsert: vi.fn(), delete: vi.fn() },
     portfolioTrade: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
