@@ -13,6 +13,10 @@ node -e "
       await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"UserBlock_blockerId_blockedId_key\" ON \"UserBlock\"(\"blockerId\", \"blockedId\")');
       await client.execute('CREATE TABLE IF NOT EXISTS \"ValueRadarCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"ticker\" TEXT NOT NULL, \"avgPE\" REAL, \"peHistoryJson\" TEXT, \"yearsOfData\" INTEGER, \"lastFetchedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
       await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_key\" ON \"ValueRadarCache\"(\"ticker\")');
+      await client.execute('CREATE TABLE IF NOT EXISTS \"RefreshRotationCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"oldTokenHash\" TEXT NOT NULL, \"newTokenCipher\" TEXT NOT NULL, \"payloadJson\" TEXT NOT NULL, \"userId\" TEXT NOT NULL, \"family\" TEXT NOT NULL, \"consumed\" BOOLEAN NOT NULL DEFAULT false, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"RefreshRotationCache_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
+      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"RefreshRotationCache_oldTokenHash_key\" ON \"RefreshRotationCache\"(\"oldTokenHash\")');
+      await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_userId_idx\" ON \"RefreshRotationCache\"(\"userId\")');
+      await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_createdAt_idx\" ON \"RefreshRotationCache\"(\"createdAt\")');
       console.log('[Startup] Critical tables ensured');
     } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
   })();
@@ -96,6 +100,11 @@ else
         await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_key\" ON \"ValueRadarCache\"(\"ticker\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_idx\" ON \"ValueRadarCache\"(\"ticker\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"ValueRadarCache_lastFetchedAt_idx\" ON \"ValueRadarCache\"(\"lastFetchedAt\")');
+        // Ensure RefreshRotationCache table (May 13 migration — refresh-token rotation cache)
+        await client.execute('CREATE TABLE IF NOT EXISTS \"RefreshRotationCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"oldTokenHash\" TEXT NOT NULL, \"newTokenCipher\" TEXT NOT NULL, \"payloadJson\" TEXT NOT NULL, \"userId\" TEXT NOT NULL, \"family\" TEXT NOT NULL, \"consumed\" BOOLEAN NOT NULL DEFAULT false, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"RefreshRotationCache_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
+        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"RefreshRotationCache_oldTokenHash_key\" ON \"RefreshRotationCache\"(\"oldTokenHash\")');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_userId_idx\" ON \"RefreshRotationCache\"(\"userId\")');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_createdAt_idx\" ON \"RefreshRotationCache\"(\"createdAt\")');
         console.log('[Migration Fix] Column + table check complete');
       } catch (e) {
         console.error('[Migration Fix] Failed:', e.message);
