@@ -17,6 +17,9 @@ node -e "
       await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"RefreshRotationCache_oldTokenHash_key\" ON \"RefreshRotationCache\"(\"oldTokenHash\")');
       await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_userId_idx\" ON \"RefreshRotationCache\"(\"userId\")');
       await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_createdAt_idx\" ON \"RefreshRotationCache\"(\"createdAt\")');
+      await client.execute('CREATE TABLE IF NOT EXISTS \"PendingEmailChange\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"newEmail\" TEXT NOT NULL, \"codeHash\" TEXT NOT NULL, \"expiresAt\" DATETIME NOT NULL, \"usedAt\" DATETIME, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"PendingEmailChange_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
+      await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_userId_idx\" ON \"PendingEmailChange\"(\"userId\")');
+      await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_expiresAt_idx\" ON \"PendingEmailChange\"(\"expiresAt\")');
       console.log('[Startup] Critical tables ensured');
     } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
   })();
@@ -33,6 +36,8 @@ npx prisma migrate resolve --applied 20260324_add_monitoring_reports 2>&1 || tru
 npx prisma migrate resolve --applied 20260324_add_stripe_indexes 2>&1 || true
 npx prisma migrate resolve --applied 20260325_add_user_block 2>&1 || true
 npx prisma migrate resolve --applied 20260327_add_value_radar_cache 2>&1 || true
+npx prisma migrate resolve --applied 20260513_add_refresh_rotation_cache 2>&1 || true
+npx prisma migrate resolve --applied 20260513_add_pending_email_change 2>&1 || true
 
 echo "=== Prisma migrate deploy ==="
 if npx prisma migrate deploy 2>&1; then
@@ -105,6 +110,10 @@ else
         await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"RefreshRotationCache_oldTokenHash_key\" ON \"RefreshRotationCache\"(\"oldTokenHash\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_userId_idx\" ON \"RefreshRotationCache\"(\"userId\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_createdAt_idx\" ON \"RefreshRotationCache\"(\"createdAt\")');
+        // Ensure PendingEmailChange table (May 13 migration — two-step email change)
+        await client.execute('CREATE TABLE IF NOT EXISTS \"PendingEmailChange\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"newEmail\" TEXT NOT NULL, \"codeHash\" TEXT NOT NULL, \"expiresAt\" DATETIME NOT NULL, \"usedAt\" DATETIME, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"PendingEmailChange_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_userId_idx\" ON \"PendingEmailChange\"(\"userId\")');
+        await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_expiresAt_idx\" ON \"PendingEmailChange\"(\"expiresAt\")');
         console.log('[Migration Fix] Column + table check complete');
       } catch (e) {
         console.error('[Migration Fix] Failed:', e.message);
