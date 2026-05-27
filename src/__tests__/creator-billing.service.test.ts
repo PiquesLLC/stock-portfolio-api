@@ -318,10 +318,13 @@ describe('creator billing webhooks', () => {
       },
     } as any);
 
+    // Legacy destination-charge entries are tagged with :legacy_destination so
+    // getPayoutBalance excludes them — Stripe has already auto-transferred 80%
+    // to the creator's Connect account. See audit C1.
     expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          description: 'stripe_event:evt_paid_odd_invoice:creator_share',
+          description: 'stripe_event:evt_paid_odd_invoice:creator_share:legacy_destination',
           amountCents: 8001,
         }),
       })
@@ -329,7 +332,7 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          description: 'stripe_event:evt_paid_odd_invoice:platform_fee',
+          description: 'stripe_event:evt_paid_odd_invoice:platform_fee:legacy_destination',
           amountCents: 2000,
         }),
       })
