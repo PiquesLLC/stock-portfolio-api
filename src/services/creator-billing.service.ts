@@ -385,8 +385,17 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           if (!sub) return;
         }
 
-        const creatorEventKey = `stripe_event:${event.id}:creator_share`;
-        const platformEventKey = `stripe_event:${event.id}:platform_fee`;
+        const invoiceWithFee = invoice as Stripe.Invoice & { application_fee_amount?: number | null };
+        // Legacy destination-charge subs created before the audit-C1 fix still carry
+        // transfer_data on the Stripe subscription, so their invoices have an
+        // application_fee_amount and 80% has ALREADY been auto-transferred to the
+        // creator's Connect account by Stripe. Mark those ledger rows with a
+        // ':legacy_destination' suffix so getPayoutBalance can exclude them — otherwise
+        // requestPayout would transfer the same 80% a second time from platform balance.
+        const isLegacyDestinationCharge = typeof invoiceWithFee.application_fee_amount === 'number';
+        const legacySuffix = isLegacyDestinationCharge ? ':legacy_destination' : '';
+        const creatorEventKey = `stripe_event:${event.id}:creator_share${legacySuffix}`;
+        const platformEventKey = `stripe_event:${event.id}:platform_fee${legacySuffix}`;
         const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
           where: {
             creatorUserId: sub.creatorUserId,
@@ -399,7 +408,6 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         });
         if (alreadyCredited) return;
 
-        const invoiceWithFee = invoice as Stripe.Invoice & { application_fee_amount?: number | null };
         const { creatorCents: creatorShare, platformCents: platformShare } = splitCreatorRevenueCents(
           amountPaid,
           invoiceWithFee.application_fee_amount
@@ -890,12 +898,15 @@ async function getLedgerBalanceFromClient(
 
   const entries = await client.creatorWalletLedger.findMany({
     where: { creatorUserId: userId },
-    select: { type: true, amountCents: true },
+    select: { type: true, amountCents: true, description: true },
     orderBy: { createdAt: 'asc' },
   });
 
   let balance = 0;
   for (const entry of entries) {
+    // Skip legacy destination-charge entries — funds already auto-transferred
+    // to the creator's Connect account by Stripe (see audit C1 / invoice.paid handler).
+    if (entry.description && entry.description.includes(':legacy_destination')) continue;
     if (entry.type === 'earning') balance += Math.abs(entry.amountCents);
     if (entry.type === 'payout' || entry.type === 'refund') balance -= Math.abs(entry.amountCents);
   }

@@ -462,11 +462,16 @@ export async function getLockedContent(
 export async function getPayoutBalanceFromLedger(userId: string): Promise<number> {
   const entries = await prisma.creatorWalletLedger.findMany({
     where: { creatorUserId: userId },
-    select: { type: true, amountCents: true },
+    select: { type: true, amountCents: true, description: true },
   });
 
   let balance = 0;
   for (const entry of entries) {
+    // Skip legacy destination-charge entries — funds already auto-transferred
+    // to the creator's Connect account by Stripe at invoice.paid time, so
+    // including them in the available-payout balance would cause a double-pay
+    // when requestPayout subsequently calls stripe.transfers.create. See audit C1.
+    if (entry.description && entry.description.includes(':legacy_destination')) continue;
     if (entry.type === 'earning') balance += Math.abs(entry.amountCents);
     if (entry.type === 'payout' || entry.type === 'refund') balance -= Math.abs(entry.amountCents);
   }
