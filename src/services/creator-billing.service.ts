@@ -394,8 +394,14 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // requestPayout would transfer the same 80% a second time from platform balance.
         const isLegacyDestinationCharge = typeof invoiceWithFee.application_fee_amount === 'number';
         const legacySuffix = isLegacyDestinationCharge ? ':legacy_destination' : '';
-        const creatorEventKey = `stripe_event:${event.id}:creator_share${legacySuffix}`;
-        const platformEventKey = `stripe_event:${event.id}:platform_fee${legacySuffix}`;
+        // Embed the chargeId so dispute / refund handlers can look up the original
+        // earning by charge id (description.contains('charge:${chargeId}')). Falls
+        // back to no segment if Stripe didn't populate charge (shouldn't happen on
+        // invoice.paid but defensive).
+        const invoiceChargeId = typeof invoice.charge === 'string' ? invoice.charge : '';
+        const chargeSegment = invoiceChargeId ? `:charge:${invoiceChargeId}` : '';
+        const creatorEventKey = `stripe_event:${event.id}${chargeSegment}:creator_share${legacySuffix}`;
+        const platformEventKey = `stripe_event:${event.id}${chargeSegment}:platform_fee${legacySuffix}`;
         const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
           where: {
             creatorUserId: sub.creatorUserId,
@@ -754,6 +760,21 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
     }
   } catch (error) {
+    // P2002 = unique violation on CreatorWalletLedger.(creatorUserId, description).
+    // Means a concurrent webhook delivery already wrote the row we just attempted.
+    // Treat as already-processed: keep the idempotency marker (so Stripe stops
+    // retrying) and return 2xx without rethrowing. This is the entire point of
+    // the DB-level uniqueness constraint.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      bumpCounter('deduped');
+      logCreatorBilling({
+        outcome: 'deduped',
+        eventId: event.id,
+        eventType: event.type,
+        reason: 'P2002 unique violation — ledger entry already exists',
+      });
+      return;
+    }
     bumpCounter('failed');
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[CreatorWebhook] Failed processing event ${event.type} (${event.id}): ${msg}`);
@@ -982,7 +1003,9 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
         creatorUserId: userId,
         type: 'payout',
         amountCents: availableCents,
-        description: 'Payout requested',
+        // Each payout gets a distinct description so the (creatorUserId, description)
+        // unique constraint enforces "one ledger row per payout" at the DB level.
+        description: `payout:${payout.id}`,
       },
     });
 
