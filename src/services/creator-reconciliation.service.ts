@@ -86,7 +86,16 @@ export function analyzeCreatorLedgerConsistency(
   }>();
 
   for (const entry of entries) {
-    if ((entry.type === 'earning' || entry.type === 'platform_fee' || entry.type === 'refund') && !entry.subscriptionId) {
+    // Compensating earning rows written when a payout fails sync
+    // (`payout_reversal:<id>`) or a transfer is reversed
+    // (`transfer_reversed:<id>`) intentionally have no subscriptionId — they
+    // restore wallet balance for a transfer that has no per-subscription
+    // origin. Skip the missing-subscription check for these.
+    const isCompensationRow =
+      typeof entry.description === 'string' &&
+      (entry.description.startsWith('payout_reversal:') ||
+       entry.description.startsWith('transfer_reversed:'));
+    if (!isCompensationRow && (entry.type === 'earning' || entry.type === 'platform_fee' || entry.type === 'refund') && !entry.subscriptionId) {
       issues.push({
         code: 'missing_subscription_reference',
         severity: 'critical',

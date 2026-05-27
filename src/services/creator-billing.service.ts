@@ -381,7 +381,13 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               });
               sub = { id: created.id, creatorUserId };
             }
-          } catch { /* Stripe lookup failed — will be retried */ }
+          } catch (lookupErr) {
+            // Stripe lookup failure: re-throw so the outer catch deletes the
+            // CreatorWebhookEvent dedup row and Stripe retries. Silently
+            // returning here would permanently lose the invoice.paid event
+            // (no ledger credit, no creator earnings, no retry).
+            throw lookupErr;
+          }
           if (!sub) return;
         }
 
@@ -941,9 +947,12 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           select: { id: true, creatorUserId: true, amountCents: true, status: true },
         });
         if (!payout) {
-          console.warn(`[CreatorWebhook] transfer.reversed for unknown transferId ${transferId}`);
-          bumpCounter('processed');
-          return;
+          // Reversal arrived before requestPayout finished writing stripeTransferId
+          // (rare ms-window race). Throw so the outer catch deletes the dedup
+          // marker and Stripe retries — the 30s backoff is far longer than the
+          // race window. Silently swallowing here would permanently drop the
+          // reversal and leave the local wallet diverged from Stripe state.
+          throw new Error(`transfer.reversed for unknown transferId ${transferId}; will retry`);
         }
         if (payout.status === 'reversed' || payout.status === 'failed') {
           // Already reflected — idempotent skip. (Belt and suspenders; the DB
@@ -1258,7 +1267,13 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     throw txErr;
   }
 
-  // Initiate actual Stripe transfer to the creator's Connect account
+  // Initiate actual Stripe transfer to the creator's Connect account.
+  // CRITICAL: idempotencyKey scoped to payoutId. Without this, a TCP drop
+  // between our process and Stripe's API can leave a transfer created
+  // server-side while our catch block writes a payout_reversal earning row,
+  // letting the user re-trigger a second transfer for the same wallet
+  // balance. With the key, any retry returns the original transfer object
+  // — Stripe guarantees at-most-one transfer per idempotencyKey for 24h.
   try {
     const stripe = getStripeClient();
     const transfer = await stripe.transfers.create({
@@ -1267,6 +1282,8 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       destination: creator.stripeConnectId!,
       description: `Nala creator payout ${result.payoutId}`,
       metadata: { payoutId: result.payoutId, creatorUserId: userId },
+    }, {
+      idempotencyKey: `payout-${result.payoutId}`,
     });
     // Transfers are instant — mark as completed immediately
     await prisma.creatorPayout.update({
