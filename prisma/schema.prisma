@@ -720,6 +720,7 @@ model AnalystEvent {
   @@index([ticker])
   @@index([read])
   @@index([createdAt])
+  @@index([ticker, createdAt])
 }
 
 // Alpha Vantage fundamentals cache — one row per ticker, stores parsed JSON
