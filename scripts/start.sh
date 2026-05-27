@@ -36,10 +36,27 @@ node -e "
       // Partial unique index: at most one pending payout per creator
       // (migration 20260527_add_payout_pending_unique). Mirrors the migration
       // in case prisma migrate deploy fails. Idempotent on subsequent boots.
+      //
+      // Pre-clean: if duplicate pending rows exist from before the constraint
+      // (kill switch was off historically, or a TOCTOU did once fire), the
+      // CREATE UNIQUE INDEX would fail and we'd silently keep running WITHOUT
+      // the constraint. Mark all-but-the-oldest pending row per-creator as
+      // 'failed' first. The compensating earning entry is intentionally NOT
+      // written here — that would require knowing which payouts actually
+      // initiated a Stripe transfer vs. which were stuck pre-transfer. Ops can
+      // backfill manually after inspecting CreatorPayout history; the failure
+      // status alone is enough to unblock the index creation.
       try {
+        const dupResult = await client.execute(\"UPDATE \\\"CreatorPayout\\\" SET status = 'failed' WHERE status = 'pending' AND rowid NOT IN (SELECT MIN(rowid) FROM \\\"CreatorPayout\\\" WHERE status = 'pending' GROUP BY \\\"creatorUserId\\\")\");
+        if (dupResult.rowsAffected > 0) {
+          console.error('[Startup] WARNING: marked ' + dupResult.rowsAffected + ' duplicate pending CreatorPayout rows as failed to allow unique-index creation. Manual ledger reconciliation may be required.');
+        }
         await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"creator_payout_pending_unique\" ON \"CreatorPayout\"(\"creatorUserId\") WHERE \"status\" = \\'pending\\'');
       } catch (e) {
-        console.warn('[Startup] Payout pending unique-index setup non-fatal error:', e.message);
+        // Elevated to error (was warn) so this is visible in any log aggregator.
+        // The constraint is critical for payout safety — losing it silently is
+        // worse than crashing the boot.
+        console.error('[Startup] CRITICAL: Payout pending unique-index setup failed:', e.message);
       }
       console.log('[Startup] Critical tables ensured');
     } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
