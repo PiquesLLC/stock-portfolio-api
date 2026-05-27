@@ -589,9 +589,53 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         if (!sub) return;
 
         const reason = dispute.reason ?? 'unknown';
-        console.error(`[CreatorWebhook] Dispute created for subscription ${sub.id}: reason=${reason}`);
+        const disputeChargeId = typeof dispute.charge === 'string' ? dispute.charge : '';
+        console.error(`[CreatorWebhook] Dispute created for subscription ${sub.id}: reason=${reason}, chargeId=${disputeChargeId}`);
 
-        await prisma.$transaction([
+        // Locate the original earning + platform_fee for this charge so we can
+        // claw them back. Requires the post-20260527 ':charge:<id>' segment in
+        // descriptions — legacy rows without it can't be matched and the clawback
+        // degrades to "dispute fee only" with a warning log.
+        let originalEarning: { amountCents: number } | null = null;
+        let originalPlatform: { amountCents: number } | null = null;
+        let prevRefundedCreator = 0;
+        if (disputeChargeId) {
+          const chargeToken = `charge:${disputeChargeId}`;
+          [originalEarning, originalPlatform] = await Promise.all([
+            prisma.creatorWalletLedger.findFirst({
+              where: {
+                creatorUserId: sub.creatorUserId,
+                type: 'earning',
+                description: { contains: chargeToken },
+              },
+              select: { amountCents: true },
+              orderBy: { createdAt: 'desc' },
+            }),
+            prisma.creatorWalletLedger.findFirst({
+              where: {
+                creatorUserId: sub.creatorUserId,
+                type: 'platform_fee',
+                description: { contains: chargeToken },
+                amountCents: { gt: 0 }, // exclude prior negative platform_fee rows (refunds/clawbacks)
+              },
+              select: { amountCents: true },
+              orderBy: { createdAt: 'desc' },
+            }),
+          ]);
+          // If this charge was previously (partially) refunded, those debits
+          // already reduced the wallet — net them so we don't double-debit.
+          const prevRefunds = await prisma.creatorWalletLedger.findMany({
+            where: {
+              creatorUserId: sub.creatorUserId,
+              type: 'refund',
+              description: { contains: `${chargeToken}:refund_creator` },
+            },
+            select: { amountCents: true },
+          });
+          prevRefundedCreator = prevRefunds.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        }
+
+        const writes: Prisma.PrismaPromise<unknown>[] = [
           prisma.creatorSubscription.update({
             where: { id: sub.id },
             data: {
@@ -609,7 +653,39 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               description: `stripe_event:${event.id}:dispute_fee:${reason}`,
             },
           }),
-        ]);
+        ];
+
+        let clawbackAmountCents = 0;
+        if (originalEarning && originalEarning.amountCents > 0 && disputeChargeId) {
+          clawbackAmountCents = Math.max(0, originalEarning.amountCents - prevRefundedCreator);
+          if (clawbackAmountCents > 0) {
+            writes.push(prisma.creatorWalletLedger.create({
+              data: {
+                creatorUserId: sub.creatorUserId,
+                type: 'refund',
+                amountCents: -clawbackAmountCents,
+                subscriptionId: sub.id,
+                description: `stripe_event:${event.id}:charge:${disputeChargeId}:dispute_clawback_creator`,
+              },
+            }));
+          }
+        } else if (disputeChargeId) {
+          console.warn(`[CreatorWebhook] Dispute ${event.id} on charge ${disputeChargeId}: no matching earning row for sub ${sub.id} — clawback skipped, dispute fee only`);
+        }
+
+        if (originalPlatform && originalPlatform.amountCents > 0 && disputeChargeId) {
+          writes.push(prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: sub.creatorUserId,
+              type: 'platform_fee',
+              amountCents: -originalPlatform.amountCents,
+              subscriptionId: sub.id,
+              description: `stripe_event:${event.id}:charge:${disputeChargeId}:dispute_clawback_platform`,
+            },
+          }));
+        }
+
+        await prisma.$transaction(writes);
         bumpCounter('disputed');
         bumpCounter('processed');
         logCreatorBilling({
@@ -619,6 +695,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           creatorUserId: sub.creatorUserId,
           subscriptionId: sub.id,
           reason,
+          chargeId: disputeChargeId,
+          clawbackAmountCents,
         });
         return;
       }
@@ -648,15 +726,64 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
 
-          // Reverse the $15 dispute fee (original was type=refund:-1500, so add back as earning)
-          await prisma.creatorWalletLedger.create({
-            data: {
-              creatorUserId: sub.creatorUserId,
-              type: 'earning',
-              amountCents: 1500,
-              description: `stripe_event:${event.id}:dispute_fee_reversal`,
-            },
-          });
+          // Dispute won — restore the creator + platform clawback from
+          // dispute.created and reverse the $15 dispute fee.
+          const wonChargeId = typeof dispute.charge === 'string' ? dispute.charge : '';
+          const restoreWrites: Prisma.PrismaPromise<unknown>[] = [
+            // Reverse the $15 dispute fee (original was type=refund:-1500, so add back as earning)
+            prisma.creatorWalletLedger.create({
+              data: {
+                creatorUserId: sub.creatorUserId,
+                type: 'earning',
+                amountCents: 1500,
+                subscriptionId: sub.id,
+                description: `stripe_event:${event.id}:dispute_fee_reversal`,
+              },
+            }),
+          ];
+          if (wonChargeId) {
+            const [creatorClawback, platformClawback] = await Promise.all([
+              prisma.creatorWalletLedger.findFirst({
+                where: {
+                  creatorUserId: sub.creatorUserId,
+                  type: 'refund',
+                  description: { contains: `charge:${wonChargeId}:dispute_clawback_creator` },
+                },
+                select: { amountCents: true },
+              }),
+              prisma.creatorWalletLedger.findFirst({
+                where: {
+                  creatorUserId: sub.creatorUserId,
+                  type: 'platform_fee',
+                  description: { contains: `charge:${wonChargeId}:dispute_clawback_platform` },
+                },
+                select: { amountCents: true },
+              }),
+            ]);
+            if (creatorClawback && creatorClawback.amountCents < 0) {
+              restoreWrites.push(prisma.creatorWalletLedger.create({
+                data: {
+                  creatorUserId: sub.creatorUserId,
+                  type: 'earning',
+                  amountCents: Math.abs(creatorClawback.amountCents),
+                  subscriptionId: sub.id,
+                  description: `stripe_event:${event.id}:charge:${wonChargeId}:dispute_won_restore_creator`,
+                },
+              }));
+            }
+            if (platformClawback && platformClawback.amountCents < 0) {
+              restoreWrites.push(prisma.creatorWalletLedger.create({
+                data: {
+                  creatorUserId: sub.creatorUserId,
+                  type: 'platform_fee',
+                  amountCents: Math.abs(platformClawback.amountCents),
+                  subscriptionId: sub.id,
+                  description: `stripe_event:${event.id}:charge:${wonChargeId}:dispute_won_restore_platform`,
+                },
+              }));
+            }
+          }
+          await prisma.$transaction(restoreWrites);
         } else {
           await prisma.creatorSubscription.update({
             where: { id: sub.id },
