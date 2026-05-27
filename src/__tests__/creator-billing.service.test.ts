@@ -76,6 +76,7 @@ import {
   handleCreatorWebhookEvent,
   requestPayout,
 } from '../services/creator-billing.service';
+import { config } from '../config';
 
 function fixtureFactory(seed = '1') {
   const creatorUserId = `creator_${seed}`;
@@ -807,6 +808,28 @@ describe('creator billing webhooks', () => {
     expect(first.status).toBe('fulfilled');
     expect(second.status).toBe('rejected');
     expect(second.status === 'rejected' ? second.reason.message : '').toContain('Existing payout request is still pending');
+  });
+
+  it('blocks payouts with HTTP 503 when CREATOR_PAYOUTS_ENABLED is false', async () => {
+    const original = (config as any).creatorPayoutsEnabled;
+    (config as any).creatorPayoutsEnabled = false;
+    try {
+      const result = await requestPayout('creator_1').then(
+        () => ({ ok: true as const }),
+        (err: Error & { status?: number }) => ({ ok: false as const, message: err.message, status: err.status }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain('temporarily paused');
+        expect(result.status).toBe(503);
+      }
+      // Confirm no DB write happened — the throw is before the transaction.
+      expect((prismaMock as any).creator.findUnique).not.toHaveBeenCalled();
+      expect((prismaMock as any).creatorPayout.create).not.toHaveBeenCalled();
+      expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
+    } finally {
+      (config as any).creatorPayoutsEnabled = original;
+    }
   });
 
   it('handles subscription.updated before checkout.session.completed gracefully', async () => {
