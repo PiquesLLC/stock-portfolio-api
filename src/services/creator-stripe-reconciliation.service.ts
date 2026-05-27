@@ -2,12 +2,12 @@ import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 
-// Lookback covers settlement-tail and webhook-retry slack. 36h was chosen
+// Lookback covers settlement-tail and webhook-retry slack. 48h was chosen
 // because Stripe transfer `created` timestamps and our local `updatedAt`
 // can drift by 10-30 minutes across timezone-edge cases / webhook retries;
-// 12h cushion on each side keeps tooling stable without doubling the API
-// cost the way 48h would.
-const LOOKBACK_WINDOW_HOURS = 36;
+// keeping the local window 6h WIDER than Stripe's makes window-edge
+// false-positive missingTransfers extremely rare.
+const LOOKBACK_WINDOW_HOURS = 48;
 // Safety bound: bail rather than OOM the process if Stripe ever returns
 // an unexpectedly huge list (e.g. someone enabled monetization without
 // the kill switch and dumped 50k transfers in a day).
@@ -291,12 +291,18 @@ export async function runCreatorStripeReconciliation(): Promise<CreatorStripeRec
     },
   };
 
+  // "missing_pair" is downgraded from the critical-severity classification
+  // because pre-migration charges (no :charge:<id> segment in description)
+  // and charges whose invoice.paid landed outside the lookback window will
+  // legitimately produce missing_pair entries. The other charge-drift kinds
+  // (amount_mismatch) ARE critical. Filter accordingly.
+  const criticalChargeDrift = report.charges.chargeDrift.filter((d) => d.kind !== 'missing_pair');
   const hasIssues =
     report.transfers.ghostTransfers.length > 0 ||
     report.transfers.missingTransfers.length > 0 ||
     report.transfers.amountMismatches.length > 0 ||
     report.transfers.reversedMismatches.length > 0 ||
-    report.charges.chargeDrift.length > 0;
+    criticalChargeDrift.length > 0;
 
   await prisma.monitoringReport.create({
     data: {
