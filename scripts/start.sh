@@ -33,6 +33,14 @@ node -e "
       } catch (e) {
         console.warn('[Startup] Ledger idempotency setup non-fatal error:', e.message);
       }
+      // Partial unique index: at most one pending payout per creator
+      // (migration 20260527_add_payout_pending_unique). Mirrors the migration
+      // in case prisma migrate deploy fails. Idempotent on subsequent boots.
+      try {
+        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"creator_payout_pending_unique\" ON \"CreatorPayout\"(\"creatorUserId\") WHERE \"status\" = \\'pending\\'');
+      } catch (e) {
+        console.warn('[Startup] Payout pending unique-index setup non-fatal error:', e.message);
+      }
       console.log('[Startup] Critical tables ensured');
     } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
   })();
@@ -52,6 +60,7 @@ npx prisma migrate resolve --applied 20260327_add_value_radar_cache 2>&1 || true
 npx prisma migrate resolve --applied 20260513_add_refresh_rotation_cache 2>&1 || true
 npx prisma migrate resolve --applied 20260513_add_pending_email_change 2>&1 || true
 npx prisma migrate resolve --applied 20260527_add_ledger_idempotency 2>&1 || true
+npx prisma migrate resolve --applied 20260527_add_payout_pending_unique 2>&1 || true
 
 echo "=== Prisma migrate deploy ==="
 if npx prisma migrate deploy 2>&1; then

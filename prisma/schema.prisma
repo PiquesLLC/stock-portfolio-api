@@ -945,10 +945,16 @@ model CreatorWalletLedger {
 }
 
 model CreatorPayout {
+  // Partial unique index `creator_payout_pending_unique` on
+  // (creatorUserId) WHERE status = 'pending' is enforced at the DB level
+  // by migration 20260527_add_payout_pending_unique. Prisma's @@unique
+  // does not support WHERE clauses. The constraint guarantees at most
+  // one pending payout per creator and physically blocks the TOCTOU
+  // double-spend that libsql's no-op Serializable cannot.
   id               String   @id @default(uuid())
   creatorUserId    String
   amountCents      Int
-  status           String   @default("pending") // pending | processing | completed | failed
+  status           String   @default("pending") // pending | processing | completed | failed | reversed
   stripeTransferId String?
   stripePayoutId   String?
   paidAt           DateTime?

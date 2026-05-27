@@ -928,6 +928,55 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
       }
 
+      case 'transfer.reversed': {
+        // Under separate-charges-and-transfers, a manual reversal in the Stripe
+        // dashboard (or a Connect-account compliance hold) flips a previously
+        // successful transfer to reversed state. We need to restore the
+        // creator's wallet by writing a compensating earning row, otherwise
+        // their internal balance under-reports the actual Stripe balance.
+        const transfer = event.data.object as Stripe.Transfer;
+        const transferId = transfer.id;
+        const payout = await prisma.creatorPayout.findFirst({
+          where: { stripeTransferId: transferId },
+          select: { id: true, creatorUserId: true, amountCents: true, status: true },
+        });
+        if (!payout) {
+          console.warn(`[CreatorWebhook] transfer.reversed for unknown transferId ${transferId}`);
+          bumpCounter('processed');
+          return;
+        }
+        if (payout.status === 'reversed' || payout.status === 'failed') {
+          // Already reflected — idempotent skip. (Belt and suspenders; the DB
+          // unique constraint on the ledger description below also blocks dup.)
+          bumpCounter('processed');
+          return;
+        }
+        await prisma.$transaction([
+          prisma.creatorPayout.update({
+            where: { id: payout.id },
+            data: { status: 'reversed' },
+          }),
+          prisma.creatorWalletLedger.create({
+            data: {
+              creatorUserId: payout.creatorUserId,
+              type: 'earning',
+              amountCents: payout.amountCents,
+              description: `transfer_reversed:${transferId}`,
+            },
+          }),
+        ]);
+        bumpCounter('processed');
+        logCreatorBilling({
+          outcome: 'processed',
+          eventId: event.id,
+          eventType: event.type,
+          stripeTransferId: transferId,
+          payoutId: payout.id,
+          restoredCents: payout.amountCents,
+        });
+        return;
+      }
+
       default:
         bumpCounter('processed');
         logCreatorBilling({
@@ -1153,8 +1202,15 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   if (!creator || creator.status !== 'active') throw new Error('Creator not active');
   if (!creator.stripeConnectId) throw new Error('Stripe Connect onboarding required');
 
-  // Wrap check + create in transaction to prevent TOCTOU double-payout
-  const result = await prisma.$transaction(async (tx) => {
+  // Wrap check + create in transaction. The application-level pendingCount
+  // check below is the fast path; the DB-level partial unique index
+  // `creator_payout_pending_unique` (migration 20260527_add_payout_pending_unique)
+  // is the authoritative guarantee that two concurrent requestPayout calls
+  // can never both insert a pending row — libsql silently no-ops Prisma's
+  // Serializable isolation, so the application check has a race window.
+  let result: { payoutId: string; amountCents: number };
+  try {
+    result = await prisma.$transaction(async (tx) => {
     const pendingCount = await tx.creatorPayout.count({
       where: { creatorUserId: userId, status: 'pending' },
     });
@@ -1188,9 +1244,19 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     });
 
     return { payoutId: payout.id, amountCents: payout.amountCents };
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-  });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+  } catch (txErr) {
+    // The partial unique index `creator_payout_pending_unique` enforces
+    // "at most one pending payout per creator". A concurrent peer that
+    // beat us to the insert produces P2002 here — translate to the same
+    // user-visible message the inline pendingCount check uses.
+    if (txErr instanceof Prisma.PrismaClientKnownRequestError && txErr.code === 'P2002') {
+      throw new Error('Existing payout request is still pending');
+    }
+    throw txErr;
+  }
 
   // Initiate actual Stripe transfer to the creator's Connect account
   try {
