@@ -629,11 +629,16 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               orderBy: { createdAt: 'desc' },
             }),
           ]);
-          // Net previous debits so we don't double-debit on refund→dispute or
-          // re-dispute sequences. Sum ALL negative rows for this charge, on
-          // both sides, regardless of whether they came from refund_* or
-          // dispute_clawback_*.
-          const [prevCreatorDebits, prevPlatformDebits] = await Promise.all([
+          // Compute the NET previously-debited amounts so we don't double-debit
+          // on refund→dispute / re-dispute sequences AND we correctly re-claw on
+          // won-then-redispute sequences. Net = |negative debits| - |positive
+          // restores|. Sums ALL relevant rows for this charge.
+          //
+          // Creator side: type='refund' debit rows (refund_creator + dispute_clawback_creator)
+          //               vs. type='earning' restore rows (:dispute_won_restore_creator).
+          // Platform side: type='platform_fee' negative rows (refund_platform + dispute_clawback_platform)
+          //                vs. type='platform_fee' positive restore rows (:dispute_won_restore_platform).
+          const [prevCreatorDebits, prevCreatorRestores, prevPlatformDebits, prevPlatformRestores] = await Promise.all([
             prisma.creatorWalletLedger.findMany({
               where: {
                 creatorUserId: sub.creatorUserId,
@@ -646,15 +651,35 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             prisma.creatorWalletLedger.findMany({
               where: {
                 creatorUserId: sub.creatorUserId,
+                type: 'earning',
+                description: { contains: `${chargeToken}:dispute_won_restore_creator` },
+              },
+              select: { amountCents: true },
+            }),
+            prisma.creatorWalletLedger.findMany({
+              where: {
+                creatorUserId: sub.creatorUserId,
                 type: 'platform_fee',
                 description: { contains: chargeToken },
                 amountCents: { lt: 0 },
               },
               select: { amountCents: true },
             }),
+            prisma.creatorWalletLedger.findMany({
+              where: {
+                creatorUserId: sub.creatorUserId,
+                type: 'platform_fee',
+                description: { contains: `${chargeToken}:dispute_won_restore_platform` },
+              },
+              select: { amountCents: true },
+            }),
           ]);
-          prevDebitedCreator = prevCreatorDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
-          prevDebitedPlatform = prevPlatformDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          const grossDebitedCreator = prevCreatorDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          const grossRestoredCreator = prevCreatorRestores.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          prevDebitedCreator = Math.max(0, grossDebitedCreator - grossRestoredCreator);
+          const grossDebitedPlatform = prevPlatformDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          const grossRestoredPlatform = prevPlatformRestores.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          prevDebitedPlatform = Math.max(0, grossDebitedPlatform - grossRestoredPlatform);
         }
 
         const writes: Prisma.PrismaPromise<unknown>[] = [
