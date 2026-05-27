@@ -8,14 +8,15 @@ client/
 # Prisma v7 generated client
 src/generated/
 
-# Environment files (keep .env.example)
-.env
-.env.local
-.env.*.local
+# Environment files (allow .env.example only)
+.env*
+!.env.example
 
 # Database
 prisma/dev.db
 prisma/dev.db-journal
+prisma/*.bak
+prisma/backups/
 
 # Runtime snapshots (regenerated, not source of truth)
 prisma/market-close-snapshot.json
