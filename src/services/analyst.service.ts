@@ -283,17 +283,27 @@ export async function getAnalystEvents(limit = 50, ticker?: string, userId?: str
 
     if (heldTickers.length === 0) return [];
 
-    const events = await prisma.analystEvent.findMany({
-      where: { ticker: { in: heldTickers } },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-
     const settings = await prisma.userSettings.findUnique({
       where: { userId },
       select: { analystLastReadAt: true },
     });
     const lastReadAt = settings?.analystLastReadAt;
+    // For users who have never marked read, bound the feed to the last 7 days
+    // so we don't sort the full history of AnalystEvent for every held ticker.
+    // Once analystLastReadAt is set, the existing "newest 50" semantics resume.
+    const where: { ticker: { in: string[] }; createdAt?: { gt: Date } } = {
+      ticker: { in: heldTickers },
+    };
+    if (!lastReadAt) {
+      where.createdAt = { gt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
+    }
+
+    const events = await prisma.analystEvent.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
     return events.map((event) => ({
       ...event,
       read: lastReadAt ? event.createdAt <= lastReadAt : false,
@@ -322,10 +332,15 @@ export async function getUnreadAnalystCount(userId: string): Promise<number> {
     select: { analystLastReadAt: true },
   });
   const lastReadAt = settings?.analystLastReadAt;
+  // When the user has never tapped "mark all read", bound the count to the
+  // last 7 days. Without this fallback Postgres scans every AnalystEvent ever
+  // recorded for every held ticker (the table has no userId), which produced
+  // multi-minute query times in production.
+  const cutoff = lastReadAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   return prisma.analystEvent.count({
     where: {
       ticker: { in: heldTickers },
-      ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
+      createdAt: { gt: cutoff },
     },
   });
 }
