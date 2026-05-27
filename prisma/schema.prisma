@@ -938,6 +938,10 @@ model CreatorWalletLedger {
   @@index([creatorUserId, type])
   @@index([subscriptionId])
   @@index([createdAt])
+  // DB-level idempotency for ledger writes (audit C4 follow-up).
+  // SQLite treats NULL as distinct, so rows with description=NULL are still
+  // insertable without collision; every callsite today sets a description.
+  @@unique([creatorUserId, description], map: "creator_wallet_ledger_creator_desc_unique")
 }
 
 model CreatorPayout {

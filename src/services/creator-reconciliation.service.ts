@@ -54,7 +54,10 @@ function parseEventDescriptor(description: string | null): {
   kind: 'creator_share' | 'platform_fee' | 'refund_creator' | 'refund_platform';
 } | null {
   if (!description) return null;
-  const match = /^stripe_event:([^:]+):(creator_share|platform_fee|refund_creator|refund_platform)(?::.*)?$/.exec(description);
+  // Optional :charge:<chargeId> segment (added in 20260527 ledger idempotency
+  // change so dispute / refund handlers can look up the original earning by
+  // charge id). Older rows without that segment still parse.
+  const match = /^stripe_event:([^:]+)(?::charge:[^:]+)?:(creator_share|platform_fee|refund_creator|refund_platform)(?::.*)?$/.exec(description);
   if (!match) return null;
   const eventId = match[1];
   const kind = match[2] as 'creator_share' | 'platform_fee' | 'refund_creator' | 'refund_platform';

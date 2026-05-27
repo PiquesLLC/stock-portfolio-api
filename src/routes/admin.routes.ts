@@ -423,11 +423,24 @@ router.post('/moderation/appeals/:appealId/resolve', requireAuth, requireAdmin, 
 // POST /admin/moderation/users/:userId/unsuspend — manually unsuspend a user
 router.post('/moderation/users/:userId/unsuspend', requireAuth, requireAdmin, unsuspendUserHandler);
 
-// POST /admin/fix-creator-ledger { creatorUserId, amountCents } — manually create missing ledger entry
+// POST /admin/fix-creator-ledger { creatorUserId, amountCents, idempotencyKey }
+// Manually credit a creator ledger pair. Requires an idempotencyKey from the
+// caller so re-running the same logical fix is a no-op rather than a duplicate
+// mint. The DB unique constraint on (creatorUserId, description) makes the
+// second insert fail with P2002 which we surface as 409 Conflict. Bounded:
+// amountCents must be a positive integer <= 50000 ($500) to limit blast radius.
 router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const { creatorUserId, amountCents } = req.body;
-  if (!creatorUserId || !amountCents) {
-    res.status(400).json({ error: 'creatorUserId and amountCents required' });
+  const { creatorUserId, amountCents, idempotencyKey } = req.body;
+  if (!creatorUserId || typeof creatorUserId !== 'string') {
+    res.status(400).json({ error: 'creatorUserId (string) required' });
+    return;
+  }
+  if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > 50000) {
+    res.status(400).json({ error: 'amountCents must be a positive integer <= 50000 ($500 cap per call)' });
+    return;
+  }
+  if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length < 8 || idempotencyKey.length > 128) {
+    res.status(400).json({ error: 'idempotencyKey (string, 8-128 chars) required' });
     return;
   }
   const sub = await prisma.creatorSubscription.findFirst({
@@ -438,15 +451,37 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
 
   const creatorShare = Math.round(amountCents * 0.8);
   const platformShare = amountCents - creatorShare;
-  await prisma.$transaction([
-    prisma.creatorWalletLedger.create({
-      data: { creatorUserId, type: 'earning', amountCents: creatorShare, subscriptionId: sub.id, description: 'admin_fix:initial_payment' },
-    }),
-    prisma.creatorWalletLedger.create({
-      data: { creatorUserId, type: 'platform_fee', amountCents: platformShare, subscriptionId: sub.id, description: 'admin_fix:platform_fee' },
-    }),
-  ]);
-  res.json({ success: true, creatorShare, platformShare });
+  const actorId = req.user!.userId;
+  try {
+    await prisma.$transaction([
+      prisma.creatorWalletLedger.create({
+        data: {
+          creatorUserId,
+          type: 'earning',
+          amountCents: creatorShare,
+          subscriptionId: sub.id,
+          description: `admin_fix:initial_payment:${actorId}:${idempotencyKey}`,
+        },
+      }),
+      prisma.creatorWalletLedger.create({
+        data: {
+          creatorUserId,
+          type: 'platform_fee',
+          amountCents: platformShare,
+          subscriptionId: sub.id,
+          description: `admin_fix:platform_fee:${actorId}:${idempotencyKey}`,
+        },
+      }),
+    ]);
+    console.log(`[Admin Ledger] ${actorId} credited creator=${creatorUserId} amount=${amountCents} key=${idempotencyKey}`);
+    res.json({ success: true, creatorShare, platformShare, idempotencyKey });
+  } catch (e) {
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
+      res.status(409).json({ error: 'Duplicate idempotencyKey — this fix has already been applied', idempotencyKey });
+      return;
+    }
+    throw e;
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
