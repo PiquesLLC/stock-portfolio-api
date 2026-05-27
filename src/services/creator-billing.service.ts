@@ -924,6 +924,15 @@ export async function getPayoutBalance(
 }
 
 export async function requestPayout(userId: string): Promise<{ payoutId: string; amountCents: number }> {
+  // Emergency kill switch — see config.creatorPayoutsEnabled. Payouts are
+  // disabled platform-wide until destination-charge double-pay (C1) and
+  // dispute clawback (C4) are remediated. Subscriptions continue normally;
+  // earnings continue to accrue in the ledger; only withdrawals are blocked.
+  if (!config.creatorPayoutsEnabled) {
+    const err = new Error('Payouts are temporarily paused for maintenance. Your earnings continue to accrue and will be available when payouts resume.');
+    (err as Error & { status?: number }).status = 503;
+    throw err;
+  }
   const creator = await prisma.creator.findUnique({
     where: { userId },
     select: { stripeConnectId: true, status: true },

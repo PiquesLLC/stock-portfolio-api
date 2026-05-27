@@ -116,6 +116,10 @@ export const config = {
   stripeConnectWebhookSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '',
   billingEnabled: process.env.BILLING_ENABLED !== 'false',
   creatorMonetizationEnabled: process.env.CREATOR_MONETIZATION_ENABLED === 'true',
+  // Emergency kill switch — disabled until C1 (destination-charges + manual-transfer
+  // double-payout) and C4 (no dispute clawback on creator ledger) are fixed.
+  // Re-enable with CREATOR_PAYOUTS_ENABLED=true after audit remediation lands.
+  creatorPayoutsEnabled: process.env.CREATOR_PAYOUTS_ENABLED === 'true',
   payoutMinCents: parseInt(process.env.PAYOUT_MIN_CENTS || '5000', 10),
   creatorAdminUserIds: (process.env.CREATOR_ADMIN_USER_IDS || '')
     .split(',')
