@@ -317,20 +317,47 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         }
         // Don't overwrite currentPeriodEnd for past_due — invoice.payment_failed already expired it
         const shouldUpdatePeriodEnd = mappedStatus !== 'past_due' && currentPeriodEndUnix;
-        await prisma.creatorSubscription.updateMany({
+        const updateData = {
+          status: mappedStatus,
+          ...(shouldUpdatePeriodEnd ? { currentPeriodEnd: new Date(currentPeriodEndUnix * 1000) } : {}),
+          canceledAt: subscription.cancel_at_period_end ? new Date() : null,
+        };
+        const updateResult = await prisma.creatorSubscription.updateMany({
           where: { stripeSubscriptionId },
-          data: {
-            status: mappedStatus,
-            ...(shouldUpdatePeriodEnd ? { currentPeriodEnd: new Date(currentPeriodEndUnix * 1000) } : {}),
-            canceledAt: subscription.cancel_at_period_end ? new Date() : null,
-          },
+          data: updateData,
         });
+        // Out-of-order delivery: subscription.updated arrived before
+        // checkout.session.completed / invoice.paid created the local row.
+        // Without this fallback the cancellation/state signal would be lost
+        // until the next webhook on this subscription. Mirror invoice.paid's
+        // metadata-lookup pattern: pull creatorUserId/subscriberUserId from
+        // the Stripe subscription's metadata (we set it at checkout creation)
+        // and upsert so the signal lands.
+        if (updateResult.count === 0) {
+          const creatorUserId = subscription.metadata?.creatorUserId;
+          const subscriberUserId = subscription.metadata?.subscriberUserId;
+          if (creatorUserId && subscriberUserId) {
+            await prisma.creatorSubscription.upsert({
+              where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
+              update: { ...updateData, stripeSubscriptionId },
+              create: {
+                subscriberUserId,
+                creatorUserId,
+                stripeSubscriptionId,
+                ...updateData,
+              },
+            });
+          } else {
+            console.warn(`[CreatorWebhook] customer.subscription.updated for unknown sub ${stripeSubscriptionId} — no metadata fallback (creatorUserId=${creatorUserId}, subscriberUserId=${subscriberUserId})`);
+          }
+        }
         bumpCounter('processed');
         logCreatorBilling({
           outcome: 'processed',
           eventId: event.id,
           eventType: event.type,
           subscriptionId: stripeSubscriptionId,
+          upserted: updateResult.count === 0,
         });
         return;
       }

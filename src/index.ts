@@ -23,6 +23,7 @@ import { evaluateValueRadarAlerts, sendValueRadarDigest } from './services/value
 import { sendEarningsAlerts } from './services/notifications.service';
 import { assertBillingDeploySafety } from './services/billing.service';
 import { runCreatorLedgerReconciliation } from './services/creator-reconciliation.service';
+import { runCreatorStripeReconciliation } from './services/creator-stripe-reconciliation.service';
 import { pollActiveResearchJobs } from './services/deep-research.service';
 import { warmHoldingsCache } from './services/market.service';
 import { startQuoteRefresh, stopQuoteRefresh } from './services/quote-refresh.service';
@@ -355,6 +356,7 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('anomaly_detection', runAnomalyDetectionForAllUsers);
   registerJobHandler('dividend_change_detection', runDividendChangeDetectionForAllUsers);
   registerJobHandler('creator_reconciliation', runCreatorLedgerReconciliation);
+  registerJobHandler('creator_stripe_reconciliation', runCreatorStripeReconciliation);
   registerJobHandler('deep_research_poller', pollActiveResearchJobs);
   registerJobHandler('congress_sync', syncLatestCongressTrades);
   registerJobHandler('congress_alert_eval', checkCongressTradeAlerts);
@@ -810,8 +812,35 @@ const server = app.listen(config.port, async () => {
         idempotencyTtlMs: 24 * 60 * 60 * 1000,
       });
     }, 24 * 60 * 60 * 1000);
+
+    // Stripe-side reconciliation — daily cross-check vs Stripe transfers
+    // + charge balance transactions. Detects "ghost" transfers (Stripe has,
+    // we don't — the audit-C2 double-pay symptom) and missing transfers,
+    // amount mismatches, reversal-status mismatches, and per-charge ledger
+    // gaps. Staggered from the internal recon by 1 minute.
+    console.log('[Creator Stripe Reconciliation] Running daily');
+    setTimeout(() => {
+      runJob({
+        name: 'creator_stripe_reconciliation',
+        fn: runCreatorStripeReconciliation,
+        idempotencyKey: buildTimeBucketIdempotencyKey('creator_stripe_reconciliation', 24 * 60 * 60 * 1000),
+        idempotencyTtlMs: 24 * 60 * 60 * 1000,
+        maxAttempts: 3,
+      });
+    }, 240000); // 4 min delay after startup (1 min after internal recon)
+
+    setInterval(() => {
+      runJob({
+        name: 'creator_stripe_reconciliation',
+        fn: runCreatorStripeReconciliation,
+        idempotencyKey: buildTimeBucketIdempotencyKey('creator_stripe_reconciliation', 24 * 60 * 60 * 1000),
+        idempotencyTtlMs: 24 * 60 * 60 * 1000,
+        maxAttempts: 3,
+      });
+    }, 24 * 60 * 60 * 1000);
   } else {
     console.log('[Creator Reconciliation] Skipped (creator monetization disabled)');
+    console.log('[Creator Stripe Reconciliation] Skipped (creator monetization disabled)');
   }
 
   // NALA AI Deep Research — background poller for Gemini async jobs
