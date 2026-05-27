@@ -7,11 +7,14 @@ import { config } from '../config';
 const router = Router();
 
 // ─── Admin guard ─────────────────────────────────────────────────────
-const ADMIN_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+// Prod Jon hardcoded as guaranteed bypass; additional admins via env.
+// Matches the convention in admin.routes.ts + health.routes.ts. TODO:
+// extract to src/middleware/admin.middleware.ts once we have a fourth caller.
+const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
 
 function isAdmin(userId?: string): boolean {
   if (!userId) return false;
-  return userId === ADMIN_USER_ID ||
+  return HARDCODED_ADMIN_IDS.includes(userId) ||
     config.waitlistAdminUserIds.includes(userId) ||
     config.creatorAdminUserIds.includes(userId);
 }
