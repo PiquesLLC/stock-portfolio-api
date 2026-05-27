@@ -66,6 +66,7 @@ vi.mock('../config', () => ({
     stripeConnectWebhookSecret: 'whsec_connect_123',
     stripeReturnUrl: 'http://localhost:5173/settings/billing',
     creatorMonetizationEnabled: true,
+    creatorPayoutsEnabled: true,
     creatorAdminUserIds: [],
   },
 }));

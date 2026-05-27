@@ -279,7 +279,8 @@ export async function requestCreatorPayoutHandler(req: AuthRequest, res: Respons
     res.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to request payout';
-    res.status(400).json({ error: message });
+    const status = (error as Error & { status?: number })?.status ?? 400;
+    res.status(status).json({ error: message });
   }
 }
 
