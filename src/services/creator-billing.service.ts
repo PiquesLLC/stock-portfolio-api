@@ -244,6 +244,22 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
         if (!creatorUserId || !subscriberUserId || !stripeSubscriptionId) return;
 
+        // If a `customer.subscription.updated` raced ahead of us (A2 fallback
+        // could have already upserted a row carrying status='canceled' or
+        // 'past_due'), don't clobber that signal by force-setting active.
+        // Only mutate to 'active' when the existing row (if any) is in a
+        // non-terminal state. For brand-new rows the create branch sets it.
+        const existingForCheckout = await prisma.creatorSubscription.findUnique({
+          where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
+          select: { id: true, status: true },
+        });
+        const checkoutUpdateData: { status?: string; stripeSubscriptionId: string; canceledAt?: Date | null } = {
+          stripeSubscriptionId,
+        };
+        if (!existingForCheckout || (existingForCheckout.status !== 'canceled' && existingForCheckout.status !== 'past_due' && existingForCheckout.status !== 'expired')) {
+          checkoutUpdateData.status = 'active';
+          checkoutUpdateData.canceledAt = null;
+        }
         await prisma.creatorSubscription.upsert({
           where: {
             subscriberUserId_creatorUserId: {
@@ -251,11 +267,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               creatorUserId,
             },
           },
-          update: {
-            status: 'active',
-            stripeSubscriptionId,
-            canceledAt: null,
-          },
+          update: checkoutUpdateData,
           create: {
             subscriberUserId,
             creatorUserId,
