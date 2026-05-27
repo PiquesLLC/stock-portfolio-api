@@ -128,8 +128,11 @@ export async function createCreatorCheckoutSession(
       subscriberUserId,
     },
     subscription_data: {
-      application_fee_percent: 20,
-      transfer_data: { destination: creator.stripeConnectId },
+      // Charges land on the platform balance. The 80/20 split is recorded in
+      // CreatorWalletLedger by the invoice.paid handler, and the creator's
+      // share is moved via stripe.transfers.create in requestPayout. This
+      // replaces the previous destination-charge model whose auto-transfer
+      // combined with the manual transfer produced a double-payment (audit C1).
       metadata: {
         creatorUserId,
         subscriberUserId,

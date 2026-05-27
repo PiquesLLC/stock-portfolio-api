@@ -253,7 +253,7 @@ describe('creator billing webhooks', () => {
     });
   });
 
-  it('creates checkout with transfer destination + 20% app fee', async () => {
+  it('creates checkout without transfer_data or application_fee (separate-charges model)', async () => {
     (prismaMock as any).creator.findUnique.mockResolvedValue({
       status: 'active',
       pricingCents: 1500,
@@ -270,16 +270,18 @@ describe('creator billing webhooks', () => {
 
     const url = await createCreatorCheckoutSession('subscriber_1', 'creator_1');
     expect(url).toContain('checkout.stripe.test');
-    expect(checkoutCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subscription_data: expect.objectContaining({
-          application_fee_percent: 20,
-          transfer_data: { destination: 'acct_123' },
-        }),
-      })
-    );
+    // Under separate-charges-and-transfers, the checkout session must NOT carry
+    // transfer_data or application_fee_percent — funds stay on platform balance
+    // until requestPayout initiates the single transfer. See audit C1.
     const callArg = checkoutCreateMock.mock.calls[0]?.[0];
+    expect(callArg?.subscription_data?.application_fee_percent).toBeUndefined();
+    expect(callArg?.subscription_data?.transfer_data).toBeUndefined();
     expect(callArg?.subscription_data?.trial_period_days).toBeUndefined();
+    // Metadata is still required so the invoice.paid handler can map back to the creator/subscriber.
+    expect(callArg?.subscription_data?.metadata).toEqual({
+      creatorUserId: 'creator_1',
+      subscriberUserId: 'subscriber_1',
+    });
   });
 
   it('ignores duplicate webhook event ids', async () => {
@@ -302,7 +304,7 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
   });
 
-  it('allocates odd-cent invoice revenue using Stripe fee amounts from the webhook payload', async () => {
+  it('allocates odd-cent invoice revenue using Stripe fee amounts from the webhook payload (legacy destination-charge subs)', async () => {
     const fx = fixtureFactory('odd_invoice');
     await handleCreatorWebhookEvent({
       id: 'evt_paid_odd_invoice',
@@ -329,6 +331,40 @@ describe('creator billing webhooks', () => {
         data: expect.objectContaining({
           description: 'stripe_event:evt_paid_odd_invoice:platform_fee',
           amountCents: 2000,
+        }),
+      })
+    );
+  });
+
+  it('splits invoice revenue with floor-80% when no application_fee_amount is present (new separate-charges model)', async () => {
+    const fx = fixtureFactory('no_app_fee');
+    await handleCreatorWebhookEvent({
+      id: 'evt_paid_no_fee',
+      type: 'invoice.paid',
+      data: {
+        object: {
+          amount_paid: 10001,
+          // no application_fee_amount — separate-charges model
+          subscription: fx.ids.stripeSubscriptionId,
+        },
+      },
+    } as any);
+
+    // Under floor-80%: creator gets floor(10001*0.8)=8000, platform gets the
+    // remainder 2001 so creator+platform === gross.
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_no_fee:creator_share',
+          amountCents: 8000,
+        }),
+      })
+    );
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_no_fee:platform_fee',
+          amountCents: 2001,
         }),
       })
     );
