@@ -20,6 +20,19 @@ node -e "
       await client.execute('CREATE TABLE IF NOT EXISTS \"PendingEmailChange\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"newEmail\" TEXT NOT NULL, \"codeHash\" TEXT NOT NULL, \"expiresAt\" DATETIME NOT NULL, \"usedAt\" DATETIME, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"PendingEmailChange_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
       await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_userId_idx\" ON \"PendingEmailChange\"(\"userId\")');
       await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_expiresAt_idx\" ON \"PendingEmailChange\"(\"expiresAt\")');
+      // CreatorWalletLedger DB-level idempotency (migration 20260527_add_ledger_idempotency).
+      // Runs the same backfills + UNIQUE INDEX as the migration in case
+      // `prisma migrate deploy` fails for any reason. Subsequent boots are no-ops:
+      // the UPDATEs only match rows still in the legacy shape, and the index
+      // uses IF NOT EXISTS.
+      try {
+        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = 'payout:' || rowid WHERE type = 'payout' AND description = 'Payout requested'\");
+        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = description || ':' || rowid WHERE description IN ('admin_fix:initial_payment', 'admin_fix:platform_fee')\");
+        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = description || ':dup:' || rowid WHERE id IN (SELECT l1.id FROM \\\"CreatorWalletLedger\\\" l1 JOIN \\\"CreatorWalletLedger\\\" l2 ON l1.\\\"creatorUserId\\\" = l2.\\\"creatorUserId\\\" AND l1.description = l2.description AND l1.description IS NOT NULL AND l1.rowid > l2.rowid)\");
+        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"creator_wallet_ledger_creator_desc_unique\" ON \"CreatorWalletLedger\"(\"creatorUserId\", \"description\")');
+      } catch (e) {
+        console.warn('[Startup] Ledger idempotency setup non-fatal error:', e.message);
+      }
       console.log('[Startup] Critical tables ensured');
     } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
   })();
@@ -38,6 +51,7 @@ npx prisma migrate resolve --applied 20260325_add_user_block 2>&1 || true
 npx prisma migrate resolve --applied 20260327_add_value_radar_cache 2>&1 || true
 npx prisma migrate resolve --applied 20260513_add_refresh_rotation_cache 2>&1 || true
 npx prisma migrate resolve --applied 20260513_add_pending_email_change 2>&1 || true
+npx prisma migrate resolve --applied 20260527_add_ledger_idempotency 2>&1 || true
 
 echo "=== Prisma migrate deploy ==="
 if npx prisma migrate deploy 2>&1; then
