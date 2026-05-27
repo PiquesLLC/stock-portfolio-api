@@ -15,11 +15,14 @@ import { pruneBackupsToKeep, BACKUP_DIR, DB_PATH } from '../services/backup.serv
 
 const router = Router();
 
-// Only Jon's account can access admin endpoints
-const ADMIN_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+// Admin gate. Prod Jon is hardcoded as a guaranteed bypass so an empty
+// WAITLIST_ADMIN_USER_IDS env can never lock him out. Additional admins
+// (e.g. local-dev accounts) are granted via that env var.
+const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
 
 function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
-  if (!req.user || req.user.userId !== ADMIN_USER_ID) {
+  const userId = req.user?.userId;
+  if (!userId || (!HARDCODED_ADMIN_IDS.includes(userId) && !config.waitlistAdminUserIds.includes(userId))) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
