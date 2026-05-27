@@ -1,11 +1,17 @@
 import { Router, Response } from 'express';
 import { healthCheck, healthStatus, authMetrics, apiUsage, webhookMetrics, jobMetrics, providerMetrics } from '../controllers/health.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { config } from '../config';
 import { AuthRequest } from '../types/auth';
 
-const ADMIN_USER_ID = '237198da-612e-411c-9ef8-f267c887a9f1';
+// Prod Jon hardcoded as guaranteed bypass; additional admins via env.
+const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
 function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
-  if (!req.user || req.user.userId !== ADMIN_USER_ID) { res.status(403).json({ error: 'Forbidden' }); return; }
+  const userId = req.user?.userId;
+  if (!userId || (!HARDCODED_ADMIN_IDS.includes(userId) && !config.waitlistAdminUserIds.includes(userId))) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
   next();
 }
 
