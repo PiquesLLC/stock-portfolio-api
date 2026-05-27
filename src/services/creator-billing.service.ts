@@ -596,9 +596,16 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // claw them back. Requires the post-20260527 ':charge:<id>' segment in
         // descriptions — legacy rows without it can't be matched and the clawback
         // degrades to "dispute fee only" with a warning log.
+        //
+        // Lookups are pinned to the exact suffix `:creator_share` / `:platform_fee`
+        // so they ONLY match the original credit rows, not the restore rows
+        // written by `dispute.closed (won)` (`:dispute_won_restore_*`). Without
+        // that pin, a second dispute on a previously-won charge could pick up
+        // the restore row instead of the original earning and over-debit.
         let originalEarning: { amountCents: number } | null = null;
         let originalPlatform: { amountCents: number } | null = null;
-        let prevRefundedCreator = 0;
+        let prevDebitedCreator = 0;
+        let prevDebitedPlatform = 0;
         if (disputeChargeId) {
           const chargeToken = `charge:${disputeChargeId}`;
           [originalEarning, originalPlatform] = await Promise.all([
@@ -606,7 +613,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               where: {
                 creatorUserId: sub.creatorUserId,
                 type: 'earning',
-                description: { contains: chargeToken },
+                description: { contains: `${chargeToken}:creator_share` },
               },
               select: { amountCents: true },
               orderBy: { createdAt: 'desc' },
@@ -615,24 +622,39 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               where: {
                 creatorUserId: sub.creatorUserId,
                 type: 'platform_fee',
-                description: { contains: chargeToken },
+                description: { contains: `${chargeToken}:platform_fee` },
                 amountCents: { gt: 0 }, // exclude prior negative platform_fee rows (refunds/clawbacks)
               },
               select: { amountCents: true },
               orderBy: { createdAt: 'desc' },
             }),
           ]);
-          // If this charge was previously (partially) refunded, those debits
-          // already reduced the wallet — net them so we don't double-debit.
-          const prevRefunds = await prisma.creatorWalletLedger.findMany({
-            where: {
-              creatorUserId: sub.creatorUserId,
-              type: 'refund',
-              description: { contains: `${chargeToken}:refund_creator` },
-            },
-            select: { amountCents: true },
-          });
-          prevRefundedCreator = prevRefunds.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          // Net previous debits so we don't double-debit on refund→dispute or
+          // re-dispute sequences. Sum ALL negative rows for this charge, on
+          // both sides, regardless of whether they came from refund_* or
+          // dispute_clawback_*.
+          const [prevCreatorDebits, prevPlatformDebits] = await Promise.all([
+            prisma.creatorWalletLedger.findMany({
+              where: {
+                creatorUserId: sub.creatorUserId,
+                type: 'refund',
+                description: { contains: chargeToken },
+                amountCents: { lt: 0 },
+              },
+              select: { amountCents: true },
+            }),
+            prisma.creatorWalletLedger.findMany({
+              where: {
+                creatorUserId: sub.creatorUserId,
+                type: 'platform_fee',
+                description: { contains: chargeToken },
+                amountCents: { lt: 0 },
+              },
+              select: { amountCents: true },
+            }),
+          ]);
+          prevDebitedCreator = prevCreatorDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+          prevDebitedPlatform = prevPlatformDebits.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
         }
 
         const writes: Prisma.PrismaPromise<unknown>[] = [
@@ -656,8 +678,9 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         ];
 
         let clawbackAmountCents = 0;
+        let platformClawbackCents = 0;
         if (originalEarning && originalEarning.amountCents > 0 && disputeChargeId) {
-          clawbackAmountCents = Math.max(0, originalEarning.amountCents - prevRefundedCreator);
+          clawbackAmountCents = Math.max(0, originalEarning.amountCents - prevDebitedCreator);
           if (clawbackAmountCents > 0) {
             writes.push(prisma.creatorWalletLedger.create({
               data: {
@@ -674,15 +697,18 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         }
 
         if (originalPlatform && originalPlatform.amountCents > 0 && disputeChargeId) {
-          writes.push(prisma.creatorWalletLedger.create({
-            data: {
-              creatorUserId: sub.creatorUserId,
-              type: 'platform_fee',
-              amountCents: -originalPlatform.amountCents,
-              subscriptionId: sub.id,
-              description: `stripe_event:${event.id}:charge:${disputeChargeId}:dispute_clawback_platform`,
-            },
-          }));
+          platformClawbackCents = Math.max(0, originalPlatform.amountCents - prevDebitedPlatform);
+          if (platformClawbackCents > 0) {
+            writes.push(prisma.creatorWalletLedger.create({
+              data: {
+                creatorUserId: sub.creatorUserId,
+                type: 'platform_fee',
+                amountCents: -platformClawbackCents,
+                subscriptionId: sub.id,
+                description: `stripe_event:${event.id}:charge:${disputeChargeId}:dispute_clawback_platform`,
+              },
+            }));
+          }
         }
 
         await prisma.$transaction(writes);
