@@ -31,9 +31,12 @@ generator client {
   output   = "../src/generated/prisma-v2"
 }
 
+// Datasource URL is configured via prisma-v2/prisma.config.ts (Prisma 7
+// no longer accepts `url` here). Connection URL comes from the
+// V2_DATABASE_URL env var at runtime; the adapter is passed to
+// PrismaClient at construction time in src/v2/ledger/prisma.ts.
 datasource db {
   provider = "postgresql"
-  url      = env("V2_DATABASE_URL")
 }
 
 // =============================================================================

@@ -443,7 +443,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // earning by charge id (description.contains('charge:${chargeId}')). Falls
         // back to no segment if Stripe didn't populate charge (shouldn't happen on
         // invoice.paid but defensive).
-        const invoiceChargeId = typeof invoice.charge === 'string' ? invoice.charge : '';
+        // Stripe v20+ removed Invoice.charge from the TypeScript types but
+        // the field is still present on API responses for older API versions.
+        // Read it via a narrow type cast — runtime behavior is unchanged.
+        const invoiceChargeRaw = (invoice as { charge?: unknown }).charge;
+        const invoiceChargeId = typeof invoiceChargeRaw === 'string' ? invoiceChargeRaw : '';
         const chargeSegment = invoiceChargeId ? `:charge:${invoiceChargeId}` : '';
         const creatorEventKey = `stripe_event:${event.id}${chargeSegment}:creator_share${legacySuffix}`;
         const platformEventKey = `stripe_event:${event.id}${chargeSegment}:platform_fee${legacySuffix}`;
