@@ -134,6 +134,10 @@ const EFFECTIVE_AT_MAX_PAST_MS = 730 * 24 * 60 * 60 * 1000;
 // Date.toJSON and strip undefined symmetrically before canonical sort.
 function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void {
   if (metadata === undefined) return;
+  // ORDER MATTERS: stringify FIRST to catch BigInt / cycles via the native
+  // TypeError. rejectNonFiniteNumbers below has no cycle protection — it
+  // would stack-overflow on a cyclic input. If you reorder these calls,
+  // add a WeakSet-based visited check inside rejectNonFiniteNumbers first.
   try {
     JSON.stringify(metadata);
   } catch (e) {
@@ -146,7 +150,8 @@ function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void
   // Non-finite numbers (NaN, Infinity, -Infinity) are silently coerced to
   // 'null' by JSON.stringify, which corrupts the original write asymmetrically
   // (caller sees their NaN preserved in memory; storage gets null). Walk the
-  // tree and reject up-front.
+  // tree and reject up-front. Safe because stringify above has already
+  // verified the tree is acyclic.
   rejectNonFiniteNumbers(metadata, entryIndex, '');
 }
 
@@ -418,15 +423,20 @@ export async function postTransaction(
         // otherwise leave the books permanently $45 off.
         //
         // PARTIAL REVERSALS (Stripe partial refunds, partial dispute losses)
-        // are explicitly NOT represented via `reversesEntryId`. The
-        // structural double-clawback guarantee (one referent → one reversal)
-        // cannot be expressed for partials without per-referent cumulative
-        // tracking, which is deferred. Callers post partials as standalone
-        // `EARNING_REFUNDED` / `PLATFORM_FEE_REFUNDED` / `ADJUSTMENT_DEBIT`
-        // entries with NO `reversesEntryId`. The link to the original Stripe
-        // event is preserved via `stripeObjectId` / `stripeEventId` for
-        // reconciliation. This is a known semantic gap; see the architecture
-        // doc for the partial-reversal magnitude-tracking design.
+        // are CURRENTLY UNSUPPORTED at this layer. The structural double-
+        // clawback guarantee (partial unique on reverses_entry_id → one
+        // referent at most one reversal) cannot be expressed for partials
+        // without per-referent cumulative magnitude tracking, which is
+        // a deferred architecture item. Callers that need partial-refund
+        // semantics today must implement out-of-band magnitude tracking
+        // (e.g. a separate refund-state table that records "of $X
+        // original, $Y refunded so far, $Z remaining") BEFORE posting any
+        // partial. The ledger has no built-in protection against e.g. two
+        // distinct webhook calls each posting a $50 EARNING_REFUNDED for
+        // the same $50 EARNING_GROSS — without external magnitude
+        // tracking, the books would silently go $50 negative.
+        // DO NOT route partial refunds through this function as
+        // standalone entries until magnitude tracking lands.
         //
         // For each entry with reversesEntryId set: load the referent and
         // verify (a) it exists, (b) same account, (c) same currency, (d) it
@@ -486,12 +496,14 @@ export async function postTransaction(
                   `Reversal: debit=${entry.debitMinorUnits} credit=${entry.creditMinorUnits}. ` +
                   `A reversal must satisfy: referent.debit == reversal.credit AND ` +
                   `referent.credit == reversal.debit. ` +
-                  `If this is a PARTIAL refund/clawback, do NOT set reversesEntryId — ` +
-                  `post a standalone EARNING_REFUNDED / PLATFORM_FEE_REFUNDED / ` +
-                  `ADJUSTMENT_DEBIT entry without reverses_entry_id, linked to the ` +
-                  `original via stripeObjectId. The structural double-clawback ` +
-                  `protection (partial unique on reverses_entry_id) does not cover ` +
-                  `partial reversals; magnitude tracking is deferred.`,
+                  `PARTIAL refunds/clawbacks are NOT supported at this layer — ` +
+                  `the ledger has no magnitude tracking against the referent, so ` +
+                  `posting partials as standalone EARNING_REFUNDED entries without ` +
+                  `external state tracking can over-refund (two distinct webhook ` +
+                  `deliveries each posting a $50 refund of a $50 charge → $50 ` +
+                  `negative balance). If you need partial-refund handling, ` +
+                  `implement an out-of-band refund-state table FIRST and consult ` +
+                  `the architecture doc on magnitude tracking.`,
               );
             }
           }
