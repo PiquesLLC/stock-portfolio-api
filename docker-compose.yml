@@ -1,0 +1,51 @@
+# Local dev environment for Nala v2 (Postgres-backed ledger subsystem).
+#
+# v1 continues to run on libsql/SQLite via Railway — this compose file is
+# purely for v2 development. The v2 cluster in prod will be Aurora Postgres 16;
+# this gives us a local equivalent on the same engine.
+#
+# Usage:
+#   docker compose up -d              # start Postgres in the background
+#   docker compose down               # stop (keeps data volume)
+#   docker compose down -v            # stop AND wipe all dev data
+#   docker compose logs -f postgres-v2  # tail logs
+#
+# Connection string (put in your .env as V2_DATABASE_URL):
+#   postgresql://nala_v2:dev_password_local_only@localhost:5432/nala_v2_ledger
+#
+# Then:
+#   npm run prisma:v2:generate          # generates the typed client
+#   npm run prisma:v2:migrate:dev       # applies the initial migration
+#   npm run prisma:v2:seed              # seeds the chart of accounts
+
+services:
+  postgres-v2:
+    image: postgres:16-alpine
+    container_name: nala-v2-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nala_v2
+      POSTGRES_PASSWORD: dev_password_local_only
+      POSTGRES_DB: nala_v2_ledger
+      # Force UTC across the cluster — financial timestamps should never
+      # depend on host timezone.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - nala-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nala_v2 -d nala_v2_ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command:
+      # Enable logging of slow queries (>100ms) for dev visibility.
+      - "postgres"
+      - "-c"
+      - "log_min_duration_statement=100"
+
+volumes:
+  nala-v2-postgres-data:
+    driver: local
