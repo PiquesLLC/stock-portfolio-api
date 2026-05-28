@@ -1,0 +1,132 @@
+// Nala v2 — Aurora Postgres ledger subsystem
+//
+// This schema is the spine of the v2 monetization system. It encodes the
+// double-entry ledger described in the v2 architecture (sections 3 and 8),
+// targeting Postgres (Aurora in prod, local Docker Postgres in dev).
+//
+// IMPORTANT: this schema lives ALONGSIDE the v1 prisma/schema.prisma. The two
+// have separate generated clients (`src/generated/prisma` for v1,
+// `src/generated/prisma-v2` for v2). v1 continues to run on libsql/SQLite via
+// Railway; v2 runs on Postgres. The two coexist until the M5 cutover.
+//
+// Invariants enforced HERE (in the schema):
+//   INV-1  per-entry XOR (debit XOR credit)            — CHECK in migration.sql
+//   INV-6  append-only (no UPDATE or DELETE)           — trigger in migration.sql
+//   Layer-4 idempotency uniqueness                     — @@unique below
+//   Per-account monotonic sequence_no                  — trigger in migration.sql
+//   Running balance computed at insert time            — trigger in migration.sql
+//
+// Invariants enforced at the APPLICATION level (in postTransaction service):
+//   INV-2  per-event balance (Σdebit = Σcredit per event_group_id)
+//   INV-3  per-charge fee split (creator + platform = gross)
+//   INV-4  no negative balance (creator scope read-side check)
+//   INV-5  reversal symmetry (compensation entry mirrors original)
+//
+// Invariants verified by RECONCILIATION CRON:
+//   INV-7  Stripe-anchor (non-adjustment rows have stripe_event_id present in raw_events)
+//   INV-8  reconciliation parity (Stripe BalanceTransaction ↔ ledger entry)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma-v2"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("V2_DATABASE_URL")
+}
+
+// =============================================================================
+// accounts — chart of accounts + per-account sequence allocator
+// =============================================================================
+// One row per (accountScope, accountId) pair. The sequence allocator lives
+// here (not as a Postgres SEQUENCE) so we don't create unbounded sequence
+// objects as creators are added. The BEFORE INSERT trigger on ledger_entry
+// does UPDATE...RETURNING on next_sequence_no, which serializes per-account
+// contention via row-level lock for the rest of the transaction — exactly
+// the isolation guarantee libsql failed to provide.
+//
+// System account scopes:
+//   stripe_clearing  — virtual buffer for Stripe-side fact-of-money-moved
+//   platform_revenue — Nala's net top line
+//   platform_fee     — the 20% take, posted as a debit against the same charge
+//   tax_withholding  — 1099-K / 1042-S withholding
+//   creator          — one logical account per creator (accountId = creatorUserId)
+//
+// 'creator' rows are created on-demand by application code at first earning.
+// The other scopes are seeded at deploy time by seed.ts (one row each).
+
+model Account {
+  accountScope     String   @map("account_scope")
+  accountId        String   @map("account_id")
+  currency         String   @db.Char(3)
+  nextSequenceNo   BigInt   @default(1) @map("next_sequence_no")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  entries          LedgerEntry[]
+
+  @@id([accountScope, accountId])
+  @@map("accounts")
+}
+
+// =============================================================================
+// ledger_entry — the financial book of record. APPEND-ONLY.
+// =============================================================================
+// One row per accounting movement. Each row affects exactly one account
+// (XOR debit/credit per INV-1). To record a single Stripe event that affects
+// multiple accounts (e.g. a charge debits stripe_clearing AND credits
+// creator AND credits platform_revenue), application code writes multiple
+// rows in one transaction, all sharing the same `eventGroupId`.
+//
+// `sequenceNo` and `runningBalanceMinorUnits` are populated by the
+// BEFORE INSERT trigger (see migration.sql). Application code must NOT set
+// them — if it tries, the values are overwritten.
+
+model LedgerEntry {
+  id                       String   @id @default(uuid()) @db.Uuid
+  sequenceNo               BigInt   @map("sequence_no")
+  accountScope             String   @map("account_scope")
+  accountId                String   @map("account_id")
+  account                  Account  @relation(fields: [accountScope, accountId], references: [accountScope, accountId], onDelete: Restrict, onUpdate: Cascade)
+  eventType                String   @map("event_type")  // discriminated union — see architecture §3.2
+  eventGroupId             String   @map("event_group_id") @db.Uuid
+  debitMinorUnits          BigInt   @default(0) @map("debit_minor_units")
+  creditMinorUnits         BigInt   @default(0) @map("credit_minor_units")
+  currency                 String   @db.Char(3)
+  stripeObjectKind         String?  @map("stripe_object_kind")  // 'charge' | 'transfer' | 'payout' | 'dispute' | 'refund'
+  stripeObjectId           String?  @map("stripe_object_id")
+  stripeEventId            String?  @map("stripe_event_id")
+  idempotencyKey           String   @map("idempotency_key")
+  reversesEntryId          String?  @map("reverses_entry_id") @db.Uuid
+  reversesEntry            LedgerEntry?  @relation("LedgerEntryReversal", fields: [reversesEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reversedBy               LedgerEntry[] @relation("LedgerEntryReversal")
+  runningBalanceMinorUnits BigInt   @map("running_balance_minor_units")  // populated by trigger
+  postedAt                 DateTime @default(now()) @map("posted_at") @db.Timestamptz()
+  effectiveAt              DateTime @map("effective_at") @db.Timestamptz()  // Stripe's event.created
+  postedBy                 String   @map("posted_by")  // 'webhook:invoice.paid' | 'job:payout-runner' | 'ops:<userId>'
+  metadata                 Json     @default("{}") @db.JsonB
+
+  // ── Uniqueness constraints (the load-bearing invariants) ──────────────────
+  // Per-account monotonic sequence. The trigger allocates these; the UNIQUE
+  // is the safety net against trigger bugs.
+  @@unique([accountScope, accountId, sequenceNo], map: "ledger_entry_seq_unique")
+  // Idempotency: layer 4 (DB-enforced). Application code MUST set
+  // idempotency_key deterministically from the source event so retries
+  // collapse to P2002 here. This is the only safe idempotency in the system.
+  @@unique([accountScope, accountId, idempotencyKey], map: "ledger_entry_idempotency_unique")
+  // Per-event-group + per-account + per-event-type uniqueness. Prevents the
+  // same Stripe event from posting the same leg into the same account twice
+  // (e.g. two creator_share rows for one invoice.paid event).
+  @@unique([eventGroupId, accountScope, eventType], map: "ledger_entry_eventgroup_type_unique")
+
+  // ── Performance indexes ──────────────────────────────────────────────────
+  // Primary read path: "give me this account's most recent entries / running
+  // balance". DESC on sequence_no because the most-recent entry is the one
+  // we want for current balance.
+  @@index([accountScope, accountId, sequenceNo(sort: Desc)], map: "ledger_entry_account_seq_desc")
+  // Reconciliation Tier 3 join keys (partial indexes — added in migration.sql
+  // because Prisma can't express WHERE clauses on @@index)
+  @@index([eventGroupId], map: "ledger_entry_event_group_id")
+
+  @@map("ledger_entry")
+}
