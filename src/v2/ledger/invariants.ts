@@ -47,28 +47,37 @@ export function assertInv1(entry: LedgerEntryInput, index: number): void {
 }
 
 /**
- * INV-2: per-event balance. Σdebit = Σcredit across all entries in this
- * postTransaction call. This is the foundational double-entry guarantee:
- * every event MUST balance to zero across the books.
+ * INV-2: per-event-per-currency balance. Σdebit = Σcredit across all entries
+ * in this postTransaction call, computed independently for each currency.
+ * This is the foundational double-entry guarantee: every event MUST balance
+ * to zero across the books FOR EACH CURRENCY.
+ *
+ * Per-currency: a USD debit and a EUR credit of the "same number" are
+ * economically nonsense and must NOT pass INV-2. Cross-currency operations
+ * require explicit FX entries via a dedicated FX clearing account.
  *
  * If this throws, the caller built the event group wrong. Common bugs:
  * forgot a leg (e.g. wrote only the creator credit without the stripe_clearing
  * debit), or computed shares with rounding that left a residual cent.
  */
 export function assertInv2(input: PostTransactionInput): void {
-  let totalDebit = 0n;
-  let totalCredit = 0n;
+  const totalsByCurrency = new Map<string, { debit: bigint; credit: bigint }>();
   for (const entry of input.entries) {
-    totalDebit += entry.debitMinorUnits;
-    totalCredit += entry.creditMinorUnits;
+    const t = totalsByCurrency.get(entry.currency) ?? { debit: 0n, credit: 0n };
+    t.debit += entry.debitMinorUnits;
+    t.credit += entry.creditMinorUnits;
+    totalsByCurrency.set(entry.currency, t);
   }
-  if (totalDebit !== totalCredit) {
-    throw new LedgerInvariantViolation(
-      'INV-2',
-      `Event group ${input.eventGroupId} unbalanced: Σdebit=${totalDebit} ≠ Σcredit=${totalCredit}. ` +
-        `Difference=${totalDebit - totalCredit} minor units. ` +
-        `Every event must balance to zero across the books.`,
-    );
+  for (const [currency, t] of totalsByCurrency.entries()) {
+    if (t.debit !== t.credit) {
+      throw new LedgerInvariantViolation(
+        'INV-2',
+        `Event group ${input.eventGroupId} unbalanced for currency ${currency}: ` +
+          `Σdebit=${t.debit} ≠ Σcredit=${t.credit}. ` +
+          `Difference=${t.debit - t.credit} minor units. ` +
+          `Every event must balance to zero across the books for each currency.`,
+      );
+    }
   }
 }
 

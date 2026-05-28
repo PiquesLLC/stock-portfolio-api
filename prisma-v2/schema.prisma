@@ -118,6 +118,14 @@ model LedgerEntry {
   // same Stripe event from posting the same leg into the same account twice
   // (e.g. two creator_share rows for one invoice.paid event).
   @@unique([eventGroupId, accountScope, eventType], map: "ledger_entry_eventgroup_type_unique")
+  // At-most-one reversal per referent. Prevents double-clawback under
+  // concurrent dispute handlers. Declared here so Prisma's migration diff
+  // doesn't try to recreate it. The ACTUAL DB index is partial
+  // (WHERE reverses_entry_id IS NOT NULL) for storage efficiency — added
+  // by migrations/20260528_add_reverses_unique. Postgres treats NULL as
+  // distinct, so the partial form is semantically equivalent to the full
+  // unique Prisma would generate.
+  @@unique([reversesEntryId], map: "ledger_entry_reverses_unique")
 
   // ── Performance indexes ──────────────────────────────────────────────────
   // Primary read path: "give me this account's most recent entries / running
