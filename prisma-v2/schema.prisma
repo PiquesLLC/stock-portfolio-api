@@ -119,12 +119,23 @@ model LedgerEntry {
   // (e.g. two creator_share rows for one invoice.paid event).
   @@unique([eventGroupId, accountScope, eventType], map: "ledger_entry_eventgroup_type_unique")
   // At-most-one reversal per referent. Prevents double-clawback under
-  // concurrent dispute handlers. Declared here so Prisma's migration diff
-  // doesn't try to recreate it. The ACTUAL DB index is partial
-  // (WHERE reverses_entry_id IS NOT NULL) for storage efficiency — added
-  // by migrations/20260528_add_reverses_unique. Postgres treats NULL as
-  // distinct, so the partial form is semantically equivalent to the full
-  // unique Prisma would generate.
+  // concurrent dispute handlers.
+  //
+  // PRISMA-VS-DB DRIFT WARNING: declared here as a full @@unique, but the
+  // ACTUAL DB index is partial (WHERE reverses_entry_id IS NOT NULL),
+  // added by migrations/20260528_add_reverses_unique. Postgres treats NULL
+  // as distinct, so the partial form is semantically equivalent.
+  //
+  // If `prisma migrate dev` ever emits a migration that touches
+  // `ledger_entry_reverses_unique` (e.g. DROP + CREATE without the WHERE),
+  // REVIEW IT MANUALLY — do not accept blindly. The partial form is more
+  // storage-efficient on large tables, and dropping it requires the
+  // CONCURRENTLY rebuild dance to avoid locking. Use `--create-only` and
+  // hand-edit the generated migration to preserve the partial WHERE.
+  //
+  // Long-term plan: when Prisma supports partial-index declarations
+  // natively (currently a preview feature in discussion), migrate this to
+  // a first-class schema construct and remove the migration-only override.
   @@unique([reversesEntryId], map: "ledger_entry_reverses_unique")
 
   // ── Performance indexes ──────────────────────────────────────────────────
