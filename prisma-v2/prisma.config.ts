@@ -24,7 +24,6 @@ const rawUrl =
 // regardless of cwd. Prisma resolves the `schema` field relative to the
 // config file's directory.
 export default defineConfig({
-  earlyAccess: true,
   schema: path.resolve(__dirname, 'schema.prisma'),
   datasource: {
     url: rawUrl,
