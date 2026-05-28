@@ -66,6 +66,37 @@ const VALID_SCOPES = new Set<AccountScope>([
 // are all pre-seeded; an entry against a non-listed system account is a bug.
 const VALID_SYSTEM_ACCOUNT_IDS = new Set(['platform']);
 
+// Valid event types. Runtime check defends against typos like
+// `'EARNING_GROSS '` (trailing space) which would bypass the
+// (eventGroupId, accountScope, eventType) unique constraint and allow
+// duplicate "real" entries to coexist under the same event.
+const VALID_EVENT_TYPES = new Set<LedgerEventType>([
+  'EARNING_GROSS',
+  'PLATFORM_FEE',
+  'STRIPE_FEE_PASS',
+  'TAX_WITHHOLDING',
+  'PAYOUT_INITIATED',
+  'PAYOUT_PAID',
+  'ADJUSTMENT_CREDIT',
+  'ADJUSTMENT_DEBIT',
+  'EARNING_REFUNDED',
+  'PLATFORM_FEE_REFUNDED',
+  'DISPUTE_FROZEN',
+  'DISPUTE_LOST',
+  'DISPUTE_WON',
+  'RESTORE_AFTER_DISPUTE_WON',
+  'PAYOUT_FAILED',
+  'PAYOUT_REVERSED',
+]);
+
+const VALID_STRIPE_OBJECT_KINDS = new Set<string>([
+  'charge',
+  'transfer',
+  'payout',
+  'dispute',
+  'refund',
+]);
+
 // postedBy shape. Format is `<actor>:<context>` where actor names the source
 // of the write and context disambiguates within that actor. Examples:
 //   'webhook:invoice.paid', 'job:payout-runner', 'cron:reconciliation-tier-2',
@@ -111,6 +142,33 @@ function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void
         `BigInt values, circular refs, and other non-JSON types are forbidden in metadata. ` +
         `Cause: ${(e as Error).message}`,
     );
+  }
+  // Non-finite numbers (NaN, Infinity, -Infinity) are silently coerced to
+  // 'null' by JSON.stringify, which corrupts the original write asymmetrically
+  // (caller sees their NaN preserved in memory; storage gets null). Walk the
+  // tree and reject up-front.
+  rejectNonFiniteNumbers(metadata, entryIndex, '');
+}
+
+function rejectNonFiniteNumbers(v: unknown, entryIndex: number, path: string): void {
+  if (v === null) return;
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) {
+      throw new Error(
+        `Entry ${entryIndex}: metadata${path} contains non-finite number ${String(v)}. ` +
+          `NaN, Infinity, and -Infinity are silently coerced to null by JSON and ` +
+          `would corrupt the stored value asymmetrically. Reject up-front.`,
+      );
+    }
+    return;
+  }
+  if (typeof v !== 'object') return;
+  if (Array.isArray(v)) {
+    v.forEach((item, i) => rejectNonFiniteNumbers(item, entryIndex, `${path}[${i}]`));
+    return;
+  }
+  for (const k of Object.keys(v as Record<string, unknown>)) {
+    rejectNonFiniteNumbers((v as Record<string, unknown>)[k], entryIndex, `${path}.${k}`);
   }
 }
 
@@ -174,6 +232,20 @@ export async function postTransaction(
     );
   }
   const isMigrationPath = input.postedBy.startsWith('migration:');
+  // `migration:` prefix bypasses the 730-day past-window, but is only
+  // honored when the deploy explicitly sets NALA_ALLOW_MIGRATION_BACKFILL.
+  // This prevents an attacker who can influence postedBy (e.g. via a
+  // webhook payload that controls part of the actor string) from
+  // backdating arbitrarily. Migration jobs set the env explicitly; the
+  // webhook deploy does not.
+  if (isMigrationPath && process.env.NALA_ALLOW_MIGRATION_BACKFILL !== 'true') {
+    throw new Error(
+      `postedBy '${input.postedBy}' uses the migration: prefix, but ` +
+        `NALA_ALLOW_MIGRATION_BACKFILL is not set in this environment. ` +
+        `Migration backfills require explicit env opt-in. Set the env to 'true' ` +
+        `in the migration job's environment, not in the webhook/API deploy.`,
+    );
+  }
 
   const nowMs = Date.now();
   const effMs = input.effectiveAt.getTime();
@@ -187,7 +259,7 @@ export async function postTransaction(
     throw new Error(
       `effectiveAt ${input.effectiveAt.toISOString()} is more than 730 days in the past. ` +
         `Live posting paths reject this as suspect; use postedBy='migration:<name>' ` +
-        `for explicit deeper backfills (which bypass this bound).`,
+        `in a deploy with NALA_ALLOW_MIGRATION_BACKFILL=true for explicit deeper backfills.`,
     );
   }
 
@@ -215,6 +287,21 @@ export async function postTransaction(
       throw new Error(
         `Entry ${i}: system account ${e.accountScope}:${e.accountId} has an unknown account id. ` +
           `Valid system account ids: ${Array.from(VALID_SYSTEM_ACCOUNT_IDS).join(', ')}.`,
+      );
+    }
+    if (!VALID_EVENT_TYPES.has(e.eventType)) {
+      // Typos like 'EARNING_GROSS ' (trailing space) would bypass the
+      // (eventGroupId, accountScope, eventType) unique constraint.
+      throw new Error(
+        `Entry ${i}: unknown eventType '${e.eventType}'. ` +
+          `Valid: ${Array.from(VALID_EVENT_TYPES).join(', ')}.`,
+      );
+    }
+    if (e.stripeObjectKind !== undefined && e.stripeObjectKind !== null &&
+        !VALID_STRIPE_OBJECT_KINDS.has(e.stripeObjectKind)) {
+      throw new Error(
+        `Entry ${i}: unknown stripeObjectKind '${e.stripeObjectKind}'. ` +
+          `Valid: ${Array.from(VALID_STRIPE_OBJECT_KINDS).join(', ')}.`,
       );
     }
     if (!CURRENCY_REGEX.test(e.currency)) {
@@ -325,13 +412,26 @@ export async function postTransaction(
 
         // ── Reversal shape validation (INV-5) ────────────────────────────
         //
+        // `reversesEntryId` is for FULL reversals only — a $50 charge fully
+        // reversed by a $50 debit. The exact-inverse check below protects
+        // against e.g. a $5 clawback against a $50 referent that would
+        // otherwise leave the books permanently $45 off.
+        //
+        // PARTIAL REVERSALS (Stripe partial refunds, partial dispute losses)
+        // are explicitly NOT represented via `reversesEntryId`. The
+        // structural double-clawback guarantee (one referent → one reversal)
+        // cannot be expressed for partials without per-referent cumulative
+        // tracking, which is deferred. Callers post partials as standalone
+        // `EARNING_REFUNDED` / `PLATFORM_FEE_REFUNDED` / `ADJUSTMENT_DEBIT`
+        // entries with NO `reversesEntryId`. The link to the original Stripe
+        // event is preserved via `stripeObjectId` / `stripeEventId` for
+        // reconciliation. This is a known semantic gap; see the architecture
+        // doc for the partial-reversal magnitude-tracking design.
+        //
         // For each entry with reversesEntryId set: load the referent and
         // verify (a) it exists, (b) same account, (c) same currency, (d) it
         // is the EXACT inverse (referent.debit == this.credit and vice
-        // versa). The FK guarantees only existence post-commit — the shape
-        // check protects against e.g. a clawback for $5 against a referent
-        // that recorded $50, which would otherwise post happily and leave
-        // the books permanently $45 off.
+        // versa).
         const reversesIds = input.entries
           .map((e) => e.reversesEntryId)
           .filter((id): id is string => !!id);
@@ -385,7 +485,13 @@ export async function postTransaction(
                   `Referent: debit=${referent.debitMinorUnits} credit=${referent.creditMinorUnits}. ` +
                   `Reversal: debit=${entry.debitMinorUnits} credit=${entry.creditMinorUnits}. ` +
                   `A reversal must satisfy: referent.debit == reversal.credit AND ` +
-                  `referent.credit == reversal.debit.`,
+                  `referent.credit == reversal.debit. ` +
+                  `If this is a PARTIAL refund/clawback, do NOT set reversesEntryId — ` +
+                  `post a standalone EARNING_REFUNDED / PLATFORM_FEE_REFUNDED / ` +
+                  `ADJUSTMENT_DEBIT entry without reverses_entry_id, linked to the ` +
+                  `original via stripeObjectId. The structural double-clawback ` +
+                  `protection (partial unique on reverses_entry_id) does not cover ` +
+                  `partial reversals; magnitude tracking is deferred.`,
               );
             }
           }
