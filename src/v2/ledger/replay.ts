@@ -14,6 +14,21 @@
 //
 // reconciliation Tier 2 runs replay() across all accounts nightly and
 // alerts on any non-convergent result.
+//
+// SCALE NOTE: this implementation loads the entire history into Node memory
+// (via findMany without take). That's fine up to ~50k entries per account
+// (~5 MB at ~100 bytes/row). Beyond that — once an active creator crosses
+// ~10k subscribers, or once the platform crosses ~1M total entries — this
+// must be rewritten to either:
+//   (a) push the sum to Postgres:
+//       SELECT SUM(credit_minor_units - debit_minor_units) FROM ledger_entry
+//       WHERE account_scope=$1 AND account_id=$2;
+//   (b) cursor-paginate via $queryRaw with a streamed accumulator.
+// Option (a) is preferable but only valid AFTER bigint-arithmetic precision
+// is verified at scale (Postgres's NUMERIC handles arbitrary precision,
+// BIGINT is i64 — sum of 1M entries of $10000 each is well within i64).
+// TODO(scale): rewrite as Postgres-side SUM when any single account
+// exceeds 50k entries.
 
 import { getLedgerClient } from './prisma';
 import { AccountScope, ReplayResult } from './types';

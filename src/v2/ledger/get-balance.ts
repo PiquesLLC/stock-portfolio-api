@@ -1,8 +1,21 @@
 // getBalance — the production read path for an account's current balance.
 //
 // O(log n) single index lookup on the latest entry's running_balance column.
-// This is what API endpoints, payout eligibility checks, and dashboard
-// queries use. For audit / proof-of-correctness, use replay() instead.
+// This is what API endpoints and dashboard queries use. For audit /
+// proof-of-correctness, use replay() instead.
+//
+// IMPORTANT — NOT SAFE FOR PAYOUT ELIGIBILITY:
+//   This function issues two non-transactional queries (account lookup +
+//   latest-entry lookup) outside any transaction. Under concurrent writes,
+//   the returned values can be from snapshots seconds apart. That's fine
+//   for displaying balance in a dashboard; it is NOT fine for deciding
+//   "may we send $X to this creator?" because a clawback could post
+//   between the read and the payout decision.
+//
+//   When the payout saga lands, it MUST acquire a row lock on the latest
+//   ledger entry (SELECT ... FOR UPDATE) inside a transaction, OR use a
+//   pessimistic balance reservation pattern. Do NOT call getBalance() from
+//   payout eligibility code paths.
 //
 // Behavior on missing account:
 //   - If the account doesn't exist (no rows in `accounts`), returns

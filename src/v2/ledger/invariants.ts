@@ -94,16 +94,35 @@ export function assertInv5Shape(entry: LedgerEntryInput, index: number): void {
   }
 }
 
+// idempotencySuffix shape rules (enforced here, NOT at the DB level):
+//   - Non-empty (empty would silently collide via the implicit `${uuid}:`
+//     idempotency_key for different intents).
+//   - Lowercase ASCII letters, digits, and underscores only. Forbidding
+//     other characters keeps log/grep-ability sane and avoids any quoting
+//     surprises in error messages or SQL string interpolation downstream.
+//   - 1-64 chars (idempotency_key column is 128 chars; uuid prefix is 37
+//     including the colon; suffix gets the remaining 91 — cap at 64 to
+//     leave headroom and reject unrealistically long inputs).
+const IDEMPOTENCY_SUFFIX_REGEX = /^[a-z0-9_]{1,64}$/;
+
 /**
  * Sanity check that the input's entries all share consistent idempotency
- * suffixes (no duplicates within one call). The (account_scope, account_id,
- * idempotency_key) DB unique constraint would catch this, but only AFTER a
- * partial transaction commit attempt — so we pre-check.
+ * suffixes (no duplicates within one call) AND each suffix matches the
+ * allowed shape. The (account_scope, account_id, idempotency_key) DB unique
+ * constraint would catch duplicates, but only AFTER a partial transaction
+ * commit attempt — so we pre-check both shape and uniqueness here.
  */
 export function assertUniqueIdempotencySuffixes(input: PostTransactionInput): void {
   const seen = new Set<string>();
   for (let i = 0; i < input.entries.length; i++) {
     const e = input.entries[i];
+    if (!IDEMPOTENCY_SUFFIX_REGEX.test(e.idempotencySuffix)) {
+      throw new Error(
+        `Entry ${i}: idempotencySuffix '${e.idempotencySuffix}' is invalid. ` +
+          `Must be 1-64 chars of [a-z0-9_]. Empty strings and special chars are rejected ` +
+          `to prevent silent collisions and downstream quoting surprises.`,
+      );
+    }
     const key = `${e.accountScope}:${e.accountId}:${e.idempotencySuffix}`;
     if (seen.has(key)) {
       throw new Error(
