@@ -4,7 +4,7 @@
     "description": "Robinhood-style REST API for real-time stock portfolio tracking with momentum-based projection engine",
     "main": "dist/index.js",
     "scripts": {
-        "build": "prisma generate && tsc",
+        "build": "prisma generate && prisma generate --schema=./prisma-v2/schema.prisma && tsc",
         "start": "prisma migrate deploy && node dist/index.js",
         "dev": "node scripts/ensure-dev-db.js && node scripts/kill-port.js && nodemon",
         "db:generate": "prisma generate",

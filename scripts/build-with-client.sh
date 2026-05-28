@@ -5,7 +5,14 @@ set -e
 
 echo "=== Building API ==="
 npm install --include=dev
+# v1 client (libsql/SQLite). Default schema at prisma/schema.prisma.
 npx prisma generate
+# v2 client (Postgres ledger). Generated to src/generated/prisma-v2/ —
+# required by src/v2/ledger/*.ts. The v2 module is NOT loaded at runtime
+# on Railway (no caller imports from src/v2 yet), but tsc compiles all
+# .ts files in src/, so the type declarations must exist for the build
+# to succeed.
+npx prisma generate --schema=prisma-v2/schema.prisma
 npx tsc
 
 echo "=== Building UI Client ==="
