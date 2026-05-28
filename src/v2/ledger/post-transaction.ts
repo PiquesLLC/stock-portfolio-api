@@ -808,7 +808,8 @@ export async function postTransaction(
 
         if (divergences.length > 0) {
           throw new Error(
-            `CRITICAL: idempotency key '${key}' reused for different intent. ` +
+            `CRITICAL: idempotency key '${idemKey}' (account ${requested.accountScope}:${requested.accountId}) ` +
+              `reused for different intent. ` +
               `Divergence(s): ${divergences.join('; ')}. ` +
               `This indicates either a buggy caller reusing keys for different events, ` +
               `or a replay attack with modified fields. Do NOT ack as success.`,
