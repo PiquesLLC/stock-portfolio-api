@@ -13,14 +13,12 @@ npx prisma generate
 # .ts files in src/, so the type declarations must exist for the build
 # to succeed.
 #
-# V2_DATABASE_URL placeholder: prisma generate only VALIDATES that
-# env-referenced vars exist; it does not connect. Railway's build
-# environment may not have V2_DATABASE_URL set (no v2 Postgres
-# provisioned yet), so we inject a placeholder inline for generate-time
-# only. The real V2_DATABASE_URL is required at runtime in the deploy
-# environment once any code path actually instantiates the v2 client.
-V2_DATABASE_URL="${V2_DATABASE_URL:-postgresql://placeholder:placeholder@localhost:5432/placeholder}" \
-  npx prisma generate --schema=prisma-v2/schema.prisma
+# Uses prisma-v2/prisma.config.ts (selected via --config) for schema and
+# datasource URL. The config provides a placeholder fallback when
+# V2_DATABASE_URL is unset, so this generate succeeds on Railway even
+# without v2 Postgres provisioned. The real V2_DATABASE_URL is required
+# at runtime once any caller invokes getLedgerClient().
+npx prisma generate --config=./prisma-v2/prisma.config.ts
 npx tsc
 
 echo "=== Building UI Client ==="

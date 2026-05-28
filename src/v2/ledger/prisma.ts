@@ -27,7 +27,13 @@ export function getLedgerClient(): PrismaClient {
           'before importing src/v2/ledger from any production code path.',
       );
     }
-    const adapter = new PrismaPg({ connectionString: url });
+    // disposeExternalPool: true ensures the internal pg.Pool is closed when
+    // PrismaClient.$disconnect() is called (test runs, hot reload). Without
+    // it, the pool can leak across reconnect cycles.
+    const adapter = new PrismaPg(
+      { connectionString: url },
+      { disposeExternalPool: true },
+    );
     cachedClient = new PrismaClient({
       adapter,
       log:
