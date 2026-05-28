@@ -52,31 +52,80 @@ import {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Valid AccountScope values. Runtime check guards against callers casting
+// strings to AccountScope via `as` — TypeScript can't enforce that.
+const VALID_SCOPES = new Set<AccountScope>([
+  'creator',
+  'stripe_clearing',
+  'platform_revenue',
+  'platform_fee',
+  'tax_withholding',
+]);
+
 // Valid system (non-creator) account ids. Hardcoded list — these accounts
 // are all pre-seeded; an entry against a non-listed system account is a bug.
 const VALID_SYSTEM_ACCOUNT_IDS = new Set(['platform']);
 
 // postedBy shape. Format is `<actor>:<context>` where actor names the source
 // of the write and context disambiguates within that actor. Examples:
-//   'webhook:invoice.paid', 'job:payout-runner', 'ops:userid-237198da',
-//   'migration:backfill-v1', 'test:integration'.
-const POSTED_BY_REGEX = /^(webhook|job|ops|api|migration|test):[a-z0-9_:.\-]{1,200}$/;
+//   'webhook:invoice.paid', 'job:payout-runner', 'cron:reconciliation-tier-2',
+//   'ops:userid-237198da', 'migration:backfill-v1', 'test:integration'.
+const POSTED_BY_REGEX = /^(webhook|job|cron|ops|api|migration|test):[a-z0-9_:.\-]{1,200}$/;
+
+// ISO-4217 currency: 3 uppercase letters. We never auto-uppercase — silent
+// case mutation hides bugs and creates currency-string-case schism in storage.
+const CURRENCY_REGEX = /^[A-Z]{3}$/;
 
 // effectiveAt bounds: protect reconciliation from gibberish dates.
-// 1 day in the future allows for clock skew / forward-dated effective times
-// (e.g. scheduled bills). 365 days in the past covers Stripe's webhook replay
-// window plus a safety margin for backfills.
+// 1 day in the future allows clock skew / forward-dated effective times.
+// 730 days in the past covers annual-subscription chargeback reversals,
+// dispute arbitration outcomes, and 1099-K year-end true-ups that can
+// arrive >365 days after the original event. Backfills beyond this need
+// migration tooling (which is exempt via `migration:` postedBy prefix).
 const EFFECTIVE_AT_MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
-const EFFECTIVE_AT_MAX_PAST_MS = 365 * 24 * 60 * 60 * 1000;
+const EFFECTIVE_AT_MAX_PAST_MS = 730 * 24 * 60 * 60 * 1000;
 
-// Canonical JSON: stable string representation regardless of key insertion
-// order. Used for metadata comparison in the dedup intent-divergence check —
-// JSONB doesn't preserve key order on round-trip, so a naive JSON.stringify
-// would false-positive on retries.
-function canonicalJson(v: unknown): string {
-  if (v === null || v === undefined) return 'null';
+// Canonical JSON for metadata comparison in the dedup intent-divergence
+// check. The fundamental challenge: JS values that JSON can't natively
+// represent (Date, BigInt, undefined) round-trip ASYMMETRICALLY through
+// Postgres JSONB. Two examples:
+//   - Date instance has no own enumerable string keys, so a naive
+//     `Object.keys().sort()` recursion returns '{}' for any Date — making
+//     all Dates compare equal. Postgres stores Date as the ISO-8601 string
+//     produced by Date.toJSON().
+//   - `undefined` values are stripped by JSON.stringify; Postgres stores
+//     no such key. A requested-side `{x: undefined}` vs stored-side `{}`
+//     must compare equal.
+//   - BigInt isn't JSON-representable and JSON.stringify throws on it.
+//
+// Solution: validate metadata is JSON-serializable up-front (rejects
+// BigInt and circular refs), then round-trip through JSON to apply
+// Date.toJSON and strip undefined symmetrically before canonical sort.
+function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void {
+  if (metadata === undefined) return;
+  try {
+    JSON.stringify(metadata);
+  } catch (e) {
+    throw new Error(
+      `Entry ${entryIndex}: metadata is not JSON-serializable. ` +
+        `BigInt values, circular refs, and other non-JSON types are forbidden in metadata. ` +
+        `Cause: ${(e as Error).message}`,
+    );
+  }
+}
+
+function canonicalMetadata(v: unknown): string {
+  // Normalize through JSON round-trip first — this applies Date.toJSON
+  // (Date → ISO string), strips undefined values, and produces a tree of
+  // only JSON-native types. Mirrors what Postgres JSONB stores.
+  const normalized = v === undefined ? null : JSON.parse(JSON.stringify(v));
+  return canonicalJsonInner(normalized);
+}
+
+function canonicalJsonInner(v: unknown): string {
+  if (v === null) return 'null';
   if (typeof v !== 'object') return JSON.stringify(v);
-  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
+  if (Array.isArray(v)) return '[' + v.map(canonicalJsonInner).join(',') + ']';
   const keys = Object.keys(v as Record<string, unknown>).sort();
   return (
     '{' +
@@ -85,7 +134,7 @@ function canonicalJson(v: unknown): string {
         (k) =>
           JSON.stringify(k) +
           ':' +
-          canonicalJson((v as Record<string, unknown>)[k]),
+          canonicalJsonInner((v as Record<string, unknown>)[k]),
       )
       .join(',') +
     '}'
@@ -106,13 +155,26 @@ export async function postTransaction(
 
   // ── effectiveAt bounds ───────────────────────────────────────────────────
   // Block sentinel/gibberish dates that would corrupt reconciliation date
-  // ranges. A 1-day forward window covers clock skew; a 365-day backward
-  // window covers Stripe replay + reasonable backfill.
+  // ranges. 1-day forward window covers clock skew; 730-day backward window
+  // covers Stripe replay + late-arriving dispute arbitration + annual-sub
+  // chargeback reversals. `migration:` actor bypasses the past-window bound
+  // for explicit deeper backfills.
   if (!(input.effectiveAt instanceof Date) || Number.isNaN(input.effectiveAt.getTime())) {
     throw new Error(
       `Invalid effectiveAt: must be a valid Date. Got: ${String(input.effectiveAt)}`,
     );
   }
+  // ── postedBy shape (must come before effectiveAt bounds — migration
+  //    actor bypasses past-window restriction) ───────────────────────────
+  if (!POSTED_BY_REGEX.test(input.postedBy)) {
+    throw new Error(
+      `Invalid postedBy '${input.postedBy}'. Must match ` +
+        `<actor>:<context> where actor ∈ {webhook, job, cron, ops, api, migration, test} ` +
+        `and context is 1-200 chars of [a-z0-9_:.-].`,
+    );
+  }
+  const isMigrationPath = input.postedBy.startsWith('migration:');
+
   const nowMs = Date.now();
   const effMs = input.effectiveAt.getTime();
   if (effMs > nowMs + EFFECTIVE_AT_MAX_FUTURE_MS) {
@@ -121,25 +183,26 @@ export async function postTransaction(
         `Reject as suspect — verify the source event's timestamp.`,
     );
   }
-  if (effMs < nowMs - EFFECTIVE_AT_MAX_PAST_MS) {
+  if (!isMigrationPath && effMs < nowMs - EFFECTIVE_AT_MAX_PAST_MS) {
     throw new Error(
-      `effectiveAt ${input.effectiveAt.toISOString()} is more than 365 days in the past. ` +
-        `Reject as suspect — backfills beyond 365 days require explicit migration tooling, not the live posting path.`,
+      `effectiveAt ${input.effectiveAt.toISOString()} is more than 730 days in the past. ` +
+        `Live posting paths reject this as suspect; use postedBy='migration:<name>' ` +
+        `for explicit deeper backfills (which bypass this bound).`,
     );
   }
 
-  // ── postedBy shape ───────────────────────────────────────────────────────
-  if (!POSTED_BY_REGEX.test(input.postedBy)) {
-    throw new Error(
-      `Invalid postedBy '${input.postedBy}'. Must match ` +
-        `<actor>:<context> where actor ∈ {webhook, job, ops, api, migration, test} ` +
-        `and context is 1-200 chars of [a-z0-9_:.-].`,
-    );
-  }
-
-  // ── accountId shape per scope ────────────────────────────────────────────
+  // ── accountScope + accountId shape per scope ─────────────────────────────
   for (let i = 0; i < input.entries.length; i++) {
     const e = input.entries[i];
+    if (!VALID_SCOPES.has(e.accountScope)) {
+      // Runtime guard — TypeScript can't prevent `as AccountScope` casts at
+      // call sites, and a misspelled scope ('creators') would otherwise
+      // reach the DB and fail with an opaque FK error.
+      throw new Error(
+        `Entry ${i}: unknown accountScope '${e.accountScope}'. ` +
+          `Valid: ${Array.from(VALID_SCOPES).join(', ')}.`,
+      );
+    }
     if (e.accountScope === 'creator') {
       // Creator accountId == userId, which is a UUID in v1 and v2.
       if (!UUID_REGEX.test(e.accountId)) {
@@ -154,6 +217,13 @@ export async function postTransaction(
           `Valid system account ids: ${Array.from(VALID_SYSTEM_ACCOUNT_IDS).join(', ')}.`,
       );
     }
+    if (!CURRENCY_REGEX.test(e.currency)) {
+      throw new Error(
+        `Entry ${i}: currency '${e.currency}' must be 3 uppercase letters (ISO-4217). ` +
+          `Lowercase / non-letters are rejected to prevent case-schism in storage.`,
+      );
+    }
+    validateMetadataIsJsonable(e.metadata, i);
   }
 
   // ── Application-layer invariant checks (fast-fail before DB round-trip) ──
@@ -547,8 +617,8 @@ export async function postTransaction(
         if (stored.postedBy !== input.postedBy) {
           divergences.push(`postedBy: stored='${stored.postedBy}' vs requested='${input.postedBy}'`);
         }
-        const storedMetaCanon = canonicalJson(stored.metadata ?? {});
-        const requestedMetaCanon = canonicalJson(requested.metadata ?? {});
+        const storedMetaCanon = canonicalMetadata(stored.metadata ?? {});
+        const requestedMetaCanon = canonicalMetadata(requested.metadata ?? {});
         if (storedMetaCanon !== requestedMetaCanon) {
           divergences.push(`metadata: stored=${storedMetaCanon} vs requested=${requestedMetaCanon}`);
         }
