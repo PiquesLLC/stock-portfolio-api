@@ -52,6 +52,46 @@ import {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Valid system (non-creator) account ids. Hardcoded list — these accounts
+// are all pre-seeded; an entry against a non-listed system account is a bug.
+const VALID_SYSTEM_ACCOUNT_IDS = new Set(['platform']);
+
+// postedBy shape. Format is `<actor>:<context>` where actor names the source
+// of the write and context disambiguates within that actor. Examples:
+//   'webhook:invoice.paid', 'job:payout-runner', 'ops:userid-237198da',
+//   'migration:backfill-v1', 'test:integration'.
+const POSTED_BY_REGEX = /^(webhook|job|ops|api|migration|test):[a-z0-9_:.\-]{1,200}$/;
+
+// effectiveAt bounds: protect reconciliation from gibberish dates.
+// 1 day in the future allows for clock skew / forward-dated effective times
+// (e.g. scheduled bills). 365 days in the past covers Stripe's webhook replay
+// window plus a safety margin for backfills.
+const EFFECTIVE_AT_MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
+const EFFECTIVE_AT_MAX_PAST_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Canonical JSON: stable string representation regardless of key insertion
+// order. Used for metadata comparison in the dedup intent-divergence check —
+// JSONB doesn't preserve key order on round-trip, so a naive JSON.stringify
+// would false-positive on retries.
+function canonicalJson(v: unknown): string {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
+  const keys = Object.keys(v as Record<string, unknown>).sort();
+  return (
+    '{' +
+    keys
+      .map(
+        (k) =>
+          JSON.stringify(k) +
+          ':' +
+          canonicalJson((v as Record<string, unknown>)[k]),
+      )
+      .join(',') +
+    '}'
+  );
+}
+
 export async function postTransaction(
   input: PostTransactionInput,
 ): Promise<PostTransactionResult> {
@@ -62,6 +102,58 @@ export async function postTransaction(
     throw new Error(
       `Invalid eventGroupId UUID format: '${input.eventGroupId}'. Use crypto.randomUUID() or pass a Stripe event id derived UUID.`,
     );
+  }
+
+  // ── effectiveAt bounds ───────────────────────────────────────────────────
+  // Block sentinel/gibberish dates that would corrupt reconciliation date
+  // ranges. A 1-day forward window covers clock skew; a 365-day backward
+  // window covers Stripe replay + reasonable backfill.
+  if (!(input.effectiveAt instanceof Date) || Number.isNaN(input.effectiveAt.getTime())) {
+    throw new Error(
+      `Invalid effectiveAt: must be a valid Date. Got: ${String(input.effectiveAt)}`,
+    );
+  }
+  const nowMs = Date.now();
+  const effMs = input.effectiveAt.getTime();
+  if (effMs > nowMs + EFFECTIVE_AT_MAX_FUTURE_MS) {
+    throw new Error(
+      `effectiveAt ${input.effectiveAt.toISOString()} is more than 1 day in the future. ` +
+        `Reject as suspect — verify the source event's timestamp.`,
+    );
+  }
+  if (effMs < nowMs - EFFECTIVE_AT_MAX_PAST_MS) {
+    throw new Error(
+      `effectiveAt ${input.effectiveAt.toISOString()} is more than 365 days in the past. ` +
+        `Reject as suspect — backfills beyond 365 days require explicit migration tooling, not the live posting path.`,
+    );
+  }
+
+  // ── postedBy shape ───────────────────────────────────────────────────────
+  if (!POSTED_BY_REGEX.test(input.postedBy)) {
+    throw new Error(
+      `Invalid postedBy '${input.postedBy}'. Must match ` +
+        `<actor>:<context> where actor ∈ {webhook, job, ops, api, migration, test} ` +
+        `and context is 1-200 chars of [a-z0-9_:.-].`,
+    );
+  }
+
+  // ── accountId shape per scope ────────────────────────────────────────────
+  for (let i = 0; i < input.entries.length; i++) {
+    const e = input.entries[i];
+    if (e.accountScope === 'creator') {
+      // Creator accountId == userId, which is a UUID in v1 and v2.
+      if (!UUID_REGEX.test(e.accountId)) {
+        throw new Error(
+          `Entry ${i}: creator accountId '${e.accountId}' must be a UUID v4 or v7. ` +
+            `Creator account ids are user ids.`,
+        );
+      }
+    } else if (!VALID_SYSTEM_ACCOUNT_IDS.has(e.accountId)) {
+      throw new Error(
+        `Entry ${i}: system account ${e.accountScope}:${e.accountId} has an unknown account id. ` +
+          `Valid system account ids: ${Array.from(VALID_SYSTEM_ACCOUNT_IDS).join(', ')}.`,
+      );
+    }
   }
 
   // ── Application-layer invariant checks (fast-fail before DB round-trip) ──
@@ -319,6 +411,9 @@ export async function postTransaction(
       const isSequenceCollision =
         targetStr.includes('ledger_entry_seq_unique') ||
         targetStr.includes('sequence_no');
+      const isReversesCollision =
+        targetStr.includes('ledger_entry_reverses_unique') ||
+        targetStr.includes('reverses_entry_id');
 
       if (isSequenceCollision) {
         // The trigger's UPDATE-RETURNING on accounts.next_sequence_no
@@ -331,6 +426,24 @@ export async function postTransaction(
             `${input.eventGroupId}. This indicates trigger corruption, ` +
             `manual mutation, or a race condition we don't understand. ` +
             `Investigate immediately. Original error: ${err.message}`,
+        );
+      }
+
+      if (isReversesCollision) {
+        // The partial unique on reverses_entry_id prevents double clawback —
+        // a single referent may be reversed at most once. Two concurrent
+        // dispute handlers attempting to reverse the same charge both fire
+        // here; the loser surfaces this error. This is NOT a bug in our
+        // code — it's the constraint working as designed. Caller should
+        // treat as "referent already reversed, do nothing further" but we
+        // surface as a distinct error so the caller can decide.
+        const reversesId = input.entries.find((e) => e.reversesEntryId)?.reversesEntryId;
+        throw new Error(
+          `Referent ledger entry ${reversesId ?? '<unknown>'} has already been reversed. ` +
+            `A referent may be reversed at most once. If this is a concurrent ` +
+            `dispute/clawback handler, the other handler won — drop this attempt. ` +
+            `If this is unexpected, investigate the prior reversal. ` +
+            `Original error: ${err.message}`,
         );
       }
 
@@ -394,24 +507,58 @@ export async function postTransaction(
               `idempotency suffixes than the original call.`,
           );
         }
-        if (
-          stored.accountScope !== requested.accountScope ||
-          stored.accountId !== requested.accountId ||
-          stored.eventType !== requested.eventType ||
-          stored.debitMinorUnits !== requested.debitMinorUnits ||
-          stored.creditMinorUnits !== requested.creditMinorUnits ||
-          stored.currency.trim() !== requested.currency
-        ) {
+        // Compare every per-entry field that is set at insert time. Trigger-
+        // populated fields (sequence_no, running_balance_minor_units, posted_at)
+        // are NOT compared — they're derived state.
+        const divergences: string[] = [];
+        if (stored.accountScope !== requested.accountScope) {
+          divergences.push(`accountScope: stored='${stored.accountScope}' vs requested='${requested.accountScope}'`);
+        }
+        if (stored.accountId !== requested.accountId) {
+          divergences.push(`accountId: stored='${stored.accountId}' vs requested='${requested.accountId}'`);
+        }
+        if (stored.eventType !== requested.eventType) {
+          divergences.push(`eventType: stored='${stored.eventType}' vs requested='${requested.eventType}'`);
+        }
+        if (stored.debitMinorUnits !== requested.debitMinorUnits) {
+          divergences.push(`debit: stored=${stored.debitMinorUnits} vs requested=${requested.debitMinorUnits}`);
+        }
+        if (stored.creditMinorUnits !== requested.creditMinorUnits) {
+          divergences.push(`credit: stored=${stored.creditMinorUnits} vs requested=${requested.creditMinorUnits}`);
+        }
+        if (stored.currency.trim() !== requested.currency) {
+          divergences.push(`currency: stored='${stored.currency.trim()}' vs requested='${requested.currency}'`);
+        }
+        if ((stored.reversesEntryId ?? null) !== (requested.reversesEntryId ?? null)) {
+          divergences.push(`reversesEntryId: stored=${stored.reversesEntryId ?? 'null'} vs requested=${requested.reversesEntryId ?? 'null'}`);
+        }
+        if ((stored.stripeEventId ?? null) !== (requested.stripeEventId ?? null)) {
+          divergences.push(`stripeEventId: stored=${stored.stripeEventId ?? 'null'} vs requested=${requested.stripeEventId ?? 'null'}`);
+        }
+        if ((stored.stripeObjectKind ?? null) !== (requested.stripeObjectKind ?? null)) {
+          divergences.push(`stripeObjectKind: stored=${stored.stripeObjectKind ?? 'null'} vs requested=${requested.stripeObjectKind ?? 'null'}`);
+        }
+        if ((stored.stripeObjectId ?? null) !== (requested.stripeObjectId ?? null)) {
+          divergences.push(`stripeObjectId: stored=${stored.stripeObjectId ?? 'null'} vs requested=${requested.stripeObjectId ?? 'null'}`);
+        }
+        if (stored.effectiveAt.getTime() !== input.effectiveAt.getTime()) {
+          divergences.push(`effectiveAt: stored='${stored.effectiveAt.toISOString()}' vs requested='${input.effectiveAt.toISOString()}'`);
+        }
+        if (stored.postedBy !== input.postedBy) {
+          divergences.push(`postedBy: stored='${stored.postedBy}' vs requested='${input.postedBy}'`);
+        }
+        const storedMetaCanon = canonicalJson(stored.metadata ?? {});
+        const requestedMetaCanon = canonicalJson(requested.metadata ?? {});
+        if (storedMetaCanon !== requestedMetaCanon) {
+          divergences.push(`metadata: stored=${storedMetaCanon} vs requested=${requestedMetaCanon}`);
+        }
+
+        if (divergences.length > 0) {
           throw new Error(
             `CRITICAL: idempotency key '${key}' reused for different intent. ` +
-              `Stored: ${stored.accountScope}:${stored.accountId} ` +
-              `type=${stored.eventType} debit=${stored.debitMinorUnits} ` +
-              `credit=${stored.creditMinorUnits} currency='${stored.currency.trim()}'. ` +
-              `Requested: ${requested.accountScope}:${requested.accountId} ` +
-              `type=${requested.eventType} debit=${requested.debitMinorUnits} ` +
-              `credit=${requested.creditMinorUnits} currency='${requested.currency}'. ` +
+              `Divergence(s): ${divergences.join('; ')}. ` +
               `This indicates either a buggy caller reusing keys for different events, ` +
-              `or a replay attack with modified amounts. Do NOT ack as success.`,
+              `or a replay attack with modified fields. Do NOT ack as success.`,
           );
         }
       }
