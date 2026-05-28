@@ -329,7 +329,27 @@ export async function postTransaction(
   // Validate per-account currency consistency within this call. Cross-call
   // currency drift is caught below by loading existing accounts and
   // comparing — we do this here (pre-DB) to fail fast with a clear message.
+  //
+  // ALSO: enforce ONE-ENTRY-PER-ACCOUNT-PER-CALL. The BEFORE INSERT trigger
+  // computes running_balance by SELECT-ing the predecessor row's value.
+  // Under Postgres MVCC, the predecessor inserted by the SAME multi-row
+  // INSERT statement has cmin == current command id and is NOT visible to
+  // the next row's trigger SELECT. So if a call posts 2+ entries against
+  // the same (account_scope, account_id), entries 2..N would compute
+  // running_balance from a NULL predecessor (COALESCEd to 0), silently
+  // corrupting the cached running balance. replay() would catch the
+  // divergence later, but getBalance() would return wrong totals in the
+  // meantime — and a payout consulting a corrupt cached balance could
+  // overpay.
+  //
+  // This restriction matches the v2 architecture (each event group writes
+  // one entry per affected account — creator, platform_revenue,
+  // platform_fee, stripe_clearing, etc., each a distinct account). If a
+  // future workflow needs multiple entries on the same account, split it
+  // into multiple postTransaction calls (each gets its own statement and
+  // its own snapshot).
   const currencyByAccount = new Map<string, string>();
+  const entryCountByAccount = new Map<string, number>();
   for (const entry of input.entries) {
     const key = `${entry.accountScope}:${entry.accountId}`;
     const existing = currencyByAccount.get(key);
@@ -341,6 +361,18 @@ export async function postTransaction(
       );
     }
     currencyByAccount.set(key, entry.currency);
+    entryCountByAccount.set(key, (entryCountByAccount.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of entryCountByAccount.entries()) {
+    if (count > 1) {
+      throw new Error(
+        `${count} entries against account ${key} in one postTransaction call. ` +
+          `Multi-entry-same-account batches are not supported: the running_balance ` +
+          `trigger reads the predecessor via SELECT, which does NOT see same-` +
+          `statement inserts under Postgres MVCC. Split into ${count} separate ` +
+          `postTransaction calls (each its own statement, its own snapshot).`,
+      );
+    }
   }
 
   const prisma = getLedgerClient();
@@ -413,6 +445,25 @@ export async function postTransaction(
             VALUES (${scope}, ${accountId}, ${declaredCurrency}, 1, NOW())
             ON CONFLICT (account_scope, account_id) DO NOTHING
           `;
+          // Race-window: another concurrent first-time call for this same
+          // new creator may have inserted with a DIFFERENT currency
+          // moments before us. ON CONFLICT DO NOTHING silently no-ops in
+          // that case; without this re-check, we'd proceed to the ledger
+          // insert and the trigger's currency-match check would surface
+          // as an opaque plpgsql error. Re-SELECT and validate explicitly.
+          const justInserted = await tx.account.findUnique({
+            where: { accountScope_accountId: { accountScope: scope as AccountScope, accountId } },
+            select: { currency: true },
+          });
+          const justInsertedCurrency = justInserted?.currency.trim();
+          if (justInsertedCurrency && justInsertedCurrency !== declaredCurrency) {
+            throw new Error(
+              `Account ${key} was just created by a concurrent transaction ` +
+                `with currency '${justInsertedCurrency}', but this transaction ` +
+                `declares '${declaredCurrency}'. Currency drift detected at ` +
+                `creation race. Investigate which caller is wrong.`,
+            );
+          }
         }
 
         // ── Reversal shape validation (INV-5) ────────────────────────────
@@ -682,17 +733,31 @@ export async function postTransaction(
             `Investigate: this may be a buggy caller or a replay attack.`,
         );
       }
-      const storedByKey = new Map(existing.map((e) => [e.idempotencyKey, e]));
+      // Map by FULL (accountScope, accountId, idempotency_key) triple — the
+      // DB's idempotency unique is on this triple, NOT on idempotency_key
+      // alone. Two entries in one event group CAN legitimately share the
+      // same idempotency_key if they're on different accounts (e.g., a
+      // shared suffix like 'share' used on both creator:X and
+      // platform_revenue:platform). Keying by just `idempotencyKey` would
+      // collapse them in the map and false-positive on dedup.
+      const storedByKey = new Map(
+        existing.map((e) => [
+          `${e.accountScope}|${e.accountId}|${e.idempotencyKey}`,
+          e,
+        ]),
+      );
       for (let i = 0; i < input.entries.length; i++) {
         const requested = input.entries[i];
-        const key = `${input.eventGroupId}:${requested.idempotencySuffix}`;
-        const stored = storedByKey.get(key);
+        const idemKey = `${input.eventGroupId}:${requested.idempotencySuffix}`;
+        const lookupKey = `${requested.accountScope}|${requested.accountId}|${idemKey}`;
+        const stored = storedByKey.get(lookupKey);
         if (!stored) {
           throw new Error(
             `CRITICAL: dedup intent divergence for event group ${input.eventGroupId}. ` +
-              `Requested entry ${i} (suffix '${requested.idempotencySuffix}') has no ` +
-              `matching stored row. Caller is reusing the event group id with different ` +
-              `idempotency suffixes than the original call.`,
+              `Requested entry ${i} (account ${requested.accountScope}:${requested.accountId}, ` +
+              `suffix '${requested.idempotencySuffix}') has no matching stored row. ` +
+              `Caller is reusing the event group id with a different entry shape ` +
+              `than the original call.`,
           );
         }
         // Compare every per-entry field that is set at insert time. Trigger-
