@@ -269,7 +269,7 @@ export function mapV1GroupToV2Event(
       const stripeEventId = groupKey.slice('stripe_event:'.length);
       const chargeMatch =
         (restoreCreatorRow?.description ?? restorePlatformRow?.description ?? '').match(
-          /:charge:([^:]+):/,
+          /:charge:([^:]+)(?::|$)/,
         );
       const chargeId = chargeMatch ? chargeMatch[1] : null;
 
@@ -280,6 +280,18 @@ export function mapV1GroupToV2Event(
       const platformRestoreAmount = restorePlatformRow
         ? BigInt(Math.abs(restorePlatformRow.amountCents))
         : 0n;
+      // The anchor fee row should always be > 0 in v1 (hardcoded -1500), but
+      // backfill must defend against corrupt v1 data: a zero-amount anchor
+      // would emit a row with debit=0 AND credit=0, which assertInv1 rejects.
+      // Surface as malformed so the v1 row is flagged for manual review
+      // rather than crashing the backfill loop.
+      if (feeAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G4 dispute_won: dispute_fee_reversal anchor has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
       const stripeDebit = feeAmount + creatorRestoreAmount + platformRestoreAmount;
       const creatorCredit = feeAmount + creatorRestoreAmount;
 
@@ -382,7 +394,7 @@ export function mapV1GroupToV2Event(
       const stripeEventId = groupKey.slice('stripe_event:'.length);
       const chargeMatch =
         (clawbackCreatorRow?.description ?? clawbackPlatformRow?.description ?? '').match(
-          /:charge:([^:]+):/,
+          /:charge:([^:]+)(?::|$)/,
         );
       const chargeId = chargeMatch ? chargeMatch[1] : null;
 
@@ -393,6 +405,16 @@ export function mapV1GroupToV2Event(
       const platformClawbackAmount = clawbackPlatformRow
         ? BigInt(Math.abs(clawbackPlatformRow.amountCents))
         : 0n;
+      // Same zero-amount guard as G4. dispute_fee is hardcoded -1500 in v1
+      // so this only fires on corrupt backfill data; better to surface as
+      // malformed than throw INV-1.
+      if (feeAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G3 dispute.created: dispute_fee anchor has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
       const stripeCredit = feeAmount + creatorClawbackAmount + platformClawbackAmount;
       const creatorDebit = feeAmount + creatorClawbackAmount;
 

@@ -280,6 +280,18 @@ describe('mapV1GroupToV2Event — G3 dispute.created', () => {
     expect(out.kind).toBe('malformed');
   });
 
+  it('rejects zero-amount dispute_fee anchor as malformed (defends against corrupt v1 data)', () => {
+    // The anchor row is hardcoded -1500 in v1 production, but backfill
+    // must not crash on corrupt rows; surface them for manual review.
+    const rows = [
+      row({ type: 'refund', amountCents: 0, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/zero amountCents/);
+  });
+
   it('extracts chargeId from clawback description into stripeObjectId', () => {
     const rows = [
       row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
@@ -347,6 +359,16 @@ describe('mapV1GroupToV2Event — G4 dispute.closed (won)', () => {
     ];
     const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
     expect(out.kind).toBe('malformed');
+  });
+
+  it('rejects zero-amount dispute_fee_reversal anchor as malformed', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 0, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/zero amountCents/);
   });
 });
 

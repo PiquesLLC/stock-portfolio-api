@@ -196,8 +196,10 @@ async function main(): Promise<void> {
 
   // Persist deferred groups to CSV so a follow-up backfill can resume
   // once the deferred mappers (G6 admin_fix) land. The file has columns:
-  //   groupKey, reason, v1RowId, createdAt
-  // (one row per v1 row id in the group — joinable on groupKey).
+  //   groupKey, reason, v1RowId
+  // One row per v1 row id in the group — join on groupKey to recover
+  // the full set of v1 rows that belong together. Overwrites any prior
+  // file at the same path (re-runs produce a fresh report).
   if (opts.deferredOut && stats.deferredGroups.length > 0) {
     const lines: string[] = ['groupKey,reason,v1RowId'];
     for (const g of stats.deferredGroups) {
