@@ -5,6 +5,17 @@
 //   - `scripts/v1-vs-v2-reconcile.ts` — CLI for manual runs and cron schedules
 //   - Future programmatic alerting (Sentry / PagerDuty integrations)
 //
+// SEMANTIC: this reconciles RAW LEDGER ARITHMETIC, not v1's user-facing
+// "spendable" balance. Specifically:
+//   - We DO NOT floor at zero. A creator whose dispute fees exceed their
+//     earnings legitimately has a negative running balance; both v1 and v2
+//     reflect that, and we want to see they agree on the negative number.
+//     (v1's `getPayoutBalanceFromLedger` clamps to 0 for UI/payout safety,
+//     but that's a display concern, not a ledger invariant.)
+//   - We DO include `:legacy_destination` rows. MIG-1 backfills them into
+//     v2 and live shadow-writes record them too; the ledgers must agree on
+//     these entries even though v1's UI hides them from payout balance.
+//
 // The check is structurally simple:
 //   v1 creator balance := sum(CreatorWalletLedger.amountCents) under the v1
 //     wallet semantic — earning rows are positive, refund rows are negative,
@@ -33,6 +44,10 @@ export interface CreatorReconcileResult {
 export interface BatchReconcileResult {
   /** When the reconciliation started. */
   startedAt: Date;
+  /** When the reconciliation finished. */
+  finishedAt: Date;
+  /** Wall-clock duration in ms (for SRE monitoring of slowdowns). */
+  durationMs: number;
   /** Total creators scanned. */
   totalScanned: number;
   /** Creators whose v1 and v2 balances diverged. */
@@ -134,8 +149,11 @@ export async function reconcileAllCreators(): Promise<BatchReconcileResult> {
     }
   }
 
+  const finishedAt = new Date();
   return {
     startedAt,
+    finishedAt,
+    durationMs: finishedAt.getTime() - startedAt.getTime(),
     totalScanned: creators.length,
     divergent,
     v2Missing,

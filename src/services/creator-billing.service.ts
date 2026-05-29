@@ -1596,10 +1596,14 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     }, {
       idempotencyKey: `payout-${result.payoutId}`,
     });
-    // Transfers are instant — mark as completed immediately
+    // Transfers are instant — mark as completed immediately. Capture the
+    // paidAt so the shadow-write writes the SAME effective timestamp v1's
+    // CreatorPayout row carries — keeps v1 and v2 reporting aligned on
+    // payout-day grouping.
+    const paidAt = new Date();
     await prisma.creatorPayout.update({
       where: { id: result.payoutId },
-      data: { stripeTransferId: transfer.id, status: 'completed', paidAt: new Date() },
+      data: { stripeTransferId: transfer.id, status: 'completed', paidAt },
     });
     // v2 shadow-write: G5a payout requested. Fires AFTER the Stripe transfer
     // succeeded so v2 only mirrors finalized v1 state. If Stripe failed, the
@@ -1608,7 +1612,7 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       payoutId: result.payoutId,
       creatorUserId: userId,
       amountCents: result.amountCents,
-      effectiveAt: new Date(),
+      effectiveAt: paidAt,
     }).catch((err) => {
       console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
     });
