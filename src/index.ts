@@ -41,6 +41,7 @@ import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
 import { cleanupStaleData } from './services/cleanup.service';
+import * as Sentry from '@sentry/node';
 import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
 
 function assertSingleReplicaRefreshRotationSafety(): void {
@@ -389,6 +390,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   persistQuoteCache();
   await stopFundamentalsPrefetch();
   prisma.$disconnect().catch(() => undefined);
+  // Flush Sentry so a divergence (or any other captureMessage/Exception)
+  // posted in the last few seconds before SIGTERM is not dropped. 2s budget
+  // is short enough that Railway's grace window (typically 10s) absorbs it
+  // even when Sentry is slow. Best-effort: a failed flush does not block
+  // the rest of shutdown.
+  await Sentry.flush(2000).catch(() => undefined);
   server.close(() => {
     console.log('Server closed');
     process.exit(0);

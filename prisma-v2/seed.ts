@@ -20,10 +20,11 @@ const url = process.env.V2_DATABASE_URL;
 if (!url) {
   throw new Error('V2_DATABASE_URL is not set. Cannot seed v2.');
 }
-const adapter = new PrismaPg(
-  { connectionString: url },
-  { disposeExternalPool: true },
-);
+// `disposeExternalPool` only applies when callers pass their own pool
+// (per @prisma/adapter-pg types). We pass `connectionString`, so the
+// adapter owns and manages the pool itself — the option is dead here,
+// but keeping a connection-string-only config keeps seed simple.
+const adapter = new PrismaPg({ connectionString: url });
 const prisma = new PrismaClient({ adapter });
 
 const SYSTEM_ACCOUNTS: Array<{

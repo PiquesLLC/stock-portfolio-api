@@ -176,6 +176,11 @@ fi
 # Clean up the previous MIG-1 marker (-v1) once the new marker (-v2) is in
 # use. Avoids long-term volume clutter for future operators inspecting
 # /data. No-op if the file is already gone.
+#
+# OPS NOTE: this rm runs on EVERY boot. Do NOT manually re-arm the -v1
+# marker by renaming a -v2 marker back — the boot will silently nuke it.
+# To force a backfill re-run after a future mapper bump, choose a NEW
+# marker name (e.g., -v3) and update the check above.
 rm -f /data/.mig-1-completed-v1 2>/dev/null || true
 
 # Optional one-shot MIG-1 backfill: v1 CreatorWalletLedger → v2 double-entry
