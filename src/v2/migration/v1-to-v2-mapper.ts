@@ -202,6 +202,65 @@ export function mapV1GroupToV2Event(
       const creatorDebit = BigInt(Math.abs(refundCreatorRow.amountCents));
       const platformDebit = BigInt(Math.abs(refundPlatformRow.amountCents));
       const stripeCredit = creatorDebit + platformDebit;
+      // Identifying fields so cross-writer convergence with the
+      // charge.refunded shadow-write matches on every divergence-checked
+      // field. Without these, the (eventGroupId, accountScope, eventType)
+      // intent-divergence check would still pass (because effectiveAt /
+      // postedBy / stripeObject* are explicitly excluded), but observability
+      // suffers and metadata-via-canonical-comparison would diverge if either
+      // side added new metadata keys later.
+      const stripeEventId = groupKey.slice('stripe_event:'.length);
+      const chargeMatch =
+        (refundCreatorRow.description ?? '').match(/:charge:([^:]+)(?::|$)/);
+      const chargeId = chargeMatch ? chargeMatch[1] : null;
+      const sharedMeta: Record<string, unknown> = { source: 'v1-backfill' };
+      const entries: LedgerEntryInput[] = [
+        {
+          accountScope: 'stripe_clearing',
+          accountId: 'platform',
+          eventType: 'EARNING_REFUNDED',
+          debitMinorUnits: 0n,
+          creditMinorUnits: stripeCredit,
+          currency: 'USD',
+          idempotencySuffix: 'stripe_clearing',
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: sharedMeta,
+        },
+        {
+          accountScope: 'creator',
+          accountId: refundCreatorRow.creatorUserId,
+          eventType: 'EARNING_REFUNDED',
+          debitMinorUnits: creatorDebit,
+          creditMinorUnits: 0n,
+          currency: 'USD',
+          idempotencySuffix: 'creator_refund',
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: sharedMeta,
+        },
+      ];
+      // Emit platform_revenue entry only when platformDebit > 0n. Mirrors
+      // shadow-write's behavior — they MUST agree on entry count or the
+      // post-transaction divergence check throws CRITICAL on cross-writer
+      // dedup. assertInv1 would also reject a zero-amount entry.
+      if (platformDebit > 0n) {
+        entries.push({
+          accountScope: 'platform_revenue',
+          accountId: 'platform',
+          eventType: 'PLATFORM_FEE_REFUNDED',
+          debitMinorUnits: platformDebit,
+          creditMinorUnits: 0n,
+          currency: 'USD',
+          idempotencySuffix: 'platform_refund',
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: sharedMeta,
+        });
+      }
       return {
         kind: 'mapped',
         shape: 'G2.charge.refunded',
@@ -210,23 +269,7 @@ export function mapV1GroupToV2Event(
           eventGroupId: v1KeyToEventGroupId(groupKey),
           effectiveAt: refundCreatorRow.createdAt,
           postedBy: 'migration:mig-1-backfill-v1',
-          entries: [
-            {
-              accountScope: 'stripe_clearing', accountId: 'platform', eventType: 'EARNING_REFUNDED',
-              debitMinorUnits: 0n, creditMinorUnits: stripeCredit, currency: 'USD',
-              idempotencySuffix: 'stripe_clearing',
-            },
-            {
-              accountScope: 'creator', accountId: refundCreatorRow.creatorUserId, eventType: 'EARNING_REFUNDED',
-              debitMinorUnits: creatorDebit, creditMinorUnits: 0n, currency: 'USD',
-              idempotencySuffix: 'creator_refund',
-            },
-            {
-              accountScope: 'platform_revenue', accountId: 'platform', eventType: 'PLATFORM_FEE_REFUNDED',
-              debitMinorUnits: platformDebit, creditMinorUnits: 0n, currency: 'USD',
-              idempotencySuffix: 'platform_refund',
-            },
-          ],
+          entries,
         },
       };
     }

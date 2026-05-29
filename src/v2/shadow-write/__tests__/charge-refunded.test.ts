@@ -217,6 +217,33 @@ describe('CONVERGENCE TEST: shadow-write payload matches MIG-1 G2 mapper for the
     expect(shadowEventGroupId).toBe(mig1EventGroupId);
   });
 
+  it('emits same entry COUNT for the zero-platform case (regression: critical bug found in blind review)', async () => {
+    // BUG: MIG-1 G2 previously always emitted 3 entries; shadow-write
+    // emits 2 when platformDebit === 0. When both writers crossed paths
+    // for a zero-platform refund, postTransaction would throw
+    // CRITICAL: dedup intent divergence due to entry-count mismatch.
+    await shadowWriteChargeRefunded({ ...baseArgs, incrementalPlatformCents: 0 });
+    const shadowInput = postTransactionMock.mock.calls[0][0];
+
+    const v1Rows = [
+      makeV1Row({
+        type: 'refund',
+        amountCents: -baseArgs.incrementalCreatorCents,
+        description: `stripe_event:${baseArgs.stripeEventId}:charge:${baseArgs.stripeChargeId}:refund_creator`,
+      }),
+      makeV1Row({
+        type: 'platform_fee',
+        amountCents: 0, // zero platform refund
+        description: `stripe_event:${baseArgs.stripeEventId}:charge:${baseArgs.stripeChargeId}:refund_platform`,
+      }),
+    ];
+    const mig1Out = mapV1GroupToV2Event(`stripe_event:${baseArgs.stripeEventId}`, v1Rows);
+    if (mig1Out.kind !== 'mapped') throw new Error('expected mapped');
+
+    expect(shadowInput.entries).toHaveLength(mig1Out.event.entries.length);
+    expect(shadowInput.entries).toHaveLength(2); // both must agree on 2
+  });
+
   it('INTENT fields (account, eventType, amounts, currency, idempotencySuffix) match between writers', async () => {
     await shadowWriteChargeRefunded(baseArgs);
     const shadowInput = postTransactionMock.mock.calls[0][0];
