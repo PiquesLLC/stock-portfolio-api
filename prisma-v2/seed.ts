@@ -14,8 +14,17 @@
 // `src/services/creator-billing.service.ts:4` which does
 // `import { Prisma } from '../generated/prisma/client'`.
 import { PrismaClient } from '../src/generated/prisma-v2/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient();
+const url = process.env.V2_DATABASE_URL;
+if (!url) {
+  throw new Error('V2_DATABASE_URL is not set. Cannot seed v2.');
+}
+const adapter = new PrismaPg(
+  { connectionString: url },
+  { disposeExternalPool: true },
+);
+const prisma = new PrismaClient({ adapter });
 
 const SYSTEM_ACCOUNTS: Array<{
   accountScope: string;
