@@ -493,6 +493,15 @@ export function mapV1GroupToV2Event(
           /:charge:([^:]+)(?::|$)/,
         );
       const chargeId = chargeMatch ? chargeMatch[1] : null;
+      // OBSERVABILITY NOTE: when only `disputeFeeRow` is present (no clawback
+      // rows because v1's originalEarning/originalPlatform lookups failed),
+      // chargeId is null here even though the live shadow-write of the SAME
+      // event would set stripeObjectId from `dispute.charge`. The divergence
+      // check excludes stripeObjectKind/Id/EventId (post-transaction.ts:801),
+      // so cross-writer dedup is unaffected — but reconciliation that joins
+      // on stripeObjectId will see asymmetric coverage. The asymmetry is
+      // structural: v1's dispute_fee row description omits the charge segment,
+      // so the chargeId simply isn't in the v1 data to recover. Accepted.
 
       // Same creatorUserId-consistency guard as G4.
       const allUserIds = new Set(rows.map((r) => r.creatorUserId));

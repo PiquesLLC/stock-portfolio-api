@@ -244,7 +244,11 @@ describe('CONVERGENCE TEST: shadow-write payload matches MIG-1 G3 mapper for the
     }
   });
 
-  it('entry counts match for the fee-only case (no clawback rows)', async () => {
+  it('INTENT fields match for the fee-only case (no clawback rows)', async () => {
+    // Reviewer-flagged gap: prior test only compared lengths. A regression
+    // that swapped DISPUTE_LOST→DISPUTE_FROZEN, flipped debit/credit, or
+    // changed a suffix in the 2-entry path would have slipped past CI.
+    // This per-entry comparison locks the contract.
     await shadowWriteChargeDisputeCreated({
       ...baseArgs,
       creatorClawbackCents: 0,
@@ -264,5 +268,26 @@ describe('CONVERGENCE TEST: shadow-write payload matches MIG-1 G3 mapper for the
 
     expect(shadowInput.entries).toHaveLength(mig1Out.event.entries.length);
     expect(shadowInput.entries).toHaveLength(2);
+
+    const sortByScope = (
+      a: { accountScope: string; idempotencySuffix: string },
+      b: { accountScope: string; idempotencySuffix: string },
+    ) =>
+      a.accountScope.localeCompare(b.accountScope) ||
+      a.idempotencySuffix.localeCompare(b.idempotencySuffix);
+    const shadowSorted = [...shadowInput.entries].sort(sortByScope);
+    const mig1Sorted = [...mig1Out.event.entries].sort(sortByScope);
+
+    for (let i = 0; i < shadowSorted.length; i++) {
+      const s = shadowSorted[i];
+      const m = mig1Sorted[i];
+      expect(s.accountScope).toBe(m.accountScope);
+      expect(s.accountId).toBe(m.accountId);
+      expect(s.eventType).toBe(m.eventType);
+      expect(s.debitMinorUnits).toBe(m.debitMinorUnits);
+      expect(s.creditMinorUnits).toBe(m.creditMinorUnits);
+      expect(s.currency).toBe(m.currency);
+      expect(s.idempotencySuffix).toBe(m.idempotencySuffix);
+    }
   });
 });

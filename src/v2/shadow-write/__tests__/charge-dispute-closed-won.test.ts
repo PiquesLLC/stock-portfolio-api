@@ -184,7 +184,10 @@ describe('CONVERGENCE TEST: shadow-write matches MIG-1 G4 mapper', () => {
     }
   });
 
-  it('entry counts match for the fee-reversal-only case', async () => {
+  it('INTENT fields match for the fee-reversal-only case', async () => {
+    // Reviewer-flagged gap: 2-entry-path regressions (wrong event_type,
+    // flipped debit/credit, suffix drift) would have slipped past the
+    // length-only check. Per-entry intent comparison locks the contract.
     await shadowWriteChargeDisputeClosedWon({
       ...baseArgs,
       creatorRestoreCents: 0,
@@ -204,5 +207,26 @@ describe('CONVERGENCE TEST: shadow-write matches MIG-1 G4 mapper', () => {
 
     expect(shadowInput.entries).toHaveLength(mig1Out.event.entries.length);
     expect(shadowInput.entries).toHaveLength(2);
+
+    const sortByScope = (
+      a: { accountScope: string; idempotencySuffix: string },
+      b: { accountScope: string; idempotencySuffix: string },
+    ) =>
+      a.accountScope.localeCompare(b.accountScope) ||
+      a.idempotencySuffix.localeCompare(b.idempotencySuffix);
+    const shadowSorted = [...shadowInput.entries].sort(sortByScope);
+    const mig1Sorted = [...mig1Out.event.entries].sort(sortByScope);
+
+    for (let i = 0; i < shadowSorted.length; i++) {
+      const s = shadowSorted[i];
+      const m = mig1Sorted[i];
+      expect(s.accountScope).toBe(m.accountScope);
+      expect(s.accountId).toBe(m.accountId);
+      expect(s.eventType).toBe(m.eventType);
+      expect(s.debitMinorUnits).toBe(m.debitMinorUnits);
+      expect(s.creditMinorUnits).toBe(m.creditMinorUnits);
+      expect(s.currency).toBe(m.currency);
+      expect(s.idempotencySuffix).toBe(m.idempotencySuffix);
+    }
   });
 });
