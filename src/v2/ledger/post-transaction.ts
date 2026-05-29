@@ -147,15 +147,15 @@ export function validateMetadataIsJsonable(metadata: unknown, entryIndex: number
         `Cause: ${(e as Error).message}`,
     );
   }
-  // Non-finite numbers (NaN, Infinity, -Infinity) are silently coerced to
-  // 'null' by JSON.stringify, which corrupts the original write asymmetrically
-  // (caller sees their NaN preserved in memory; storage gets null). Walk the
-  // tree and reject up-front. Safe because stringify above has already
-  // verified the tree is acyclic.
-  rejectNonFiniteNumbers(metadata, entryIndex, '');
+  // Walk the tree and reject values that JSON.stringify silently mangles
+  // (non-finite numbers, functions, symbols). These would otherwise be
+  // serialized as null or dropped entirely — asymmetric corruption identical
+  // to the BigInt bug caught by the stringify above. Safe to recurse without
+  // cycle protection because stringify already verified the tree is acyclic.
+  rejectNonStorageValues(metadata, entryIndex, '');
 }
 
-function rejectNonFiniteNumbers(v: unknown, entryIndex: number, path: string): void {
+function rejectNonStorageValues(v: unknown, entryIndex: number, path: string): void {
   if (v === null) return;
   if (typeof v === 'number') {
     if (!Number.isFinite(v)) {
@@ -167,13 +167,31 @@ function rejectNonFiniteNumbers(v: unknown, entryIndex: number, path: string): v
     }
     return;
   }
+  if (typeof v === 'function') {
+    // JSON.stringify silently DROPS function values (returns no key for
+    // them) — same asymmetric-corruption class as NaN/Infinity. Reject.
+    throw new Error(
+      `Entry ${entryIndex}: metadata${path} contains a function. ` +
+        `Functions are silently dropped by JSON serialization and have no ` +
+        `defensible place in a financial audit log. Reject up-front.`,
+    );
+  }
+  if (typeof v === 'symbol') {
+    // JSON.stringify silently DROPS symbol-keyed values and produces
+    // 'undefined' for top-level symbols — same corruption class.
+    throw new Error(
+      `Entry ${entryIndex}: metadata${path} contains a Symbol. ` +
+        `Symbols are silently dropped by JSON serialization and have no ` +
+        `defensible place in a financial audit log. Reject up-front.`,
+    );
+  }
   if (typeof v !== 'object') return;
   if (Array.isArray(v)) {
-    v.forEach((item, i) => rejectNonFiniteNumbers(item, entryIndex, `${path}[${i}]`));
+    v.forEach((item, i) => rejectNonStorageValues(item, entryIndex, `${path}[${i}]`));
     return;
   }
   for (const k of Object.keys(v as Record<string, unknown>)) {
-    rejectNonFiniteNumbers((v as Record<string, unknown>)[k], entryIndex, `${path}.${k}`);
+    rejectNonStorageValues((v as Record<string, unknown>)[k], entryIndex, `${path}.${k}`);
   }
 }
 

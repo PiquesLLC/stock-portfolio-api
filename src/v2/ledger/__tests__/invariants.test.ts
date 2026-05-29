@@ -124,6 +124,24 @@ describe('assertInv2 (per-event-per-currency balance)', () => {
     expect(caught?.message).toMatch(/currency USD/);
     expect(caught?.message).toMatch(/Difference=-?\d+ minor units/);
   });
+
+  it('returns silently on empty entries (caller is expected to guard length)', () => {
+    // postTransaction itself guards `entries.length === 0` upfront. assertInv2
+    // is meaningful only on populated input, but it MUST NOT throw on empty
+    // — the empty totals map iterates over nothing, which is correct.
+    const input = makeInput([]);
+    expect(() => assertInv2(input)).not.toThrow();
+  });
+
+  it('rejects single-entry event (cannot balance by itself)', () => {
+    // One entry can only be debit-only OR credit-only (INV-1), so by
+    // definition it can't satisfy Σdebit == Σcredit unless both are zero
+    // (rejected by INV-1). INV-2 catches this independently.
+    const input = makeInput([
+      makeEntry({ debitMinorUnits: 0n, creditMinorUnits: 1000n }),
+    ]);
+    expect(() => assertInv2(input)).toThrow(/unbalanced for currency USD/);
+  });
 });
 
 describe('assertInv5Shape (reversal must document reason)', () => {
@@ -181,8 +199,8 @@ describe('assertUniqueIdempotencySuffixes (shape + uniqueness)', () => {
     expect(() => assertUniqueIdempotencySuffixes(input)).toThrow(/is invalid/);
   });
 
-  it('rejects special chars (colon, dot, hyphen) in suffix', () => {
-    for (const bad of ['a:b', 'a.b', 'a-b', 'a b', 'a@b', 'a/b']) {
+  it('rejects special chars (colon, dot, hyphen, whitespace, control) in suffix', () => {
+    for (const bad of ['a:b', 'a.b', 'a-b', 'a b', 'a@b', 'a/b', 'share\n', 'share\t', 'share ', ' share', 'a\rb']) {
       const input = makeInput([makeEntry({ idempotencySuffix: bad })]);
       expect(() => assertUniqueIdempotencySuffixes(input)).toThrow(/is invalid/);
     }

@@ -174,6 +174,51 @@ describe('validateMetadataIsJsonable (rejection of non-JSON values)', () => {
     expect(() => validateMetadataIsJsonable({ outer: { values: [1, NaN] } }, 0))
       .toThrow(/metadata\.outer\.values\[1\]/);
   });
+
+  it('rejects function values (silently dropped by JSON.stringify)', () => {
+    expect(() => validateMetadataIsJsonable({ callback: () => {} }, 0))
+      .toThrow(/contains a function/);
+  });
+
+  it('rejects function values nested in objects', () => {
+    expect(() => validateMetadataIsJsonable({ outer: { fn: function () {} } }, 0))
+      .toThrow(/contains a function/);
+  });
+
+  it('rejects function values inside arrays', () => {
+    expect(() => validateMetadataIsJsonable({ list: [() => {}] }, 0))
+      .toThrow(/contains a function/);
+  });
+
+  it('rejects Symbol values (silently dropped by JSON.stringify)', () => {
+    expect(() => validateMetadataIsJsonable({ tag: Symbol('x') }, 0))
+      .toThrow(/contains a Symbol/);
+  });
+
+  it('rejects Symbol values inside arrays', () => {
+    expect(() => validateMetadataIsJsonable({ tags: [Symbol('a')] }, 0))
+      .toThrow(/contains a Symbol/);
+  });
+
+  it('rejects top-level BigInt (caller-facing API surface)', () => {
+    // The type signature is `unknown` — defend against callers passing
+    // primitives at the top level instead of an object.
+    expect(() => validateMetadataIsJsonable(100n, 0))
+      .toThrow(/not JSON-serializable/);
+  });
+
+  it('accepts top-level plain string (defensive)', () => {
+    // Strings are a legitimate JSON value at the top level.
+    expect(() => validateMetadataIsJsonable('plain', 0)).not.toThrow();
+  });
+
+  it('accepts top-level plain number (defensive)', () => {
+    expect(() => validateMetadataIsJsonable(42, 0)).not.toThrow();
+  });
+
+  it('rejects top-level NaN (path is just root)', () => {
+    expect(() => validateMetadataIsJsonable(NaN, 0)).toThrow(/non-finite number/);
+  });
 });
 
 describe('canonicalMetadata vs validateMetadataIsJsonable ordering', () => {
