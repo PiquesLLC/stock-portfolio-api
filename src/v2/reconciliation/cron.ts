@@ -17,6 +17,7 @@
 // that ever changes, two replicas would do duplicate reconcile passes
 // — wasted DB load but no correctness risk since the job is read-only.
 
+import * as Sentry from '@sentry/node';
 import { reconcileAllCreators } from './v1-vs-v2';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,7 +61,16 @@ async function runOnce(): Promise<void> {
       })),
     };
     if (report.divergent.length > 0) {
-      console.error('[V2 Reconcile] DIVERGENCE DETECTED', JSON.stringify(summary));
+      const message = `[V2 Reconcile] DIVERGENCE DETECTED — ${report.divergent.length} creator(s) drifted vs v2`;
+      console.error(message, JSON.stringify(summary));
+      // Fire to Sentry so on-call gets paged (or routed through configured
+      // Sentry alert rules). Mirror the webhook-metrics pattern at
+      // src/utils/webhook-metrics.ts:108-109. Sentry.init lives in src/app.ts.
+      Sentry.captureMessage(message, {
+        level: 'error',
+        tags: { component: 'v2_reconciliation' },
+        extra: summary,
+      });
     } else {
       console.log('[V2 Reconcile] OK', JSON.stringify(summary));
     }

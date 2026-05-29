@@ -726,10 +726,112 @@ export function mapV1GroupToV2Event(
   }
 
   // ── G6: admin_fix ─────────────────────────────────────────────────
-  // Deferred: no Stripe anchor; needs an adjustment account that the
-  // current chart of accounts doesn't have. Architecture work required.
+  // v1: a SINGLE row (bucketing keys on the full description, which is
+  //     globally unique per row — see v1DescriptionToGroupKey). Two
+  //     description shapes exist:
+  //       'admin_fix:initial_payment:<actor>:<key>'  (creator share, type=earning)
+  //       'admin_fix:platform_fee:<actor>:<key>'    (platform share, type=platform_fee)
+  //     Legacy rows (pre-idempotency-key era, see scripts/start.sh:30) have
+  //     a :<rowid> suffix instead of :<actor>:<key>. We match by the variant
+  //     segment ([1]) — both shapes work identically.
+  // v2: 2 entries — credit the appropriate destination (creator or
+  //     platform_revenue) and debit `adjustment:platform` for the same
+  //     amount. ADJUSTMENT_CREDIT event type for both legs.
+  //
+  // Because each v1 row maps to its OWN v2 event (single-row group), the
+  // initial_payment and platform_fee halves of the same admin call become
+  // TWO separate v2 event groups. They remain correlated via the shared
+  // <actor>:<key> in metadata.idempotency_key.
   if (groupKey.startsWith('admin_fix:')) {
-    return { kind: 'deferred', reason: 'G6.admin_fix — needs adjustment account in chart of accounts', v1RowIds: ids };
+    if (rows.length !== 1) {
+      return {
+        kind: 'malformed',
+        reason: `G6.admin_fix expects exactly 1 row per group (got ${rows.length})`,
+        v1RowIds: ids,
+      };
+    }
+    const row = rows[0];
+    const desc = row.description ?? '';
+    const segments = desc.split(':');
+    // Expect: ['admin_fix', '<variant>', ...]
+    const variant = segments[1];
+    if (variant !== 'initial_payment' && variant !== 'platform_fee') {
+      return {
+        kind: 'malformed',
+        reason: `G6.admin_fix: unknown variant '${variant}' in description`,
+        v1RowIds: ids,
+      };
+    }
+    if (row.amountCents <= 0) {
+      return {
+        kind: 'malformed',
+        reason: `G6.admin_fix: amountCents must be positive (got ${row.amountCents})`,
+        v1RowIds: ids,
+      };
+    }
+    if (variant === 'initial_payment' && row.type !== 'earning') {
+      return {
+        kind: 'malformed',
+        reason: `G6.admin_fix initial_payment must be type=earning (got ${row.type})`,
+        v1RowIds: ids,
+      };
+    }
+    if (variant === 'platform_fee' && row.type !== 'platform_fee') {
+      return {
+        kind: 'malformed',
+        reason: `G6.admin_fix platform_fee must be type=platform_fee (got ${row.type})`,
+        v1RowIds: ids,
+      };
+    }
+    // Tail metadata: '<actor>:<key>' for modern, '<rowid>' for legacy.
+    const idempotencyTail = segments.slice(2).join(':');
+    const amount = BigInt(row.amountCents);
+    const creditEntry: LedgerEntryInput = variant === 'initial_payment'
+      ? {
+          accountScope: 'creator',
+          accountId: row.creatorUserId,
+          eventType: 'ADJUSTMENT_CREDIT',
+          debitMinorUnits: 0n,
+          creditMinorUnits: amount,
+          currency: 'USD',
+          idempotencySuffix: 'creator_credit',
+        }
+      : {
+          accountScope: 'platform_revenue',
+          accountId: 'platform',
+          eventType: 'ADJUSTMENT_CREDIT',
+          debitMinorUnits: 0n,
+          creditMinorUnits: amount,
+          currency: 'USD',
+          idempotencySuffix: 'platform_revenue_credit',
+        };
+    return {
+      kind: 'mapped',
+      shape: `G6.admin_fix.${variant}`,
+      v1RowIds: ids,
+      event: {
+        eventGroupId: v1KeyToEventGroupId(groupKey),
+        effectiveAt: row.createdAt,
+        postedBy: 'migration:mig-1-backfill-v1',
+        entries: [
+          creditEntry,
+          {
+            accountScope: 'adjustment',
+            accountId: 'platform',
+            eventType: 'ADJUSTMENT_CREDIT',
+            debitMinorUnits: amount,
+            creditMinorUnits: 0n,
+            currency: 'USD',
+            idempotencySuffix: 'adjustment_debit',
+            metadata: {
+              source: 'mig-1:admin_fix',
+              variant,
+              idempotency_tail: idempotencyTail,
+            },
+          },
+        ],
+      },
+    };
   }
 
   return { kind: 'malformed', reason: `Unrecognized group key: ${groupKey}`, v1RowIds: ids };

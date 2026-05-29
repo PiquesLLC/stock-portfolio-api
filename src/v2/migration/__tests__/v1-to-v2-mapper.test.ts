@@ -454,13 +454,127 @@ describe('mapV1GroupToV2Event — G4 dispute.closed (won)', () => {
   });
 });
 
-describe('mapV1GroupToV2Event — deferrals', () => {
-  it('defers G6 admin_fix groups', () => {
+describe('mapV1GroupToV2Event — G6 admin_fix', () => {
+  it('maps initial_payment (modern shape) → creator credit + adjustment debit', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 800,
+      description: 'admin_fix:initial_payment:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment:user_a:idem_1', [r]);
+    expect(out.kind).toBe('mapped');
+    if (out.kind !== 'mapped') return;
+    expect(out.shape).toBe('G6.admin_fix.initial_payment');
+    expect(out.event.entries).toHaveLength(2);
+    expect(out.event.entries[0]).toMatchObject({
+      accountScope: 'creator',
+      eventType: 'ADJUSTMENT_CREDIT',
+      creditMinorUnits: 800n,
+      debitMinorUnits: 0n,
+      idempotencySuffix: 'creator_credit',
+    });
+    expect(out.event.entries[1]).toMatchObject({
+      accountScope: 'adjustment',
+      accountId: 'platform',
+      eventType: 'ADJUSTMENT_CREDIT',
+      debitMinorUnits: 800n,
+      creditMinorUnits: 0n,
+      idempotencySuffix: 'adjustment_debit',
+    });
+    expect(out.event.entries[1].metadata).toMatchObject({
+      source: 'mig-1:admin_fix',
+      variant: 'initial_payment',
+      idempotency_tail: 'user_a:idem_1',
+    });
+  });
+
+  it('maps platform_fee (modern shape) → platform_revenue credit + adjustment debit', () => {
+    const r = row({
+      type: 'platform_fee',
+      amountCents: 200,
+      description: 'admin_fix:platform_fee:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:platform_fee:user_a:idem_1', [r]);
+    expect(out.kind).toBe('mapped');
+    if (out.kind !== 'mapped') return;
+    expect(out.shape).toBe('G6.admin_fix.platform_fee');
+    expect(out.event.entries[0]).toMatchObject({
+      accountScope: 'platform_revenue',
+      accountId: 'platform',
+      creditMinorUnits: 200n,
+      idempotencySuffix: 'platform_revenue_credit',
+    });
+    expect(out.event.entries[1]).toMatchObject({
+      accountScope: 'adjustment',
+      debitMinorUnits: 200n,
+      idempotencySuffix: 'adjustment_debit',
+    });
+  });
+
+  it('maps legacy shape (rowid suffix, no actor/key)', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 500,
+      description: 'admin_fix:initial_payment:42',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment:42', [r]);
+    expect(out.kind).toBe('mapped');
+    if (out.kind !== 'mapped') return;
+    expect(out.event.entries[1].metadata).toMatchObject({
+      idempotency_tail: '42',
+    });
+  });
+
+  it('rejects multi-row groups (bucketing invariant)', () => {
     const rows = [
       row({ type: 'earning', amountCents: 800, description: 'admin_fix:initial_payment:user_a:idem_1' }),
       row({ type: 'platform_fee', amountCents: 200, description: 'admin_fix:platform_fee:user_a:idem_1' }),
     ];
     const out = mapV1GroupToV2Event('admin_fix:initial_payment:user_a:idem_1', rows);
-    expect(out.kind).toBe('deferred');
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/exactly 1 row/);
+  });
+
+  it('rejects unknown variant', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 100,
+      description: 'admin_fix:mystery:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:mystery:user_a:idem_1', [r]);
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/unknown variant/);
+  });
+
+  it('rejects non-positive amountCents', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 0,
+      description: 'admin_fix:initial_payment:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment:user_a:idem_1', [r]);
+    expect(out.kind).toBe('malformed');
+  });
+
+  it('rejects type mismatch (initial_payment must be earning)', () => {
+    const r = row({
+      type: 'platform_fee',
+      amountCents: 100,
+      description: 'admin_fix:initial_payment:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment:user_a:idem_1', [r]);
+    expect(out.kind).toBe('malformed');
+  });
+
+  it('rejects type mismatch (platform_fee must be platform_fee)', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 100,
+      description: 'admin_fix:platform_fee:user_a:idem_1',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:platform_fee:user_a:idem_1', [r]);
+    expect(out.kind).toBe('malformed');
   });
 });

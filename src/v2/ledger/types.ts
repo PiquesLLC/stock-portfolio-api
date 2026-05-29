@@ -13,7 +13,12 @@ export type AccountScope =
   | 'platform_revenue'
   | 'platform_fee'
   | 'tax_withholding'
-  | 'stripe_clearing';
+  | 'stripe_clearing'
+  // Platform-funded manual adjustments (the "ops bucket" — corresponds to v1's
+  // admin_fix entries posted via POST /admin/fix-creator-ledger). Debited when
+  // ops pays a creator out of pocket, credited when an adjustment is reversed.
+  // Reconciles against an external ledger that ops maintains; no Stripe anchor.
+  | 'adjustment';
 
 export type LedgerEventType =
   // Forward (architecture §3.2)

@@ -63,6 +63,16 @@ const SYSTEM_ACCOUNTS: Array<{
       '1099-K / 1042-S withholding holding account. Debits as withholding ' +
       'is taken from creator earnings; credits as remittance is filed.',
   },
+  {
+    accountScope: 'adjustment',
+    accountId: 'platform',
+    currency: 'USD',
+    purpose:
+      'Platform-funded manual adjustments. Debited when ops pays a creator ' +
+      'out of pocket (v1 admin_fix). Counter-side for G6 mapper + future ' +
+      'admin endpoint shadow-writes. No Stripe anchor — reconciles against ' +
+      'an external ops ledger.',
+  },
 ];
 
 async function main() {

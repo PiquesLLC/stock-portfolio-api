@@ -168,7 +168,7 @@ fi
 # healthcheckTimeout=300s; large v1 datasets could easily exceed that under
 # the per-group sequential awaits in mig-1-backfill.ts).
 #
-# Marker: /data/.mig-1-completed-v1 — versioned so a future re-run after the
+# Marker: /data/.mig-1-completed-v2 — versioned so a future re-run after the
 # G6 admin_fix mapper lands can use -v2 without manually deleting the old
 # marker on the persistent volume.
 #
@@ -184,8 +184,8 @@ echo "=== Optional: MIG-1 v2 backfill (gated by V2_RUN_BACKFILL_ONCE) ==="
 if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ]; then
   if [ -z "${V2_DATABASE_URL:-}" ]; then
     echo "[MIG-1] SKIP: V2_DATABASE_URL is not set; backfill cannot run without v2 connection."
-  elif [ -f /data/.mig-1-completed-v1 ]; then
-    echo "[MIG-1] Marker /data/.mig-1-completed-v1 present — skipping."
+  elif [ -f /data/.mig-1-completed-v2 ]; then
+    echo "[MIG-1] Marker /data/.mig-1-completed-v2 present — skipping."
     if [ -f /data/mig-1.log ]; then
       echo "[MIG-1] Previous run tail (last 30 lines of /data/mig-1.log):"
       tail -30 /data/mig-1.log | sed 's/^/[MIG-1-log] /' || true
@@ -196,8 +196,8 @@ if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ]; then
       NALA_ALLOW_MIGRATION_BACKFILL=true npx ts-node scripts/mig-1-backfill.ts --apply --deferred-out /data/mig-1-deferred.csv 2>&1 | tee /data/mig-1.log | sed 's/^/[MIG-1] /'
       exit_code=${PIPESTATUS[0]}
       if [ "$exit_code" = "0" ]; then
-        touch /data/.mig-1-completed-v1
-        echo "[MIG-1] OK — exit 0; marker set at /data/.mig-1-completed-v1."
+        touch /data/.mig-1-completed-v2
+        echo "[MIG-1] OK — exit 0; marker set at /data/.mig-1-completed-v2."
       else
         echo "[MIG-1] CRITICAL: backfill exited code $exit_code — marker NOT set; will retry on next boot."
       fi
@@ -207,6 +207,37 @@ if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ]; then
   fi
 else
   echo "[MIG-1] V2_RUN_BACKFILL_ONCE not 'true' — skipping."
+fi
+
+# Optional one-shot pre-cutover gate: runs the v1↔v2 reconciliation in
+# --gate mode and reports. Exit code is logged but does NOT crash the
+# container (the start.sh `set -uo pipefail` doesn't trigger because we
+# explicitly check the exit status).
+#
+# Use this to verify "7-day clean streak" milestones — set
+# V2_RUN_GATE_ONCE=true, redeploy, scrape the [V2 Gate] log lines, then
+# unset the env var. Foregrounded (not backgrounded) because the gate is
+# a quick read-only check and the operator wants the result in the boot
+# log stream, not 5 minutes later.
+echo "=== Optional: V2 reconciliation --gate (V2_RUN_GATE_ONCE) ==="
+if [ "${V2_RUN_GATE_ONCE:-}" = "true" ]; then
+  if [ -z "${V2_DATABASE_URL:-}" ]; then
+    echo "[V2 Gate] SKIP: V2_DATABASE_URL is not set."
+  else
+    echo "[V2 Gate] Running reconciliation --gate (exit 1 on any divergence)..."
+    if npx ts-node scripts/v1-vs-v2-reconcile.ts --gate 2>&1 | sed 's/^/[V2 Gate] /'; then
+      gate_exit=${PIPESTATUS[0]}
+    else
+      gate_exit=${PIPESTATUS[0]}
+    fi
+    if [ "$gate_exit" = "0" ]; then
+      echo "[V2 Gate] PASS — no divergence."
+    else
+      echo "[V2 Gate] FAIL — divergence detected (exit $gate_exit). Container continues; investigate via logs above."
+    fi
+  fi
+else
+  echo "[V2 Gate] V2_RUN_GATE_ONCE not 'true' — skipping."
 fi
 
 echo "=== Configuring fonts for share card rendering ==="
