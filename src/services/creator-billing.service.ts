@@ -6,6 +6,8 @@ import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
 import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 import { shadowWriteChargeRefunded } from '../v2/shadow-write/charge-refunded';
+import { shadowWriteChargeDisputeCreated } from '../v2/shadow-write/charge-dispute-created';
+import { shadowWriteChargeDisputeClosedWon } from '../v2/shadow-write/charge-dispute-closed-won';
 
 type CreatorBillingCounterKey =
   | 'processed'
@@ -995,6 +997,23 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         }
 
         await prisma.$transaction(writes);
+        // v2 shadow-write: fire-and-forget after v1 mutations succeed. Uses
+        // the IDENTICAL scheme MIG-1 G3 mapper uses (DISPUTE_LOST eventType +
+        // 'creator_clawback'/'platform_clawback' suffixes + component
+        // breakdown metadata) so cross-writer convergence dedups cleanly.
+        void shadowWriteChargeDisputeCreated({
+          stripeEventId: event.id,
+          stripeChargeId: disputeChargeId,
+          creatorUserId: sub.creatorUserId,
+          feeAmountCents: 1500,
+          creatorClawbackCents: clawbackAmountCents,
+          platformClawbackCents: platformClawbackCents,
+          effectiveAt: typeof event.created === 'number'
+            ? new Date(event.created * 1000)
+            : new Date(),
+        }).catch((err) => {
+          console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+        });
         bumpCounter('disputed');
         bumpCounter('processed');
         logCreatorBilling({
@@ -1038,6 +1057,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           // Dispute won — restore the creator + platform clawback from
           // dispute.created and reverse the $15 dispute fee.
           const wonChargeId = typeof dispute.charge === 'string' ? dispute.charge : '';
+          // Hoisted so the shadow-write call below can read them after the
+          // `if (wonChargeId)` block closes; zero when no corresponding G3
+          // clawback row was found.
+          let wonCreatorRestoreCents = 0;
+          let wonPlatformRestoreCents = 0;
           const restoreWrites: Prisma.PrismaPromise<unknown>[] = [
             // Reverse the $15 dispute fee (original was type=refund:-1500, so add back as earning)
             prisma.creatorWalletLedger.create({
@@ -1070,22 +1094,24 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               }),
             ]);
             if (creatorClawback && creatorClawback.amountCents < 0) {
+              wonCreatorRestoreCents = Math.abs(creatorClawback.amountCents);
               restoreWrites.push(prisma.creatorWalletLedger.create({
                 data: {
                   creatorUserId: sub.creatorUserId,
                   type: 'earning',
-                  amountCents: Math.abs(creatorClawback.amountCents),
+                  amountCents: wonCreatorRestoreCents,
                   subscriptionId: sub.id,
                   description: `stripe_event:${event.id}:charge:${wonChargeId}:dispute_won_restore_creator`,
                 },
               }));
             }
             if (platformClawback && platformClawback.amountCents < 0) {
+              wonPlatformRestoreCents = Math.abs(platformClawback.amountCents);
               restoreWrites.push(prisma.creatorWalletLedger.create({
                 data: {
                   creatorUserId: sub.creatorUserId,
                   type: 'platform_fee',
-                  amountCents: Math.abs(platformClawback.amountCents),
+                  amountCents: wonPlatformRestoreCents,
                   subscriptionId: sub.id,
                   description: `stripe_event:${event.id}:charge:${wonChargeId}:dispute_won_restore_platform`,
                 },
@@ -1093,6 +1119,24 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             }
           }
           await prisma.$transaction(restoreWrites);
+          // v2 shadow-write — locks in the scheme MIG-1 G4 mapper uses
+          // (RESTORE_AFTER_DISPUTE_WON + 'creator_restore'/'platform_restore'
+          // suffixes + component-breakdown metadata). Amounts mirror what
+          // v1 just wrote (Math.abs of the prior clawback rows; zero when
+          // no corresponding clawback existed).
+          void shadowWriteChargeDisputeClosedWon({
+            stripeEventId: event.id,
+            stripeChargeId: wonChargeId,
+            creatorUserId: sub.creatorUserId,
+            feeReversalCents: 1500,
+            creatorRestoreCents: wonCreatorRestoreCents,
+            platformRestoreCents: wonPlatformRestoreCents,
+            effectiveAt: typeof event.created === 'number'
+              ? new Date(event.created * 1000)
+              : new Date(),
+          }).catch((err) => {
+            console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+          });
         } else {
           await prisma.creatorSubscription.update({
             where: { id: sub.id },
