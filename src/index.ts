@@ -41,6 +41,7 @@ import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
 import { cleanupStaleData } from './services/cleanup.service';
+import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
 
 function assertSingleReplicaRefreshRotationSafety(): void {
   const replicaCountRaw = process.env.RAILWAY_REPLICA_COUNT;
@@ -1025,6 +1026,11 @@ const server = app.listen(config.port, async () => {
   console.log('[Backup] Scheduled daily');
   setTimeout(() => backupDatabase(), 30000);
   setInterval(() => backupDatabase(), 24 * 60 * 60 * 1000);
+
+  // v1↔v2 ledger reconciliation — daily drift check during shadow-write
+  // epoch. No-op if V2_DATABASE_URL is not set. Delete this call once
+  // post-cutover and v1 is fully decommissioned.
+  scheduleV2ReconcileDaily();
 });
 
 process.on('SIGTERM', () => {
