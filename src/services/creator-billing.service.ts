@@ -41,6 +41,131 @@ function getStripeClient(): Stripe {
   return new Stripe(config.stripeSecretKey);
 }
 
+// Extract the underlying Charge id for an Invoice across Stripe API versions.
+//
+// Background: Stripe API 2025-02 removed the top-level `Invoice.charge`
+// field. The replacement is the dedicated `InvoicePayment` resource. Older
+// API versions (account-pinned <2025-02) still return the legacy field.
+// Webhooks dispatch the Invoice payload using the account's pinned version,
+// so we must handle both shapes — AND fall back to an API call when the
+// payload carries neither.
+//
+// Why this matters: the returned id is embedded into the ledger row's
+// `description` as `:charge:<id>:creator_share` / `:platform_fee`. Dispute
+// clawback (`charge.dispute.created`) and refund handlers look up the
+// original earning via `description.contains('charge:<dispute.charge>')`.
+// If the id is missing, the lookup returns null and the clawback is
+// silently skipped — creator keeps the earnings, platform eats the
+// chargeback + dispute fee.
+//
+// Resolution order:
+//   1. Legacy top-level `invoice.charge` (older API versions)
+//   2. Embedded `invoice.payments.data[0].payment.charge` (if expansion
+//      was requested or surfaced by webhook)
+//   3. `stripe.invoicePayments.list({invoice})` then extract charge from
+//      the first payment. If the payment is a PaymentIntent (subscription
+//      invoices typically are), retrieve the PI and read `latest_charge`.
+//   4. Return '' and log a warning so the regression is visible in logs.
+async function extractInvoiceChargeId(
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+): Promise<string> {
+  // Path 1: legacy top-level field.
+  const legacy = (invoice as { charge?: unknown }).charge;
+  if (typeof legacy === 'string' && legacy.length > 0) return legacy;
+
+  const invoiceId = typeof invoice.id === 'string' ? invoice.id : '';
+  if (!invoiceId) return '';
+
+  // Path 2: embedded payments. Only present if webhook payload included
+  // expansion (Stripe doesn't expand by default, but operators may
+  // override per-endpoint).
+  const embedded = (invoice as { payments?: { data?: unknown } }).payments?.data;
+  if (Array.isArray(embedded) && embedded.length > 0) {
+    const id = extractChargeFromPayment(embedded[0]);
+    if (id) return id;
+  }
+
+  // Path 3: explicit API fetch.
+  try {
+    const ipList = await stripe.invoicePayments.list({
+      invoice: invoiceId,
+      limit: 1,
+    });
+    const first = ipList.data[0];
+    if (first) {
+      const direct = extractChargeFromPayment(first);
+      if (direct) return direct;
+      // Payment is a PaymentIntent rather than a direct Charge — retrieve
+      // the PI and read latest_charge.
+      const piId = extractPaymentIntentId(first);
+      if (piId) {
+        const pi = await stripe.paymentIntents.retrieve(piId);
+        const latest = (pi as { latest_charge?: unknown }).latest_charge;
+        if (typeof latest === 'string' && latest.length > 0) return latest;
+        if (
+          latest &&
+          typeof latest === 'object' &&
+          'id' in latest &&
+          typeof (latest as { id?: unknown }).id === 'string'
+        ) {
+          return (latest as { id: string }).id;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[CreatorWebhook] InvoicePayments lookup failed for invoice ${invoiceId}: ` +
+        `${(err as Error).message}`,
+    );
+  }
+
+  // Visible regression marker. If this fires in production, the ledger
+  // row will lack the :charge: segment and dispute clawback will silently
+  // degrade. Monitor for this log line.
+  console.warn(
+    `[CreatorWebhook] No charge id available for invoice ${invoiceId} ` +
+      `— ledger row will lack :charge: segment, breaking dispute clawback lookups`,
+  );
+  return '';
+}
+
+function extractChargeFromPayment(payment: unknown): string {
+  if (!payment || typeof payment !== 'object') return '';
+  const pay = (payment as { payment?: unknown }).payment;
+  if (!pay || typeof pay !== 'object') return '';
+  const charge = (pay as { charge?: unknown }).charge;
+  if (typeof charge === 'string' && charge.length > 0) return charge;
+  if (
+    charge &&
+    typeof charge === 'object' &&
+    'id' in charge &&
+    typeof (charge as { id?: unknown }).id === 'string' &&
+    (charge as { id: string }).id.length > 0
+  ) {
+    return (charge as { id: string }).id;
+  }
+  return '';
+}
+
+function extractPaymentIntentId(payment: unknown): string {
+  if (!payment || typeof payment !== 'object') return '';
+  const pay = (payment as { payment?: unknown }).payment;
+  if (!pay || typeof pay !== 'object') return '';
+  const pi = (pay as { payment_intent?: unknown }).payment_intent;
+  if (typeof pi === 'string' && pi.length > 0) return pi;
+  if (
+    pi &&
+    typeof pi === 'object' &&
+    'id' in pi &&
+    typeof (pi as { id?: unknown }).id === 'string' &&
+    (pi as { id: string }).id.length > 0
+  ) {
+    return (pi as { id: string }).id;
+  }
+  return '';
+}
+
 async function getOrCreateStripeCustomer(userId: string): Promise<string> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -440,14 +565,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const isLegacyDestinationCharge = typeof invoiceWithFee.application_fee_amount === 'number';
         const legacySuffix = isLegacyDestinationCharge ? ':legacy_destination' : '';
         // Embed the chargeId so dispute / refund handlers can look up the original
-        // earning by charge id (description.contains('charge:${chargeId}')). Falls
-        // back to no segment if Stripe didn't populate charge (shouldn't happen on
-        // invoice.paid but defensive).
-        // Stripe v20+ removed Invoice.charge from the TypeScript types but
-        // the field is still present on API responses for older API versions.
-        // Read it via a narrow type cast — runtime behavior is unchanged.
-        const invoiceChargeRaw = (invoice as { charge?: unknown }).charge;
-        const invoiceChargeId = typeof invoiceChargeRaw === 'string' ? invoiceChargeRaw : '';
+        // earning by charge id (description.contains('charge:${chargeId}')). On
+        // Stripe API 2025-02+ the legacy `invoice.charge` field is gone, so the
+        // helper falls through to an InvoicePayments lookup. See
+        // `extractInvoiceChargeId` JSDoc for the full resolution chain.
+        const invoiceChargeId = await extractInvoiceChargeId(getStripeClient(), invoice);
         const chargeSegment = invoiceChargeId ? `:charge:${invoiceChargeId}` : '';
         const creatorEventKey = `stripe_event:${event.id}${chargeSegment}:creator_share${legacySuffix}`;
         const platformEventKey = `stripe_event:${event.id}${chargeSegment}:platform_fee${legacySuffix}`;
