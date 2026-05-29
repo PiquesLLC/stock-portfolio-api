@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
-import { v1LedgerCreate } from '../services/v1-wallet-freeze';
+import { v1LedgerCreate, isV1WalletFrozen } from '../services/v1-wallet-freeze';
 import {
   getModerationDashboardHandler,
   getAppealsHandler,
@@ -431,6 +431,17 @@ router.post('/moderation/users/:userId/unsuspend', requireAuth, requireAdmin, un
 // second insert fail with P2002 which we surface as 409 Conflict. Bounded:
 // amountCents must be a positive integer <= 50000 ($500) to limit blast radius.
 router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  // Hard-fail when V1_WALLET_FREEZE is active: this endpoint writes only to
+  // v1 (no v2 shadow-write yet), so silently no-oping the writes would mean
+  // the admin saw HTTP 200 but neither ledger received the row. That's the
+  // worst-of-both-worlds outcome. Force ops to either disable the freeze
+  // temporarily (and re-enable after) or use a future v2-aware admin path.
+  if (isV1WalletFrozen()) {
+    res.status(503).json({
+      error: 'V1_WALLET_FREEZE is active; v1 manual fixes are disabled. To proceed: unset V1_WALLET_FREEZE on Railway, retry this call, then re-set it. (A v2-aware admin fix endpoint is pending post-cutover.)',
+    });
+    return;
+  }
   const { creatorUserId, amountCents, idempotencyKey } = req.body;
   if (!creatorUserId || typeof creatorUserId !== 'string') {
     res.status(400).json({ error: 'creatorUserId (string) required' });

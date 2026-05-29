@@ -17,8 +17,10 @@
 //     types require `Prisma.PrismaPromise`. Returning `null` or skipping
 //     would force every $transaction call site to `.filter(Boolean)` and
 //     cast the type — a much larger refactor than the freeze deserves.
-//   - `SELECT 1` is the canonical Postgres / SQLite no-op. It runs inside
-//     the same transaction so isolation guarantees are preserved.
+//   - `SELECT 1` is the canonical Postgres no-op (v1's prod DB). It runs
+//     inside the same transaction so isolation guarantees are preserved;
+//     under Serializable isolation it acquires no locks and does not
+//     contribute to the serialization read-set (no FROM clause).
 //
 // FREEZE LIFECYCLE
 //   - Day T-N: this helper lands; all v1 write call sites get refactored

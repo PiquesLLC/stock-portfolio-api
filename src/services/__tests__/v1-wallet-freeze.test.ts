@@ -121,6 +121,19 @@ describe('v1LedgerCreate', () => {
     expect(client.$queryRaw).toHaveBeenCalledTimes(1); // unchanged
   });
 
+  it('propagates errors thrown by the underlying create when not frozen', async () => {
+    const client = {
+      creatorWalletLedger: {
+        create: vi.fn(() => Promise.reject(new Error('P2002: unique constraint violation'))),
+      },
+      $queryRaw: vi.fn(),
+    };
+    const args = { data: { creatorUserId: 'u1', type: 'earning', amountCents: 100, description: 'x' } } as never;
+
+    await expect(v1LedgerCreate(client as never, args)).rejects.toThrow(/P2002/);
+    expect(client.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it('accepts an interactive transaction client (tx) the same way', () => {
     // Prisma's interactive transaction passes a `tx` client with the same
     // shape as the top-level prisma instance for the operations we care
