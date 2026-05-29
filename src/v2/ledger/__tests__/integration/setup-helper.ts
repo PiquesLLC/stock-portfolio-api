@@ -21,6 +21,11 @@ let migrationsApplied = false;
 export async function applyMigrationsAndSeedIfNeeded(): Promise<void> {
   if (migrationsApplied) return;
 
+  // Same hostname allowlist guard as truncateLedgerForTest — `prisma migrate
+  // deploy` against a non-test DB could apply v2 migrations to production,
+  // which is destructive in its own way.
+  assertSafeTestDatabaseOrThrow();
+
   // Probe connection first so a missing docker compose surfaces a clear
   // message rather than 50 cryptic test failures.
   const url = process.env.V2_DATABASE_URL;
@@ -60,6 +65,33 @@ export async function applyMigrationsAndSeedIfNeeded(): Promise<void> {
 }
 
 /**
+ * Hostname allowlist guard. truncateLedgerForTest disables the append-only
+ * triggers and wipes ledger_entry + accounts — catastrophic if pointed at
+ * production. The guard checks V2_DATABASE_URL against an allowlist of
+ * test-DB hostnames and refuses to run if the URL doesn't match.
+ *
+ * Override via V2_TEST_DB_HOSTS env (comma-separated). Defaults to local
+ * docker compose endpoints.
+ */
+function assertSafeTestDatabaseOrThrow(): void {
+  const url = process.env.V2_DATABASE_URL ?? '';
+  const allowlist = (process.env.V2_TEST_DB_HOSTS ?? 'localhost,127.0.0.1')
+    .split(',')
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0);
+  const matched = allowlist.some((h) => url.includes(h));
+  if (!matched) {
+    const redacted = url.replace(/:[^:@]+@/, ':***@');
+    throw new Error(
+      `truncateLedgerForTest refused: V2_DATABASE_URL=${redacted} is not in the ` +
+        `allowlist (${allowlist.join(', ')}). This guard prevents accidental ` +
+        `wipes of non-test databases. Set V2_TEST_DB_HOSTS to include this host ` +
+        `if the URL is intentional (e.g., a dedicated test DB on a remote box).`,
+    );
+  }
+}
+
+/**
  * Wipe ledger_entry + non-system accounts between tests. The append-only
  * triggers normally reject TRUNCATE/DELETE — we disable them transiently
  * for the truncate, then re-enable. This is safe in test code because we
@@ -69,8 +101,13 @@ export async function applyMigrationsAndSeedIfNeeded(): Promise<void> {
  * Re-seeds the chart-of-accounts system accounts (stripe_clearing,
  * platform_revenue, platform_fee, tax_withholding) so every test starts
  * from a known shape.
+ *
+ * Hostname-guarded: refuses to run if V2_DATABASE_URL points at a host
+ * not in the test allowlist. This is a defense-in-depth check on top of
+ * the RUN_V2_INTEGRATION env gate.
  */
 export async function truncateLedgerForTest(): Promise<void> {
+  assertSafeTestDatabaseOrThrow();
   const prisma = getLedgerClient();
 
   // Disable append-only triggers. Order: TRUNCATE trigger first (since

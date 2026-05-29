@@ -650,12 +650,22 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
-        // v2 shadow-write: gated by V2_SHADOW_WRITE_ENABLED env. Failures
-        // are caught inside the helper and logged — they CANNOT propagate
-        // and must not affect the v1 commit above. eventGroupId is a
-        // deterministic UUID v4 derived from event.id so Stripe retries
-        // and MIG-1 backfill converge on the same v2 entry.
-        await shadowWriteInvoicePaid({
+        // v2 shadow-write: gated by V2_SHADOW_WRITE_ENABLED env. The helper
+        // catches all errors internally so they CANNOT propagate to the v1
+        // webhook response. We FIRE-AND-FORGET (no await) because:
+        //   1. The handler doesn't depend on v2 success — v1 is the source
+        //      of truth, v2 is a parallel observer.
+        //   2. await would block the Stripe webhook response on v2's
+        //      Postgres round-trip. If v2's database is degraded during a
+        //      traffic spike, every webhook would eat the connect timeout
+        //      and push response latency past Stripe's 30s budget,
+        //      triggering retries and amplifying load.
+        //   3. The .catch fallback is defensive — the helper SHOULD swallow
+        //      all errors internally, but if it ever leaks an exception
+        //      we still want it logged, not unhandled.
+        // eventGroupId is a deterministic UUID v4 derived from event.id so
+        // Stripe retries and MIG-1 backfill converge on the same v2 entry.
+        void shadowWriteInvoicePaid({
           stripeEventId: event.id,
           stripeInvoiceId: typeof invoice.id === 'string' ? invoice.id : '',
           stripeChargeId: invoiceChargeId,
@@ -668,6 +678,8 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           effectiveAt: typeof event.created === 'number'
             ? new Date(event.created * 1000)
             : new Date(),
+        }).catch((err) => {
+          console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
         });
         bumpCounter('processed');
         logCreatorBilling({

@@ -119,11 +119,24 @@ describe('shadowWriteInvoicePaid payload shape', () => {
     }
   });
 
-  it('passes effectiveAt through unchanged', async () => {
-    const when = new Date('2025-06-15T08:30:00Z');
+  it('passes recent effectiveAt through unchanged', async () => {
+    const when = new Date(Date.now() - 60_000); // 1 minute ago
     await shadowWriteInvoicePaid({ ...baseArgs, effectiveAt: when });
     const input = postTransactionMock.mock.calls[0][0];
     expect(input.effectiveAt.getTime()).toBe(when.getTime());
+  });
+
+  it('clamps effectiveAt to within the 730-day past-window for backdated replays', async () => {
+    // Stripe "Resend event" admin tool can emit events with `created`
+    // from > 2 years ago. The clamp ensures postTransaction's 730-day
+    // past-window doesn't silently reject the shadow-write.
+    const farPast = new Date('2022-01-01T00:00:00Z');
+    await shadowWriteInvoicePaid({ ...baseArgs, effectiveAt: farPast });
+    const input = postTransactionMock.mock.calls[0][0];
+    const minAllowed = Date.now() - 730 * 24 * 60 * 60 * 1000;
+    expect(input.effectiveAt.getTime()).toBeGreaterThan(minAllowed);
+    // And less than `now` (clamp doesn't push it into the future).
+    expect(input.effectiveAt.getTime()).toBeLessThanOrEqual(Date.now());
   });
 });
 

@@ -265,7 +265,12 @@ export function mapV1GroupToV2Event(
       return { kind: 'malformed', reason: 'payout_reversal group should have exactly 1 row', v1RowIds: ids };
     }
     const row = rows[0];
-    const amount = BigInt(row.amountCents);
+    if (row.amountCents <= 0) {
+      return { kind: 'malformed', reason: 'payout_reversal row must have positive amountCents', v1RowIds: ids };
+    }
+    // Defensive abs() — if a historical row was incorrectly written negative
+    // it would propagate to creditMinorUnits and trip assertInv1 in v2.
+    const amount = BigInt(Math.abs(row.amountCents));
     return {
       kind: 'mapped',
       shape: 'G5b.payout_reversal',
@@ -296,7 +301,10 @@ export function mapV1GroupToV2Event(
       return { kind: 'malformed', reason: 'transfer_reversed group should have exactly 1 row', v1RowIds: ids };
     }
     const row = rows[0];
-    const amount = BigInt(row.amountCents);
+    if (row.amountCents <= 0) {
+      return { kind: 'malformed', reason: 'transfer_reversed row must have positive amountCents', v1RowIds: ids };
+    }
+    const amount = BigInt(Math.abs(row.amountCents));
     return {
       kind: 'mapped',
       shape: 'G5c.transfer.reversed',

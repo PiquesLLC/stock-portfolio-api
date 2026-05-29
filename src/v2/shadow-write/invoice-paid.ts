@@ -76,6 +76,15 @@ export async function shadowWriteInvoicePaid(args: ShadowWriteInvoicePaidArgs): 
     return;
   }
 
+  // Clamp effectiveAt to within the live posting path's 730-day past-window.
+  // Stripe's "Resend event" admin tool and migration replay tooling can emit
+  // events with `event.created` from > 2 years ago. postTransaction with
+  // webhook: postedBy rejects these — without the clamp, the shadow-write
+  // would silently drop them.
+  const minEffectiveAt = new Date(Date.now() - 720 * 24 * 60 * 60 * 1000);
+  const effectiveAt =
+    args.effectiveAt > minEffectiveAt ? args.effectiveAt : minEffectiveAt;
+
   const gross = BigInt(args.creatorShareCents + args.platformShareCents);
   const creatorCredit = BigInt(args.creatorShareCents);
   const platformCredit = BigInt(args.platformShareCents);
@@ -128,7 +137,7 @@ export async function shadowWriteInvoicePaid(args: ShadowWriteInvoicePaidArgs): 
 
   const input: PostTransactionInput = {
     eventGroupId: stripeEventToV2EventGroupId(args.stripeEventId),
-    effectiveAt: args.effectiveAt,
+    effectiveAt,
     postedBy: 'webhook:invoice.paid',
     entries,
   };
