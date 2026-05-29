@@ -440,11 +440,12 @@ describe('creator billing webhooks', () => {
     // The retry should NOT create new ledger rows because the prefix
     // (`stripe_event:evt_dedup_retry`) matches the existing row.
     expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
-    // Verify the dedup query used startsWith on the event prefix.
+    // Verify the dedup query used startsWith on the event prefix WITH the
+    // trailing colon (defends against `evt_x` matching `evt_x10` etc.).
     expect((prismaMock as any).creatorWalletLedger.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          description: { startsWith: 'stripe_event:evt_dedup_retry' },
+          description: { startsWith: 'stripe_event:evt_dedup_retry:' },
         }),
       })
     );

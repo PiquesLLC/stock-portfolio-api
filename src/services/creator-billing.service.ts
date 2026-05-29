@@ -126,7 +126,11 @@ async function extractInvoiceChargeId(
       errAny.type === 'StripeConnectionError' ||
       errAny.type === 'StripeAPIError' ||
       errAny.type === 'StripePermissionError' ||
-      errAny.type === 'StripeRateLimitError'
+      errAny.type === 'StripeRateLimitError' ||
+      // Idempotency conflict on Stripe's side (concurrent request with the
+      // same idempotency key while server held the lock). Transient —
+      // let Stripe retry.
+      errAny.type === 'StripeIdempotencyError'
     ) {
       throw err;
     }
@@ -593,11 +597,18 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // segment is variable across retries (Stripe API outage / transient
         // failure on Path 3 of extractInvoiceChargeId could resolve '' on
         // delivery 1 then the real id on delivery 2 → two distinct exact
-        // keys → double credit). Matching on `stripe_event:<event.id>` is
+        // keys → double credit). Matching on `stripe_event:<event.id>:` is
         // sufficient: the event id is the unique anchor across all retries
         // for one Stripe event, and is the same regardless of whether the
         // charge segment is present.
-        const eventKeyPrefix = `stripe_event:${event.id}`;
+        //
+        // The TRAILING COLON is load-bearing: without it, `startsWith` would
+        // false-positive across event ids that share a prefix (e.g.,
+        // `evt_paid_1` would match rows for `evt_paid_10`). Production Stripe
+        // event ids are fixed-length opaque tokens so the collision is
+        // probabilistically zero — but test seeds and future-format changes
+        // are not. Always include the colon.
+        const eventKeyPrefix = `stripe_event:${event.id}:`;
         const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
           where: {
             creatorUserId: sub.creatorUserId,
