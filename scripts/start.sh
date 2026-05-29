@@ -210,7 +210,7 @@ if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ]; then
     echo "[MIG-1] Starting backfill in background — output with [MIG-1] prefix below + persistent copy at /data/mig-1.log..."
     (
       NALA_ALLOW_MIGRATION_BACKFILL=true npx ts-node scripts/mig-1-backfill.ts --apply --deferred-out /data/mig-1-deferred.csv 2>&1 | tee /data/mig-1.log | sed 's/^/[MIG-1] /'
-      exit_code=${PIPESTATUS[0]}
+      exit_code=${PIPESTATUS[0]:-1}
       if [ "$exit_code" = "0" ]; then
         touch /data/.mig-1-completed-v2
         echo "[MIG-1] OK — exit 0; marker set at /data/.mig-1-completed-v2."
