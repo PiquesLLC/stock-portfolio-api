@@ -15,6 +15,7 @@
 // the v1 key, so postTransaction's idempotency dedup means re-runs are
 // safe. Run as many times as you want.
 
+import { writeFileSync } from 'fs';
 import v1Prisma from '../src/utils/prisma';
 import { postTransaction } from '../src/v2/ledger';
 import {
@@ -27,21 +28,25 @@ interface CliOptions {
   apply: boolean;
   creatorId: string | null;
   limit: number | null;
+  deferredOut: string | null;
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const opts: CliOptions = { apply: false, creatorId: null, limit: null };
+  const opts: CliOptions = { apply: false, creatorId: null, limit: null, deferredOut: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--apply') opts.apply = true;
     else if (a === '--creator-id') opts.creatorId = argv[++i] ?? null;
     else if (a === '--limit') opts.limit = parseInt(argv[++i] ?? '0', 10) || null;
+    else if (a === '--deferred-out') opts.deferredOut = argv[++i] ?? null;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: mig-1-backfill [--apply] [--creator-id <uuid>] [--limit N]\n\n' +
+        'Usage: mig-1-backfill [--apply] [--creator-id <uuid>] [--limit N] [--deferred-out path.csv]\n\n' +
           '  --apply         actually write to v2 (default: dry-run)\n' +
           '  --creator-id    only backfill this one creator (smoke test)\n' +
-          '  --limit         cap the number of v1 rows scanned (debug)',
+          '  --limit         cap the number of v1 rows scanned (debug)\n' +
+          '  --deferred-out  write deferred groupKeys + row ids to a CSV at this path\n' +
+          '                  so a follow-up backfill can resume when G6 mapper lands',
       );
       process.exit(0);
     }
@@ -55,6 +60,7 @@ interface BackfillStats {
   unbucketed: number;
   mapped: number;
   deferred: Map<string, number>;
+  deferredGroups: Array<{ groupKey: string; reason: string; v1RowIds: string[] }>;
   malformed: Map<string, number>;
   v2Posted: number;
   v2Deduplicated: number;
@@ -68,11 +74,19 @@ function newStats(): BackfillStats {
     unbucketed: 0,
     mapped: 0,
     deferred: new Map(),
+    deferredGroups: [],
     malformed: new Map(),
     v2Posted: 0,
     v2Deduplicated: 0,
     v2Errors: [],
   };
+}
+
+// CSV escape: wrap in quotes and double internal quotes. Handles commas,
+// newlines, and quotes in any input column.
+function csvEscape(s: string): string {
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
 }
 
 async function readV1Rows(opts: CliOptions): Promise<V1LedgerRow[]> {
@@ -124,6 +138,11 @@ async function main(): Promise<void> {
     const outcome = mapV1GroupToV2Event(groupKey, rows);
     if (outcome.kind === 'deferred') {
       stats.deferred.set(outcome.reason, (stats.deferred.get(outcome.reason) ?? 0) + 1);
+      stats.deferredGroups.push({
+        groupKey,
+        reason: outcome.reason,
+        v1RowIds: outcome.v1RowIds,
+      });
       continue;
     }
     if (outcome.kind === 'malformed') {
@@ -173,6 +192,25 @@ async function main(): Promise<void> {
     for (const e of stats.v2Errors.slice(0, 10)) {
       console.log(`  ${e.groupKey}: ${e.error.slice(0, 200)}`);
     }
+  }
+
+  // Persist deferred groups to CSV so a follow-up backfill can resume
+  // once the deferred mappers (G6 admin_fix) land. The file has columns:
+  //   groupKey, reason, v1RowId, createdAt
+  // (one row per v1 row id in the group — joinable on groupKey).
+  if (opts.deferredOut && stats.deferredGroups.length > 0) {
+    const lines: string[] = ['groupKey,reason,v1RowId'];
+    for (const g of stats.deferredGroups) {
+      for (const id of g.v1RowIds) {
+        lines.push([g.groupKey, g.reason, id].map(csvEscape).join(','));
+      }
+    }
+    writeFileSync(opts.deferredOut, lines.join('\n') + '\n', 'utf8');
+    console.log(
+      `\nWrote ${stats.deferredGroups.length} deferred group(s) ` +
+        `(${stats.deferredGroups.reduce((s, g) => s + g.v1RowIds.length, 0)} v1 rows) ` +
+        `to ${opts.deferredOut}`,
+    );
   }
 
   process.exit(stats.v2Errors.length > 0 ? 1 : 0);

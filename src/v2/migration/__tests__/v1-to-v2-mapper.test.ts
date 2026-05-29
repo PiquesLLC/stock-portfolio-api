@@ -211,16 +211,146 @@ describe('mapV1GroupToV2Event — G5a/b/c payouts', () => {
   });
 });
 
-describe('mapV1GroupToV2Event — deferrals', () => {
-  it('defers G3 dispute clawback shapes', () => {
+describe('mapV1GroupToV2Event — G3 dispute.created', () => {
+  it('maps the minimum case: dispute_fee only (no clawback)', () => {
     const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    expect(out.kind).toBe('mapped');
+    if (out.kind !== 'mapped') return;
+    expect(out.shape).toBe('G3.dispute.created');
+    expect(out.event.entries).toHaveLength(2);
+    const stripeClearing = out.event.entries.find((e) => e.accountScope === 'stripe_clearing')!;
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    expect(stripeClearing.creditMinorUnits).toBe(1500n);
+    expect(creator.debitMinorUnits).toBe(1500n);
+    expect(creator.eventType).toBe('DISPUTE_FROZEN');
+  });
+
+  it('maps fee + creator-clawback (no platform side)', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    expect(out.event.entries).toHaveLength(2);
+    const stripeClearing = out.event.entries.find((e) => e.accountScope === 'stripe_clearing')!;
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    expect(stripeClearing.creditMinorUnits).toBe(1500n + 800n); // 2300
+    expect(creator.debitMinorUnits).toBe(1500n + 800n);
+  });
+
+  it('maps fee + both clawbacks (full 3-leg)', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
       row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
       row({ type: 'platform_fee', amountCents: -200, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_platform' }),
     ];
     const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
-    expect(out.kind).toBe('deferred');
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    expect(out.event.entries).toHaveLength(3);
+    const stripeClearing = out.event.entries.find((e) => e.accountScope === 'stripe_clearing')!;
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    const platformRev = out.event.entries.find((e) => e.accountScope === 'platform_revenue')!;
+    // INV-2 balance: stripe credit 2500 = creator debit 2300 + platform debit 200
+    expect(stripeClearing.creditMinorUnits).toBe(2500n);
+    expect(creator.debitMinorUnits).toBe(2300n);
+    expect(platformRev.debitMinorUnits).toBe(200n);
   });
 
+  it('maps fee + platform-clawback only (creator clawback absent)', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'platform_fee', amountCents: -200, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_platform' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    expect(out.event.entries).toHaveLength(3);
+    const platformRev = out.event.entries.find((e) => e.accountScope === 'platform_revenue')!;
+    expect(platformRev.debitMinorUnits).toBe(200n);
+  });
+
+  it('rejects clawback-without-anchor as malformed', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    expect(out.kind).toBe('malformed');
+  });
+
+  it('extracts chargeId from clawback description into stripeObjectId', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_disputeXYZ:dispute_clawback_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    for (const e of out.event.entries) {
+      expect(e.stripeObjectId).toBe('ch_disputeXYZ');
+      expect(e.stripeObjectKind).toBe('dispute');
+      expect(e.stripeEventId).toBe('evt_D');
+    }
+  });
+});
+
+describe('mapV1GroupToV2Event — G4 dispute.closed (won)', () => {
+  it('maps the minimum case: dispute_fee_reversal only', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 1500, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    expect(out.kind).toBe('mapped');
+    if (out.kind !== 'mapped') return;
+    expect(out.shape).toBe('G4.dispute.closed_won');
+    expect(out.event.entries).toHaveLength(2);
+    const stripeClearing = out.event.entries.find((e) => e.accountScope === 'stripe_clearing')!;
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    expect(stripeClearing.debitMinorUnits).toBe(1500n);
+    expect(creator.creditMinorUnits).toBe(1500n);
+    expect(creator.eventType).toBe('RESTORE_AFTER_DISPUTE_WON');
+  });
+
+  it('maps fee_reversal + both restores (full 3-leg)', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 1500, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+      row({ type: 'earning', amountCents: 800, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_creator' }),
+      row({ type: 'platform_fee', amountCents: 200, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_platform' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    expect(out.event.entries).toHaveLength(3);
+    const stripeClearing = out.event.entries.find((e) => e.accountScope === 'stripe_clearing')!;
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    const platformRev = out.event.entries.find((e) => e.accountScope === 'platform_revenue')!;
+    // INV-2 balance: stripe debit 2500 = creator credit 2300 + platform credit 200
+    expect(stripeClearing.debitMinorUnits).toBe(2500n);
+    expect(creator.creditMinorUnits).toBe(2300n);
+    expect(platformRev.creditMinorUnits).toBe(200n);
+  });
+
+  it('detects G4 BEFORE G3 (dispute_fee_reversal does not falsely match G3)', () => {
+    // The string `dispute_fee_reversal` contains `dispute_fee` as substring.
+    // The mapper must not treat this as a G3 dispute_fee anchor.
+    const rows = [
+      row({ type: 'earning', amountCents: 1500, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    expect(out.shape).toBe('G4.dispute.closed_won');
+  });
+
+  it('rejects restore-without-anchor as malformed', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 800, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    expect(out.kind).toBe('malformed');
+  });
+});
+
+describe('mapV1GroupToV2Event — deferrals', () => {
   it('defers G6 admin_fix groups', () => {
     const rows = [
       row({ type: 'earning', amountCents: 800, description: 'admin_fix:initial_payment:user_a:idem_1' }),
