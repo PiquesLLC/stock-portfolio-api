@@ -4,6 +4,7 @@ import { config } from '../config';
 import { Prisma } from '../generated/prisma/client';
 import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
+import { v1LedgerCreate } from './v1-wallet-freeze';
 import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 import { shadowWriteChargeRefunded } from '../v2/shadow-write/charge-refunded';
 import { shadowWriteChargeDisputeCreated } from '../v2/shadow-write/charge-dispute-created';
@@ -631,7 +632,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         );
 
         await prisma.$transaction([
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: sub.creatorUserId,
               type: 'earning',
@@ -640,7 +641,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               description: creatorEventKey,
             },
           }),
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: sub.creatorUserId,
               type: 'platform_fee',
@@ -773,7 +774,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const platformRefundKey = `stripe_event:${event.id}:charge:${chargeId}:refund_platform`;
 
         await prisma.$transaction([
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: sub.creatorUserId,
               type: 'refund',
@@ -782,7 +783,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               description: creatorRefundKey,
             },
           }),
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: sub.creatorUserId,
               type: 'platform_fee',
@@ -954,7 +955,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
               currentPeriodEnd: new Date(Date.now() - 1000),
             },
           }),
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: sub.creatorUserId,
               type: 'refund',
@@ -970,7 +971,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         if (originalEarning && originalEarning.amountCents > 0 && disputeChargeId) {
           clawbackAmountCents = Math.max(0, originalEarning.amountCents - prevDebitedCreator);
           if (clawbackAmountCents > 0) {
-            writes.push(prisma.creatorWalletLedger.create({
+            writes.push(v1LedgerCreate(prisma,{
               data: {
                 creatorUserId: sub.creatorUserId,
                 type: 'refund',
@@ -987,7 +988,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         if (originalPlatform && originalPlatform.amountCents > 0 && disputeChargeId) {
           platformClawbackCents = Math.max(0, originalPlatform.amountCents - prevDebitedPlatform);
           if (platformClawbackCents > 0) {
-            writes.push(prisma.creatorWalletLedger.create({
+            writes.push(v1LedgerCreate(prisma,{
               data: {
                 creatorUserId: sub.creatorUserId,
                 type: 'platform_fee',
@@ -1067,7 +1068,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           let wonPlatformRestoreCents = 0;
           const restoreWrites: Prisma.PrismaPromise<unknown>[] = [
             // Reverse the $15 dispute fee (original was type=refund:-1500, so add back as earning)
-            prisma.creatorWalletLedger.create({
+            v1LedgerCreate(prisma,{
               data: {
                 creatorUserId: sub.creatorUserId,
                 type: 'earning',
@@ -1098,7 +1099,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             ]);
             if (creatorClawback && creatorClawback.amountCents < 0) {
               wonCreatorRestoreCents = Math.abs(creatorClawback.amountCents);
-              restoreWrites.push(prisma.creatorWalletLedger.create({
+              restoreWrites.push(v1LedgerCreate(prisma,{
                 data: {
                   creatorUserId: sub.creatorUserId,
                   type: 'earning',
@@ -1110,7 +1111,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             }
             if (platformClawback && platformClawback.amountCents < 0) {
               wonPlatformRestoreCents = Math.abs(platformClawback.amountCents);
-              restoreWrites.push(prisma.creatorWalletLedger.create({
+              restoreWrites.push(v1LedgerCreate(prisma,{
                 data: {
                   creatorUserId: sub.creatorUserId,
                   type: 'platform_fee',
@@ -1264,7 +1265,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             where: { id: payout.id },
             data: { status: 'reversed' },
           }),
-          prisma.creatorWalletLedger.create({
+          v1LedgerCreate(prisma,{
             data: {
               creatorUserId: payout.creatorUserId,
               type: 'earning',
@@ -1552,7 +1553,7 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       select: { id: true, amountCents: true },
     });
 
-    await tx.creatorWalletLedger.create({
+    await v1LedgerCreate(tx, {
       data: {
         creatorUserId: userId,
         type: 'payout',
@@ -1624,7 +1625,7 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
         where: { id: result.payoutId },
         data: { status: 'failed' },
       }),
-      prisma.creatorWalletLedger.create({
+      v1LedgerCreate(prisma,{
         data: {
           creatorUserId: userId,
           type: 'earning',

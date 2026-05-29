@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
+import { v1LedgerCreate } from '../services/v1-wallet-freeze';
 import {
   getModerationDashboardHandler,
   getAppealsHandler,
@@ -454,7 +455,7 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
   const actorId = req.user!.userId;
   try {
     await prisma.$transaction([
-      prisma.creatorWalletLedger.create({
+      v1LedgerCreate(prisma,{
         data: {
           creatorUserId,
           type: 'earning',
@@ -463,7 +464,7 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
           description: `admin_fix:initial_payment:${actorId}:${idempotencyKey}`,
         },
       }),
-      prisma.creatorWalletLedger.create({
+      v1LedgerCreate(prisma,{
         data: {
           creatorUserId,
           type: 'platform_fee',
