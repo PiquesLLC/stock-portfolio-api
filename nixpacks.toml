@@ -1,15 +1,3 @@
 [phases.setup]
 nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf"]
 nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"
-
-# Override the install phase to use `npm install` rather than `npm ci`.
-# Background: npm 11 (local dev) generates lockfiles that omit certain
-# optional-peer-dep entries (e.g. `c12`'s optional peer on
-# `magicast@^0.3.5`). npm 10 (Railway's nixpacks) strict-checks the
-# lockfile and fails with "Missing: magicast@0.3.5 from lock file". Until
-# nixpacks ships an npm 11 package — or until the upstream npm CLI
-# normalizes lockfile generation across major versions — `npm install`
-# bypasses the strict check while still respecting the lockfile for
-# resolved versions.
-[phases.install]
-cmds = ["npm install --include=dev --no-audit --no-fund"]
