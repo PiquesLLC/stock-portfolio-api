@@ -8,6 +8,8 @@ const {
   invoicesRetrieveMock,
   transfersCreateMock,
   subscriptionsUpdateMock,
+  invoicePaymentsListMock,
+  paymentIntentsRetrieveMock,
 } = vi.hoisted(() => ({
   checkoutCreateMock: vi.fn(),
   chargesRetrieveMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   invoicesRetrieveMock: vi.fn(),
   transfersCreateMock: vi.fn(),
   subscriptionsUpdateMock: vi.fn(),
+  invoicePaymentsListMock: vi.fn(),
+  paymentIntentsRetrieveMock: vi.fn(),
 }));
 
 vi.mock('stripe', () => {
@@ -29,6 +33,12 @@ vi.mock('stripe', () => {
     };
     invoices = {
       retrieve: invoicesRetrieveMock,
+    };
+    invoicePayments = {
+      list: invoicePaymentsListMock,
+    };
+    paymentIntents = {
+      retrieve: paymentIntentsRetrieveMock,
     };
     subscriptions = {
       update: subscriptionsUpdateMock,
@@ -334,6 +344,107 @@ describe('creator billing webhooks', () => {
         data: expect.objectContaining({
           description: 'stripe_event:evt_paid_odd_invoice:platform_fee:legacy_destination',
           amountCents: 2000,
+        }),
+      })
+    );
+  });
+
+  it('resolves invoice charge id via InvoicePayments API on Stripe 2025-02+ when invoice.charge is absent', async () => {
+    // Regression: Stripe API 2025-02 removed Invoice.charge. With no resolution,
+    // ledger rows are written without `:charge:<id>` and downstream dispute
+    // clawback fails to locate the original earning. The helper must fall
+    // through to stripe.invoicePayments.list → paymentIntents.retrieve and
+    // embed `:charge:<resolved-id>` in the description.
+    const fx = fixtureFactory('charge_resolution');
+    invoicePaymentsListMock.mockResolvedValueOnce({
+      data: [
+        {
+          payment: {
+            type: 'payment_intent',
+            payment_intent: 'pi_resolved_xyz',
+          },
+        },
+      ],
+    });
+    paymentIntentsRetrieveMock.mockResolvedValueOnce({
+      id: 'pi_resolved_xyz',
+      latest_charge: 'ch_resolved_xyz',
+    });
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_paid_resolved',
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_needs_resolution',
+          amount_paid: 10000,
+          subscription: fx.ids.stripeSubscriptionId,
+          // NOTE: no `charge` field — simulates Stripe API 2025-02+ payload
+        },
+      },
+    } as any);
+
+    expect(invoicePaymentsListMock).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice: 'in_needs_resolution', limit: 1 })
+    );
+    expect(paymentIntentsRetrieveMock).toHaveBeenCalledWith('pi_resolved_xyz');
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_resolved:charge:ch_resolved_xyz:creator_share',
+        }),
+      })
+    );
+    expect((prismaMock as any).creatorWalletLedger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          description: 'stripe_event:evt_paid_resolved:charge:ch_resolved_xyz:platform_fee',
+        }),
+      })
+    );
+  });
+
+  it('dedupes invoice.paid retries by event-id prefix even when charge resolution differs between attempts', async () => {
+    // Regression: my fix for the API-2025-02 charge resolution could double-
+    // credit if first delivery resolved charge='' (helper fell through) and
+    // a retry resolves charge='ch_xxx' — without prefix-based dedup the
+    // two distinct descriptions would both pass the `alreadyCredited` check.
+    // The dedup query must match on `stripe_event:<event.id>` prefix.
+    const fx = fixtureFactory('dedup_prefix');
+    // Simulate: a prior ledger row was written WITHOUT the :charge: segment
+    // (e.g., first delivery's helper short-circuited).
+    (prismaMock as any).creatorWalletLedger.findFirst.mockResolvedValueOnce({
+      id: 'existing_ledger_row',
+    });
+
+    invoicePaymentsListMock.mockResolvedValueOnce({
+      data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_x' } }],
+    });
+    paymentIntentsRetrieveMock.mockResolvedValueOnce({
+      id: 'pi_x',
+      latest_charge: 'ch_now_resolved',
+    });
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_dedup_retry',
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_dedup',
+          amount_paid: 10000,
+          subscription: fx.ids.stripeSubscriptionId,
+        },
+      },
+    } as any);
+
+    // The retry should NOT create new ledger rows because the prefix
+    // (`stripe_event:evt_dedup_retry`) matches the existing row.
+    expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
+    // Verify the dedup query used startsWith on the event prefix.
+    expect((prismaMock as any).creatorWalletLedger.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          description: { startsWith: 'stripe_event:evt_dedup_retry' },
         }),
       })
     );

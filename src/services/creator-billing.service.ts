@@ -114,8 +114,24 @@ async function extractInvoiceChargeId(
       }
     }
   } catch (err) {
+    // Re-throw infrastructure failures (auth revoked, network down, Stripe
+    // 5xx) so the outer webhook handler returns a 5xx and Stripe retries.
+    // Silently degrading would write a charge-less ledger row that the
+    // dedup widening below tolerates, but on a sustained outage we'd lose
+    // visibility — better to retry. Swallow only InvalidRequest errors
+    // (genuinely "no payments for this invoice" — rare but valid).
+    const errAny = err as { type?: string };
+    if (
+      errAny.type === 'StripeAuthenticationError' ||
+      errAny.type === 'StripeConnectionError' ||
+      errAny.type === 'StripeAPIError' ||
+      errAny.type === 'StripePermissionError' ||
+      errAny.type === 'StripeRateLimitError'
+    ) {
+      throw err;
+    }
     console.warn(
-      `[CreatorWebhook] InvoicePayments lookup failed for invoice ${invoiceId}: ` +
+      `[CreatorWebhook] InvoicePayments lookup non-fatal for invoice ${invoiceId}: ` +
         `${(err as Error).message}`,
     );
   }
@@ -573,13 +589,19 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const chargeSegment = invoiceChargeId ? `:charge:${invoiceChargeId}` : '';
         const creatorEventKey = `stripe_event:${event.id}${chargeSegment}:creator_share${legacySuffix}`;
         const platformEventKey = `stripe_event:${event.id}${chargeSegment}:platform_fee${legacySuffix}`;
+        // Dedup by event-id PREFIX, NOT exact description match. The charge
+        // segment is variable across retries (Stripe API outage / transient
+        // failure on Path 3 of extractInvoiceChargeId could resolve '' on
+        // delivery 1 then the real id on delivery 2 → two distinct exact
+        // keys → double credit). Matching on `stripe_event:<event.id>` is
+        // sufficient: the event id is the unique anchor across all retries
+        // for one Stripe event, and is the same regardless of whether the
+        // charge segment is present.
+        const eventKeyPrefix = `stripe_event:${event.id}`;
         const alreadyCredited = await prisma.creatorWalletLedger.findFirst({
           where: {
             creatorUserId: sub.creatorUserId,
-            OR: [
-              { description: creatorEventKey },
-              { description: platformEventKey },
-            ],
+            description: { startsWith: eventKeyPrefix },
           },
           select: { id: true },
         });
