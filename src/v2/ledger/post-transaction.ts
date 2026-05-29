@@ -132,7 +132,7 @@ const EFFECTIVE_AT_MAX_PAST_MS = 730 * 24 * 60 * 60 * 1000;
 // Solution: validate metadata is JSON-serializable up-front (rejects
 // BigInt and circular refs), then round-trip through JSON to apply
 // Date.toJSON and strip undefined symmetrically before canonical sort.
-function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void {
+export function validateMetadataIsJsonable(metadata: unknown, entryIndex: number): void {
   if (metadata === undefined) return;
   // ORDER MATTERS: stringify FIRST to catch BigInt / cycles via the native
   // TypeError. rejectNonFiniteNumbers below has no cycle protection — it
@@ -177,7 +177,7 @@ function rejectNonFiniteNumbers(v: unknown, entryIndex: number, path: string): v
   }
 }
 
-function canonicalMetadata(v: unknown): string {
+export function canonicalMetadata(v: unknown): string {
   // Normalize through JSON round-trip first — this applies Date.toJSON
   // (Date → ISO string), strips undefined values, and produces a tree of
   // only JSON-native types. Mirrors what Postgres JSONB stores.
