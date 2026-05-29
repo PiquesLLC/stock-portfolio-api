@@ -162,6 +162,53 @@ else
   " 2>&1 || echo "WARNING: Manual column fix also failed, continuing..."
 fi
 
+# Optional one-shot MIG-1 backfill: v1 CreatorWalletLedger → v2 double-entry
+# ledger. Gated by V2_RUN_BACKFILL_ONCE=true so it only runs when ops flips
+# the env var. Backgrounded so it cannot block the healthcheck (railway.json
+# healthcheckTimeout=300s; large v1 datasets could easily exceed that under
+# the per-group sequential awaits in mig-1-backfill.ts).
+#
+# Marker: /data/.mig-1-completed-v1 — versioned so a future re-run after the
+# G6 admin_fix mapper lands can use -v2 without manually deleting the old
+# marker on the persistent volume.
+#
+# Logs go BOTH to Railway's log stream (tee + sed prefix, inherited by
+# node after the `exec` at the bottom of this script) AND to
+# /data/mig-1.log so we can `tail` the prior run's summary on subsequent
+# boots even after the log buffer rotates out.
+#
+# Idempotency safety net: MIG-1's eventGroupIds are deterministic SHA-256
+# hashes of v1 keys, so postTransaction would dedup anyway. A mid-backfill
+# crash + restart is therefore safe to re-run once the marker is cleared.
+echo "=== Optional: MIG-1 v2 backfill (gated by V2_RUN_BACKFILL_ONCE) ==="
+if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ]; then
+  if [ -z "${V2_DATABASE_URL:-}" ]; then
+    echo "[MIG-1] SKIP: V2_DATABASE_URL is not set; backfill cannot run without v2 connection."
+  elif [ -f /data/.mig-1-completed-v1 ]; then
+    echo "[MIG-1] Marker /data/.mig-1-completed-v1 present — skipping."
+    if [ -f /data/mig-1.log ]; then
+      echo "[MIG-1] Previous run tail (last 30 lines of /data/mig-1.log):"
+      tail -30 /data/mig-1.log | sed 's/^/[MIG-1-log] /' || true
+    fi
+  else
+    echo "[MIG-1] Starting backfill in background — output with [MIG-1] prefix below + persistent copy at /data/mig-1.log..."
+    (
+      NALA_ALLOW_MIGRATION_BACKFILL=true npx ts-node scripts/mig-1-backfill.ts --apply --deferred-out /data/mig-1-deferred.csv 2>&1 | tee /data/mig-1.log | sed 's/^/[MIG-1] /'
+      exit_code=${PIPESTATUS[0]}
+      if [ "$exit_code" = "0" ]; then
+        touch /data/.mig-1-completed-v1
+        echo "[MIG-1] OK — exit 0; marker set at /data/.mig-1-completed-v1."
+      else
+        echo "[MIG-1] CRITICAL: backfill exited code $exit_code — marker NOT set; will retry on next boot."
+      fi
+    ) &
+    disown 2>/dev/null || true
+    echo "[MIG-1] Backgrounded (PID $!) — proceeding to start the server."
+  fi
+else
+  echo "[MIG-1] V2_RUN_BACKFILL_ONCE not 'true' — skipping."
+fi
+
 echo "=== Configuring fonts for share card rendering ==="
 export FONTCONFIG_FILE=/app/assets/fonts.conf
 mkdir -p /tmp/fontconfig-cache
