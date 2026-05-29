@@ -24,11 +24,26 @@ const INITIAL_DELAY_MS = 5 * 60 * 1000;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let interval: ReturnType<typeof setInterval> | null = null;
+let running = false;
 
 async function runOnce(): Promise<void> {
+  // Overlap guard: if a previous run is still in flight (e.g., v2 Postgres
+  // degraded and per-creator queries stalled past the 24h interval), do NOT
+  // start a second pass — that would double DB load on an already-sick
+  // system. The next tick will pick up cleanly once the in-flight run ends.
+  if (running) {
+    console.warn(
+      '[V2 Reconcile] SKIP — previous run still in flight (overlap guard).',
+    );
+    return;
+  }
+  running = true;
   const startedAt = new Date().toISOString();
   try {
     const report = await reconcileAllCreators();
+    // bigint → Number coercion: safe for per-creator wallet cents — single
+    // creator balances will not approach Number.MAX_SAFE_INTEGER (2^53 - 1
+    // cents = ~$90 quadrillion). Used only for log emission.
     const summary = {
       ts: startedAt,
       job: 'v2_reconcile',
@@ -58,6 +73,8 @@ async function runOnce(): Promise<void> {
         error: (err as Error).message,
       }),
     );
+  } finally {
+    running = false;
   }
 }
 
