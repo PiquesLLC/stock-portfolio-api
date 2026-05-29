@@ -577,4 +577,26 @@ describe('mapV1GroupToV2Event — G6 admin_fix', () => {
     const out = mapV1GroupToV2Event('admin_fix:platform_fee:user_a:idem_1', [r]);
     expect(out.kind).toBe('malformed');
   });
+
+  it('rejects description with no identifier tail (admin_fix:initial_payment)', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 100,
+      description: 'admin_fix:initial_payment',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment', [r]);
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/missing identifier tail/);
+  });
+
+  it('rejects description with empty tail (admin_fix:initial_payment:)', () => {
+    const r = row({
+      type: 'earning',
+      amountCents: 100,
+      description: 'admin_fix:initial_payment:',
+    });
+    const out = mapV1GroupToV2Event('admin_fix:initial_payment:', [r]);
+    expect(out.kind).toBe('malformed');
+  });
 });

@@ -60,6 +60,7 @@ const VALID_SCOPES = new Set<AccountScope>([
   'platform_revenue',
   'platform_fee',
   'tax_withholding',
+  'adjustment',
 ]);
 
 // Valid system (non-creator) account ids. Hardcoded list — these accounts

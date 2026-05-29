@@ -22,10 +22,15 @@ import { reconcileAllCreators } from './v1-vs-v2';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INITIAL_DELAY_MS = 5 * 60 * 1000;
+// Don't page on the same drift signature more than once per 6h. The cron
+// runs every 24h so this only matters during the initial-day burst or when
+// scheduleV2ReconcileDaily is invoked from multiple paths; defensive.
+const ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let interval: ReturnType<typeof setInterval> | null = null;
 let running = false;
+let lastAlertAt = 0;
 
 async function runOnce(): Promise<void> {
   // Overlap guard: if a previous run is still in flight (e.g., v2 Postgres
@@ -61,16 +66,24 @@ async function runOnce(): Promise<void> {
       })),
     };
     if (report.divergent.length > 0) {
-      const message = `[V2 Reconcile] DIVERGENCE DETECTED — ${report.divergent.length} creator(s) drifted vs v2`;
-      console.error(message, JSON.stringify(summary));
-      // Fire to Sentry so on-call gets paged (or routed through configured
-      // Sentry alert rules). Mirror the webhook-metrics pattern at
-      // src/utils/webhook-metrics.ts:108-109. Sentry.init lives in src/app.ts.
-      Sentry.captureMessage(message, {
-        level: 'error',
-        tags: { component: 'v2_reconciliation' },
-        extra: summary,
-      });
+      // Stable message string so Sentry groups all drift events into ONE
+      // issue (avoids paging once per fluctuating creator count). The
+      // per-run details land in `extra`. Also rate-limit Sentry sends to
+      // one per ALERT_COOLDOWN_MS so a multi-day drift doesn't page daily.
+      const stableMessage = '[V2 Reconcile] DIVERGENCE DETECTED — v1↔v2 creator balance drift';
+      const detailLine = `${stableMessage} (count=${report.divergent.length})`;
+      console.error(detailLine, JSON.stringify(summary));
+      const now = Date.now();
+      if (now - lastAlertAt > ALERT_COOLDOWN_MS) {
+        lastAlertAt = now;
+        // Mirrors the webhook-metrics pattern at
+        // src/utils/webhook-metrics.ts:108-109. Sentry.init lives in src/app.ts.
+        Sentry.captureMessage(stableMessage, {
+          level: 'error',
+          tags: { component: 'v2_reconciliation' },
+          extra: summary,
+        });
+      }
     } else {
       console.log('[V2 Reconcile] OK', JSON.stringify(summary));
     }

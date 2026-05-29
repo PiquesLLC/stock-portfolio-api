@@ -162,6 +162,22 @@ else
   " 2>&1 || echo "WARNING: Manual column fix also failed, continuing..."
 fi
 
+# Pre-MIG-1 hygiene: ensure the v2 chart-of-accounts is fully seeded BEFORE
+# the backfill runs. Without this guard, the G6 admin_fix mapper would
+# fail with a FK violation on the first row because `adjustment:platform`
+# is a new account introduced alongside G6. Seed is idempotent — re-runs
+# are a no-op for existing accounts. Only invoked when V2_RUN_BACKFILL_ONCE
+# is set so steady-state boots don't pay the seed-script cost.
+if [ "${V2_RUN_BACKFILL_ONCE:-}" = "true" ] && [ -n "${V2_DATABASE_URL:-}" ]; then
+  echo "=== Pre-MIG-1: ensuring v2 system accounts (idempotent seed) ==="
+  npx ts-node prisma-v2/seed.ts 2>&1 | sed 's/^/[v2-seed] /' || echo "[v2-seed] WARN: seed failed — MIG-1 may FK-violate. Investigate before unblocking."
+fi
+
+# Clean up the previous MIG-1 marker (-v1) once the new marker (-v2) is in
+# use. Avoids long-term volume clutter for future operators inspecting
+# /data. No-op if the file is already gone.
+rm -f /data/.mig-1-completed-v1 2>/dev/null || true
+
 # Optional one-shot MIG-1 backfill: v1 CreatorWalletLedger → v2 double-entry
 # ledger. Gated by V2_RUN_BACKFILL_ONCE=true so it only runs when ops flips
 # the env var. Backgrounded so it cannot block the healthcheck (railway.json
@@ -226,9 +242,9 @@ if [ "${V2_RUN_GATE_ONCE:-}" = "true" ]; then
   else
     echo "[V2 Gate] Running reconciliation --gate (exit 1 on any divergence)..."
     if npx ts-node scripts/v1-vs-v2-reconcile.ts --gate 2>&1 | sed 's/^/[V2 Gate] /'; then
-      gate_exit=${PIPESTATUS[0]}
+      gate_exit=${PIPESTATUS[0]:-1}
     else
-      gate_exit=${PIPESTATUS[0]}
+      gate_exit=${PIPESTATUS[0]:-1}
     fi
     if [ "$gate_exit" = "0" ]; then
       echo "[V2 Gate] PASS — no divergence."

@@ -762,6 +762,17 @@ export function mapV1GroupToV2Event(
         v1RowIds: ids,
       };
     }
+    // Require a non-empty tail (legacy `:<rowid>` OR modern `:<actor>:<key>`).
+    // A description of just `admin_fix:<variant>` with nothing after would
+    // produce a non-unique eventGroupId across rows AND signal that the
+    // start.sh:30 legacy backfill never ran. Treat as malformed defensively.
+    if (segments.length < 3 || segments.slice(2).join(':') === '') {
+      return {
+        kind: 'malformed',
+        reason: 'G6.admin_fix: description missing identifier tail (need :<actor>:<key> or :<rowid>)',
+        v1RowIds: ids,
+      };
+    }
     if (row.amountCents <= 0) {
       return {
         kind: 'malformed',
