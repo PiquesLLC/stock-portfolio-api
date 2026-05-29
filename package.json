@@ -35,7 +35,6 @@
     "engines": {
         "node": ">=22.12"
     },
-    "packageManager": "npm@10.9.2",
     "jest": {
         "roots": [
             "<rootDir>/src"
