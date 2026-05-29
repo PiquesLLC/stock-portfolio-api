@@ -242,8 +242,12 @@ export function mapV1GroupToV2Event(
     // Detect BEFORE G3 because the dispute_fee_reversal description contains
     // the substring `dispute_fee` (but with `_reversal` suffix). Matching
     // G4 first avoids the false-positive on G3's dispute_fee detector.
+    // The G4 detector uses end-anchored regex (not bare substring) so a
+    // future suffix like `:dispute_fee_reversal_partial` would NOT match.
     const feeReversalRow = rows.find(
-      (r) => r.type === 'earning' && r.description?.includes(':dispute_fee_reversal'),
+      (r) =>
+        r.type === 'earning' &&
+        /:dispute_fee_reversal(?::|$)/.test(r.description ?? ''),
     );
     const restoreCreatorRow = rows.find(
       (r) =>
@@ -273,6 +277,17 @@ export function mapV1GroupToV2Event(
         );
       const chargeId = chargeMatch ? chargeMatch[1] : null;
 
+      // Consistency: all rows in a v1 dispute group should target the same
+      // creatorUserId. Mismatch indicates v1 data corruption or a writer
+      // bug — surface for manual review rather than silently picking one.
+      const allUserIds = new Set(rows.map((r) => r.creatorUserId));
+      if (allUserIds.size > 1) {
+        return {
+          kind: 'malformed',
+          reason: 'G4 dispute_won: rows span multiple creatorUserIds',
+          v1RowIds: ids,
+        };
+      }
       const feeAmount = BigInt(Math.abs(feeReversalRow.amountCents));
       const creatorRestoreAmount = restoreCreatorRow
         ? BigInt(Math.abs(restoreCreatorRow.amountCents))
@@ -280,11 +295,11 @@ export function mapV1GroupToV2Event(
       const platformRestoreAmount = restorePlatformRow
         ? BigInt(Math.abs(restorePlatformRow.amountCents))
         : 0n;
-      // The anchor fee row should always be > 0 in v1 (hardcoded -1500), but
-      // backfill must defend against corrupt v1 data: a zero-amount anchor
-      // would emit a row with debit=0 AND credit=0, which assertInv1 rejects.
-      // Surface as malformed so the v1 row is flagged for manual review
-      // rather than crashing the backfill loop.
+      // Zero-amount guards (anchor + optionals). The anchor fee row is
+      // hardcoded +1500 in v1, but backfill must defend against corrupt
+      // data. A zero-amount anchor would emit debit=0/credit=0 and trip
+      // assertInv1; a zero-amount optional would silently disappear from
+      // the migration record. Both surface as malformed for manual review.
       if (feeAmount === 0n) {
         return {
           kind: 'malformed',
@@ -292,10 +307,39 @@ export function mapV1GroupToV2Event(
           v1RowIds: ids,
         };
       }
+      if (restoreCreatorRow && creatorRestoreAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G4 dispute_won: dispute_won_restore_creator row has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
+      if (restorePlatformRow && platformRestoreAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G4 dispute_won: dispute_won_restore_platform row has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
       const stripeDebit = feeAmount + creatorRestoreAmount + platformRestoreAmount;
       const creatorCredit = feeAmount + creatorRestoreAmount;
 
-      const sharedMeta: Record<string, unknown> = { source: 'v1-backfill' };
+      // Metadata records the sub-components folded into the creator credit
+      // (fee_reversal + restore) so downstream reconciliation can recover
+      // the breakdown that v1 stored as two rows. Multi-entry-same-account
+      // is rejected by postTransaction (load-bearing concurrency guard), so
+      // we cannot split the creator side into two entries.
+      const sharedMeta: Record<string, unknown> = {
+        source: 'v1-backfill',
+        fee_reversal_cents: Number(feeAmount),
+        creator_restore_cents: Number(creatorRestoreAmount),
+        platform_restore_cents: Number(platformRestoreAmount),
+      };
+      // stripeObjectKind/Id are charge-side identifiers because v1 only
+      // recorded the charge id; the dispute id (du_...) isn't available
+      // without going to Stripe. Use 'charge' kind so the (kind, id) pair
+      // is type-consistent. A future enrichment job can update to dispute
+      // kind + du_... once that data exists.
       const entries: LedgerEntryInput[] = [
         {
           accountScope: 'stripe_clearing',
@@ -305,7 +349,7 @@ export function mapV1GroupToV2Event(
           creditMinorUnits: 0n,
           currency: 'USD',
           idempotencySuffix: 'stripe_clearing',
-          stripeObjectKind: 'dispute',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,
@@ -317,8 +361,8 @@ export function mapV1GroupToV2Event(
           debitMinorUnits: 0n,
           creditMinorUnits: creatorCredit,
           currency: 'USD',
-          idempotencySuffix: 'creator',
-          stripeObjectKind: 'dispute',
+          idempotencySuffix: 'creator_restore',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,
@@ -332,8 +376,8 @@ export function mapV1GroupToV2Event(
           debitMinorUnits: 0n,
           creditMinorUnits: platformRestoreAmount,
           currency: 'USD',
-          idempotencySuffix: 'platform',
-          stripeObjectKind: 'dispute',
+          idempotencySuffix: 'platform_restore',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,
@@ -358,8 +402,17 @@ export function mapV1GroupToV2Event(
     //     dispute_clawback_platform (optional, type=platform_fee, -clawback)
     // v2: stripe_clearing credit (sum of all amounts pulled back to Stripe)
     //     + creator debit (fee + creator clawback) + optional
-    //     platform_revenue debit (platform clawback). eventType
-    //     DISPUTE_FROZEN on all.
+    //     platform_revenue debit (platform clawback). eventType DISPUTE_LOST
+    //     on all entries.
+    //
+    // WHY DISPUTE_LOST (not DISPUTE_FROZEN): v1's charge.dispute.created
+    // handler ACTUALLY DEBITS the creator's wallet at dispute-open time —
+    // it doesn't merely "freeze" funds in an escrow account. The semantic
+    // of "money moves out of creator account now" maps to DISPUTE_LOST.
+    // DISPUTE_FROZEN is reserved for a future hold-only flow that places
+    // an encumbrance without moving money. Pinning the right event_type
+    // here avoids a CRITICAL idempotency-divergence throw when a future
+    // shadow-write of charge.dispute.created uses DISPUTE_LOST too.
     //
     // The dispute_fee match must use `:dispute_fee:` with trailing colon
     // so it doesn't accidentally match `:dispute_fee_reversal` (G4 path
@@ -398,6 +451,15 @@ export function mapV1GroupToV2Event(
         );
       const chargeId = chargeMatch ? chargeMatch[1] : null;
 
+      // Same creatorUserId-consistency guard as G4.
+      const allUserIds = new Set(rows.map((r) => r.creatorUserId));
+      if (allUserIds.size > 1) {
+        return {
+          kind: 'malformed',
+          reason: 'G3 dispute.created: rows span multiple creatorUserIds',
+          v1RowIds: ids,
+        };
+      }
       const feeAmount = BigInt(Math.abs(disputeFeeRow.amountCents));
       const creatorClawbackAmount = clawbackCreatorRow
         ? BigInt(Math.abs(clawbackCreatorRow.amountCents))
@@ -405,9 +467,7 @@ export function mapV1GroupToV2Event(
       const platformClawbackAmount = clawbackPlatformRow
         ? BigInt(Math.abs(clawbackPlatformRow.amountCents))
         : 0n;
-      // Same zero-amount guard as G4. dispute_fee is hardcoded -1500 in v1
-      // so this only fires on corrupt backfill data; better to surface as
-      // malformed than throw INV-1.
+      // Anchor zero-amount + optional zero-amount guards (mirror of G4).
       if (feeAmount === 0n) {
         return {
           kind: 'malformed',
@@ -415,20 +475,44 @@ export function mapV1GroupToV2Event(
           v1RowIds: ids,
         };
       }
+      if (clawbackCreatorRow && creatorClawbackAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G3 dispute.created: dispute_clawback_creator row has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
+      if (clawbackPlatformRow && platformClawbackAmount === 0n) {
+        return {
+          kind: 'malformed',
+          reason: 'G3 dispute.created: dispute_clawback_platform row has zero amountCents',
+          v1RowIds: ids,
+        };
+      }
       const stripeCredit = feeAmount + creatorClawbackAmount + platformClawbackAmount;
       const creatorDebit = feeAmount + creatorClawbackAmount;
 
-      const sharedMeta: Record<string, unknown> = { source: 'v1-backfill' };
+      // Component breakdown in metadata so reconciliation can recover
+      // "of $X debit on creator, $1500 was the Stripe dispute fee and
+      // $Y was the chargeback principal."
+      const sharedMeta: Record<string, unknown> = {
+        source: 'v1-backfill',
+        dispute_fee_cents: Number(feeAmount),
+        creator_clawback_cents: Number(creatorClawbackAmount),
+        platform_clawback_cents: Number(platformClawbackAmount),
+      };
+      // stripeObjectKind: 'charge' (not 'dispute') because the available
+      // identifier is the charge id — v1 doesn't carry du_... ids.
       const entries: LedgerEntryInput[] = [
         {
           accountScope: 'stripe_clearing',
           accountId: 'platform',
-          eventType: 'DISPUTE_FROZEN',
+          eventType: 'DISPUTE_LOST',
           debitMinorUnits: 0n,
           creditMinorUnits: stripeCredit,
           currency: 'USD',
           idempotencySuffix: 'stripe_clearing',
-          stripeObjectKind: 'dispute',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,
@@ -436,12 +520,12 @@ export function mapV1GroupToV2Event(
         {
           accountScope: 'creator',
           accountId: creatorUserId,
-          eventType: 'DISPUTE_FROZEN',
+          eventType: 'DISPUTE_LOST',
           debitMinorUnits: creatorDebit,
           creditMinorUnits: 0n,
           currency: 'USD',
-          idempotencySuffix: 'creator',
-          stripeObjectKind: 'dispute',
+          idempotencySuffix: 'creator_clawback',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,
@@ -451,12 +535,12 @@ export function mapV1GroupToV2Event(
         entries.push({
           accountScope: 'platform_revenue',
           accountId: 'platform',
-          eventType: 'DISPUTE_FROZEN',
+          eventType: 'DISPUTE_LOST',
           debitMinorUnits: platformClawbackAmount,
           creditMinorUnits: 0n,
           currency: 'USD',
-          idempotencySuffix: 'platform',
-          stripeObjectKind: 'dispute',
+          idempotencySuffix: 'platform_clawback',
+          stripeObjectKind: 'charge',
           stripeObjectId: chargeId,
           stripeEventId,
           metadata: sharedMeta,

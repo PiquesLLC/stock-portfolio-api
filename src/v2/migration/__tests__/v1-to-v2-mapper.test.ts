@@ -225,7 +225,7 @@ describe('mapV1GroupToV2Event — G3 dispute.created', () => {
     const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
     expect(stripeClearing.creditMinorUnits).toBe(1500n);
     expect(creator.debitMinorUnits).toBe(1500n);
-    expect(creator.eventType).toBe('DISPUTE_FROZEN');
+    expect(creator.eventType).toBe('DISPUTE_LOST');
   });
 
   it('maps fee + creator-clawback (no platform side)', () => {
@@ -301,9 +301,59 @@ describe('mapV1GroupToV2Event — G3 dispute.created', () => {
     if (out.kind !== 'mapped') throw new Error('expected mapped');
     for (const e of out.event.entries) {
       expect(e.stripeObjectId).toBe('ch_disputeXYZ');
-      expect(e.stripeObjectKind).toBe('dispute');
+      // 'charge' (not 'dispute') because v1 only stores the charge id.
+      expect(e.stripeObjectKind).toBe('charge');
       expect(e.stripeEventId).toBe('evt_D');
     }
+  });
+
+  it('uses idempotencySuffix scheme that future shadow-write must match', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
+      row({ type: 'platform_fee', amountCents: -200, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_platform' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    const suffixes = out.event.entries.map((e) => e.idempotencySuffix);
+    expect(suffixes).toContain('stripe_clearing');
+    expect(suffixes).toContain('creator_clawback');
+    expect(suffixes).toContain('platform_clawback');
+  });
+
+  it('includes per-component breakdown in metadata for reconciliation', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
+    expect(creator.metadata).toMatchObject({
+      dispute_fee_cents: 1500,
+      creator_clawback_cents: 800,
+      platform_clawback_cents: 0,
+    });
+  });
+
+  it('rejects rows spanning multiple creatorUserIds as malformed', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent', creatorUserId: CREATOR_A }),
+      row({ type: 'refund', amountCents: -800, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator', creatorUserId: CREATOR_B }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    expect(out.kind).toBe('malformed');
+    if (out.kind !== 'malformed') return;
+    expect(out.reason).toMatch(/multiple creatorUserIds/);
+  });
+
+  it('rejects zero-amount optional clawback rows as malformed', () => {
+    const rows = [
+      row({ type: 'refund', amountCents: -1500, description: 'stripe_event:evt_D:dispute_fee:fraudulent' }),
+      row({ type: 'refund', amountCents: 0, description: 'stripe_event:evt_D:charge:ch_X:dispute_clawback_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_D', rows);
+    expect(out.kind).toBe('malformed');
   });
 });
 
@@ -369,6 +419,38 @@ describe('mapV1GroupToV2Event — G4 dispute.closed (won)', () => {
     expect(out.kind).toBe('malformed');
     if (out.kind !== 'malformed') return;
     expect(out.reason).toMatch(/zero amountCents/);
+  });
+
+  it('uses idempotencySuffix scheme that future shadow-write must match', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 1500, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+      row({ type: 'earning', amountCents: 800, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_creator' }),
+      row({ type: 'platform_fee', amountCents: 200, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_platform' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    if (out.kind !== 'mapped') throw new Error('expected mapped');
+    const suffixes = out.event.entries.map((e) => e.idempotencySuffix);
+    expect(suffixes).toContain('stripe_clearing');
+    expect(suffixes).toContain('creator_restore');
+    expect(suffixes).toContain('platform_restore');
+  });
+
+  it('rejects zero-amount optional restore rows as malformed', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 1500, description: 'stripe_event:evt_W:dispute_fee_reversal' }),
+      row({ type: 'earning', amountCents: 0, description: 'stripe_event:evt_W:charge:ch_X:dispute_won_restore_creator' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    expect(out.kind).toBe('malformed');
+  });
+
+  it('does NOT false-match a future :dispute_fee_reversal_partial suffix (end-anchored regex)', () => {
+    const rows = [
+      row({ type: 'earning', amountCents: 750, description: 'stripe_event:evt_W:dispute_fee_reversal_partial' }),
+    ];
+    const out = mapV1GroupToV2Event('stripe_event:evt_W', rows);
+    // Should NOT match G4 — falls through to malformed (no recognized anchor).
+    expect(out.kind).not.toBe('mapped');
   });
 });
 
