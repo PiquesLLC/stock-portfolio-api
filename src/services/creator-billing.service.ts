@@ -8,6 +8,9 @@ import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 import { shadowWriteChargeRefunded } from '../v2/shadow-write/charge-refunded';
 import { shadowWriteChargeDisputeCreated } from '../v2/shadow-write/charge-dispute-created';
 import { shadowWriteChargeDisputeClosedWon } from '../v2/shadow-write/charge-dispute-closed-won';
+import { shadowWritePayoutRequested } from '../v2/shadow-write/payout-requested';
+import { shadowWritePayoutFailed } from '../v2/shadow-write/payout-failed';
+import { shadowWriteTransferReversed } from '../v2/shadow-write/transfer-reversed';
 
 type CreatorBillingCounterKey =
   | 'processed'
@@ -1270,6 +1273,18 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
+        // v2 shadow-write: G5c transfer.reversed. Same scheme as MIG-1.
+        void shadowWriteTransferReversed({
+          stripeTransferId: transferId,
+          stripeEventId: event.id,
+          creatorUserId: payout.creatorUserId,
+          amountCents: payout.amountCents,
+          effectiveAt: typeof event.created === 'number'
+            ? new Date(event.created * 1000)
+            : new Date(),
+        }).catch((err) => {
+          console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+        });
         bumpCounter('processed');
         logCreatorBilling({
           outcome: 'processed',
@@ -1586,6 +1601,17 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
       where: { id: result.payoutId },
       data: { stripeTransferId: transfer.id, status: 'completed', paidAt: new Date() },
     });
+    // v2 shadow-write: G5a payout requested. Fires AFTER the Stripe transfer
+    // succeeded so v2 only mirrors finalized v1 state. If Stripe failed, the
+    // catch path below fires the G5b shadow-write instead.
+    void shadowWritePayoutRequested({
+      payoutId: result.payoutId,
+      creatorUserId: userId,
+      amountCents: result.amountCents,
+      effectiveAt: new Date(),
+    }).catch((err) => {
+      console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+    });
   } catch (err) {
     console.error(`[Creator Payout] Stripe transfer failed for ${result.payoutId}:`, (err as Error).message);
     // Mark payout as failed AND reverse the ledger entry so balance is restored
@@ -1603,6 +1629,15 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
         },
       }),
     ]);
+    // v2 shadow-write: G5b payout failed (restore).
+    void shadowWritePayoutFailed({
+      payoutId: result.payoutId,
+      creatorUserId: userId,
+      amountCents: result.amountCents,
+      effectiveAt: new Date(),
+    }).catch((err) => {
+      console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+    });
     throw new Error('Payout transfer failed — please try again later');
   }
 
