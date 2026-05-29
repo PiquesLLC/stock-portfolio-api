@@ -67,26 +67,49 @@ export async function applyMigrationsAndSeedIfNeeded(): Promise<void> {
 /**
  * Hostname allowlist guard. truncateLedgerForTest disables the append-only
  * triggers and wipes ledger_entry + accounts — catastrophic if pointed at
- * production. The guard checks V2_DATABASE_URL against an allowlist of
- * test-DB hostnames and refuses to run if the URL doesn't match.
+ * production. The guard parses V2_DATABASE_URL and compares the hostname
+ * against an exact-match allowlist; refuses to run if no match.
+ *
+ * IMPORTANT: must use exact-match comparison via parsed `URL.hostname`.
+ * A substring check like `url.includes('localhost')` would allow
+ * `postgresql://...@localhost.evil-domain.com:5432/db` to slip through.
  *
  * Override via V2_TEST_DB_HOSTS env (comma-separated). Defaults to local
  * docker compose endpoints.
+ *
+ * Exported for testing — callers in production paths should not invoke it
+ * directly; it's the internal precondition of the truncate/migrate flow.
  */
-function assertSafeTestDatabaseOrThrow(): void {
+export function assertSafeTestDatabaseOrThrow(): void {
   const url = process.env.V2_DATABASE_URL ?? '';
+  if (!url) {
+    throw new Error(
+      'assertSafeTestDatabaseOrThrow: V2_DATABASE_URL is not set. ' +
+        'Integration tests require Postgres.',
+    );
+  }
   const allowlist = (process.env.V2_TEST_DB_HOSTS ?? 'localhost,127.0.0.1')
     .split(',')
-    .map((h) => h.trim())
+    .map((h) => h.trim().toLowerCase())
     .filter((h) => h.length > 0);
-  const matched = allowlist.some((h) => url.includes(h));
-  if (!matched) {
+  let parsedHost: string;
+  try {
+    parsedHost = new URL(url).hostname.toLowerCase();
+  } catch (err) {
+    throw new Error(
+      `assertSafeTestDatabaseOrThrow: V2_DATABASE_URL is not a valid URL ` +
+        `(${(err as Error).message}). Cannot verify it's a test database.`,
+    );
+  }
+  if (!allowlist.includes(parsedHost)) {
     const redacted = url.replace(/:[^:@]+@/, ':***@');
     throw new Error(
-      `truncateLedgerForTest refused: V2_DATABASE_URL=${redacted} is not in the ` +
-        `allowlist (${allowlist.join(', ')}). This guard prevents accidental ` +
-        `wipes of non-test databases. Set V2_TEST_DB_HOSTS to include this host ` +
-        `if the URL is intentional (e.g., a dedicated test DB on a remote box).`,
+      `truncateLedgerForTest refused: V2_DATABASE_URL=${redacted} parses to ` +
+        `hostname '${parsedHost}', which is not in the allowlist ` +
+        `(${allowlist.join(', ')}). This guard prevents accidental wipes of ` +
+        `non-test databases. Set V2_TEST_DB_HOSTS to include this hostname ` +
+        `EXACTLY if the URL is intentional (e.g., a dedicated test DB on a ` +
+        `remote box).`,
     );
   }
 }
