@@ -787,24 +787,6 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
-        // v2 shadow-write: fire-and-forget, gated by V2_SHADOW_WRITE_ENABLED.
-        // See invoice.paid for the rationale (v2 outage cannot block v1).
-        // Uses the SAME idempotencySuffix scheme as MIG-1 G2
-        // (stripe_clearing / creator_refund / platform_refund) so cross-
-        // writer convergence with backfill dedups cleanly. Amounts passed
-        // are INCREMENTAL (v1 handler already computed the delta).
-        void shadowWriteChargeRefunded({
-          stripeEventId: event.id,
-          stripeChargeId: chargeId,
-          creatorUserId: sub.creatorUserId,
-          incrementalCreatorCents: incrementalCreator,
-          incrementalPlatformCents: incrementalPlatform,
-          effectiveAt: typeof event.created === 'number'
-            ? new Date(event.created * 1000)
-            : new Date(),
-        }).catch((err) => {
-          console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
-        });
 
         const amount = typeof charge.amount === 'number' ? charge.amount : 0;
         if (amount > 0 && cumulativeRefunded >= amount) {
@@ -823,6 +805,27 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           });
         }
+        // v2 shadow-write fires AFTER all v1 mutations succeed so v2
+        // reflects "v1 finalized this delivery" — not a partial state where
+        // refund rows are in v1 but the subscription cancellation update
+        // threw and rolled back. Fire-and-forget; the helper swallows all
+        // errors internally so v2 outage cannot block v1.
+        // Uses the SAME idempotencySuffix scheme as MIG-1 G2
+        // (stripe_clearing / creator_refund / platform_refund) so cross-
+        // writer convergence with backfill dedups cleanly. Amounts passed
+        // are INCREMENTAL (v1 handler already computed the delta).
+        void shadowWriteChargeRefunded({
+          stripeEventId: event.id,
+          stripeChargeId: chargeId,
+          creatorUserId: sub.creatorUserId,
+          incrementalCreatorCents: incrementalCreator,
+          incrementalPlatformCents: incrementalPlatform,
+          effectiveAt: typeof event.created === 'number'
+            ? new Date(event.created * 1000)
+            : new Date(),
+        }).catch((err) => {
+          console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+        });
         bumpCounter('refunded');
         bumpCounter('processed');
         logCreatorBilling({
