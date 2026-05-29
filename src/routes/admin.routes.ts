@@ -6,6 +6,7 @@ import { config } from '../config';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 import { v1LedgerCreate, isV1WalletFrozen } from '../services/v1-wallet-freeze';
+import { logSafe } from '../utils/log-safe';
 import {
   getModerationDashboardHandler,
   getAppealsHandler,
@@ -438,7 +439,7 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
   // temporarily (and re-enable after) or use a future v2-aware admin path.
   if (isV1WalletFrozen()) {
     console.warn(
-      `[Admin Ledger] FREEZE-BLOCKED attempt by ${req.user?.userId ?? 'unknown'} → creatorUserId=${req.body?.creatorUserId ?? 'unknown'}`,
+      `[Admin Ledger] FREEZE-BLOCKED attempt by ${logSafe(req.user?.userId)} → creatorUserId=${logSafe(req.body?.creatorUserId)}`,
     );
     res.status(503).json({
       error:
@@ -491,7 +492,7 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
         },
       }),
     ]);
-    console.log(`[Admin Ledger] ${actorId} credited creator=${creatorUserId} amount=${amountCents} key=${idempotencyKey}`);
+    console.log(`[Admin Ledger] ${logSafe(actorId)} credited creator=${logSafe(creatorUserId)} amount=${amountCents} key=${logSafe(idempotencyKey)}`);
     res.json({ success: true, creatorShare, platformShare, idempotencyKey });
   } catch (e) {
     if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
