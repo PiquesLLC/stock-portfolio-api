@@ -112,6 +112,24 @@ export function assertSafeTestDatabaseOrThrow(): void {
         `remote box).`,
     );
   }
+
+  // Defense-in-depth: even when the hostname IS in the allowlist, if it's
+  // not literally localhost/127.0.0.1, require an explicit positive ACK env.
+  // Catches the case where an operator added a staging host to
+  // V2_TEST_DB_HOSTS for ad-hoc testing and forgot to remove it.
+  const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
+  if (
+    !LOCAL_HOSTS.has(parsedHost) &&
+    process.env.V2_ALLOW_TRUNCATE_NON_LOCALHOST !== 'true'
+  ) {
+    throw new Error(
+      `truncateLedgerForTest refused: V2_DATABASE_URL parses to hostname ` +
+        `'${parsedHost}' which is non-local. Even though it appears in the ` +
+        `allowlist, destructive operations against non-localhost hosts ` +
+        `require explicit V2_ALLOW_TRUNCATE_NON_LOCALHOST=true. Set this ` +
+        `only when you're certain (i.e., a dedicated ephemeral test DB).`,
+    );
+  }
 }
 
 /**

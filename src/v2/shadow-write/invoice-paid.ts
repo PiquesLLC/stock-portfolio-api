@@ -21,9 +21,9 @@
 //   - postTransaction throws (validation, schema, etc.) → warn, return.
 //   - Never throws to the caller. Never blocks the v1 commit.
 
-import { createHash } from 'crypto';
 import { postTransaction } from '../ledger';
 import { LedgerEntryInput, PostTransactionInput } from '../ledger/types';
+import { v1KeyToEventGroupId } from '../migration/v1-to-v2-mapper';
 
 export interface ShadowWriteInvoicePaidArgs {
   /** The Stripe event id (event.id from the webhook payload). */
@@ -45,17 +45,11 @@ export interface ShadowWriteInvoicePaidArgs {
 }
 
 // Same derivation as MIG-1 so backfilled rows + live shadow-writes
-// converge on the same eventGroupId for the same Stripe event.
+// converge on the same eventGroupId for the same Stripe event. We import
+// MIG-1's helper rather than duplicating the SHA-256 algorithm so a
+// future change is enforced on both sides at compile time.
 function stripeEventToV2EventGroupId(stripeEventId: string): string {
-  const hash = createHash('sha256').update('mig-1:stripe_event:' + stripeEventId).digest('hex');
-  const variantChar = ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
-  return (
-    hash.slice(0, 8) + '-' +
-    hash.slice(8, 12) + '-' +
-    '4' + hash.slice(13, 16) + '-' +
-    variantChar + hash.slice(17, 20) + '-' +
-    hash.slice(20, 32)
-  );
+  return v1KeyToEventGroupId('stripe_event:' + stripeEventId);
 }
 
 /**
@@ -77,10 +71,11 @@ export async function shadowWriteInvoicePaid(args: ShadowWriteInvoicePaidArgs): 
   }
 
   // Clamp effectiveAt to within the live posting path's 730-day past-window.
+  // 10-day buffer to absorb clock skew between this host and the Postgres
+  // host plus the few-ms gap between this clamp and postTransaction's check.
   // Stripe's "Resend event" admin tool and migration replay tooling can emit
-  // events with `event.created` from > 2 years ago. postTransaction with
-  // webhook: postedBy rejects these — without the clamp, the shadow-write
-  // would silently drop them.
+  // events with `event.created` from > 2 years ago; without the clamp, the
+  // shadow-write would silently drop them.
   const minEffectiveAt = new Date(Date.now() - 720 * 24 * 60 * 60 * 1000);
   const effectiveAt =
     args.effectiveAt > minEffectiveAt ? args.effectiveAt : minEffectiveAt;

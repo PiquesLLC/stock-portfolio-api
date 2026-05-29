@@ -117,7 +117,7 @@ describe('mapV1GroupToV2Event — G1 invoice.paid', () => {
     const out = mapV1GroupToV2Event('stripe_event:evt_X', rows);
     if (out.kind !== 'mapped') throw new Error('expected mapped');
     const creator = out.event.entries.find((e) => e.accountScope === 'creator')!;
-    expect(creator.metadata).toEqual({ legacy_destination: true });
+    expect(creator.metadata).toEqual({ legacy_destination: true, source: 'v1-backfill' });
   });
 
   it('uses migration: postedBy', () => {

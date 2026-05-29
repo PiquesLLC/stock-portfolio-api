@@ -123,6 +123,16 @@ export function mapV1GroupToV2Event(
       const gross = BigInt(creatorShareRow.amountCents + platformShareRow.amountCents);
       const creatorShare = BigInt(creatorShareRow.amountCents);
       const platformShare = BigInt(platformShareRow.amountCents);
+      // Extract identifying fields from groupKey + description so the v2
+      // entries carry the SAME Stripe-anchor information that the live
+      // shadow-write supplies. Without this, the divergence check would
+      // false-positive whenever shadow-write and MIG-1 cross paths.
+      const stripeEventId = groupKey.slice('stripe_event:'.length);
+      const chargeMatch = (creatorShareRow.description ?? '').match(/:charge:([^:]+)/);
+      const chargeId = chargeMatch ? chargeMatch[1] : null;
+      const legacyMeta: Record<string, unknown> = isLegacy
+        ? { legacy_destination: true, source: 'v1-backfill' }
+        : { source: 'v1-backfill' };
 
       const entries: LedgerEntryInput[] = [
         {
@@ -133,7 +143,10 @@ export function mapV1GroupToV2Event(
           creditMinorUnits: 0n,
           currency: 'USD',
           idempotencySuffix: 'stripe_clearing',
-          metadata: isLegacy ? { legacy_destination: true } : undefined,
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: legacyMeta,
         },
         {
           accountScope: 'creator',
@@ -143,7 +156,10 @@ export function mapV1GroupToV2Event(
           creditMinorUnits: creatorShare,
           currency: 'USD',
           idempotencySuffix: 'creator_share',
-          metadata: isLegacy ? { legacy_destination: true } : undefined,
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: legacyMeta,
         },
         {
           accountScope: 'platform_revenue',
@@ -153,6 +169,10 @@ export function mapV1GroupToV2Event(
           creditMinorUnits: platformShare,
           currency: 'USD',
           idempotencySuffix: 'platform_revenue',
+          stripeObjectKind: 'charge',
+          stripeObjectId: chargeId,
+          stripeEventId,
+          metadata: legacyMeta,
         },
       ];
 

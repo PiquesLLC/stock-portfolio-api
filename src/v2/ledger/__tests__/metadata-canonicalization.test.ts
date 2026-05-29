@@ -18,7 +18,7 @@
 //   - Key-order independence (canonical sort)
 
 import { describe, expect, it } from 'vitest';
-import { canonicalMetadata, validateMetadataIsJsonable } from '../post-transaction';
+import { canonicalMetadata, stripSourceTag, validateMetadataIsJsonable } from '../post-transaction';
 
 describe('canonicalMetadata (key-order independence)', () => {
   it('produces same string for differently-ordered objects', () => {
@@ -218,6 +218,65 @@ describe('validateMetadataIsJsonable (rejection of non-JSON values)', () => {
 
   it('rejects top-level NaN (path is just root)', () => {
     expect(() => validateMetadataIsJsonable(NaN, 0)).toThrow(/non-finite number/);
+  });
+});
+
+describe('stripSourceTag (writer-identity normalization for divergence check)', () => {
+  it('returns null for null input', () => {
+    expect(stripSourceTag(null)).toBeNull();
+  });
+
+  it('returns null for undefined input', () => {
+    expect(stripSourceTag(undefined)).toBeNull();
+  });
+
+  it('returns null for empty object', () => {
+    expect(stripSourceTag({})).toBeNull();
+  });
+
+  it('returns null when only key was source', () => {
+    expect(stripSourceTag({ source: 'v2-shadow-write' })).toBeNull();
+  });
+
+  it('strips source key from object with other fields', () => {
+    expect(stripSourceTag({ source: 'v1-backfill', legacy_destination: true }))
+      .toEqual({ legacy_destination: true });
+  });
+
+  it('passes through object with no source key', () => {
+    expect(stripSourceTag({ legacy_destination: true })).toEqual({ legacy_destination: true });
+  });
+
+  it('passes arrays through unchanged', () => {
+    expect(stripSourceTag([1, 2, 3])).toEqual([1, 2, 3]);
+  });
+
+  it('passes primitives through unchanged', () => {
+    expect(stripSourceTag('plain')).toBe('plain');
+    expect(stripSourceTag(42)).toBe(42);
+  });
+
+  it('CONVERGENCE TEST: shadow-write {source: ...} canonicalizes identically to MIG-1 null', () => {
+    // The exact scenario from the BLOCK-1 reviewer finding.
+    const shadowMeta = { source: 'v2-shadow-write' };
+    const mig1Meta = null;
+    expect(canonicalMetadata(stripSourceTag(shadowMeta)))
+      .toBe(canonicalMetadata(stripSourceTag(mig1Meta)));
+  });
+
+  it('CONVERGENCE TEST: legacy_destination metadata matches across writers', () => {
+    const shadowMeta = { legacy_destination: true, source: 'v2-shadow-write' };
+    const mig1Meta = { legacy_destination: true, source: 'v1-backfill' };
+    expect(canonicalMetadata(stripSourceTag(shadowMeta)))
+      .toBe(canonicalMetadata(stripSourceTag(mig1Meta)));
+  });
+
+  it('DIVERGENCE TEST: real intent differences are still caught', () => {
+    // A buggy caller writing different amounts/notes should still fail.
+    const original = { note: 'first attempt', source: 'webhook' };
+    const tampered = { note: 'second attempt', source: 'webhook' };
+    expect(canonicalMetadata(stripSourceTag(original)))
+      .not.toBe(canonicalMetadata(stripSourceTag(tampered)));
   });
 });
 

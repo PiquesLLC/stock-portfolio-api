@@ -195,6 +195,25 @@ function rejectNonStorageValues(v: unknown, entryIndex: number, path: string): v
   }
 }
 
+// Strip the writer-identity `source` key from a metadata object before
+// canonicalizing for divergence comparison. Lets shadow-write tag
+// `{source: 'v2-shadow-write'}` and MIG-1 tag `{source: 'v1-backfill'}`
+// without tripping the divergence check on cross-writer convergence.
+//
+// Also collapses the resulting empty-object case (`{}`) to `null` so that
+// a writer that supplied ONLY a source tag normalizes identically to a
+// writer that supplied no metadata at all.
+export function stripSourceTag(v: unknown): unknown {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) return v;
+  const obj = v as Record<string, unknown>;
+  const stripped: Record<string, unknown> = {};
+  for (const k of Object.keys(obj)) {
+    if (k !== 'source') stripped[k] = obj[k];
+  }
+  return Object.keys(stripped).length === 0 ? null : stripped;
+}
+
 export function canonicalMetadata(v: unknown): string {
   // Normalize through JSON round-trip first — this applies Date.toJSON
   // (Date → ISO string), strips undefined values, and produces a tree of
@@ -778,9 +797,23 @@ export async function postTransaction(
               `than the original call.`,
           );
         }
-        // Compare every per-entry field that is set at insert time. Trigger-
-        // populated fields (sequence_no, running_balance_minor_units, posted_at)
-        // are NOT compared — they're derived state.
+        // Compare every per-entry field that represents MONETARY INTENT.
+        // Writer-identity fields (effectiveAt, postedBy, stripeObjectKind,
+        // stripeObjectId, stripeEventId, metadata.source) are EXCLUDED
+        // because two legitimate writers of the same source event — e.g.,
+        // the live webhook shadow-writer and the MIG-1 backfill — produce
+        // different values for those fields but represent the SAME money
+        // movement. The eventGroupId is derived deterministically from the
+        // source event id, so identity of the source is already pinned;
+        // comparing writer-side observational metadata would cause
+        // CRITICAL throws on legitimate cross-writer convergence.
+        //
+        // Trigger-populated fields (sequence_no, running_balance_minor_units,
+        // posted_at) are also NOT compared — derived state.
+        //
+        // What CAN'T drift: account, eventType, amounts, currency, and the
+        // reversal pointer. An attacker replaying with modified amounts
+        // still trips the check.
         const divergences: string[] = [];
         if (stored.accountScope !== requested.accountScope) {
           divergences.push(`accountScope: stored='${stored.accountScope}' vs requested='${requested.accountScope}'`);
@@ -803,23 +836,12 @@ export async function postTransaction(
         if ((stored.reversesEntryId ?? null) !== (requested.reversesEntryId ?? null)) {
           divergences.push(`reversesEntryId: stored=${stored.reversesEntryId ?? 'null'} vs requested=${requested.reversesEntryId ?? 'null'}`);
         }
-        if ((stored.stripeEventId ?? null) !== (requested.stripeEventId ?? null)) {
-          divergences.push(`stripeEventId: stored=${stored.stripeEventId ?? 'null'} vs requested=${requested.stripeEventId ?? 'null'}`);
-        }
-        if ((stored.stripeObjectKind ?? null) !== (requested.stripeObjectKind ?? null)) {
-          divergences.push(`stripeObjectKind: stored=${stored.stripeObjectKind ?? 'null'} vs requested=${requested.stripeObjectKind ?? 'null'}`);
-        }
-        if ((stored.stripeObjectId ?? null) !== (requested.stripeObjectId ?? null)) {
-          divergences.push(`stripeObjectId: stored=${stored.stripeObjectId ?? 'null'} vs requested=${requested.stripeObjectId ?? 'null'}`);
-        }
-        if (stored.effectiveAt.getTime() !== input.effectiveAt.getTime()) {
-          divergences.push(`effectiveAt: stored='${stored.effectiveAt.toISOString()}' vs requested='${input.effectiveAt.toISOString()}'`);
-        }
-        if (stored.postedBy !== input.postedBy) {
-          divergences.push(`postedBy: stored='${stored.postedBy}' vs requested='${input.postedBy}'`);
-        }
-        const storedMetaCanon = canonicalMetadata(stored.metadata ?? {});
-        const requestedMetaCanon = canonicalMetadata(requested.metadata ?? {});
+        // Metadata comparison strips the 'source' key (writer-identity tag)
+        // before canonicalizing. Other metadata still compared strictly —
+        // a caller changing `metadata.note` from "first attempt" to
+        // "second attempt" still trips the check (caller bug indicator).
+        const storedMetaCanon = canonicalMetadata(stripSourceTag(stored.metadata ?? {}));
+        const requestedMetaCanon = canonicalMetadata(stripSourceTag(requested.metadata ?? {}));
         if (storedMetaCanon !== requestedMetaCanon) {
           divergences.push(`metadata: stored=${storedMetaCanon} vs requested=${requestedMetaCanon}`);
         }

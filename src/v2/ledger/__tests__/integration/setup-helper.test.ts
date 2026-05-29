@@ -59,10 +59,21 @@ describe('assertSafeTestDatabaseOrThrow', () => {
     expect(() => assertSafeTestDatabaseOrThrow()).toThrow(/not in the allowlist/);
   });
 
-  it('accepts a custom hostname when V2_TEST_DB_HOSTS overrides', () => {
+  it('rejects allowlisted non-local hostname without V2_ALLOW_TRUNCATE_NON_LOCALHOST', () => {
     process.env.V2_DATABASE_URL = 'postgresql://nala_v2:pw@nala-v2-test.internal:5432/db';
     process.env.V2_TEST_DB_HOSTS = 'nala-v2-test.internal,localhost';
-    expect(() => assertSafeTestDatabaseOrThrow()).not.toThrow();
+    expect(() => assertSafeTestDatabaseOrThrow()).toThrow(/non-local|V2_ALLOW_TRUNCATE_NON_LOCALHOST/);
+  });
+
+  it('accepts a custom hostname when V2_TEST_DB_HOSTS overrides AND V2_ALLOW_TRUNCATE_NON_LOCALHOST=true', () => {
+    process.env.V2_DATABASE_URL = 'postgresql://nala_v2:pw@nala-v2-test.internal:5432/db';
+    process.env.V2_TEST_DB_HOSTS = 'nala-v2-test.internal,localhost';
+    process.env.V2_ALLOW_TRUNCATE_NON_LOCALHOST = 'true';
+    try {
+      expect(() => assertSafeTestDatabaseOrThrow()).not.toThrow();
+    } finally {
+      delete process.env.V2_ALLOW_TRUNCATE_NON_LOCALHOST;
+    }
   });
 
   it('is case-insensitive on hostname match', () => {
