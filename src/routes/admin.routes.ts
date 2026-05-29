@@ -437,8 +437,14 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
   // worst-of-both-worlds outcome. Force ops to either disable the freeze
   // temporarily (and re-enable after) or use a future v2-aware admin path.
   if (isV1WalletFrozen()) {
+    console.warn(
+      `[Admin Ledger] FREEZE-BLOCKED attempt by ${req.user?.userId ?? 'unknown'} → creatorUserId=${req.body?.creatorUserId ?? 'unknown'}`,
+    );
     res.status(503).json({
-      error: 'V1_WALLET_FREEZE is active; v1 manual fixes are disabled. To proceed: unset V1_WALLET_FREEZE on Railway, retry this call, then re-set it. (A v2-aware admin fix endpoint is pending post-cutover.)',
+      error:
+        'V1_WALLET_FREEZE is active; v1 manual fixes are disabled. ' +
+        'A v2-aware admin fix endpoint is pending post-cutover — prefer waiting for it. ' +
+        'If you must proceed, coordinate with on-call FIRST: disabling the freeze re-enables ALL v1 writes process-wide (Stripe webhooks, payouts, etc.), not just this endpoint.',
     });
     return;
   }
