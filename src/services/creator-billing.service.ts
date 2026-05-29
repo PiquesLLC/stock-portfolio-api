@@ -4,6 +4,7 @@ import { config } from '../config';
 import { Prisma } from '../generated/prisma/client';
 import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
+import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 
 type CreatorBillingCounterKey =
   | 'processed'
@@ -649,6 +650,25 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             },
           }),
         ]);
+        // v2 shadow-write: gated by V2_SHADOW_WRITE_ENABLED env. Failures
+        // are caught inside the helper and logged — they CANNOT propagate
+        // and must not affect the v1 commit above. eventGroupId is a
+        // deterministic UUID v4 derived from event.id so Stripe retries
+        // and MIG-1 backfill converge on the same v2 entry.
+        await shadowWriteInvoicePaid({
+          stripeEventId: event.id,
+          stripeInvoiceId: typeof invoice.id === 'string' ? invoice.id : '',
+          stripeChargeId: invoiceChargeId,
+          creatorUserId: sub.creatorUserId,
+          creatorShareCents: creatorShare,
+          platformShareCents: platformShare,
+          isLegacyDestination: isLegacyDestinationCharge,
+          // event.created is Unix seconds (Stripe API). Multiply by 1000.
+          // Falls back to `now()` if absent.
+          effectiveAt: typeof event.created === 'number'
+            ? new Date(event.created * 1000)
+            : new Date(),
+        });
         bumpCounter('processed');
         logCreatorBilling({
           outcome: 'processed',
