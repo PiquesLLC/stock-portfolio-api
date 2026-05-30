@@ -28,11 +28,13 @@ interface Volume {
   serviceName: string;
 }
 
-// Hard-coded volume metadata (from `railway volume list --json`). The
-// IDs are stable per-project and don't change between deploys.
+// Volume INSTANCE IDs (NOT volume IDs — backup mutations require the
+// instance ID, which is the per-environment binding). Discovered via
+// `environment(id, projectId) { volumeInstances { edges { node { id volumeId } } } }`.
+// Production environment of fabulous-manifestation project.
 const VOLUMES: Volume[] = [
-  { id: '8bc9f02b-2002-49c1-978c-31b12b5a2a92', name: 'postgres-volume-r1qk', serviceName: 'Postgres-XF5D' },
-  { id: '0bf35ded-65b7-44ce-b15b-a9635711f061', name: 'stock-portfolio-api-volume-jDWV', serviceName: 'stock-portfolio-api' },
+  { id: '97e56d12-a926-4d55-bdcb-5ee0b0f92e80', name: 'postgres-volume-r1qk', serviceName: 'Postgres-XF5D' },
+  { id: 'e9ff6c9a-081d-4fe8-871e-8c878c8e9886', name: 'stock-portfolio-api-volume-jDWV', serviceName: 'stock-portfolio-api' },
 ];
 
 async function gql(token: string, query: string, variables?: Record<string, unknown>): Promise<unknown> {
@@ -43,8 +45,15 @@ async function gql(token: string, query: string, variables?: Record<string, unkn
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query, variables }),
+    // 30s ceiling per call so a Railway API hang doesn't lock the script
+    // with an elevated token live.
+    signal: AbortSignal.timeout(30_000),
   });
-  const body = await res.json();
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`HTTP ${res.status}: ${txt.slice(0, 500)}`);
+  }
+  const body = (await res.json()) as { data?: unknown; errors?: unknown };
   if (body.errors) {
     throw new Error(JSON.stringify(body.errors));
   }
@@ -82,9 +91,12 @@ async function main(): Promise<void> {
     //    cron tick).
     try {
       const name = `setup-baseline-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      // volumeInstanceBackupCreate returns a WorkflowId scalar object — we
+      // need to select an id subfield. The workflow id can be polled for
+      // completion if needed; we just fire-and-forget.
       await gql(
         token,
-        'mutation($id: String!, $name: String!) { volumeInstanceBackupCreate(volumeInstanceId: $id, name: $name) }',
+        'mutation($id: String!, $name: String!) { volumeInstanceBackupCreate(volumeInstanceId: $id, name: $name) { workflowId } }',
         { id: vol.id, name },
       );
       console.log(`  ✓ manual baseline backup created: ${name}`);
@@ -104,8 +116,8 @@ async function main(): Promise<void> {
           vol.id +
           '") { id kind cron retentionSeconds } backups: volumeInstanceBackupList(volumeInstanceId: "' +
           vol.id +
-          '") { id name kind createdAt status } }',
-      )) as { scheds: Array<{ kind: string; cron: string; retentionSeconds: number | null }>; backups: Array<{ name: string; kind: string; createdAt: string; status: string }> };
+          '") { id name createdAt expiresAt referencedMB } }',
+      )) as { scheds: Array<{ kind: string; cron: string; retentionSeconds: number | null }>; backups: Array<{ name: string; createdAt: string; expiresAt: string | null; referencedMB: number | null }> };
 
       console.log(`\n${vol.name}:`);
       console.log(`  schedules:`);
@@ -115,7 +127,7 @@ async function main(): Promise<void> {
       }
       console.log(`  recent backups:`);
       for (const b of data.backups.slice(0, 5)) {
-        console.log(`    - ${b.kind} ${b.name} status=${b.status} at ${b.createdAt}`);
+        console.log(`    - ${b.name} ${b.referencedMB?.toFixed(1) ?? '?'}MB at ${b.createdAt}`);
       }
     } catch (e) {
       console.error(`  ✗ verification query failed for ${vol.name}: ${(e as Error).message}`);
