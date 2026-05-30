@@ -22,8 +22,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { URL } from 'url';
 import { spawn } from 'child_process';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import * as Sentry from '@sentry/node';
 import { BACKUP_DIR } from './backup.service';
 
@@ -128,10 +134,32 @@ async function shipV1ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
 }
 
 /**
+ * Parse V2_DATABASE_URL into pg_dump-friendly env vars (so the password
+ * never appears in argv / /proc/<pid>/cmdline). pg_dump reads PGPASSWORD
+ * + PGHOST + PGPORT + PGUSER + PGDATABASE + PGSSLMODE.
+ */
+function parsePgEnv(dbUrl: string): Record<string, string> {
+  const u = new URL(dbUrl);
+  const env: Record<string, string> = {
+    PGHOST: u.hostname,
+    PGPORT: u.port || '5432',
+    PGUSER: decodeURIComponent(u.username),
+    PGDATABASE: u.pathname.replace(/^\//, ''),
+  };
+  if (u.password) env.PGPASSWORD = decodeURIComponent(u.password);
+  const sslmode = u.searchParams.get('sslmode');
+  if (sslmode) env.PGSSLMODE = sslmode;
+  return env;
+}
+
+/**
  * Spawn pg_dump against V2_DATABASE_URL and stream the output directly
- * to an R2 object. Falls back to logging if pg_dump isn't on PATH (e.g.,
- * in a base image that didn't include postgresql). The nixpacks.toml
- * setup phase adds it for production.
+ * to an R2 object. Credentials go via env vars (NEVER argv) so they
+ * don't appear in `ps aux` / `/proc/<pid>/cmdline`.
+ *
+ * Race semantics: on pg_dump failure (non-zero exit or spawn error) we
+ * AbortMultipartUpload the in-flight upload so a truncated dump
+ * doesn't land in R2 indistinguishable from a good one.
  */
 async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
   const dbUrl = process.env.V2_DATABASE_URL;
@@ -142,62 +170,99 @@ async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
 
   const ts = new Date().toISOString().slice(0, 10);
   const key = `${cfg.prefix}v2/v2-${ts}.dump`;
+  const abortController = new AbortController();
 
   return new Promise<boolean>((resolve) => {
-    const dump = spawn('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', dbUrl], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let pgEnv: Record<string, string>;
+    try {
+      pgEnv = parsePgEnv(dbUrl);
+    } catch (e) {
+      reportCritical(`V2_DATABASE_URL is unparseable: ${(e as Error).message}`);
+      resolve(false);
+      return;
+    }
+
+    const dump = spawn(
+      'pg_dump',
+      ['--format=custom', '--no-owner', '--no-privileges'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...pgEnv },
+      },
+    );
     let stderrBuf = '';
     dump.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
 
-    const upload = client.send(
-      new PutObjectCommand({
-        Bucket: cfg.bucket,
-        Key: key,
-        Body: dump.stdout,
-        Metadata: { source: 'v2-postgres-pg_dump', shipped_at: new Date().toISOString() },
-      }),
-    );
+    let dumpExitCode: number | null = null;
+    let dumpErrored = false;
+    let resolved = false;
 
-    let dumpExited = false;
+    const finish = async (ok: boolean, reason: string) => {
+      if (resolved) return;
+      resolved = true;
+      if (!ok) {
+        try { abortController.abort(); } catch { /* ignore */ }
+        // Best-effort cleanup of any partial multipart upload + the
+        // (unlikely) fully-committed object.
+        try {
+          await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
+        } catch { /* may not exist */ }
+      }
+      if (ok) {
+        console.log(`[Offsite] v2 shipped: ${key}`);
+      } else {
+        reportCritical(`v2 ship failed: ${reason}`, { key, stderr: stderrBuf.slice(0, 500) });
+      }
+      resolve(ok);
+    };
+
     dump.on('error', (err) => {
+      dumpErrored = true;
       if (err.message.includes('ENOENT')) {
         console.warn('[Offsite] pg_dump not on PATH — install postgresql in nixpacks.toml. Skipping v2 ship.');
+        // Not a CRITICAL — graceful degradation while nixpacks builds.
+        if (!resolved) {
+          resolved = true;
+          try { abortController.abort(); } catch { /* ignore */ }
+          resolve(false);
+        }
       } else {
-        reportCritical(`pg_dump spawn error: ${err.message}`);
+        void finish(false, `pg_dump spawn error: ${err.message}`);
       }
-      resolve(false);
     });
 
     dump.on('exit', (code) => {
-      dumpExited = true;
-      if (code !== 0) {
-        reportCritical(`pg_dump exited code ${code}: ${stderrBuf.slice(0, 500)}`, { key });
-        resolve(false);
+      dumpExitCode = code;
+      if (code !== 0 && !dumpErrored) {
+        void finish(false, `pg_dump exited code ${code}`);
       }
     });
 
-    upload
+    client
+      .send(
+        new PutObjectCommand({
+          Bucket: cfg.bucket,
+          Key: key,
+          Body: dump.stdout,
+          Metadata: { source: 'v2-postgres-pg_dump', shipped_at: new Date().toISOString() },
+        }),
+        { abortSignal: abortController.signal },
+      )
       .then(() => {
-        if (dumpExited) {
-          console.log(`[Offsite] v2 shipped: ${key}`);
-          resolve(true);
+        // Wait for pg_dump's exit (might already have fired).
+        if (dumpExitCode === 0) {
+          void finish(true, 'ok');
+        } else if (dumpExitCode !== null) {
+          void finish(false, `pg_dump exited code ${dumpExitCode}`);
         } else {
-          // Upload finished before pg_dump's exit event — wait for exit.
           dump.once('exit', (code) => {
-            if (code === 0) {
-              console.log(`[Offsite] v2 shipped: ${key}`);
-              resolve(true);
-            } else {
-              reportCritical(`pg_dump exit ${code} after upload: ${stderrBuf.slice(0, 500)}`, { key });
-              resolve(false);
-            }
+            void finish(code === 0, code === 0 ? 'ok' : `pg_dump exited code ${code}`);
           });
         }
       })
       .catch((err) => {
-        reportCritical(`v2 upload failed: ${(err as Error).message}`, { key });
-        resolve(false);
+        if ((err as Error).name === 'AbortError') return; // we aborted intentionally
+        void finish(false, `upload error: ${(err as Error).message}`);
       });
   });
 }
@@ -205,20 +270,37 @@ async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
 /**
  * Delete objects older than KEEP_DAYS days from BOTH v1/ and v2/ prefixes.
  * Safe to run every day; objects newer than the cutoff are skipped.
+ *
+ * Paginates through `IsTruncated`/`NextContinuationToken` so a long-running
+ * deployment with many ad-hoc backups can't accumulate orphan objects past
+ * the S3 1000-key response cap.
+ *
+ * NOTE on multipart orphans: a SIGTERM mid-upload can leave incomplete
+ * multipart uploads in R2 that this DeleteObject sweep can't reach. The
+ * bucket should have a lifecycle rule for AbortIncompleteMultipartUpload
+ * after 1 day — see docs/v2-cutover.md.
  */
 async function pruneOldOffsite(client: S3Client, cfg: R2Config): Promise<void> {
   const cutoff = Date.now() - KEEP_DAYS * DAY_MS;
   try {
     for (const sub of ['v1/', 'v2/'] as const) {
-      const list = await client.send(
-        new ListObjectsV2Command({ Bucket: cfg.bucket, Prefix: cfg.prefix + sub }),
-      );
-      for (const obj of list.Contents ?? []) {
-        if (obj.LastModified && obj.LastModified.getTime() < cutoff && obj.Key) {
-          await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: obj.Key }));
-          console.log(`[Offsite] pruned: ${obj.Key}`);
+      let continuationToken: string | undefined;
+      do {
+        const list = await client.send(
+          new ListObjectsV2Command({
+            Bucket: cfg.bucket,
+            Prefix: cfg.prefix + sub,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        for (const obj of list.Contents ?? []) {
+          if (obj.LastModified && obj.LastModified.getTime() < cutoff && obj.Key) {
+            await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: obj.Key }));
+            console.log(`[Offsite] pruned: ${obj.Key}`);
+          }
         }
-      }
+        continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+      } while (continuationToken);
     }
   } catch (err) {
     console.warn(`[Offsite] prune skipped due to error: ${(err as Error).message}`);
