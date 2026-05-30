@@ -386,26 +386,42 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   isShuttingDown = true;
 
   console.log(`${signal} received, shutting down gracefully`);
+
+  // 1. Stop background refreshers (they're DB writers — let them quit before
+  //    the backup snapshot so WAL contention drops).
   stopQuoteRefresh();
   persistQuoteCache();
   await stopFundamentalsPrefetch();
-  // Pre-shutdown snapshot — gives us at least one fresh backup point per
-  // deploy. Best-effort; failures are logged but do not block shutdown.
-  // The daily setInterval keeps running independently; this is additive.
+
+  // 2. Stop accepting NEW HTTP requests and wait for in-flight to finish.
+  //    Doing this BEFORE the backup means the WAL checkpoint can fully
+  //    drain (no concurrent transaction holding a write lock).
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      console.log('Server closed');
+      resolve();
+    });
+  });
+
+  // 3. Pre-shutdown snapshot — now contention-free, so the WAL checkpoint
+  //    inside backupDatabase() should hit busy=0. Best-effort; failures
+  //    are logged + Sentry-captured but do not block shutdown.
   await backupDatabase().catch((e) =>
     console.warn('[Shutdown] backup failed:', (e as Error).message),
   );
+
+  // 4. Disconnect Prisma — must come AFTER the backup since backup uses
+  //    Prisma's connection for the WAL checkpoint.
   prisma.$disconnect().catch(() => undefined);
-  // Flush Sentry so a divergence (or any other captureMessage/Exception)
-  // posted in the last few seconds before SIGTERM is not dropped. 2s budget
-  // is short enough that Railway's grace window (typically 10s) absorbs it
-  // even when Sentry is slow. Best-effort: a failed flush does not block
-  // the rest of shutdown.
+
+  // 5. Flush Sentry so a divergence (or any other captureMessage/Exception)
+  //    posted in the last few seconds before SIGTERM — including any
+  //    CRITICAL backup-failure capture from step 3 — is not dropped. 2s
+  //    budget sits comfortably inside Railway's grace window (~10s).
   await Sentry.flush(2000).catch(() => undefined);
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
+
+  console.log('[Shutdown] Complete');
+  process.exit(0);
 }
 
 const server = app.listen(config.port, async () => {

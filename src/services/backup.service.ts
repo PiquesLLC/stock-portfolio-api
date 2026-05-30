@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as Sentry from '@sentry/node';
 import { createClient } from '@libsql/client';
+import prisma from '../utils/prisma';
 
 export const DB_PATH = process.env.DATABASE_URL?.replace('file:', '') || '/data/nala.db';
 export const BACKUP_DIR = process.env.NODE_ENV === 'production' ? '/data/backups' : path.join(process.cwd(), 'prisma', 'backups');
@@ -11,48 +13,108 @@ export const BACKUP_DIR = process.env.NODE_ENV === 'production' ? '/data/backups
 const MAX_BACKUPS = 1;
 const MIN_FREE_SPACE_BYTES = 500 * 1024 * 1024;
 
-/**
- * Checkpoint the WAL into the main DB file before copying. Without this, a
- * live SQLite file can have writes living in `nala.db-wal` that the copy
- * misses — restoring from a backup file alone would lose minutes of recent
- * activity. TRUNCATE mode is the strongest checkpoint: blocks readers
- * briefly, drains WAL to main, truncates WAL to zero size.
- *
- * Errors are swallowed (logged): if the checkpoint fails (e.g., transient
- * lock from another writer), the copy still proceeds with the existing WAL
- * — which is the same behavior as the pre-checkpoint code, so no regression.
- */
-async function checkpointWal(): Promise<void> {
+// libsql adds these journal/shared-memory sidecar files when opening a DB
+// in WAL mode (the production journal_mode). The backup `.db` file inherits
+// its source's WAL header, so even briefly opening it (e.g., for quick_check)
+// creates these sidecars. We track them so pruning catches them too — without
+// this, sidecars from earlier runs accumulate and eat the 5 GB volume.
+const SIDECAR_EXTS = ['-wal', '-shm', '-journal'] as const;
+
+function reportCritical(message: string, extra?: Record<string, unknown>): void {
+  console.error(`[Backup] CRITICAL: ${message}`);
   try {
-    const client = createClient({ url: `file:${DB_PATH}` });
-    await client.execute('PRAGMA wal_checkpoint(TRUNCATE)');
-    client.close();
-  } catch (err) {
-    console.warn(`[Backup] WAL checkpoint warning: ${(err as Error).message} (continuing with copy)`);
+    Sentry.captureMessage(`[Backup] ${message}`, {
+      level: 'error',
+      tags: { component: 'backup' },
+      extra,
+    });
+  } catch {
+    // Sentry not initialised (e.g., tests / dev without DSN) — don't mask the
+    // underlying problem.
+  }
+}
+
+function unlinkSidecars(basePath: string): void {
+  for (const ext of SIDECAR_EXTS) {
+    const sidecar = basePath + ext;
+    if (fs.existsSync(sidecar)) {
+      try {
+        fs.unlinkSync(sidecar);
+      } catch (e) {
+        console.warn(`[Backup] sidecar cleanup failed for ${sidecar}: ${(e as Error).message}`);
+      }
+    }
   }
 }
 
 /**
- * Run PRAGMA quick_check on the freshly-copied backup. Catches obvious
- * corruption (torn page, malformed b-tree) without the wall-clock cost of
- * a full integrity_check on a 1.4 GB DB. Returns true if intact.
+ * Checkpoint the WAL into the main DB file before copying. Without this,
+ * recent writes living in `nala.db-wal` would be missing from the snapshot.
+ *
+ * Uses the existing Prisma libsql connection (rather than a fresh one) so
+ * the checkpoint sees the same lock state Prisma sees. PRAGMA wal_checkpoint
+ * returns a row `(busy, log, checkpointed)` — busy=1 means SQLite gave up
+ * because another writer holds a lock. We log this loudly because the
+ * silent-busy case is the worst failure mode (we'd label the snapshot
+ * "verified" while it actually missed the last N minutes of writes).
+ *
+ * Returns true if the WAL was fully drained (busy=0), false if partial.
+ * The copy proceeds either way — a partial checkpoint is still better
+ * than no checkpoint — but the caller can decide whether to escalate.
+ */
+async function checkpointWal(): Promise<{ ok: boolean; busy: number; log: number; checkpointed: number } | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ busy: number; log: number; checkpointed: number }>>(
+      'PRAGMA wal_checkpoint(TRUNCATE)',
+    );
+    const row = rows?.[0];
+    if (!row) {
+      console.warn('[Backup] WAL checkpoint returned no row');
+      return null;
+    }
+    const ok = row.busy === 0;
+    if (!ok) {
+      reportCritical(
+        `WAL checkpoint INCOMPLETE — busy=${row.busy} log=${row.log} checkpointed=${row.checkpointed}. ` +
+          `Snapshot may miss recent writes. Re-run when concurrent writers settle.`,
+        { busy: row.busy, log: row.log, checkpointed: row.checkpointed },
+      );
+    }
+    return { ok, ...row };
+  } catch (err) {
+    console.warn(`[Backup] WAL checkpoint warning: ${(err as Error).message} (continuing with copy)`);
+    return null;
+  }
+}
+
+/**
+ * Open the freshly-copied backup file with a sandboxed libsql client and
+ * run `PRAGMA quick_check`. Catches obvious corruption (torn page,
+ * malformed b-tree) without the wall-clock cost of `integrity_check` on
+ * a ~1.4 GB DB. Returns true if intact.
+ *
+ * The client is closed afterwards; any -wal/-shm sidecars libsql created
+ * are cleaned up by the caller via `unlinkSidecars(backupPath)`.
  */
 async function verifyBackup(backupPath: string): Promise<boolean> {
+  let client: ReturnType<typeof createClient> | null = null;
   try {
-    const client = createClient({ url: `file:${backupPath}` });
+    client = createClient({ url: `file:${path.resolve(backupPath)}` });
     const result = await client.execute('PRAGMA quick_check');
-    client.close();
     const rows = result.rows;
     const ok = rows.length === 1 && rows[0].quick_check === 'ok';
     if (!ok) {
-      console.error(
-        `[Backup] CRITICAL: quick_check returned ${JSON.stringify(rows)} — backup is suspect.`,
+      reportCritical(
+        `quick_check returned ${JSON.stringify(rows)} — backup is suspect.`,
+        { path: backupPath, rows },
       );
     }
     return ok;
   } catch (err) {
-    console.error(`[Backup] CRITICAL: verification failed: ${(err as Error).message}`);
+    reportCritical(`verification failed: ${(err as Error).message}`, { path: backupPath });
     return false;
+  } finally {
+    try { client?.close(); } catch { /* ignore */ }
   }
 }
 
@@ -60,6 +122,9 @@ async function verifyBackup(backupPath: string): Promise<boolean> {
  * Delete all but the `keep` most recent backups (by filename, which is date-stamped).
  * Returns the list of deleted filenames and the bytes freed. Safe to call from
  * an admin endpoint; does not depend on `backupDatabase()` running.
+ *
+ * Also sweeps any orphan `-wal`/`-shm`/`-journal` sidecar files for the deleted
+ * backups so they don't accumulate on the 5 GB volume.
  */
 export function pruneBackupsToKeep(keep: number): { deleted: { name: string; sizeMB: number }[]; freedMB: number; remaining: { name: string; sizeMB: number }[] } {
   const deleted: { name: string; sizeMB: number }[] = [];
@@ -79,6 +144,7 @@ export function pruneBackupsToKeep(keep: number): { deleted: { name: string; siz
     try {
       const size = fs.statSync(full).size;
       fs.unlinkSync(full);
+      unlinkSidecars(full);
       deleted.push({ name, sizeMB: +(size / 1024 / 1024).toFixed(2) });
       freedBytes += size;
     } catch (e) {
@@ -118,8 +184,10 @@ function pruneOldBackups(): void {
     .reverse();
 
   for (const old of backups.slice(MAX_BACKUPS)) {
-    fs.unlinkSync(path.join(BACKUP_DIR, old));
-    console.log(`[Backup] Removed old: ${old}`);
+    const full = path.join(BACKUP_DIR, old);
+    fs.unlinkSync(full);
+    unlinkSidecars(full);
+    console.log(`[Backup] Removed old: ${old} (+ sidecars)`);
   }
 }
 
@@ -134,8 +202,6 @@ export async function backupDatabase(): Promise<void> {
     if (!fs.existsSync(BACKUP_DIR)) {
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
     }
-
-    pruneOldBackups();
 
     const date = new Date().toISOString().split('T')[0];
     const backupPath = path.join(BACKUP_DIR, `nala-${date}.db`);
@@ -154,7 +220,7 @@ export async function backupDatabase(): Promise<void> {
     }
 
     // Drain WAL into the main DB file so the copy is self-contained.
-    await checkpointWal();
+    const ckpt = await checkpointWal();
 
     // Copy database file
     fs.copyFileSync(DB_PATH, backupPath);
@@ -165,19 +231,26 @@ export async function backupDatabase(): Promise<void> {
     // file so we don't poison the directory with an unrestorable artifact —
     // and so today's same-day guard doesn't make tomorrow's run a no-op.
     const ok = await verifyBackup(backupPath);
+    unlinkSidecars(backupPath); // clean up -wal/-shm libsql created during verify
     if (!ok) {
       try {
         fs.unlinkSync(backupPath);
         console.error(`[Backup] CRITICAL: deleted corrupt backup ${backupPath}`);
       } catch (e) {
-        console.error(`[Backup] CRITICAL: also failed to delete corrupt backup: ${(e as Error).message}`);
+        reportCritical(`also failed to delete corrupt backup: ${(e as Error).message}`, { path: backupPath });
       }
       return;
     }
-    console.log(`[Backup] Created + verified: ${backupPath} (${backupSizeMB}MB, free space: ${freeMB}MB)`);
+    const ckptTag = ckpt?.ok ? 'full' : ckpt ? `partial(busy=${ckpt.busy})` : 'unknown';
+    console.log(
+      `[Backup] Created + verified: ${backupPath} (${backupSizeMB}MB, free space: ${freeMB}MB, ckpt=${ckptTag})`,
+    );
 
+    // Prune AFTER verification succeeds — never trade a known-good old backup
+    // for a not-yet-verified new one. (The same-day guard above already
+    // protects against re-running prune on a day where backup is already done.)
     pruneOldBackups();
   } catch (err) {
-    console.error('[Backup] Failed:', (err as Error).message);
+    reportCritical(`Backup failed: ${(err as Error).message}`, { stack: (err as Error).stack });
   }
 }
