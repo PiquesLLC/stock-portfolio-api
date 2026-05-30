@@ -7,8 +7,8 @@
 //                        Needs scope: `project:write` (or `project:admin`).
 //                        Token is one-shot; revoke after running.
 //   SENTRY_ORG_SLUG    — your Sentry org's slug (e.g. "nala").
-//   SENTRY_PROJECT     — the project slug (e.g. "nala-api"). Defaults to
-//                        "nala-api" — set explicitly if different.
+//   SENTRY_PROJECT     — the project slug (default: "nala"). Set if your
+//                        project slug differs.
 //
 // USAGE
 //   SENTRY_AUTH_TOKEN=<token> SENTRY_ORG_SLUG=<org> \
