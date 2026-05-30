@@ -389,6 +389,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   stopQuoteRefresh();
   persistQuoteCache();
   await stopFundamentalsPrefetch();
+  // Pre-shutdown snapshot — gives us at least one fresh backup point per
+  // deploy. Best-effort; failures are logged but do not block shutdown.
+  // The daily setInterval keeps running independently; this is additive.
+  await backupDatabase().catch((e) =>
+    console.warn('[Shutdown] backup failed:', (e as Error).message),
+  );
   prisma.$disconnect().catch(() => undefined);
   // Flush Sentry so a divergence (or any other captureMessage/Exception)
   // posted in the last few seconds before SIGTERM is not dropped. 2s budget

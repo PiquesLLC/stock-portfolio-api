@@ -24,9 +24,33 @@ clean-recon evidence.
 - [ ] **Sentry alert rule wired** for
       `tags.component = v2_reconciliation, level = error` — divergence
       will page on-call once v2 is authoritative.
-- [ ] **PG backup verified**: Railway's Postgres-XF5D service is on a
-      backup schedule and the most recent backup is < 24h old. Document the
-      restore RTO in the runbook (out of scope here).
+- [ ] **Railway volume backups enabled** on BOTH volumes (Railway does NOT
+      enable backups by default — must be configured in dashboard, no CLI):
+      - `postgres-volume-r1qk` (Postgres-XF5D, v2 ledger). Dashboard →
+        Postgres-XF5D service → Settings → Backups tab → enable at least
+        Daily (6-day retention) AND Weekly (1-month retention) so a 7-day
+        rollback window exists post-cutover.
+      - `stock-portfolio-api-volume-jDWV` (v1 SQLite + assets). Same path
+        in the API service's Settings. Daily + Weekly recommended.
+- [ ] **Verified RTO**: at least once before cutover, perform a manual
+      backup restore on a NON-PRODUCTION environment (clone Postgres-XF5D
+      to a fresh service via Railway dashboard → backup → restore →
+      deploy to a temp service). Measure wall-clock time from "click
+      restore" to "service Online". Document this RTO in the row below.
+      Estimated RTO for the current ~216 MB Postgres-XF5D dataset is
+      under 5 minutes based on Railway's restore model.
+- [ ] **Pre-freeze manual snapshot**: at T-1 (just before T+0 freeze),
+      trigger a manual backup of BOTH volumes via the dashboard. Note
+      timestamps. This is the canonical rollback target if cutover is
+      aborted within the 7-day verification window.
+- [ ] **In-app SQLite backup hygiene (already wired post-`a4c19f8`)**:
+      `backupDatabase()` now (1) runs `PRAGMA wal_checkpoint(TRUNCATE)`
+      before copying so the snapshot is self-contained, (2) runs
+      `PRAGMA quick_check` after copying and deletes the file + logs
+      CRITICAL if corruption is detected, (3) is invoked on SIGTERM
+      shutdown so deploys yield a fresh snapshot. The Railway volume
+      backups above are the long-term durability story; this is the
+      hot-path freshness story.
 
 ## Cutover sequence
 
@@ -153,6 +177,28 @@ If something goes wrong between T+0 and T+7d:
 
 After T+7d (v1 schema dropped), rollback requires restoring from PG +
 SQLite backups. Don't go past T+7d without high confidence.
+
+### Backup restore procedure (per Railway docs)
+
+1. Dashboard → service (Postgres-XF5D OR stock-portfolio-api) → Settings →
+   Backups tab.
+2. Locate the desired backup by timestamp.
+3. Click "Restore".
+4. Railway **stages** the change — a new volume mounts at the same path
+   as the original, with the backup timestamp as its name. The original
+   volume is detached (kept, not deleted).
+5. Review the staged change in the deploy preview.
+6. Click "Deploy" to complete.
+
+**Critical gotcha** (from Railway docs): restoring a backup REMOVES any
+newer backups created after the chosen restore point. If you might need
+to compare states, manually download/snapshot the newer backups first.
+
+### Off-site copy (recommended, not yet wired)
+
+Railway's volume backups live on Railway infrastructure. For true
+disaster-recovery independence, periodically `pg_dump` v2 + the SQLite
+file to S3/R2. Out of scope for this playbook; tracked as future work.
 
 ## Files / env vars touched
 
