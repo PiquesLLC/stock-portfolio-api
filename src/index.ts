@@ -387,18 +387,30 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   console.log(`${signal} received, shutting down gracefully`);
 
-  // Stop background refreshers we have explicit handles on.
+  // Hard deadline: if any step below hangs (e.g., a long-poll holding
+  // server.close open, Sentry stuck on a slow upstream), exit anyway
+  // before Railway's ~10s SIGKILL grace expires. Lets the process end
+  // deterministically rather than hanging until killed.
+  const hardExitTimer = setTimeout(() => {
+    console.warn('[Shutdown] hard-deadline reached; forcing exit');
+    process.exit(0);
+  }, 8000);
+  hardExitTimer.unref();
+
+  // Stop background refreshers we have explicit handles on. Note: there
+  // are 38+ untracked setInterval timers across this file (snapshot,
+  // billionaire refresh, leaderboard, anomaly detection, etc.) that
+  // keep firing until process exit — moving them to a tracked registry
+  // is a separate refactor.
   stopQuoteRefresh();
   persistQuoteCache();
   await stopFundamentalsPrefetch();
 
   // NOTE: we used to take a SQLite backup here, but reviewer flagged
-  // that ~30 untracked setInterval timers (snapshot scheduler,
-  // billionaire refresh, leaderboard, etc.) keep firing and cause
-  // WAL-checkpoint busy=1 contention, AND that the 1.4 GB copy can
-  // exceed Railway's 10s SIGKILL grace. The daily-cron backup +
-  // documented pre-cutover manual snapshot cover the freshness story
-  // without the shutdown-path fragility.
+  // that the untracked setInterval writers cause WAL-checkpoint busy=1
+  // contention, AND that the 1.4 GB copy can exceed Railway's grace.
+  // The daily-cron backup + documented pre-cutover manual snapshot
+  // cover the freshness story without the shutdown-path fragility.
 
   // Disconnect Prisma. Await so the pool teardown completes before
   // Sentry.flush — otherwise a Sentry flush in-flight while Prisma
@@ -410,10 +422,13 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // Railway's grace window (~10s).
   await Sentry.flush(2000).catch(() => undefined);
 
-  // server.close runs in parallel with the above — it only resolves
-  // once in-flight requests drain. Long-polling clients can hold it
-  // open; use callback form so we exit when the server's done OR after
-  // the disconnect path, whichever wins.
+  // Stop accepting new connections, and drop existing idle ones so
+  // server.close can resolve in finite time. server.closeAllConnections
+  // is available since Node 18.2. Long-poll clients holding active
+  // request scope still gate close — that's the hardExitTimer's job.
+  if (typeof server.closeAllConnections === 'function') {
+    server.closeAllConnections();
+  }
   server.close(() => {
     // Use the write-with-callback form so the line actually flushes to
     // Railway's log pipe before process.exit.
