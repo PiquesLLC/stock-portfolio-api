@@ -387,24 +387,28 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   console.log(`${signal} received, shutting down gracefully`);
 
-  // Hard deadline: if any step below hangs (e.g., a long-poll holding
-  // server.close open, Sentry stuck on a slow upstream), exit anyway
-  // before Railway's ~10s SIGKILL grace expires. Lets the process end
-  // deterministically rather than hanging until killed.
-  const hardExitTimer = setTimeout(() => {
-    console.warn('[Shutdown] hard-deadline reached; forcing exit');
-    process.exit(0);
-  }, 8000);
-  hardExitTimer.unref();
-
-  // Stop background refreshers we have explicit handles on. Note: there
-  // are 38+ untracked setInterval timers across this file (snapshot,
-  // billionaire refresh, leaderboard, anomaly detection, etc.) that
-  // keep firing until process exit — moving them to a tracked registry
-  // is a separate refactor.
+  // Stop background refreshers we have explicit handles on. Done BEFORE
+  // arming the hard deadline so refresh-stop time isn't counted against
+  // the post-refresh drain budget. Note: there are 38+ untracked
+  // setInterval timers across this file (snapshot, billionaire refresh,
+  // leaderboard, anomaly detection, etc.) that keep firing until
+  // process exit — moving them to a tracked registry is a separate
+  // refactor.
   stopQuoteRefresh();
   persistQuoteCache();
   await stopFundamentalsPrefetch();
+
+  // Hard deadline: if any step below hangs (long-poll holding
+  // server.close open, Sentry stuck on a slow upstream, libsql worker
+  // stalled in $disconnect), exit anyway before Railway's ~10s SIGKILL
+  // grace expires. Use process.stderr.write so the warning actually
+  // flushes to Railway's pipe before exit.
+  const hardExitTimer = setTimeout(() => {
+    process.stderr.write('[Shutdown] hard-deadline reached; forcing exit\n', () =>
+      process.exit(0),
+    );
+  }, 8000);
+  hardExitTimer.unref();
 
   // NOTE: we used to take a SQLite backup here, but reviewer flagged
   // that the untracked setInterval writers cause WAL-checkpoint busy=1

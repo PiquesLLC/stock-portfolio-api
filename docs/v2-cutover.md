@@ -21,9 +21,18 @@ clean-recon evidence.
       `transfer.reversed`. If a path has not yet been exercised by real
       production traffic, manufacture a test event in Stripe sandbox-mode
       and confirm both v1 + v2 wrote symmetric entries.
-- [ ] **Sentry alert rule wired** for
-      `tags.component = v2_reconciliation, level = error` — divergence
-      will page on-call once v2 is authoritative.
+- [ ] **Sentry alert rule wired** in https://sentry.io → Project Settings
+      → Alerts → Create Alert → "Issues" → conditions:
+        - "The issue's tags match `component` equal to `v2_reconciliation`
+          OR `backup`" (use the OR-of-equals form)
+        - AND "the issue's level equals error"
+      Action: notify your preferred channel (email / Slack / PagerDuty).
+      Frequency: "Notify at most once per 30 minutes per issue" so a
+      sticky drift doesn't spam.
+      Both `v2_reconciliation` (daily recon cron divergence) and
+      `backup` (WAL-checkpoint busy=1, quick_check fail, backup throw)
+      paths route through the same level=error pipe; one rule covers
+      both.
 - [ ] **Railway volume backups enabled** on BOTH volumes (Railway does NOT
       enable backups by default — must be configured in dashboard, no CLI):
       - `postgres-volume-r1qk` (Postgres-XF5D, v2 ledger). Dashboard →
@@ -43,6 +52,15 @@ clean-recon evidence.
       trigger a manual backup of BOTH volumes via the dashboard. Note
       timestamps. This is the canonical rollback target if cutover is
       aborted within the 7-day verification window.
+      Also run the in-app SQLite snapshot:
+      ```
+      railway run --service stock-portfolio-api -- \
+        npx ts-node scripts/pre-cutover-snapshot.ts
+      ```
+      It writes `/data/backups/nala-pre-cutover-<ts>.db` with the same
+      WAL-checkpoint + quick_check pipeline as the daily cron, but with
+      a non-colliding filename so the daily prune-to-keep-1 logic
+      cannot sweep it. Exit code 0 = clean snapshot.
 - [ ] **In-app SQLite backup hygiene** (commits `73ed9a7` / `e78f5c3` /
       this batch): the daily `backupDatabase()` cron now (1) runs
       `PRAGMA wal_checkpoint(TRUNCATE)` via Prisma's connection and
