@@ -21,18 +21,26 @@ clean-recon evidence.
       `transfer.reversed`. If a path has not yet been exercised by real
       production traffic, manufacture a test event in Stripe sandbox-mode
       and confirm both v1 + v2 wrote symmetric entries.
-- [ ] **Sentry alert rule wired** in https://sentry.io → Project Settings
-      → Alerts → Create Alert → "Issues" → conditions:
-        - "The issue's tags match `component` equal to `v2_reconciliation`
-          OR `backup`" (use the OR-of-equals form)
-        - AND "the issue's level equals error"
-      Action: notify your preferred channel (email / Slack / PagerDuty).
-      Frequency: "Notify at most once per 30 minutes per issue" so a
-      sticky drift doesn't spam.
-      Both `v2_reconciliation` (daily recon cron divergence) and
-      `backup` (WAL-checkpoint busy=1, quick_check fail, backup throw)
-      paths route through the same level=error pipe; one rule covers
-      both.
+- [ ] **Sentry alert rules wired** in https://sentry.io → Project
+      Settings → Alerts → Create Alert → "Issues". One rule per
+      component (Sentry groups issues by `message` + tag fingerprint,
+      so the same rule can match BOTH components but each component
+      becomes a different Sentry issue and is independently subject to
+      the cooldown — meaning both can still page within the same
+      window; if you want a single rule it's fine but be aware of the
+      multiplicity).
+      Rule A — recon drift:
+        - tag `component` equals `v2_reconciliation`
+        - level equals `error`
+        - "Notify at most once per 30 minutes per issue"
+      Rule B — backup health:
+        - tag `component` equals `backup`
+        - level equals `error`
+        - "Notify at most once per 30 minutes per issue"
+      Action for both: email / Slack / PagerDuty (your call).
+      Both code paths already set the tags correctly (recon at
+      `src/v2/reconciliation/cron.ts`, backup at
+      `src/services/backup.service.ts` via `reportCritical`).
 - [ ] **Railway volume backups enabled** on BOTH volumes (Railway does NOT
       enable backups by default — must be configured in dashboard, no CLI):
       - `postgres-volume-r1qk` (Postgres-XF5D, v2 ledger). Dashboard →

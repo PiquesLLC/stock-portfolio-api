@@ -20,6 +20,12 @@ const MIN_FREE_SPACE_BYTES = 500 * 1024 * 1024;
 // this, sidecars from earlier runs accumulate and eat the 5 GB volume.
 const SIDECAR_EXTS = ['-wal', '-shm', '-journal'] as const;
 
+// Strict match for date-stamped daily backups ONLY.
+// Excludes one-shot snapshots like `nala-pre-cutover-<ISO-ts>.db` which
+// the daily prune-to-keep-1 logic must NOT sweep — they're canonical
+// rollback targets created by scripts/pre-cutover-snapshot.ts.
+const DAILY_BACKUP_REGEX = /^nala-\d{4}-\d{2}-\d{2}\.db$/;
+
 function reportCritical(message: string, extra?: Record<string, unknown>): void {
   console.error(`[Backup] CRITICAL: ${message}`);
   try {
@@ -136,7 +142,7 @@ export function pruneBackupsToKeep(keep: number): { deleted: { name: string; siz
   }
 
   const all = fs.readdirSync(BACKUP_DIR)
-    .filter(f => f.startsWith('nala-') && f.endsWith('.db'))
+    .filter(f => DAILY_BACKUP_REGEX.test(f))
     .sort()
     .reverse();
 
@@ -180,7 +186,7 @@ function pruneOldBackups(): void {
   }
 
   const backups = fs.readdirSync(BACKUP_DIR)
-    .filter(f => f.startsWith('nala-') && f.endsWith('.db'))
+    .filter(f => DAILY_BACKUP_REGEX.test(f))
     .sort()
     .reverse();
 
