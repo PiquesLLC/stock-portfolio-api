@@ -35,7 +35,10 @@ const BACKUP_DIR =
   process.env.NODE_ENV === 'production'
     ? '/data/backups'
     : path.join(process.cwd(), 'prisma', 'backups');
-const MIN_FREE_SPACE_BYTES = 500 * 1024 * 1024;
+// Pre-cutover snapshot keeps the daily backup AND the live DB, so the
+// minimum required free space is `dbSize + safety margin`, not the 500 MB
+// the daily backup hard-codes (the daily prunes the previous backup first).
+const FREE_SPACE_SAFETY_BYTES = 200 * 1024 * 1024;
 
 function getDataVolumeFreeBytes(): number | null {
   if (!fs.existsSync('/data')) return null;
@@ -90,11 +93,17 @@ async function main(): Promise<void> {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
   }
 
+  const dbSizeBytes = fs.statSync(DB_PATH).size;
+  const requiredBytes = dbSizeBytes + FREE_SPACE_SAFETY_BYTES;
   const freeBytes = getDataVolumeFreeBytes();
-  if (freeBytes !== null && freeBytes < MIN_FREE_SPACE_BYTES) {
+  if (freeBytes !== null && freeBytes < requiredBytes) {
     const freeMB = (freeBytes / 1024 / 1024).toFixed(1);
+    const requiredMB = (requiredBytes / 1024 / 1024).toFixed(1);
+    const dbMB = (dbSizeBytes / 1024 / 1024).toFixed(1);
     console.error(
-      `[Pre-cutover] FATAL: only ${freeMB} MB free on /data; need >= ${(MIN_FREE_SPACE_BYTES / 1024 / 1024).toFixed(0)} MB.`,
+      `[Pre-cutover] FATAL: only ${freeMB} MB free on /data; need >= ${requiredMB} MB ` +
+        `(DB is ${dbMB} MB + ${(FREE_SPACE_SAFETY_BYTES / 1024 / 1024).toFixed(0)} MB safety). ` +
+        `Free disk space (run admin/prune-data-backups or grow the volume) before retrying.`,
     );
     process.exit(1);
   }

@@ -387,16 +387,19 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   console.log(`${signal} received, shutting down gracefully`);
 
-  // Stop background refreshers we have explicit handles on. Done BEFORE
-  // arming the hard deadline so refresh-stop time isn't counted against
-  // the post-refresh drain budget. Note: there are 38+ untracked
-  // setInterval timers across this file (snapshot, billionaire refresh,
-  // leaderboard, anomaly detection, etc.) that keep firing until
-  // process exit — moving them to a tracked registry is a separate
-  // refactor.
+  // Stop background refreshers we have explicit handles on. Note: there
+  // are 38+ untracked setInterval timers across this file (snapshot,
+  // billionaire refresh, leaderboard, anomaly detection, etc.) that keep
+  // firing until process exit — moving them to a tracked registry is a
+  // separate refactor.
   stopQuoteRefresh();
   persistQuoteCache();
-  await stopFundamentalsPrefetch();
+  // 2s ceiling on the prefetch teardown so a stuck network call can't
+  // gate the hard-deadline timer below from arming.
+  await Promise.race([
+    stopFundamentalsPrefetch(),
+    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+  ]);
 
   // Hard deadline: if any step below hangs (long-poll holding
   // server.close open, Sentry stuck on a slow upstream, libsql worker
