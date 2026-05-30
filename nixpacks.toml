@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf"]
+# postgresql gives us pg_dump on PATH for the off-site backup shipper
+# (src/services/offsite-backup.service.ts). The Postgres server itself
+# isn't started — we only need the client tools.
+nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf", "postgresql"]
 nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"
 
 # Override the install phase to use `npm install` rather than `npm ci`.

@@ -43,6 +43,7 @@ import { backupDatabase } from './services/backup.service';
 import { cleanupStaleData } from './services/cleanup.service';
 import * as Sentry from '@sentry/node';
 import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
+import { scheduleOffsiteBackups } from './services/offsite-backup.service';
 
 function assertSingleReplicaRefreshRotationSafety(): void {
   const replicaCountRaw = process.env.RAILWAY_REPLICA_COUNT;
@@ -1079,6 +1080,11 @@ const server = app.listen(config.port, async () => {
   // epoch. No-op if V2_DATABASE_URL is not set. Delete this call once
   // post-cutover and v1 is fully decommissioned.
   scheduleV2ReconcileDaily();
+
+  // Off-site backup ship — daily upload of v1 SQLite + v2 pg_dump to
+  // Cloudflare R2. No-op if R2_* env vars are not set. Provides
+  // disaster-recovery independence from Railway's own backup infra.
+  scheduleOffsiteBackups();
 });
 
 process.on('SIGTERM', () => {
