@@ -43,14 +43,21 @@ clean-recon evidence.
       trigger a manual backup of BOTH volumes via the dashboard. Note
       timestamps. This is the canonical rollback target if cutover is
       aborted within the 7-day verification window.
-- [ ] **In-app SQLite backup hygiene (already wired post-`a4c19f8`)**:
-      `backupDatabase()` now (1) runs `PRAGMA wal_checkpoint(TRUNCATE)`
-      before copying so the snapshot is self-contained, (2) runs
-      `PRAGMA quick_check` after copying and deletes the file + logs
-      CRITICAL if corruption is detected, (3) is invoked on SIGTERM
-      shutdown so deploys yield a fresh snapshot. The Railway volume
-      backups above are the long-term durability story; this is the
-      hot-path freshness story.
+- [ ] **In-app SQLite backup hygiene** (commits `73ed9a7` / `e78f5c3` /
+      this batch): the daily `backupDatabase()` cron now (1) runs
+      `PRAGMA wal_checkpoint(TRUNCATE)` via Prisma's connection and
+      Sentry-captures if busy != 0 (snapshot may miss recent writes),
+      (2) runs `PRAGMA quick_check` after copying and deletes the file
+      + Sentry-captures on corruption, (3) cleans up `-wal`/`-shm`
+      sidecars so the 5 GB volume doesn't fill, (4) only prunes the
+      previous-day backup AFTER the new one is verified. The Railway
+      volume backups above are the long-term durability story; this is
+      the hot-path freshness story.
+      A shutdown-hook backup was tried and removed — ~30 untracked
+      `setInterval` writers caused checkpoint busy=1 contention and
+      a 1.4 GB copy can exceed Railway's 10 s SIGKILL grace. The
+      pre-cutover MANUAL snapshot (preceding bullet) covers the
+      "important moment" need; the daily cron covers steady-state.
 
 ## Cutover sequence
 

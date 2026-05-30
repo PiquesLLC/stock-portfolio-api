@@ -387,41 +387,38 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   console.log(`${signal} received, shutting down gracefully`);
 
-  // 1. Stop background refreshers (they're DB writers — let them quit before
-  //    the backup snapshot so WAL contention drops).
+  // Stop background refreshers we have explicit handles on.
   stopQuoteRefresh();
   persistQuoteCache();
   await stopFundamentalsPrefetch();
 
-  // 2. Stop accepting NEW HTTP requests and wait for in-flight to finish.
-  //    Doing this BEFORE the backup means the WAL checkpoint can fully
-  //    drain (no concurrent transaction holding a write lock).
-  await new Promise<void>((resolve) => {
-    server.close(() => {
-      console.log('Server closed');
-      resolve();
-    });
-  });
+  // NOTE: we used to take a SQLite backup here, but reviewer flagged
+  // that ~30 untracked setInterval timers (snapshot scheduler,
+  // billionaire refresh, leaderboard, etc.) keep firing and cause
+  // WAL-checkpoint busy=1 contention, AND that the 1.4 GB copy can
+  // exceed Railway's 10s SIGKILL grace. The daily-cron backup +
+  // documented pre-cutover manual snapshot cover the freshness story
+  // without the shutdown-path fragility.
 
-  // 3. Pre-shutdown snapshot — now contention-free, so the WAL checkpoint
-  //    inside backupDatabase() should hit busy=0. Best-effort; failures
-  //    are logged + Sentry-captured but do not block shutdown.
-  await backupDatabase().catch((e) =>
-    console.warn('[Shutdown] backup failed:', (e as Error).message),
-  );
+  // Disconnect Prisma. Await so the pool teardown completes before
+  // Sentry.flush — otherwise a Sentry flush in-flight while Prisma
+  // shuts down its libsql worker can race.
+  await prisma.$disconnect().catch(() => undefined);
 
-  // 4. Disconnect Prisma — must come AFTER the backup since backup uses
-  //    Prisma's connection for the WAL checkpoint.
-  prisma.$disconnect().catch(() => undefined);
-
-  // 5. Flush Sentry so a divergence (or any other captureMessage/Exception)
-  //    posted in the last few seconds before SIGTERM — including any
-  //    CRITICAL backup-failure capture from step 3 — is not dropped. 2s
-  //    budget sits comfortably inside Railway's grace window (~10s).
+  // Flush Sentry so any captureMessage/Exception posted in the seconds
+  // before SIGTERM is not dropped. 2s budget sits comfortably inside
+  // Railway's grace window (~10s).
   await Sentry.flush(2000).catch(() => undefined);
 
-  console.log('[Shutdown] Complete');
-  process.exit(0);
+  // server.close runs in parallel with the above — it only resolves
+  // once in-flight requests drain. Long-polling clients can hold it
+  // open; use callback form so we exit when the server's done OR after
+  // the disconnect path, whichever wins.
+  server.close(() => {
+    // Use the write-with-callback form so the line actually flushes to
+    // Railway's log pipe before process.exit.
+    process.stdout.write('[Shutdown] Complete\n', () => process.exit(0));
+  });
 }
 
 const server = app.listen(config.port, async () => {

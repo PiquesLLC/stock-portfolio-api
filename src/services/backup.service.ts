@@ -62,7 +62,8 @@ function unlinkSidecars(basePath: string): void {
  * The copy proceeds either way — a partial checkpoint is still better
  * than no checkpoint — but the caller can decide whether to escalate.
  */
-async function checkpointWal(): Promise<{ ok: boolean; busy: number; log: number; checkpointed: number } | null> {
+// Exported for unit testing. Production callers go through backupDatabase().
+export async function checkpointWal(): Promise<{ ok: boolean; busy: number; log: number; checkpointed: number } | null> {
   try {
     const rows = await prisma.$queryRawUnsafe<Array<{ busy: number; log: number; checkpointed: number }>>(
       'PRAGMA wal_checkpoint(TRUNCATE)',
