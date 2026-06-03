@@ -64,9 +64,32 @@ export async function cleanupStaleData(): Promise<void> {
     }).catch(() => ({ count: 0 }));
     totalDeleted += expiredTokens.count;
 
-    await prisma.$executeRawUnsafe('PRAGMA wal_checkpoint(TRUNCATE)').catch(() => {});
+    // 9. Holding snapshots older than 90 days — parity with PortfolioSnapshot (step 1).
+    // This table is the dominant disk-growth driver (one row per holding every
+    // snapshot cycle) and previously had NO scheduled retention, so it grew
+    // unbounded — the slow-fill behind the 91%-full volume. Chunked deletes keep
+    // the WAL bounded on a tight SQLite volume (mirrors the admin /cleanup-db
+    // endpoint). NOTE: returning freed pages to the OS still needs VACUUM (run
+    // with disk headroom) — the incremental_vacuum below reclaims gradually when
+    // the DB's auto_vacuum is INCREMENTAL; it is a harmless no-op otherwise.
+    let holdingSnaps = 0;
+    try {
+      for (let chunk = 0; chunk < 500; chunk++) {
+        const deleted = await prisma.$executeRawUnsafe(
+          `DELETE FROM "HoldingSnapshot" WHERE rowid IN (SELECT rowid FROM "HoldingSnapshot" WHERE "timestamp" < datetime('now', '-90 days') LIMIT 5000)`
+        );
+        holdingSnaps += deleted;
+        if (deleted < 5000) break;
+      }
+    } catch (err) {
+      console.error('[Cleanup] HoldingSnapshot prune failed:', (err as Error).message);
+    }
+    totalDeleted += holdingSnaps;
 
-    console.log(`[Cleanup] Removed ${totalDeleted} stale records (snapshots: ${snapshots.count}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count}, deadLetters: ${deadLetters.count}, expiredTokens: ${expiredTokens.count})`);
+    await prisma.$executeRawUnsafe('PRAGMA wal_checkpoint(TRUNCATE)').catch(() => {});
+    await prisma.$executeRawUnsafe('PRAGMA incremental_vacuum').catch(() => {});
+
+    console.log(`[Cleanup] Removed ${totalDeleted} stale records (snapshots: ${snapshots.count}, holdingSnaps: ${holdingSnaps}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count}, deadLetters: ${deadLetters.count}, expiredTokens: ${expiredTokens.count})`);
   } catch (err) {
     console.error('[Cleanup] Failed:', (err as Error).message);
   }
