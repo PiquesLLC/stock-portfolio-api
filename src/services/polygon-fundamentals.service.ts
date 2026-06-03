@@ -493,7 +493,45 @@ async function refreshFundamentals(ticker: string): Promise<void> {
   ]);
 
   if (annualFilings.length === 0 && quarterlyFilings.length === 0) {
-    console.warn(`[Polygon Fundamentals] No filings found for ${upper}`);
+    // fetchPolygonFinancials() returns [] on BOTH "Polygon genuinely has no filings"
+    // and "the fetch failed" (timeout/5xx/network all hit its catch). We must not cache
+    // an empty sentinel for a transient failure — that would blank out a real ticker's
+    // fundamentals for up to 7 days. tickerDetails is the corroborating signal: it's
+    // non-null only when Polygon actually responded for this ticker. If it's null too,
+    // treat this as a fetch failure and DON'T cache — let the next cycle retry (old behavior).
+    if (!tickerDetails) {
+      console.warn(`[Polygon Fundamentals] No filings and no ticker details for ${upper} — treating as fetch failure, not caching`);
+      return;
+    }
+
+    // Real ticker that genuinely has no Polygon financials (recent IPOs, foreign listings).
+    // Mark overviewJson so pickNextTicker() (which re-selects any ticker with a falsy
+    // overviewJson) stops re-fetching it every 15s. We deliberately:
+    //   • touch ONLY overviewJson + lastFetchedAt — never the statement columns — so we
+    //     can't clobber real income/balance/cashflow data written by another code path
+    //     (e.g. the legacy Alpha Vantage writer can store overviewJson="null" with real
+    //     statements);
+    //   • use an atomic updateMany guarded to rows whose overviewJson is null/empty, with a
+    //     create-if-absent fallback — so a concurrent refresh that found real data is never
+    //     overwritten (no read-then-write race; refreshFundamentalsForTicker bypasses the
+    //     inflightRefresh dedupe, so concurrent same-ticker refreshes are possible).
+    // lastFetchedAt drives a natural retry once the row goes stale (>7d), in case the issuer
+    // later files. (Mirrors the earnings sentinel in fundamentals-prefetch.service.ts.)
+    console.warn(`[Polygon Fundamentals] No filings found for ${upper} — marking empty (sentinel)`);
+    const nullOverview = JSON.stringify(null); // the string "null" — truthy, so the picker skips it
+    const marked = await prisma.fundamentalsCache.updateMany({
+      where: { ticker: upper, OR: [{ overviewJson: null }, { overviewJson: nullOverview }] },
+      data: { overviewJson: nullOverview, lastFetchedAt: new Date() },
+    });
+    if (marked.count === 0) {
+      // No row matched: either none exists (create one) or one already holds a real overview
+      // (leave it — the unique constraint makes create throw, which we swallow to preserve it).
+      try {
+        await prisma.fundamentalsCache.create({
+          data: { ticker: upper, overviewJson: nullOverview, lastFetchedAt: new Date() },
+        });
+      } catch { /* row appeared concurrently with real data — preserve it */ }
+    }
     return;
   }
 

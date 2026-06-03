@@ -350,6 +350,37 @@ process.on('unhandledRejection', (reason) => {
   Sentry.captureException(reason);
 });
 
+// Crash-safety net (added after a dev crash that left only nodemon's bare
+// "app crashed" line with NO stack trace, making the cause undiagnosable).
+// 1) Guarantee uncaught exceptions print a full stack SYNCHRONOUSLY before exit.
+//    fs.writeSync(2, …) writes straight to the stderr fd, bypassing the async
+//    stdout/stderr pipe buffering that can be dropped when the process exits on
+//    the next tick (the suspected reason the original crash logged nothing).
+process.on('uncaughtException', (err) => {
+  const detail = err instanceof Error ? (err.stack || err.message) : String(err);
+  try {
+    fs.writeSync(2, `[FATAL] uncaughtException: ${detail}\n`);
+  } catch { /* fd 2 unavailable — nothing more we can do */ }
+  // Hard deadline: guarantee the process exits promptly even if the Sentry flush below
+  // hangs or never settles. unref() so this timer can't itself keep the process alive.
+  setTimeout(() => process.exit(1), 2500).unref();
+  // Best-effort: Sentry's default integration already captured this exception; flush it
+  // (caps at 2s, within nodemon/Railway grace; resolves immediately if Sentry was never
+  // initialised) then exit. The stack trace above is already on stderr regardless. Process
+  // state is undefined after an uncaught exception — exit so nodemon (dev) / the platform
+  // (prod) restarts from a clean slate rather than limping on.
+  void Sentry.close(2000).finally(() => process.exit(1));
+});
+
+// 2) A broken stdout/stderr pipe must NOT escalate into an uncaughtException that kills the
+//    server — happens when the parent terminal/nodemon stops reading while we're logging.
+//    Swallow the known pipe-failure codes (EPIPE, plus EBADF/EIO seen on Windows stdio);
+//    surface anything else.
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (!err.code || !['EPIPE', 'EBADF', 'EIO'].includes(err.code)) console.error('[stdout] write error:', err.message);
+});
+process.stderr.on('error', () => { /* cannot meaningfully log a stderr write failure */ });
+
 // Prevent WKWebView/browser from caching JSON API responses
 // (fixes pull-to-refresh returning stale data on iOS/native)
 app.use((req, res, next) => {
