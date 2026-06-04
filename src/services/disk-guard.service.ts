@@ -78,7 +78,14 @@ function loadState(): GuardState {
   }
 }
 function saveState(s: GuardState): void {
-  try { fs.writeFileSync(STATE_PATH, JSON.stringify(s)); } catch { /* best-effort */ }
+  // Atomic write (tmp + rename) so a kill mid-write can't leave torn JSON — which would
+  // make loadState fall back to zeros and reset the cooldown during the exact crash-loop
+  // this state is meant to survive.
+  try {
+    const tmp = `${STATE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(s));
+    fs.renameSync(tmp, STATE_PATH);
+  } catch { /* best-effort */ }
 }
 
 export async function runDiskGuard(): Promise<void> {
@@ -117,7 +124,7 @@ export async function runDiskGuard(): Promise<void> {
         // (live DB is the source of truth) — it is regenerated immediately after.
         if (free !== null && dbBytes > 0 && free < dbBytes * 1.2) {
           const res = pruneBackupsToKeep(0);
-          console.warn(`[DiskGuard] freed backups for VACUUM headroom: deleted=${res.deleted} freedMB=${res.freedMB}`);
+          console.warn(`[DiskGuard] freed backups for VACUUM headroom: deleted=${res.deleted.length} freedMB=${res.freedMB}`);
           free = getDataVolumeFreeBytes();
         }
 
