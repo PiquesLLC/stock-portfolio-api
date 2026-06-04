@@ -41,6 +41,7 @@ import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
 import { cleanupStaleData } from './services/cleanup.service';
+import { runDiskGuard } from './services/disk-guard.service';
 import * as Sentry from '@sentry/node';
 import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
 import { scheduleOffsiteBackups } from './services/offsite-backup.service';
@@ -983,6 +984,15 @@ const server = app.listen(config.port, async () => {
       idempotencyTtlMs: 24 * 60 * 60 * 1000,
     });
   }, 24 * 60 * 60 * 1000);
+
+  // Disk guard — auto-heal disk pressure (prune + reclaim) and alert if still critical after.
+  console.log(`[DiskGuard] Scheduled every ${config.diskGuardIntervalMs / 1000}s (warn=${config.diskWarnPct}% critical=${config.diskCriticalPct}%)`);
+  setTimeout(() => {
+    runJob({ name: 'disk_guard', fn: runDiskGuard, maxAttempts: 1 });
+  }, 120000); // 120s after startup — let boot settle before any VACUUM
+  setInterval(() => {
+    runJob({ name: 'disk_guard', fn: runDiskGuard, maxAttempts: 1 });
+  }, config.diskGuardIntervalMs);
 
   // Daily Report pre-generation — gated by market state
   console.log('[Daily Report Pre-Gen] Scheduled: every 5 min, state-aware (intraday=20min bucket, otherwise=4h bucket)');

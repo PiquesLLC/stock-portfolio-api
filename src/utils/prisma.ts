@@ -26,7 +26,11 @@ const prisma = new PrismaClient({ adapter });
 export async function initSqlitePragmas(): Promise<void> {
   await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
   await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 5000');
-  console.log('[DB] SQLite WAL mode + busy_timeout=5000ms enabled');
+  // Return freed pages to the OS so row deletes actually shrink the file. Only takes
+  // effect after the first full VACUUM (the disk guard runs one when reclaiming); until
+  // then it is inert, so setting it unconditionally on every connect is safe.
+  await prisma.$executeRawUnsafe('PRAGMA auto_vacuum = INCREMENTAL');
+  console.log('[DB] SQLite WAL mode + busy_timeout=5000ms + auto_vacuum=INCREMENTAL enabled');
 }
 
 export default prisma;

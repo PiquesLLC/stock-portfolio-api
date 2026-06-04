@@ -61,6 +61,12 @@ export const config = {
   priceCacheTtl: parseInt(process.env.PRICE_CACHE_TTL || '5', 10),
   snapshotIntervalSeconds: parseInt(process.env.SNAPSHOT_INTERVAL_SECONDS || '60', 10),
 
+  // Disk self-healing guard (SQLite volume at /data)
+  diskWarnPct: parseInt(process.env.DISK_WARN_PCT || '80', 10),
+  diskCriticalPct: parseInt(process.env.DISK_CRITICAL_PCT || '90', 10),
+  diskGuardIntervalMs: parseInt(process.env.DISK_GUARD_INTERVAL_MS || '600000', 10),
+  diskAlertCooldownMs: parseInt(process.env.DISK_ALERT_COOLDOWN_MS || '21600000', 10),
+
   // Polygon API settings
   polygonApiKey: process.env.POLYGON_API_KEY || '',
   quoteCacheTtlSeconds: parseInt(process.env.QUOTE_CACHE_TTL_SECONDS || '30', 10),

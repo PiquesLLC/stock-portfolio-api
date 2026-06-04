@@ -171,7 +171,7 @@ export function pruneBackupsToKeep(keep: number): { deleted: { name: string; siz
   return { deleted, freedMB: +(freedBytes / 1024 / 1024).toFixed(2), remaining };
 }
 
-function getDataVolumeFreeBytes(): number | null {
+export function getDataVolumeFreeBytes(): number | null {
   if (!fs.existsSync('/data')) {
     return null;
   }
