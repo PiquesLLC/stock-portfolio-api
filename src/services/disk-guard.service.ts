@@ -103,8 +103,11 @@ export async function runDiskGuard(): Promise<void> {
       console.warn('[DiskGuard] heavy reclaim ran within the last hour — skipping VACUUM/backup churn this tick');
     } else {
       try {
-        const pruned = await pruneHoldingSnapshots(7);
-        console.warn(`[DiskGuard] aggressive prune: HoldingSnapshot >7d deleted=${pruned}`);
+        // Keep 30 days — the deepest window any consumer reads (1-month holding
+        // intelligence via getRecentHoldingSnapshots). Still collapses the bulk of a
+        // multi-million-row backlog while preserving every feature's data.
+        const pruned = await pruneHoldingSnapshots(30);
+        console.warn(`[DiskGuard] aggressive prune: HoldingSnapshot >30d deleted=${pruned}`);
         await prisma.$executeRawUnsafe('PRAGMA wal_checkpoint(TRUNCATE)').catch(() => {});
 
         const dbBytes = (() => { try { return fs.statSync(DB_PATH).size; } catch { return 0; } })();
