@@ -986,6 +986,7 @@ const server = app.listen(config.port, async () => {
   }, 24 * 60 * 60 * 1000);
 
   // Disk guard — auto-heal disk pressure (prune + reclaim) and alert if still critical after.
+  registerJobHandler('disk_guard', runDiskGuard);
   console.log(`[DiskGuard] Scheduled every ${config.diskGuardIntervalMs / 1000}s (warn=${config.diskWarnPct}% critical=${config.diskCriticalPct}%)`);
   setTimeout(() => {
     runJob({ name: 'disk_guard', fn: runDiskGuard, maxAttempts: 1 });
