@@ -168,7 +168,16 @@ export async function getIntraday(req: Request, res: Response): Promise<void> {
       fetchIntradayCandles(ticker),
       fetchQuote(ticker).catch(() => null),
     ]);
-    const previousClose = quote?.regularClose || quote?.previousClose || null;
+    // The 1D intraday chart baseline must be YESTERDAY's close so the line shows
+    // today's full move from the prior session. `previousClose` is yesterday's
+    // close across all quote sources. During POST (after-hours) `regularClose`
+    // is TODAY's regular-session close — the WRONG baseline (it would anchor the
+    // chart on today's close and flatten/invert the day's shape). Prefer
+    // previousClose, falling back to regularClose only if it's missing. (In REG
+    // `regularClose` is unset; in PRE it already equals previousClose — so this
+    // ordering only changes POST/CLOSED, which is exactly the fix.) Matches the
+    // detail chart (anchors on quote.previousClose) and the SPY overlay baseline.
+    const previousClose = quote?.previousClose || quote?.regularClose || null;
     res.json({ ticker, candles, previousClose });
   } catch (error: unknown) {
     console.error('[Market] getIntraday error:', error instanceof Error ? error.message : String(error));
