@@ -510,14 +510,21 @@ export async function updateUserSettingsHandler(req: AuthRequest, res: Response)
     if (timezone !== undefined) userData.timezone = timezone;
     if (holdingsVisibility !== undefined) userData.holdingsVisibility = holdingsVisibility;
     if (bio !== undefined) {
-      if (typeof bio === 'string' && bio.trim().length > 0) {
-        const bioFilter = filterContent(bio);
+      // Reject absurdly long input up front, then content-filter only the stored
+      // (<=80 char) slice — running filterContent on an unbounded string is a ReDoS surface.
+      if (typeof bio === 'string' && bio.length > 500) {
+        res.status(400).json({ error: 'Bio is too long (max 500 characters).' });
+        return;
+      }
+      const trimmedBio = typeof bio === 'string' ? bio.slice(0, 80) : null;
+      if (trimmedBio && trimmedBio.trim().length > 0) {
+        const bioFilter = filterContent(trimmedBio);
         if (!bioFilter.allowed) {
           res.status(400).json({ error: 'Bio violates our content policy.', code: 'content_policy_violation', reason: bioFilter.reason });
           return;
         }
       }
-      userData.bio = typeof bio === 'string' ? bio.slice(0, 80) : null;
+      userData.bio = trimmedBio;
     }
 
     // Audit log: capture privacy-sensitive fields BEFORE update
