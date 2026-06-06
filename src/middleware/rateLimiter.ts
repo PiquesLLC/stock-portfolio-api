@@ -240,6 +240,19 @@ export const deepResearchLimiter = rateLimit({
   keyGenerator: userOrIpKey,
 });
 
+/**
+ * Public share-card image generation (unauthenticated, CPU-bound libvips render).
+ * IP-keyed to blunt the cost-amplification DoS; CDN caching absorbs repeats.
+ * 30/min/IP prod.
+ */
+export const shareCardLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? 30 : 300,
+  message: { error: 'Too many share-card requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ---------------------------------------------------------------------------
 // Webhook limiters (keyed by IP, trusted sources whitelisted)
 // ---------------------------------------------------------------------------

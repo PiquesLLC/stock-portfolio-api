@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, getCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getMarketScreenerHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler, getValueRadarHandler } from '../controllers/market.controller';
 import { getSectorPerformanceHandler } from '../controllers/sector-performance.controller';
-import { heavyReadLimiter, mutationLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, aiLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
 const router = Router();
@@ -21,7 +21,7 @@ router.get('/benchmark/:ticker/closes', getBenchmarkClosesHandler);
 router.get('/news', heavyReadLimiter, getMarketNews);
 router.get('/stock/:ticker/news', heavyReadLimiter, getTickerNews);
 router.get('/stock/:ticker/ai-events', heavyReadLimiter, requireAuth, requirePlan('premium'), getAIEventsHandler);
-router.post('/stock/:ticker/ask', mutationLimiter, requireAuth, requirePlan('premium'), askStockQuestionHandler);
+router.post('/stock/:ticker/ask', aiLimiter, requireAuth, requirePlan('premium'), askStockQuestionHandler);
 router.get('/historical-cagr', heavyReadLimiter, getHistoricalCAGRHandler);
 router.get('/heatmap', heavyReadLimiter, getHeatmapHandler);
 router.get('/screener', heavyReadLimiter, getMarketScreenerHandler);

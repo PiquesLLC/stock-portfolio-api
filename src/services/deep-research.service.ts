@@ -2,6 +2,7 @@ import axios from 'axios';
 import { config } from '../config';
 import { getPortfolio } from './portfolio.service';
 import { extractJson } from '../utils/perplexity';
+import { validateCitationUrl } from '../utils/content-filter';
 import prisma from '../utils/prisma';
 import crypto from 'crypto';
 
@@ -605,8 +606,18 @@ async function handleStreamCompletion(
   if (outputText) {
     try {
       const jsonStr = extractJson(outputText);
-      JSON.parse(jsonStr); // Validate
-      resultJson = jsonStr;
+      const parsed = JSON.parse(jsonStr); // Validate
+      // Security: the model can emit arbitrary citation URLs (including
+      // `javascript:` payloads from prompt-injected sources). Drop any that
+      // aren't safe http(s) before storing, so a citation can't become a
+      // clickable XSS in the report — mirrors the validateCitationUrl filter
+      // every other AI service already applies.
+      if (parsed && Array.isArray(parsed.citations)) {
+        parsed.citations = parsed.citations.filter(
+          (c: { url?: unknown }) => typeof c?.url === 'string' && validateCitationUrl(c.url),
+        );
+      }
+      resultJson = JSON.stringify(parsed);
     } catch (e) {
       parseError = e instanceof Error ? e.message : 'JSON parse failed';
       resultText = outputText;
@@ -1243,8 +1254,15 @@ export async function pollActiveResearchJobs(): Promise<void> {
 
         try {
           const jsonStr = extractJson(outputText);
-          JSON.parse(jsonStr); // Validate it's valid JSON
-          resultJson = jsonStr;
+          const parsed = JSON.parse(jsonStr); // Validate it's valid JSON
+          // Security: drop non-http(s) citation URLs (prompt-injection XSS guard)
+          // — same filter as the streaming path.
+          if (parsed && Array.isArray(parsed.citations)) {
+            parsed.citations = parsed.citations.filter(
+              (c: { url?: unknown }) => typeof c?.url === 'string' && validateCitationUrl(c.url),
+            );
+          }
+          resultJson = JSON.stringify(parsed);
         } catch (e) {
           parseError = e instanceof Error ? e.message : 'JSON parse failed';
           resultText = outputText; // Store raw text as fallback

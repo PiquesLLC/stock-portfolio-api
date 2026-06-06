@@ -21,7 +21,9 @@ export async function getStockShareCardHandler(req: Request, res: Response): Pro
     }
 
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    // Public OG image — let Cloudflare absorb repeat loads (defuses the
+    // CPU-bound render DoS); a 5-min TTL is plenty fresh for a shared card.
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300');
     res.send(pngBuffer);
   } catch (err) {
     console.error('Stock share card generation failed:', err);
