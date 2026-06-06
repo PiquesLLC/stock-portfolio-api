@@ -215,6 +215,74 @@ export async function createSnapshotIfNeeded(userId: string): Promise<PortfolioS
   }
 }
 
+const SNAPSHOT_SCHEDULER_CONCURRENCY = 8;
+const SNAPSHOT_PREWARM_TIMEOUT_MS = 20_000;
+
+/**
+ * Batched snapshot scheduler. Pre-warms the per-ticker quote cache with a SINGLE
+ * fetchPrices(unionTickers) call so each user's createSnapshotIfNeeded -> getPortfolio
+ * -> fetchPrices hits the warm in-memory cache instead of making its own cold network
+ * fetch, then runs the (unchanged) createSnapshotIfNeeded per user with bounded
+ * concurrency. Snapshot OUTPUT is identical to the old serial loop — this only changes
+ * how quotes are fetched and how the per-user calls are scheduled, not what is written.
+ * NOTE: the per-ticker quote cache TTL is ~30s; at very large user counts the tail of
+ * the loop may outrun the warm window and fall back to per-user fetches (raise the
+ * concurrency or the cache TTL if that ever becomes the bottleneck).
+ */
+export async function snapshotAllUsersBatched(): Promise<{ users: number; tickers: number; created: number }> {
+  const userRows = await prisma.holding.findMany({
+    select: { userId: true },
+    distinct: ['userId'],
+    where: { shares: { gt: 0 }, userId: { not: null } },
+  });
+  const userIds = userRows.map(r => r.userId).filter((id): id is string => !!id);
+  if (userIds.length === 0) return { users: 0, tickers: 0, created: 0 };
+
+  // Pre-warm the per-ticker quote cache once for the union of all held equity tickers.
+  // fetchPrices caches per ticker, so the per-user getPortfolio calls below hit memory
+  // instead of each making its own cold network fetch. Options are excluded here — they
+  // are priced separately via getOptionQuotes inside getPortfolio.
+  let tickerCount = 0;
+  try {
+    const tickerRows = await prisma.holding.findMany({
+      where: { shares: { gt: 0 }, userId: { not: null }, holdingType: { not: 'option' } },
+      select: { ticker: true },
+      distinct: ['ticker'],
+    });
+    const tickers = Array.from(new Set(tickerRows.map(t => t.ticker.toUpperCase()).filter(Boolean)));
+    tickerCount = tickers.length;
+    if (tickers.length > 0) {
+      const { fetchPrices } = await import('./market.service');
+      // Bound the pre-warm: a slow/flapping upstream (e.g. the sequential Finnhub
+      // fallback on a Polygon miss) must not blow past the tick window and starve the
+      // per-user snapshots — they can still fetch their own quotes if we bail early.
+      let warmTimer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        fetchPrices(tickers, { preferPolygon: true }),
+        new Promise<void>(resolve => { warmTimer = setTimeout(resolve, SNAPSHOT_PREWARM_TIMEOUT_MS); }),
+      ]);
+      if (warmTimer) clearTimeout(warmTimer);
+    }
+  } catch (err) {
+    // Non-fatal: each user's getPortfolio will fetch its own quotes (the old behavior).
+    console.error('[Snapshot Scheduler] Quote pre-warm failed (continuing per-user):', (err as Error).message);
+  }
+
+  // createSnapshotIfNeeded is unchanged and per-user mutexed, so distinct users can run
+  // concurrently; cap concurrency to bound SQLite write-lock contention.
+  const tasks = userIds.map(userId => () =>
+    createSnapshotIfNeeded(userId).catch(err => {
+      if (err?.message && !err.message.includes('quotes')) {
+        console.error(`[Snapshot Scheduler] Error for user ${userId.slice(0, 8)}:`, err.message);
+      }
+      return null;
+    })
+  );
+  const results = await limitConcurrency(tasks, SNAPSHOT_SCHEDULER_CONCURRENCY);
+  const created = results.filter(Boolean).length;
+  return { users: userIds.length, tickers: tickerCount, created };
+}
+
 export async function getAllSnapshots(userId: string): Promise<PortfolioSnapshot[]> {
   return prisma.portfolioSnapshot.findMany({
     where: { userId },

@@ -3,7 +3,7 @@ import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached, restoreCandleCache, persistCandleCache } from './utils/candle-cache';
 import { persistQuoteCache, restoreQuoteCache } from './utils/polygon';
-import { createSnapshotIfNeeded, refreshLeaderboardSnapshots } from './services/snapshot.service';
+import { refreshLeaderboardSnapshots, snapshotAllUsersBatched } from './services/snapshot.service';
 import { backfillLeaderboardDemoData } from './services/demo-data.service';
 import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
@@ -245,19 +245,11 @@ function buildTimeBucketIdempotencyKey(jobName: string, windowMs: number): strin
 }
 
 async function runSnapshotSchedulerForAllUsers() {
-  const userIds = await prisma.holding.findMany({
-    select: { userId: true },
-    distinct: ['userId'],
-    where: { shares: { gt: 0 }, userId: { not: null } },
-  });
-  for (const { userId } of userIds) {
-    if (userId) {
-      await createSnapshotIfNeeded(userId).catch(err => {
-        if (err?.message && !err.message.includes('quotes')) {
-          console.error(`[Snapshot Scheduler] Error for user ${userId.slice(0, 8)}:`, err.message);
-        }
-      });
-    }
+  // Batched: one shared quote pre-warm + bounded-concurrency per-user snapshots,
+  // replacing the old serial loop that made a cold quote fetch per user.
+  const { users, tickers, created } = await snapshotAllUsersBatched();
+  if (users > 0) {
+    console.log(`[Snapshot Scheduler] ${created}/${users} snapshots written (pre-warmed ${tickers} tickers)`);
   }
 }
 
