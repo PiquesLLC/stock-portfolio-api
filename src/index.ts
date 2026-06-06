@@ -448,6 +448,10 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 const server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
+  // Deploy fingerprint — grep prod logs for "[boot] commit=" to confirm which commit
+  // is actually live (Railway injects RAILWAY_GIT_COMMIT_SHA per deployment). Lets an
+  // API-only deploy (UI unchanged) be verified unambiguously instead of guessing.
+  console.log(`[boot] commit=${(process.env.RAILWAY_GIT_COMMIT_SHA || 'local').slice(0, 7)} branch=${process.env.RAILWAY_GIT_BRANCH || 'n/a'} at ${new Date().toISOString()}`);
 
   // Must run before any DB operations — enables concurrent reads + write queuing
   await initSqlitePragmas();
