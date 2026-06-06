@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
@@ -468,7 +469,9 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
   });
   if (!sub) { res.status(404).json({ error: 'No active subscription found' }); return; }
 
-  const creatorShare = Math.round(amountCents * 0.8);
+  // Exact integer 80% floor — match the webhook writer's split convention so the
+  // reconciler doesn't later flag this manual fix as a broken split.
+  const creatorShare = Number((BigInt(amountCents) * 80n) / 100n);
   const platformShare = amountCents - creatorShare;
   const actorId = req.user!.userId;
   try {
@@ -510,8 +513,15 @@ router.post('/fix-creator-ledger', requireAuth, requireAdmin, async (req: AuthRe
 // POST /admin/reports — store a monitoring report (auth via secret key, not JWT)
 router.post('/reports', async (req: AuthRequest, res: Response) => {
   try {
-    const authHeader = req.headers['x-report-key'];
-    if (!authHeader || authHeader !== process.env.REPORT_API_KEY) {
+    // Constant-time key comparison (avoids a timing oracle on REPORT_API_KEY); reject
+    // array-valued headers and a missing/empty configured key.
+    const headerVal = req.headers['x-report-key'];
+    const provided = Array.isArray(headerVal) ? '' : (headerVal ?? '');
+    const expected = process.env.REPORT_API_KEY ?? '';
+    const providedBuf = Buffer.from(provided, 'utf8');
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    if (!expected || providedBuf.length !== expectedBuf.length ||
+        !crypto.timingSafeEqual(providedBuf, expectedBuf)) {
       res.status(401).json({ error: 'Invalid report key' });
       return;
     }

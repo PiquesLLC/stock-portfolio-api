@@ -59,7 +59,7 @@ function isAdminBypassFromToken(req: Request): boolean {
     const cookieToken = (req as { cookies?: { authToken?: string } }).cookies?.authToken;
     const token = bearer || cookieToken;
     if (!token || typeof token !== 'string') return false;
-    const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
     return config.waitlistAdminUserIds.includes(payload.userId);
   } catch {
     return false;

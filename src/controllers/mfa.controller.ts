@@ -77,14 +77,22 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     // MFA passed — issue real auth tokens
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, username: true, displayName: true, email: true, emailVerified: true },
+      select: { id: true, username: true, displayName: true, email: true, emailVerified: true, plan: true, planExpiresAt: true },
     });
     if (!user) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
 
-    const token = generateAccessToken({ userId: user.id, username: user.username });
+    // Carry plan/emailVerified into the token so the email-verification gate and
+    // plan checks behave the same after MFA login as after normal login.
+    const token = generateAccessToken({
+      userId: user.id,
+      username: user.username,
+      plan: user.plan,
+      planExpiresAt: user.planExpiresAt ? user.planExpiresAt.toISOString() : null,
+      emailVerified: user.emailVerified ?? false,
+    });
     const refreshToken = await generateRefreshToken(user.id);
 
     const isAdmin = config.waitlistAdminUserIds.includes(user.id) ||

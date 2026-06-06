@@ -1421,7 +1421,7 @@ function splitCreatorRevenueCents(
   grossCents: number,
   explicitPlatformFeeCents?: number | null
 ): { creatorCents: number; platformCents: number } {
-  if (!Number.isFinite(grossCents) || grossCents <= 0) {
+  if (!Number.isInteger(grossCents) || grossCents <= 0) {
     return { creatorCents: 0, platformCents: 0 };
   }
 
@@ -1433,7 +1433,10 @@ function splitCreatorRevenueCents(
     };
   }
 
-  const creatorCents = Math.floor(grossCents * 0.8);
+  // Exact integer 80% floor (BigInt avoids float-representation error in `gross * 0.8`).
+  // MUST stay identical to creator-reconciliation `expectedCreatorShare` and the admin
+  // fee-split so the writer, reconciler, and manual-fix endpoint never disagree.
+  const creatorCents = Number((BigInt(grossCents) * 80n) / 100n);
   return {
     creatorCents,
     platformCents: grossCents - creatorCents,

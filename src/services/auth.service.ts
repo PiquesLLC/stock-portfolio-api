@@ -601,7 +601,7 @@ export async function revokeAllRefreshTokens(userId: string): Promise<void> {
  */
 export function verifyToken(token: string): JwtPayload | null {
   try {
-    return jwt.verify(token, config.jwtSecret) as JwtPayload;
+    return jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
   } catch {
     return null;
   }
@@ -613,7 +613,7 @@ export function verifyToken(token: string): JwtPayload | null {
  */
 export function verifyTokenDetailed(token: string): { payload: JwtPayload | null; expired: boolean } {
   try {
-    const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
     return { payload, expired: false };
   } catch (err) {
     if (err instanceof TokenExpiredError) {

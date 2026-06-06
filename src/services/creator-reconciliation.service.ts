@@ -65,7 +65,9 @@ function parseEventDescriptor(description: string | null): {
 }
 
 function expectedCreatorShare(totalCents: number): number {
-  return Math.round(totalCents * 0.8);
+  // Exact integer 80% floor — single source of truth with `splitCreatorRevenueCents`
+  // in creator-billing (the writer floors, so the reconciler must expect the floor too).
+  return Number((BigInt(totalCents) * 80n) / 100n);
 }
 
 export function analyzeCreatorLedgerConsistency(
