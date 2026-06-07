@@ -174,6 +174,22 @@ describe('nala-score.service', () => {
     }));
     expect(cacheSetMock).toHaveBeenCalledTimes(1);
   });
+
+  it('degrades gracefully when optional sources (analyst, dividends, candles) are missing', async () => {
+    // Core fundamentals + quote remain (from beforeEach); the optional inputs go away.
+    getAnalystSnapshotMock.mockResolvedValue(null);
+    dividendFindManyMock.mockResolvedValue([]);
+    fetchDailyCandlesMock.mockResolvedValue([]);
+
+    const result = await getNalaScore('NOW');
+
+    // Must still return a valid, bounded score rather than throwing / 500ing.
+    expect(typeof result.composite).toBe('number');
+    expect(result.composite).toBeGreaterThanOrEqual(0);
+    expect(result.composite).toBeLessThanOrEqual(100);
+    expect(['Strong', 'Good', 'Fair', 'Weak']).toContain(result.grade);
+    expect(result.dimensions).toBeTruthy();
+  });
 });
 
 describe('gradeFromScore boundaries', () => {
