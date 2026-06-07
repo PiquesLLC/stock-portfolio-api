@@ -742,28 +742,41 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // charge.amount_refunded is CUMULATIVE across all refund events for THIS CHARGE.
         // Scope refund tracking per-charge (not per-subscription) so multi-month refunds are independent.
         const chargeId = typeof charge.id === 'string' ? charge.id : '';
-        const previousRefundEntries = await prisma.creatorWalletLedger.findMany({
-          where: {
-            creatorUserId: sub.creatorUserId,
-            type: 'refund',
-            description: { contains: `charge:${chargeId}` },
-          },
-          select: { amountCents: true },
-        });
-        const previouslyDebitedCreator = previousRefundEntries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        const chargeToken = `charge:${chargeId}`;
+        // NET previously-debited amounts, mirroring charge.dispute.created: sum the prior
+        // refund + dispute-clawback DEBITS and SUBTRACT any dispute-WON RESTORES. Without
+        // subtracting the restores, an earn -> dispute clawback -> dispute WON (restore) ->
+        // refund sequence left previouslyDebited == the full share, so incremental == 0 and
+        // the refund row was never written — the creator kept money the platform refunded to
+        // the buyer (bug F1). type='refund' rows are always negative, so contains(chargeToken)
+        // catches refund_creator + dispute_clawback_creator; the dispute_fee row has no
+        // ":charge:" segment and is correctly excluded.
+        const [creatorRefundDebits, creatorDisputeRestores, platformRefundDebits, platformDisputeRestores] =
+          await Promise.all([
+            prisma.creatorWalletLedger.findMany({
+              where: { creatorUserId: sub.creatorUserId, type: 'refund', description: { contains: chargeToken }, amountCents: { lt: 0 } },
+              select: { amountCents: true },
+            }),
+            prisma.creatorWalletLedger.findMany({
+              where: { creatorUserId: sub.creatorUserId, type: 'earning', description: { contains: `${chargeToken}:dispute_won_restore_creator` } },
+              select: { amountCents: true },
+            }),
+            prisma.creatorWalletLedger.findMany({
+              where: { creatorUserId: sub.creatorUserId, type: 'platform_fee', description: { contains: chargeToken }, amountCents: { lt: 0 } },
+              select: { amountCents: true },
+            }),
+            prisma.creatorWalletLedger.findMany({
+              where: { creatorUserId: sub.creatorUserId, type: 'platform_fee', description: { contains: `${chargeToken}:dispute_won_restore_platform` } },
+              select: { amountCents: true },
+            }),
+          ]);
+        const sumAbs = (entries: { amountCents: number }[]) => entries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        const previouslyDebitedCreator = Math.max(0, sumAbs(creatorRefundDebits) - sumAbs(creatorDisputeRestores));
         const totalCreatorShare = getCumulativeCreatorRefundCents(charge);
         const incrementalCreator = totalCreatorShare - previouslyDebitedCreator;
         if (incrementalCreator <= 0) return; // Already fully accounted for
 
-        const previousPlatformRefundEntries = await prisma.creatorWalletLedger.findMany({
-          where: {
-            creatorUserId: sub.creatorUserId,
-            type: 'platform_fee',
-            description: { contains: `charge:${chargeId}:refund_platform` },
-          },
-          select: { amountCents: true },
-        });
-        const previouslyDebitedPlatform = previousPlatformRefundEntries.reduce((sum, r) => sum + Math.abs(r.amountCents), 0);
+        const previouslyDebitedPlatform = Math.max(0, sumAbs(platformRefundDebits) - sumAbs(platformDisputeRestores));
         const totalPlatformRefund = cumulativeRefunded - totalCreatorShare;
         const incrementalPlatform = totalPlatformRefund - previouslyDebitedPlatform;
         if (incrementalPlatform < 0) return;

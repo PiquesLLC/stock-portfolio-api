@@ -662,6 +662,65 @@ describe('creator billing webhooks', () => {
     expect((prismaMock as any).creatorSubscription.update).toHaveBeenCalled();
   });
 
+  it('won-then-refund: creator does NOT keep refunded money (F1 regression — refund must net out dispute-won restores)', async () => {
+    const fx = fixtureFactory('wtr');
+
+    // In-memory ledger so the dispute/refund handlers read back the rows they write.
+    type Row = { type: string; amountCents: number; description: string; seq: number };
+    const rows: Row[] = [];
+    let seq = 0;
+    const matches = (where: any, r: Row): boolean => {
+      if (where.type && r.type !== where.type) return false;
+      if (where.description?.contains && !r.description.includes(where.description.contains)) return false;
+      if (where.amountCents?.lt != null && !(r.amountCents < where.amountCents.lt)) return false;
+      if (where.amountCents?.gt != null && !(r.amountCents > where.amountCents.gt)) return false;
+      return true;
+    };
+    (prismaMock as any).creatorWalletLedger.create.mockImplementation(({ data }: any) => {
+      const row: Row = { type: data.type, amountCents: data.amountCents, description: data.description, seq: ++seq };
+      rows.push(row);
+      return Promise.resolve({ id: `wl_${row.seq}`, ...row });
+    });
+    (prismaMock as any).creatorWalletLedger.findMany.mockImplementation(({ where }: any) =>
+      Promise.resolve(rows.filter(r => matches(where, r)).map(r => ({ amountCents: r.amountCents }))),
+    );
+    (prismaMock as any).creatorWalletLedger.findFirst.mockImplementation(({ where, orderBy }: any) => {
+      let c = rows.filter(r => matches(where, r));
+      if (orderBy?.createdAt === 'desc') c = [...c].sort((a, b) => b.seq - a.seq);
+      return Promise.resolve(c[0] ? { amountCents: c[0].amountCents } : null);
+    });
+
+    // Same fully-refunded $100 charge across the dispute + refund handlers.
+    chargesRetrieveMock.mockResolvedValue({ id: fx.ids.stripeChargeId, object: 'charge', amount: 10000, amount_refunded: 10000, invoice: fx.ids.stripeInvoiceId });
+    invoicesRetrieveMock.mockResolvedValue({ id: fx.ids.stripeInvoiceId, subscription: fx.ids.stripeSubscriptionId });
+
+    // Seed the original invoice.paid rows WITH the charge segment (as prod writes them
+    // once the invoice's charge is resolved) so the handlers can look them up by charge.
+    const cd = (suffix: string) => `stripe_event:evt_wtr_paid:charge:${fx.ids.stripeChargeId}:${suffix}`;
+    rows.push({ type: 'earning', amountCents: 8000, description: cd('creator_share'), seq: ++seq });
+    rows.push({ type: 'platform_fee', amountCents: 2000, description: cd('platform_fee'), seq: ++seq });
+
+    // earn $80 -> dispute clawback (-$80 -$20 -$15 fee) -> dispute WON (restore +$80 +$20 +$15) -> full refund.
+    await handleCreatorWebhookEvent(fx.event.disputeCreated('evt_wtr_dispute', 'fraudulent'));
+    await handleCreatorWebhookEvent(fx.event.disputeClosed('evt_wtr_won', 'won'));
+    await handleCreatorWebhookEvent(fx.event.chargeRefunded('evt_wtr_refund', 10000, 10000));
+
+    // The refund MUST debit the creator's $80 share (the won-dispute restore was reversed
+    // by the refund). Before the fix, the clawback alone made incremental=0 and this row
+    // was never written, leaving the creator holding $80 of refunded money.
+    const refundCreatorRow = rows.find(r => r.description.includes(':refund_creator'));
+    expect(refundCreatorRow?.amountCents).toBe(-8000);
+
+    // Net creator payout balance via the same reducer getPayoutBalanceFromLedger uses.
+    let balance = 0;
+    for (const r of rows) {
+      if (r.description.includes(':legacy_destination')) continue;
+      if (r.type === 'earning') balance += Math.abs(r.amountCents);
+      if (r.type === 'payout' || r.type === 'refund') balance -= Math.abs(r.amountCents);
+    }
+    expect(Math.max(0, balance)).toBe(0);
+  });
+
   it('updates payout by stripePayoutId for payout.paid and payout.failed', async () => {
     const fx = fixtureFactory('payout');
     await handleCreatorWebhookEvent(fx.event.payoutPaid('evt_payout_paid_1'));
