@@ -271,11 +271,17 @@ describe('creator billing webhooks', () => {
       stripeConnectId: 'acct_123',
       user: { displayName: 'Creator One' },
     });
-    (prismaMock as any).user.findUnique.mockResolvedValue({
-      id: 'subscriber_1',
-      email: 'sub@example.com',
-      stripeCustomerId: 'cus_1',
-    });
+    // The self-deal guard reads subscriber then creator; give them DISTINCT email/customer
+    // so it doesn't (correctly) reject this legit checkout. The sticky fallback then serves
+    // getOrCreateStripeCustomer's subscriber lookup.
+    (prismaMock as any).user.findUnique
+      .mockResolvedValueOnce({ email: 'sub@example.com', stripeCustomerId: 'cus_1' })
+      .mockResolvedValueOnce({ email: 'creator@example.com', stripeCustomerId: 'cus_2' })
+      .mockResolvedValue({
+        id: 'subscriber_1',
+        email: 'sub@example.com',
+        stripeCustomerId: 'cus_1',
+      });
     checkoutCreateMock.mockResolvedValue({ url: 'https://checkout.stripe.test/cs_123' });
 
     const url = await createCreatorCheckoutSession('subscriber_1', 'creator_1');

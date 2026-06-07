@@ -227,6 +227,23 @@ export async function createCreatorCheckoutSession(
     throw new Error('Cannot subscribe to yourself');
   }
 
+  // Defense-in-depth against sock-puppet self-dealing: also block when the subscriber and
+  // creator share an email or Stripe customer (the same person via an alt account), not just
+  // when the userId matches. A determined attacker with a separate email + card still needs
+  // the payment-fingerprint check at charge time (tracked as P1 in docs/AUDIT.md) — but this
+  // closes the lazy case. Purely additive: it can only reject, never grant.
+  const [subscriberAcct, creatorAcct] = await Promise.all([
+    prisma.user.findUnique({ where: { id: subscriberUserId }, select: { email: true, stripeCustomerId: true } }),
+    prisma.user.findUnique({ where: { id: creatorUserId }, select: { email: true, stripeCustomerId: true } }),
+  ]);
+  const sameEmail = !!subscriberAcct?.email && !!creatorAcct?.email &&
+    subscriberAcct.email.trim().toLowerCase() === creatorAcct.email.trim().toLowerCase();
+  const sameStripeCustomer = !!subscriberAcct?.stripeCustomerId &&
+    subscriberAcct.stripeCustomerId === creatorAcct?.stripeCustomerId;
+  if (sameEmail || sameStripeCustomer) {
+    throw new Error('Cannot subscribe to yourself');
+  }
+
   // Prevent duplicate subscriptions — block if active, trialing, or canceled but still within paid period
   const existingSub = await prisma.creatorSubscription.findUnique({
     where: { subscriberUserId_creatorUserId: { subscriberUserId, creatorUserId } },
