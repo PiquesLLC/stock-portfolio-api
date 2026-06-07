@@ -158,12 +158,14 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
       user: { ...result.user, isWaitlistAdmin: isWaitlistAdmin(result.user.id, result.user.email, result.user.emailVerified) },
       ...(isNative ? { accessToken: result.token, refreshToken: result.refreshToken, token: result.token } : {}),
     };
-    console.error('[AuthRuntime] login response', {
-      origin: req.headers.origin,
-      nativeHeader: req.headers['x-nala-native'],
-      isNative,
-      bodyKeys: Object.keys(body),
-    });
+    if (process.env.AUTH_DEBUG === '1') {
+      console.error('[AuthRuntime] login response', {
+        origin: req.headers.origin,
+        nativeHeader: req.headers['x-nala-native'],
+        isNative,
+        bodyKeys: Object.keys(body),
+      });
+    }
     res.json(body);
   } catch (error: unknown) {
     console.error('Login error:', error instanceof Error ? error.message : String(error));
@@ -963,12 +965,14 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
       message: 'Token refreshed successfully',
       ...(isNative ? { accessToken, refreshToken: result.refreshToken, token: accessToken } : {}),
     };
-    console.error('[AuthRuntime] refresh response', {
-      origin: req.headers.origin,
-      nativeHeader: req.headers['x-nala-native'],
-      isNative,
-      bodyKeys: Object.keys(refreshBody),
-    });
+    if (process.env.AUTH_DEBUG === '1') {
+      console.error('[AuthRuntime] refresh response', {
+        origin: req.headers.origin,
+        nativeHeader: req.headers['x-nala-native'],
+        isNative,
+        bodyKeys: Object.keys(refreshBody),
+      });
+    }
     res.json(refreshBody);
   } catch (error: unknown) {
     console.error('Refresh token error:', error instanceof Error ? error.message : String(error));

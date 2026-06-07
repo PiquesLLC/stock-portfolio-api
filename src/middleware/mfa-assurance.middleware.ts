@@ -2,13 +2,17 @@ import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 
-const MFA_ASSURANCE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+// 5 minutes — tightened step-up window so a hijacked session can't ride a stale
+// login-MFA challenge into a sensitive action (Plaid link/exchange). NOTE: this is a
+// mitigation, not a full fix — a login-MFA challenge still counts within this short
+// window. True per-action step-up needs a MfaChallenge.purpose column (follow-up).
+const MFA_ASSURANCE_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * MFA Assurance middleware for sensitive operations (e.g., Plaid Link, token exchange).
  *
  * If the user has MFA enabled, they must have completed an MFA challenge
- * within the last 30 minutes to proceed. This provides step-up authentication
+ * within the last 5 minutes to proceed. This provides step-up authentication
  * for high-risk actions like linking a brokerage account.
  *
  * If the user has no MFA methods enabled, the request is allowed through
