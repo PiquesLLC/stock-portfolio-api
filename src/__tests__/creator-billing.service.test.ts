@@ -300,6 +300,40 @@ describe('creator billing webhooks', () => {
     });
   });
 
+  it('blocks self-subscribe when subscriber and creator share an email (case-insensitive) — sock-puppet guard', async () => {
+    (prismaMock as any).user.findUnique
+      .mockResolvedValueOnce({ email: 'me@example.com', stripeCustomerId: 'cus_sub' })     // subscriber pre-flight
+      .mockResolvedValueOnce({ email: 'ME@Example.com', stripeCustomerId: 'cus_creator' }); // creator pre-flight (same email, diff case)
+    await expect(createCreatorCheckoutSession('subscriber_1', 'creator_1'))
+      .rejects.toThrow('Cannot subscribe to yourself');
+    // Must reject BEFORE any Stripe customer/session is created.
+    expect(checkoutCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks self-subscribe when subscriber and creator share a Stripe customer — sock-puppet guard', async () => {
+    (prismaMock as any).user.findUnique
+      .mockResolvedValueOnce({ email: 'a@example.com', stripeCustomerId: 'cus_shared' })  // subscriber
+      .mockResolvedValueOnce({ email: 'b@example.com', stripeCustomerId: 'cus_shared' }); // creator (same customer id)
+    await expect(createCreatorCheckoutSession('subscriber_1', 'creator_1'))
+      .rejects.toThrow('Cannot subscribe to yourself');
+    expect(checkoutCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT false-block distinct users who both have null email/customer (guard short-circuits)', async () => {
+    (prismaMock as any).user.findUnique
+      .mockResolvedValueOnce({ email: null, stripeCustomerId: null })  // subscriber pre-flight
+      .mockResolvedValueOnce({ email: null, stripeCustomerId: null })  // creator pre-flight
+      .mockResolvedValue({ id: 'subscriber_1', email: null, stripeCustomerId: 'cus_existing' }); // getOrCreateStripeCustomer
+    (prismaMock as any).creatorSubscription.findUnique.mockResolvedValue(null);
+    (prismaMock as any).creator.findUnique.mockResolvedValue({
+      status: 'active', pricingCents: 1500, trialDays: 7, stripeConnectId: 'acct_123',
+      user: { displayName: 'Creator One' },
+    });
+    checkoutCreateMock.mockResolvedValue({ url: 'https://checkout.stripe.test/cs_null' });
+    const url = await createCreatorCheckoutSession('subscriber_1', 'creator_1');
+    expect(url).toContain('checkout.stripe.test');
+  });
+
   it('ignores duplicate webhook event ids', async () => {
     (prismaMock as any).creatorWebhookEvent.create.mockRejectedValue({ code: 'P2002' });
     const fx = fixtureFactory('dup');
