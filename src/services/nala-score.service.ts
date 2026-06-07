@@ -95,7 +95,7 @@ function fmt(v: number | null | undefined, suffix = ''): string {
   return `${v >= 0 ? '' : ''}${Number(v.toFixed(2))}${suffix}`;
 }
 
-function gradeFromScore(score: number): NalaGrade {
+export function gradeFromScore(score: number): NalaGrade {
   if (score >= 75) return 'Strong';
   if (score >= 50) return 'Good';
   if (score >= 25) return 'Fair';

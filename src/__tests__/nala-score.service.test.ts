@@ -64,7 +64,7 @@ vi.mock('../utils/prisma', () => ({
   },
 }));
 
-import { getNalaScore } from '../services/nala-score.service';
+import { getNalaScore, gradeFromScore } from '../services/nala-score.service';
 
 describe('nala-score.service', () => {
   beforeEach(() => {
@@ -173,5 +173,18 @@ describe('nala-score.service', () => {
       isETF: false,
     }));
     expect(cacheSetMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('gradeFromScore boundaries', () => {
+  it('maps composite to the documented grade thresholds (>=75 Strong, >=50 Good, >=25 Fair, else Weak)', () => {
+    expect(gradeFromScore(100)).toBe('Strong');
+    expect(gradeFromScore(75)).toBe('Strong');
+    expect(gradeFromScore(74.9)).toBe('Good');
+    expect(gradeFromScore(50)).toBe('Good');
+    expect(gradeFromScore(49.9)).toBe('Fair');
+    expect(gradeFromScore(25)).toBe('Fair');
+    expect(gradeFromScore(24.9)).toBe('Weak');
+    expect(gradeFromScore(0)).toBe('Weak');
   });
 });
