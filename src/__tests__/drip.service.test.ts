@@ -43,7 +43,7 @@ describe('reinvestDividend — DRIP cash to shares', () => {
     expect(drip.totalAmount).toBe(10);
 
     const holdingUpd = (prismaMock as any).holding.update.mock.calls[0][0].data;
-    expect(holdingUpd.shares).toBe(12);          // 10 + 2
+    expect(holdingUpd.shares).toEqual({ increment: 2 });   // atomic increment (race-safe): 10 -> 12
     expect(holdingUpd.averageCost).toBe(4.17);   // round((10*4 + 10) / 12 * 100) / 100
 
     const lot = (prismaMock as any).lot.create.mock.calls[0][0].data;

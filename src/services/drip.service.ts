@@ -105,7 +105,18 @@ export async function reinvestDividend(
 
   // Perform the reinvestment in a transaction
   const reinvestment = await prisma.$transaction(async (tx) => {
+    // Re-read the holding INSIDE the transaction so a concurrent reinvest or
+    // trade on the same ticker can't cause a lost update on `shares` (the outer
+    // read above is only a fail-fast; this one is authoritative under the tx lock).
+    const current = await tx.holding.findFirst({
+      where: { ticker, userId: userId },
+    });
+    if (!current) {
+      throw new Error(`No holding found for ${ticker}`);
+    }
+
     // 1. Create DividendReinvestment record
+    // (unique on dividendCreditId guards against double-reinvesting the same credit)
     const drip = await tx.dividendReinvestment.create({
       data: {
         userId: userId,
@@ -119,16 +130,17 @@ export async function reinvestDividend(
       },
     });
 
-    // 2. Update Holding: add shares and recalculate weighted average cost
-    const newTotalShares = holding.shares + sharesPurchased;
-    const oldTotalCost = holding.shares * holding.averageCost;
+    // 2. Update Holding: add shares (atomic increment) and recalculate the
+    // weighted average cost from the freshly-read values.
+    const newTotalShares = current.shares + sharesPurchased;
+    const oldTotalCost = current.shares * current.averageCost;
     const newTotalCost = oldTotalCost + amountToReinvest;
     const newAverageCost = newTotalShares > 0 ? newTotalCost / newTotalShares : 0;
 
     await tx.holding.update({
-      where: { id: holding.id },
+      where: { id: current.id },
       data: {
-        shares: newTotalShares,
+        shares: { increment: sharesPurchased },
         averageCost: Math.round(newAverageCost * 100) / 100,
       },
     });
