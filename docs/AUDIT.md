@@ -78,3 +78,33 @@ These are **gated by `creatorPayoutsEnabled=false` / `creatorMonetizationEnabled
 | **P3 — growth** | free Plaid + free daily briefs, unauth viral Nala-Score share card, push cadence | not started |
 
 **The one firm rule:** do **not** enable creator payouts until P1 lands. Use the free runway to prove the AI-wedge retention and recruit lighthouse creators.
+
+---
+
+## 2026-06-07 — Independent re-audit & corrections (8-agent swarm + first-hand verification)
+
+A fresh full-platform audit (security, money, scale, frontend, product/UX, growth, devsecops + an adversarial verifier) was run; every Critical/contradictory claim was re-verified first-hand. Prior remediation holds and the monetization kill-switches genuinely block money movement with **no bypass path**. Corrections + new findings:
+
+### Corrections to earlier claims
+- **"Citation XSS closed across ALL render paths" was overstated.** 5 anchors rendered server/AI/news URLs with no scheme guard: `IntelligenceTab.tsx` (signal.url ~L358, news n.url ~L1182), `StockQAPanel.tsx:188`, `TaxHarvest.tsx:185`, `StockPriceChart.tsx:3577`. Server-side `validateCitationUrl` was the only guard; `TaxHarvest` caches citations 24h so pre-fix entries could persist. **FIXED this session.** (`EarningsPreview`, `StockDetailView` were already guarded.)
+- **"AI_PREMIUM_ENABLED gives Premium AI away free → inflated metrics" appears FALSE.** Gating is enforced at the route layer via `requirePlan('premium')`; the env flag is a secondary kill-switch. Free users are not getting premium AI.
+
+### New findings (not in the original audit)
+- **[Critical, LIVE] Cross-purpose OTP → ATO.** `EmailOtpCode` (schema:310) has no `purpose` column; `resetPasswordWithCode` (auth.service.ts:1328) accepts the most-recent unused/unexpired code regardless of issue reason → a verify/MFA-setup/email-change code can reset the password. NOT gated. Fix = `purpose` enum + filter every verify path (migration — STAGED in HANDOFF).
+- **[Critical, exposure] Live secrets in OneDrive-synced `.env`** (live `sk_live` Stripe key, JWT/MFA secrets, Resend, Railway token, data-API keys). `.env` is gitignored (NOT on GitHub) → exposure is OneDrive cloud-sync. Action: rotate + relocate (USER).
+- **[High, LIVE → FIXED] DRIP lost-update race.** Read holding outside tx + absolute `shares` write → concurrent same-ticker reinvests clobbered shares. **FIXED this session** (re-read inside tx + atomic increment).
+- **[High] Post-auth mutations skip MFA step-up** (change-password/email/username/delete use `requireAuthAllowUnverified` only). STAGED.
+- **[High] `isCapacitorRequest` trusts the `X-Nala-Native:1` header alone** → post-XSS refresh-token exfil + CSRF bypass. STAGED (needs device test).
+- **[High] OCR endpoint CPU-DoS** (sharp+tesseract ×3 @30/min/user) → dedicated `ocrLimiter` + single worker + 1 variant.
+- **[High, latent/gated] Stripe webhook accounting:** `transfer.reversed` ignores partial `amount_reversed`; no `dispute.funds_reinstated` handler (double-restore risk); refund net-calc reads outside the tx.
+- **[High] Performance share-card rate-limited but `Cache-Control: no-store`** → still drives sharp renders @30/min/IP.
+- **[Med, devsecops] CI doesn't run lint/`npm audit`/secret-scan and doesn't gate deploys; UI build clones UI `master` with no SHA pin; Prisma 7.5 is bleeding-edge; verify `dev.db` isn't in git history (`git log --all -- dev.db`).**
+
+### Performance / scale (verified)
+Realistic DAU ceiling ~3–5k today; binding constraint is SQLite single-writer write-amplification (`BackgroundJobRun` telemetry per cron run is the top writer). Quick wins: concurrency-limit the serial cron loops; add composite indexes (`MilestoneEvent`, `AnomalyEvent`, `ApiUsageLog`, `Holding(ticker)`); skip telemetry for hot crons; bound `fetchPrices` with a 12s race. Frontend: memoize `AuthContext` + `React.memo` heavy leaves; lazy `html-to-image`; remove dead deps (`html2canvas`, `hls.js`).
+
+### Product / growth (new — highest ROI)
+Engines built but not wired to users: **daily brief never push-notifies** (+20–40% DAU if wired); **per-profile OG images missing** (share links unfurl generic → 5–10× share→install if fixed); **referral has no two-sided reward** and only surfaces in Settings; **email-verify is a hard pre-activation gate** (defer → +25–40% activation); **free tier caps at 10 holdings** (raise to ~25).
+
+### Shipped this session (blind-Opus-reviewed; MUST-FIX: none)
+5 citation/href XSS guards (UI); DRIP atomic-increment race fix (API); `.gitignore`/`.railwayignore` hardening. **Postgres follow-up:** when off SQLite, give DRIP `averageCost` a row-lock / serializable isolation (the `shares` increment is atomic but `averageCost` is an absolute write).

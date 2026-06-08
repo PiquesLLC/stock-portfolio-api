@@ -52,3 +52,12 @@ tmp-*.ts
 share-card-redesign-preview*.png
 logo-b64.txt
 .vapid-keys.json
+
+# Stray local artifacts / data dumps (never commit)
+/dev.db
+/dev.db-*
+/0
+axon_*.json
+portfolio_smoke.json
+prisma/ci-smoke.db
+prisma/*-snapshot.json

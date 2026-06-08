@@ -23,9 +23,9 @@ Running handoff: what's done, and the specific things **only you** can do to unb
 3. **Cents migration — gated on #1 (and ideally #2).**
    Nothing to do yet; it rides on the backup + Postgres. Design is in `docs/CENTS-MIGRATION.md`.
 
-4. **OAuth email-squatting fix — one product decision.**
-   Decide adopt-vs-delete when a real owner signs in via OAuth to an email that an unverified account is squatting, and accept that Claude will also revoke that account's sessions/MFA (unverified accounts can hold them). Say e.g. "do the OAuth-squatting fix, adopt approach."
-   → Unblocks: closes a denial-of-signup hole. Needs care + tests (Claude will write them) — that's why it isn't blind-shipped.
+4. **OAuth email-squatting fix — ✅ DONE (shipped autonomously).**
+   Adopt approach: a verified OAuth sign-in to an email an *unverified* account is squatting now takes over that account and revokes every prior access vector (password, refresh tokens, MFA methods + challenges, the other-provider login, Stripe-customer link). A blind review caught and fixed a cross-provider-takeover edge before ship; covered by tests.
+   → **Carryover still to handle when you enable creator payouts:** a squatter's `Creator` profile / `stripeConnectId` is not cleared on adopt (monetization-gated, so inert today). Wipe or force re-onboard as part of turning payouts on.
 
 5. **Apple-IAP verification — provide a dependency.**
    Confirm using the official `app-store-server-library`, get Claude Apple's root CA certs (Apple PKI), and sandbox access to test.
@@ -36,3 +36,27 @@ Monetization (creator payouts / billing) stays **OFF** until the P1 money-safety
 
 ## 🤖 What Claude keeps doing meanwhile (no input needed)
 Extending regression coverage into the non-money paths (charts, leaderboard, nala-score) and other safe, self-contained hardening.
+
+---
+
+## 2026-06-07 session — shipped, staged, and your TODO
+
+### ✅ Shipped this session (in the local working tree — needs your commit + deploy)
+- **Citation/AI/news XSS hardening** — `^https?://` scheme guards added to 5 unguarded anchor sinks: `IntelligenceTab.tsx` (×2), `StockQAPanel.tsx`, `TaxHarvest.tsx`, `StockPriceChart.tsx` (corrects the earlier "closed across all paths" overstatement).
+- **DRIP lost-update race fix** — `drip.service.ts` re-reads the holding inside the transaction and uses atomic `shares: { increment }`.
+- **Repo hygiene** — `.gitignore` + `.railwayignore` now exclude root `dev.db`, the stray `0`, `axon_*.json`, `portfolio_smoke.json`, `prisma/ci-smoke.db`, `prisma/backups/`, snapshots, and launch/QA memos.
+- All changes reviewed by a blind Opus reviewer — **MUST-FIX: none.**
+
+### 🔧 To ship it (you run these — Claude can't use the shell in this environment)
+1. UI: `cd stock-portfolio-ui` → `npm run build` → `npm test` → commit + push `master`.
+2. API: `cd stock-portfolio-api` → `npm run build` → `npm test` → commit + push `master` (Railway auto-deploys). **UI master before API master** per deploy choreography.
+3. Git hygiene (untrack now-ignored files if any are tracked): `git rm --cached 0 axon_yahoo.json axon_ytd.json portfolio_smoke.json prisma/ci-smoke.db` then commit.
+
+### 🧪 Staged — NOT shipped (need a migration / device / coordinated FE; do deliberately)
+- **OTP `purpose` column (Critical, LIVE).** Add `purpose String?` to `EmailOtpCode`; set on every OTP create (`verification|password_reset|mfa_setup|mfa_login|email_change`); filter `purpose:'password_reset'` in `resetPasswordWithCode`. Needs `prisma migrate` — run + test locally first (it auto-applies on deploy).
+- **MFA step-up on sensitive routes (High).** Add `requireMfaAssurance` to change-password/username/email/delete-account — but first make the UI handle the `MFA_STEP_UP_REQUIRED` 403 and test with an MFA account (non-MFA users already pass through).
+- **`isCapacitorRequest` tightening (High).** Require header AND `capacitor://localhost` origin — test on a real native build first (risk: locking out native auth).
+- **Apple IAP x5c rewrite (Critical, gated).** Replace OIDC-key verification with `app-store-server-library` x5c chain validation + require bundleId.
+
+### 🔴 Your action #1 (urgent): rotate the live secrets in `.env` and move it off OneDrive
+Live `sk_live` Stripe key, JWT/MFA secrets, Resend, Railway token sit in a OneDrive-synced file. Rotate each provider + `railway logout/login`, then relocate `.env` to a non-synced path. (Rotating `JWT_SECRET` logs everyone out; rotating `MFA_ENCRYPTION_KEY` forces TOTP re-enroll — plan those two.)

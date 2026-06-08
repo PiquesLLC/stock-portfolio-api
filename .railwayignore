@@ -19,3 +19,14 @@ docs/
 src/generated/
 *.test.ts
 vitest.config.ts
+dev.db
+dev.db-*
+0
+axon_*.json
+portfolio_smoke.json
+prisma/backups/
+prisma/ci-smoke.db
+prisma/*-snapshot.json
+LAUNCH-*.md
+QA-LAUNCH-*.md
+nala_security_audit.md
