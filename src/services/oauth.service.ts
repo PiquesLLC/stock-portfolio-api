@@ -268,6 +268,40 @@ export async function findOrCreateOAuthUser(
           trackP2002('byEmail');
           return { user: byEmail, isNewUser: false };
         }
+
+        // Unverified account squatting this email: the OAuth provider has just proven the
+        // caller controls the address, so adopt the account rather than failing closed —
+        // link the provider, mark verified, and REVOKE every prior access vector (password,
+        // refresh tokens, MFA methods + pending challenges) so a squatter who pre-registered
+        // the email retains nothing. Fixes a denial-of-signup that otherwise permanently
+        // blocks the real owner's OAuth signup.
+        if (byEmail && !byEmail.emailVerified) {
+          // Also clear the OTHER provider login: a squatter could have pre-staged this row via
+          // an unverified OAuth sign-up under the other provider, and leaving it set would let
+          // them re-enter the now-verified account (cross-provider takeover). Drop the password
+          // and any inherited Stripe-customer link too. (A squatter's Creator profile /
+          // stripeConnectId carryover is a separate, monetization-gated concern — tracked in
+          // docs/HANDOFF.md for the creator-payout-enable work.)
+          const otherProviderField = providerIdField === 'googleId' ? 'appleId' : 'googleId';
+          await prisma.$transaction([
+            prisma.user.update({
+              where: { id: byEmail.id },
+              data: {
+                [providerIdField]: profile.providerId,
+                [otherProviderField]: null,
+                emailVerified: true,
+                passwordHash: null,
+                stripeCustomerId: null,
+              } as any,
+              select: { id: true },
+            }),
+            prisma.refreshToken.deleteMany({ where: { userId: byEmail.id } }),
+            prisma.mfaMethod.deleteMany({ where: { userId: byEmail.id } }),
+            prisma.mfaChallenge.deleteMany({ where: { userId: byEmail.id } }),
+          ]);
+          trackP2002('adoptedUnverified');
+          return { user: { ...byEmail, emailVerified: true }, isNewUser: false };
+        }
       }
 
       // 3) Any other race/conflict: fail closed

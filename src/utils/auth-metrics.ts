@@ -9,7 +9,7 @@ interface AuthMetrics {
   login: { success: number; fail: number; mfaChallenged: number };
   signup: { success: number; fail: number };
   rateLimited: { oauth: number; login: number };
-  p2002Recovery: { byProvider: number; byEmail: number; failed: number };
+  p2002Recovery: { byProvider: number; byEmail: number; failed: number; adoptedUnverified: number };
   startedAt: string;
 }
 
@@ -21,7 +21,7 @@ const metrics: AuthMetrics = {
   login: { success: 0, fail: 0, mfaChallenged: 0 },
   signup: { success: 0, fail: 0 },
   rateLimited: { oauth: 0, login: 0 },
-  p2002Recovery: { byProvider: 0, byEmail: 0, failed: 0 },
+  p2002Recovery: { byProvider: 0, byEmail: 0, failed: 0, adoptedUnverified: 0 },
   startedAt: new Date().toISOString(),
 };
 
@@ -43,7 +43,7 @@ export function trackLoginMfa(): void { metrics.login.mfaChallenged++; }
 export function trackSignupSuccess(): void { metrics.signup.success++; }
 export function trackSignupFail(): void { metrics.signup.fail++; }
 export function trackRateLimited(type: 'oauth' | 'login'): void { metrics.rateLimited[type]++; }
-export function trackP2002(outcome: 'byProvider' | 'byEmail' | 'failed'): void { metrics.p2002Recovery[outcome]++; }
+export function trackP2002(outcome: 'byProvider' | 'byEmail' | 'failed' | 'adoptedUnverified'): void { metrics.p2002Recovery[outcome]++; }
 
 export function getAuthMetrics(): AuthMetrics {
   return { ...metrics };
