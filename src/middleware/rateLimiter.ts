@@ -13,15 +13,29 @@ import { JwtPayload } from '../types/auth';
  * This prevents shared-IP collateral damage (corporate networks, VPNs)
  * while still rate-limiting unauthenticated abuse by IP.
  */
+/**
+ * Real client IP. Behind Cloudflare (nalaai.com) the socket peer is a Cloudflare/
+ * Railway proxy, and `trust proxy: 1` cannot reliably recover the origin client
+ * across the CF→Railway hops — so every visitor collapses onto ONE shared IP and
+ * the IP-keyed limiters bucket the whole site together (a single user then trips
+ * the "global" limit by themselves). Cloudflare always sets `CF-Connecting-IP` to
+ * the true client, so prefer it; fall back to req.ip (local dev / non-CF paths).
+ */
+function clientIp(request: Request): string {
+  const cf = request.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.length > 0) return cf.trim();
+  return request.ip ?? 'unknown';
+}
+
 function userOrIpKey(request: Request): string {
   const userId = (request as any).user?.userId;
   return userId
     ? `user:${userId}`
-    : ipKeyGenerator(request.ip ?? 'unknown');
+    : ipKeyGenerator(clientIp(request));
 }
 
 function ipOnlyKey(request: Request): string {
-  return ipKeyGenerator(request.ip ?? 'unknown');
+  return ipKeyGenerator(clientIp(request));
 }
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -35,6 +49,14 @@ const isProd = process.env.NODE_ENV === 'production';
 function isTrustedTraffic(req: Request): boolean {
   // Health checks (BetterStack uptime monitoring hits /health)
   if (req.path === '/health') return true;
+
+  // Static front-end assets. The global apiLimiter runs BEFORE express.static
+  // (app.ts), so without this every hashed JS/CSS/font/image chunk of an SPA
+  // page-load counts against the API budget — dozens of "requests" per refresh.
+  // These are cheap, CDN-cached static files, not API calls, and must not
+  // consume the limit.
+  if (req.path.startsWith('/assets/')) return true;
+  if (/\.(?:js|mjs|css|map|woff2?|ttf|eot|png|jpe?g|gif|svg|ico|webp|avif|webmanifest|json|txt)$/i.test(req.path)) return true;
 
   return false;
 }
@@ -201,10 +223,12 @@ export const billingMutationLimiter = rateLimit({
   keyGenerator: userOrIpKey,
 });
 
-/** Heavy reads (charts, portfolio data, news). 120/min prod per user. */
+/** Heavy reads (charts, portfolio data, news). 300/min prod per user.
+ *  An active dashboard fans out many reads per page-load; 120 was easy for a
+ *  single engaged user to clip while navigating/refreshing. Still per-user. */
 export const heavyReadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: isProd ? 120 : 1000,
+  max: isProd ? 300 : 1000,
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -281,12 +305,13 @@ export const billingWebhookLimiter = rateLimit({
 // Global limiter (keyed by IP, trusted traffic whitelisted)
 // ---------------------------------------------------------------------------
 
-/** Global safety net. 600/min prod per IP. */
+/** Global safety net. 600/min prod per real client IP (static assets exempt). */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: isProd ? 600 : 1000,
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipOnlyKey, // real client IP (CF-Connecting-IP), not the collapsed proxy IP
   skip: isTrustedTraffic,
 });
