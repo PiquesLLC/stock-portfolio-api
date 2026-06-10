@@ -1,6 +1,15 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load env from NALA_ENV_FILE when set, so the local .env can live OUTSIDE the
+// cloud-synced project folder (it previously held live secrets on OneDrive). In
+// prod (Railway) NALA_ENV_FILE is unset and vars are injected directly, so this
+// falls through to the default ./.env behavior, unchanged.
+if (process.env.NALA_ENV_FILE) {
+  dotenv.config({ path: process.env.NALA_ENV_FILE });
+  console.log(`[env] loaded from NALA_ENV_FILE=${process.env.NALA_ENV_FILE}`);
+} else {
+  dotenv.config();
+}
 
 // CRITICAL: Required environment variables
 const jwtSecret = process.env.JWT_SECRET;
