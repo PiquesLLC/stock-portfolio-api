@@ -11,6 +11,7 @@ vi.mock('../utils/prisma', () => {
   const mockPrisma = {
     user: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -54,12 +55,12 @@ vi.mock('../utils/prisma', () => {
       count: vi.fn(),
     },
     // MFA
-    mfaMethod: { count: vi.fn(), deleteMany: vi.fn() },
+    mfaMethod: { count: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn(), update: vi.fn() },
     mfaChallenge: { deleteMany: vi.fn() },
-    mfaBackupCode: { deleteMany: vi.fn() },
+    mfaBackupCode: { deleteMany: vi.fn(), create: vi.fn() },
     // Consent & email OTP
     consentRecord: { create: vi.fn(), deleteMany: vi.fn() },
-    emailOtpCode: { create: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+    emailOtpCode: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
     // Plaid
     plaidItem: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     plaidAccount: { deleteMany: vi.fn() },

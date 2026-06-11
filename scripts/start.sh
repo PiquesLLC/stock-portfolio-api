@@ -154,6 +154,18 @@ else
         await client.execute('CREATE TABLE IF NOT EXISTS \"PendingEmailChange\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"newEmail\" TEXT NOT NULL, \"codeHash\" TEXT NOT NULL, \"expiresAt\" DATETIME NOT NULL, \"usedAt\" DATETIME, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"PendingEmailChange_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
         await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_userId_idx\" ON \"PendingEmailChange\"(\"userId\")');
         await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_expiresAt_idx\" ON \"PendingEmailChange\"(\"expiresAt\")');
+        // Ensure EmailOtpCode.purpose column (migration 20260610135312_otp_purpose —
+        // single-purpose OTP codes; without it the new consumers query a missing
+        // column and ALL OTP flows 500). Retire pre-purpose unconsumed codes the
+        // first time the column is added, mirroring the real migration.
+        const otpCols = await client.execute('PRAGMA table_info(EmailOtpCode)');
+        const otpNames = otpCols.rows.map(r => r.name);
+        if (!otpNames.includes('purpose')) {
+          await client.execute('ALTER TABLE \"EmailOtpCode\" ADD COLUMN \"purpose\" TEXT NOT NULL DEFAULT \\'legacy\\'');
+          await client.execute('UPDATE \"EmailOtpCode\" SET \"usedAt\" = CURRENT_TIMESTAMP WHERE \"usedAt\" IS NULL');
+          console.log('[Migration Fix] Added EmailOtpCode.purpose column (+retired pre-purpose codes)');
+        }
+        await client.execute('CREATE INDEX IF NOT EXISTS \"EmailOtpCode_userId_purpose_idx\" ON \"EmailOtpCode\"(\"userId\", \"purpose\")');
         console.log('[Migration Fix] Column + table check complete');
       } catch (e) {
         console.error('[Migration Fix] Failed:', e.message);

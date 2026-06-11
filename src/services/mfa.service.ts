@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import prisma from '../utils/prisma';
 import { encrypt, decrypt } from '../utils/encryption';
 import { sendOtpEmail, sendEmailVerification } from './email.service';
+import { OTP_PURPOSE } from '../types/auth';
 
 const SALT_ROUNDS = 10;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -268,14 +269,15 @@ export async function updateEmail(userId: string, email: string): Promise<void> 
   const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
-  // Invalidate previous codes
+  // Invalidate previous codes of the same purpose only — the new-address
+  // verification code must not clobber pending reset/MFA codes.
   await prisma.emailOtpCode.updateMany({
-    where: { userId, usedAt: null },
+    where: { userId, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null },
     data: { usedAt: new Date() },
   });
 
   await prisma.emailOtpCode.create({
-    data: { userId, codeHash, expiresAt },
+    data: { userId, codeHash, expiresAt, purpose: OTP_PURPOSE.EMAIL_VERIFICATION },
   });
 
   await sendEmailVerification(normalizedEmail, code);
@@ -283,7 +285,7 @@ export async function updateEmail(userId: string, email: string): Promise<void> 
 
 export async function verifyEmail(userId: string, code: string): Promise<boolean> {
   const otpCodes = await prisma.emailOtpCode.findMany({
-    where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: 'desc' },
     take: 5,
   });
@@ -329,12 +331,12 @@ export async function beginEmailOtpSetup(userId: string): Promise<void> {
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   await prisma.emailOtpCode.updateMany({
-    where: { userId, usedAt: null },
+    where: { userId, purpose: OTP_PURPOSE.MFA_SETUP, usedAt: null },
     data: { usedAt: new Date() },
   });
 
   await prisma.emailOtpCode.create({
-    data: { userId, codeHash, expiresAt },
+    data: { userId, codeHash, expiresAt, purpose: OTP_PURPOSE.MFA_SETUP },
   });
 
   await sendOtpEmail(user.email, code);
@@ -342,7 +344,7 @@ export async function beginEmailOtpSetup(userId: string): Promise<void> {
 
 export async function verifyEmailOtpSetup(userId: string, code: string): Promise<string[] | null> {
   const otpCodes = await prisma.emailOtpCode.findMany({
-    where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId, purpose: OTP_PURPOSE.MFA_SETUP, usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: 'desc' },
     take: 5,
   });
@@ -379,14 +381,14 @@ export async function sendEmailOtp(userId: string): Promise<void> {
   const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
-  // Invalidate previous codes
+  // Invalidate previous codes of the same purpose only
   await prisma.emailOtpCode.updateMany({
-    where: { userId, usedAt: null },
+    where: { userId, purpose: OTP_PURPOSE.MFA_EMAIL, usedAt: null },
     data: { usedAt: new Date() },
   });
 
   await prisma.emailOtpCode.create({
-    data: { userId, codeHash, expiresAt },
+    data: { userId, codeHash, expiresAt, purpose: OTP_PURPOSE.MFA_EMAIL },
   });
 
   await sendOtpEmail(user.email, code);
@@ -394,7 +396,7 @@ export async function sendEmailOtp(userId: string): Promise<void> {
 
 export async function verifyEmailOtp(userId: string, code: string): Promise<boolean> {
   const otpCodes = await prisma.emailOtpCode.findMany({
-    where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId, purpose: OTP_PURPOSE.MFA_EMAIL, usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: 'desc' },
     take: 5,
   });

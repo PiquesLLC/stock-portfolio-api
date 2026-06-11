@@ -3,7 +3,7 @@ import jwt, { SignOptions, Secret, TokenExpiredError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { config } from '../config';
-import { JwtPayload, LoginResponse, MfaChallengeResponse } from '../types/auth';
+import { JwtPayload, LoginResponse, MfaChallengeResponse, OTP_PURPOSE } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
 import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmail, sendEmailChangeVerification, sendEmailChangedNotice } from './email.service';
 
@@ -386,13 +386,15 @@ async function issueEmailVerificationCode(userId: string, email: string): Promis
   const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
+  // Only supersede prior codes of the SAME purpose — a verification resend
+  // must not invalidate a pending password-reset code (and vice versa).
   await prisma.emailOtpCode.updateMany({
-    where: { userId, usedAt: null },
+    where: { userId, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null },
     data: { usedAt: new Date() },
   });
 
   await prisma.emailOtpCode.create({
-    data: { userId, codeHash, expiresAt },
+    data: { userId, codeHash, expiresAt, purpose: OTP_PURPOSE.EMAIL_VERIFICATION },
   });
 
   try {
@@ -408,12 +410,12 @@ async function issuePasswordResetCode(userId: string, email: string): Promise<vo
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   await prisma.emailOtpCode.updateMany({
-    where: { userId, usedAt: null },
+    where: { userId, purpose: OTP_PURPOSE.PASSWORD_RESET, usedAt: null },
     data: { usedAt: new Date() },
   });
 
   await prisma.emailOtpCode.create({
-    data: { userId, codeHash, expiresAt },
+    data: { userId, codeHash, expiresAt, purpose: OTP_PURPOSE.PASSWORD_RESET },
   });
 
   try {
@@ -1135,7 +1137,7 @@ export async function verifyEmailCode(
   }
 
   const otp = await prisma.emailOtpCode.findFirst({
-    where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId: user.id, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: 'desc' },
   });
   if (!otp) {
@@ -1175,7 +1177,7 @@ export async function verifyEmailCode(
   const usedAt = new Date();
   await prisma.$transaction([
     prisma.emailOtpCode.updateMany({
-      where: { userId: user.id, usedAt: null },
+      where: { userId: user.id, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null },
       data: { usedAt },
     }),
     prisma.user.update({
@@ -1326,7 +1328,7 @@ export async function resetPasswordWithCode(
   }
 
   const otp = await prisma.emailOtpCode.findFirst({
-    where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId: user.id, purpose: OTP_PURPOSE.PASSWORD_RESET, usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: 'desc' },
   });
   if (!otp) {
@@ -1367,7 +1369,7 @@ export async function resetPasswordWithCode(
   const now = new Date();
   await prisma.$transaction([
     prisma.emailOtpCode.updateMany({
-      where: { userId: user.id, usedAt: null },
+      where: { userId: user.id, purpose: OTP_PURPOSE.PASSWORD_RESET, usedAt: null },
       data: { usedAt: now },
     }),
     prisma.user.update({

@@ -312,11 +312,16 @@ model EmailOtpCode {
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   codeHash  String
+  // Issuing flow: 'email_verification' | 'password_reset' | 'mfa_setup' | 'mfa_email'
+  // (see OTP_PURPOSE in src/types/auth.ts). Consumers filter on this so a code
+  // minted for one flow can never satisfy another. 'legacy' marks pre-migration
+  // rows of unknown purpose; no consumer accepts it.
+  purpose   String    @default("legacy")
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
-  @@index([userId])
+  @@index([userId, purpose])
   @@index([expiresAt])
 }
 
