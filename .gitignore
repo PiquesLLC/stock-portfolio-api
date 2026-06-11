@@ -61,3 +61,7 @@ axon_*.json
 portfolio_smoke.json
 prisma/ci-smoke.db
 prisma/*-snapshot.json
+
+# internal audit artifacts - never commit (public repo)
+/nala_security_audit.md
+/test-output.txt
