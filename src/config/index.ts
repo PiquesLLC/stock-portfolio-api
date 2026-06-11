@@ -157,6 +157,17 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   appFrontendUrl: process.env.APP_FRONTEND_URL || process.env.STRIPE_RETURN_URL || 'https://nalaai.com',
+
+  // H4 origin lockdown (rate-limit IP trust). When set, the rate limiter trusts
+  // the `CF-Connecting-IP` header ONLY on requests that also carry a matching
+  // `X-Origin-Auth` header — injected by a Cloudflare Transform Rule that an
+  // attacker hitting the Railway origin directly cannot forge. Unset (default)
+  // preserves the legacy behavior of always trusting CF-Connecting-IP, so
+  // deploying this is inert until BOTH the edge rule and this secret are set.
+  // ⚠️ Set the Cloudflare rule FIRST, verify the header arrives, THEN set this —
+  // otherwise legitimate traffic loses its per-client key. See
+  // docs/H4-origin-lockdown.md.
+  cloudflareOriginSecret: process.env.CLOUDFLARE_ORIGIN_SECRET || '',
   testerFeatureAccessUsernames: (process.env.TESTER_FEATURE_ACCESS_USERNAMES || '')
     .split(',')
     .map((u) => u.trim().toLowerCase())

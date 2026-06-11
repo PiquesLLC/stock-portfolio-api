@@ -1,6 +1,7 @@
 import { Request } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { config } from '../config';
 import { JwtPayload } from '../types/auth';
 
@@ -14,17 +15,58 @@ import { JwtPayload } from '../types/auth';
  * while still rate-limiting unauthenticated abuse by IP.
  */
 /**
+ * Is this request provably proxied through our Cloudflare zone?
+ *
+ * H4: the Railway origin (`*.up.railway.app`) is reachable directly, bypassing
+ * Cloudflare. Since `CF-Connecting-IP` is just a header, anyone hitting the
+ * origin directly can forge it — and because the IP limiters key on it, a forged
+ * rotating value resets every per-IP limit (login / MFA / OTP brute force). We
+ * therefore trust `CF-Connecting-IP` only when the request also carries a secret
+ * `X-Origin-Auth` header injected by a Cloudflare Transform Rule (which a direct
+ * origin hit cannot know). Constant-time compared.
+ *
+ * When `cloudflareOriginSecret` is unset we return `true` to preserve the prior
+ * behavior (trust CF-Connecting-IP), so this is inert until the operator wires
+ * up the edge rule + secret. See docs/H4-origin-lockdown.md.
+ */
+export function isViaCloudflare(request: Request): boolean {
+  const secret = config.cloudflareOriginSecret;
+  if (!secret) return true; // not configured → legacy behavior (inert)
+  const provided = request.headers['x-origin-auth'];
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  // timingSafeEqual throws on length mismatch — guard first (length is not secret).
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
  * Real client IP. Behind Cloudflare (nalaai.com) the socket peer is a Cloudflare/
  * Railway proxy, and `trust proxy: 1` cannot reliably recover the origin client
  * across the CF→Railway hops — so every visitor collapses onto ONE shared IP and
  * the IP-keyed limiters bucket the whole site together (a single user then trips
  * the "global" limit by themselves). Cloudflare always sets `CF-Connecting-IP` to
- * the true client, so prefer it; fall back to req.ip (local dev / non-CF paths).
+ * the true client, so prefer it — but only when the request is provably via
+ * Cloudflare (see isViaCloudflare); otherwise the header is attacker-controlled.
+ *
+ * For requests NOT provably via Cloudflare we fall back to `request.ip`, i.e. the
+ * client IP Railway's edge writes into X-Forwarded-For (with `trust proxy: 1`).
+ * This is the trustworthy per-client key for traffic that reaches the origin
+ * directly — notably the Capacitor NATIVE app, which always hits the Railway
+ * origin (not Cloudflare) and so carries no CF-Connecting-IP. Crucially, using
+ * `request.ip` here makes this function identical to the prior behavior whenever
+ * `cloudflareOriginSecret` is unset, so deploying the H4 change is inert until
+ * the edge rule + secret are configured. We never fall back to a client-settable
+ * header, so a forged CF-Connecting-IP on a direct hit is ignored.
+ * (Pre-activation, verify Railway's edge writes XFF authoritatively — see
+ * docs/H4-origin-lockdown.md.)
  */
-function clientIp(request: Request): string {
-  const cf = request.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.length > 0) return cf.trim();
-  return request.ip ?? 'unknown';
+export function clientIp(request: Request): string {
+  if (isViaCloudflare(request)) {
+    const cf = request.headers['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.length > 0) return cf.trim();
+  }
+  return request.ip ?? request.socket?.remoteAddress ?? 'unknown';
 }
 
 function userOrIpKey(request: Request): string {
