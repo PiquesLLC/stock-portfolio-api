@@ -258,8 +258,13 @@ export async function updateEmailHandler(req: AuthRequest, res: Response): Promi
     await updateEmail(req.user.userId, parsed.data.email);
     res.json({ email: parsed.data.email, verified: false });
   } catch (error: unknown) {
-    if (error instanceof Error && error.message === 'Email already in use') {
-      res.status(409).json({ error: 'Email already in use' });
+    if (error instanceof Error && error.message === 'EMAIL_CHANGE_NOT_ALLOWED') {
+      // This endpoint only re-confirms the account's own email for MFA codes;
+      // changing the primary email must use the protected change-email flow.
+      res.status(400).json({
+        error: 'To change your account email, use Settings → Security → Change Email.',
+        code: 'EMAIL_CHANGE_NOT_ALLOWED',
+      });
       return;
     }
     console.error('Update email error:', error instanceof Error ? error.message : String(error));

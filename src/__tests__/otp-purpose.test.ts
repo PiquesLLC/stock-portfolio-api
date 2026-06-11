@@ -217,8 +217,10 @@ describe('OTP purpose separation (H1)', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects an email-change (new address verification) code for password reset', async () => {
-    await updateEmail(USER.id, 'new-address@example.com');
+  it('rejects an MFA email-confirmation code for password reset', async () => {
+    // updateEmail now only re-confirms the account's OWN email (M1); it issues
+    // an EMAIL_VERIFICATION-purpose code, which must not reset a password.
+    await updateEmail(USER.id, USER.email);
     const code = lastCodeSentBy(sendEmailVerification);
 
     const result = await resetPasswordWithCode(USER.email, code, 'NewStrongPass1');

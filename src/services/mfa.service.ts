@@ -250,27 +250,39 @@ export async function disableTotp(userId: string): Promise<void> {
 
 // ─── Email OTP ──────────────────────────────────────────
 
+/**
+ * Re-issue a verification code to the account's OWN primary email so the
+ * email-OTP MFA setup flow can confirm the user controls it.
+ *
+ * SECURITY (M1): this is deliberately NOT a primary-email editor. It only ever
+ * (re)sends a code to the address already on the account; attempting to set a
+ * *different* address is rejected here and must go through the two-step
+ * requestEmailChange/confirmEmailChange flow, which verifies the new address
+ * before applying it, revokes all refresh tokens, and notifies the old address.
+ * Previously this overwrote User.email immediately after a password check — so a
+ * hijacked session (with the password) could silently swap the recovery email
+ * with no notice to the old address and no session revocation. The `email`
+ * argument is retained only so an unchanged value still succeeds; it can no
+ * longer mutate the account.
+ */
 export async function updateEmail(userId: string, email: string): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
-  // Check uniqueness
-  const existing = await prisma.user.findFirst({
-    where: { email: normalizedEmail, id: { not: userId } },
-  });
-  if (existing) throw new Error('Email already in use');
-
-  await prisma.user.update({
+  const user = await prisma.user.findUnique({
     where: { id: userId },
-    data: { email: normalizedEmail, emailVerified: false },
-    select: { id: true },
+    select: { email: true },
   });
+  if (!user?.email || user.email.trim().toLowerCase() !== normalizedEmail) {
+    // Different (or missing) address — not a re-confirmation. Force the caller
+    // onto the protected change-email flow instead of silently mutating here.
+    throw new Error('EMAIL_CHANGE_NOT_ALLOWED');
+  }
 
-  // Send verification code
   const code = generateOtpCode();
   const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
-  // Invalidate previous codes of the same purpose only — the new-address
-  // verification code must not clobber pending reset/MFA codes.
+  // Supersede only prior verification codes (same purpose) — must not clobber
+  // pending reset/MFA codes.
   await prisma.emailOtpCode.updateMany({
     where: { userId, purpose: OTP_PURPOSE.EMAIL_VERIFICATION, usedAt: null },
     data: { usedAt: new Date() },
