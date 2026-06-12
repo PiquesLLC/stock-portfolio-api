@@ -1,4 +1,4 @@
-# Nala — Progress & Your TODO (as of 2026-06-07)
+# Nala — Progress & Your TODO (as of 2026-06-12)
 
 Running handoff: what's done, and the specific things **only you** can do to unblock the next round. Pick any item when you have time, tell Claude, and it executes.
 
@@ -60,3 +60,20 @@ Extending regression coverage into the non-money paths (charts, leaderboard, nal
 
 ### 🔴 Your action #1 (urgent): rotate the live secrets in `.env` and move it off OneDrive
 Live `sk_live` Stripe key, JWT/MFA secrets, Resend, Railway token sit in a OneDrive-synced file. Rotate each provider + `railway logout/login`, then relocate `.env` to a non-synced path. (Rotating `JWT_SECRET` logs everyone out; rotating `MFA_ENCRYPTION_KEY` forces TOTP re-enroll — plan those two.)
+
+---
+
+## 2026-06-12 session — M4 CSP hardening shipped
+
+### ✅ Shipped (UI + API master)
+- **M4: `'unsafe-inline'` removed from script-src** in both the helmet header (api `src/app.ts`) and the UI meta CSP (`index.html`). Replaced with a 5-hash sha256 allowlist: theme snippet (LF+CRLF), `GET /invite` route bridge (single-line, 1 hash), static `public/invite/index.html` bridge (LF+CRLF). Every hash verified against actual bytes: source, built dist, api/client/dist, live responses incl. the OG-injected crawler variant and the `/invite` 301→`/invite/` chain. `style-src` keeps `'unsafe-inline'` (unchanged).
+- **Dev-breakage found & fixed:** Vite's react plugin injects the fast-refresh preamble as an inline script at serve time — hash-only meta CSP bricked dev. Added a serve-only `dev-csp-relax` plugin in `vite.config.ts`: strips the hashes and adds `'unsafe-inline'` (CSP ignores `'unsafe-inline'` while any hash is listed, so stripping is required). Build output verified strict; `apply: 'serve'` keeps it out of `vite build`/preview/vitest.
+- **OG injection `$`-pattern bug fixed** (blind-review finding): `injectMetaTags` used a bare string replacement with user-derived `ogTags` — `` $` ``/`$&` could duplicate document chunks for crawler requests. Now a replacer fn.
+- **Review:** blind reviewer → SHIP, no MUST-FIX; both post-review patches re-confirmed; relax regex hardened with `(?!-)` against future `script-src-elem/-attr` directives.
+
+### ⚠️ Carryovers / standing notes from review
+- **Capacitor legacy-WebView floor:** on Android WebViews lacking `DOCUMENT_START_SCRIPT` (pre-Chromium-89, ~pre-2021), Capacitor falls back to injecting its bridge as an inline script → blocked by the strict meta CSP → dead shell on those devices. Decide (accept floor vs. Capacitor-specific index.html) when native app builds resume.
+- **Cloudflare:** do NOT enable Rocket Loader or any HTML-mutating edge feature — it would rewrite inline scripts and invalidate the hashes.
+- **helmet `frameSrc` (plaid only) intentionally differs from meta frame-src (plaid+google+apple):** both auth flows are popups, not iframes. Sync deliberately if that ever changes.
+- **Test debt (pre-existing, not from this change):** UI suite has 5 failing tests on clean master (`config`, `HoldingsTable`, `NotificationBell` ×2, `StockDetailView`); API suite is load-flaky under parallel workers (billing/chart/profile-visibility files fail in full runs, pass in isolation — likely SQLite contention). Next session candidate: fix both.
+- `public/mockup/daily-brief.html` left untracked on purpose (local design mockup; its inline script would be CSP-blocked if ever shipped — convert before promoting).

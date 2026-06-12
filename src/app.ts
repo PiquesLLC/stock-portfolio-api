@@ -120,8 +120,10 @@ ${twitterSiteTag}
 
 function injectMetaTags(html: string, ogTags: string): string {
   if (!html) return html;
+  // Replacer fn: ogTags carries user-derived text, which a bare replacement
+  // string would expand $-patterns ($`, $&) from.
   return html.includes('</head>')
-    ? html.replace('</head>', `${ogTags}\n</head>`)
+    ? html.replace('</head>', () => `${ogTags}\n</head>`)
     : `${ogTags}\n${html}`;
 }
 
@@ -135,8 +137,25 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.plaid.com", "https://static.cloudflareinsights.com", "https://accounts.google.com", "https://appleid.cdn-apple.com"],
-      // NOTE: The UI's index.html also has a CSP <meta> tag. Both must be kept in sync.
+      // script-src has NO 'unsafe-inline' (M4). Inline scripts are blocked except the
+      // few we control, each allowlisted by its sha256 hash (LF + CRLF variants, since
+      // served line endings differ between the Linux build and local Windows). External
+      // SDKs (Plaid/Google/Apple/CF-insights) load via their hosts below, not inline.
+      scriptSrc: [
+        "'self'",
+        "'sha256-xbBsN8B7sJ4tLq8S2ymld39Caxvf6Zsk6uz8zjJzJTI='", // theme snippet (LF)
+        "'sha256-Ym080m/i9V6DYVLS4yM5HkeYI3aYa1Ba7kEzZItWJlE='", // theme snippet (CRLF)
+        "'sha256-8m42BgRd5bhSv7T0zhSWQscz67x6cfUi22r3bnOGZbE='", // GET /invite route bridge (app.ts below)
+        "'sha256-2ovWPRWV6lijwGUMbEpWjogPvtZjKo3A5RRfX5hwFCU='", // static /invite bridge (LF)
+        "'sha256-1JEN6EiDjcjQvYBUKuxLHxDHELVmwZfSiWcqA4hX5WU='", // static /invite bridge (CRLF)
+        "https://cdn.plaid.com",
+        "https://static.cloudflareinsights.com",
+        "https://accounts.google.com",
+        "https://appleid.cdn-apple.com",
+      ],
+      // NOTE: the UI's index.html <meta> CSP carries the SAME two THEME hashes (the
+      // /invite pages have no meta CSP, so their hashes live only here). Keep in sync —
+      // if the theme snippet or an /invite bridge script changes, recompute the hash.
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "data:", "blob:", ...config.allowedOrigins, "https://cdn.plaid.com", "https://*.plaid.com", "https://fonts.googleapis.com"],
