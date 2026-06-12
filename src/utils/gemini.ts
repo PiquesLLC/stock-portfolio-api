@@ -1,8 +1,20 @@
 import axios from 'axios';
 import { config } from '../config';
 import type { PerplexityMessage, PerplexityResponse, PerplexityCallOptions } from './perplexity';
+import { assertAiBudget } from './ai-spend-guard';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+// Published per-token pricing for the chat models we call. Used to log a real
+// USD estimate (the breaker's count cap is the provider-agnostic backstop, but
+// a non-zero USD figure keeps the cost dashboard + USD cap meaningful). Search
+// grounding adds a per-request surcharge on top.
+const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'gemini-2.5-flash': { input: 0.3 / 1_000_000, output: 2.5 / 1_000_000 },
+  'gemini-2.5-pro': { input: 1.25 / 1_000_000, output: 10 / 1_000_000 },
+  'gemini-1.5-flash': { input: 0.075 / 1_000_000, output: 0.3 / 1_000_000 },
+};
+const GEMINI_SEARCH_COST_USD = 0.0; // grounded-search requests are within the free allowance today; raise if billed
 
 /**
  * Call Google Gemini as a drop-in replacement for callPerplexity.
@@ -15,6 +27,10 @@ export async function callGemini(
   options?: PerplexityCallOptions & { model?: string; useSearch?: boolean },
 ): Promise<PerplexityResponse | null> {
   if (!config.googleGeminiApiKey) return null;
+
+  // Platform-wide spend backstop (M6) — throws if the rolling-24h budget is
+  // exhausted or AI is hard-disabled.
+  await assertAiBudget(options?.feature);
 
   const startMs = Date.now();
   const model = options?.model || 'gemini-2.5-flash';
@@ -122,7 +138,13 @@ export async function callGemini(
   const inputTokens = usageMetadata?.promptTokenCount ?? 0;
   const outputTokens = usageMetadata?.candidatesTokenCount ?? 0;
 
-  // Gemini Flash is free, but log for tracking
+  // Real USD estimate (was hardcoded 0, which blinded any USD-based spend cap).
+  const pricing = GEMINI_MODEL_PRICING[model] || GEMINI_MODEL_PRICING['gemini-2.5-flash'];
+  const costUsdEstimate =
+    inputTokens * pricing.input +
+    outputTokens * pricing.output +
+    (options?.useSearch ? GEMINI_SEARCH_COST_USD : 0);
+
   if (options?.feature) {
     logApiUsage({
       provider: 'gemini',
@@ -130,7 +152,7 @@ export async function callGemini(
       feature: options.feature,
       inputTokens,
       outputTokens,
-      costUsdEstimate: 0, // Free tier
+      costUsdEstimate,
       userId: options.userId,
       ticker: options.ticker,
       durationMs,

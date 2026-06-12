@@ -22,10 +22,15 @@ import {
   MonthlyLimitError,
   FeatureDisabledError,
 } from '../services/deep-research.service';
+import { AiBudgetExceededError } from '../utils/ai-spend-guard';
 
 function handleServiceError(err: unknown, res: Response): void {
   if (err instanceof FeatureDisabledError) {
     res.status(503).json({ error: err.message, code: 'feature_disabled' });
+    return;
+  }
+  if (err instanceof AiBudgetExceededError) {
+    res.status(503).json({ error: 'AI is temporarily unavailable. Please try again later.', code: 'ai_budget_exceeded' });
     return;
   }
   if (err instanceof ConcurrentLimitError) {

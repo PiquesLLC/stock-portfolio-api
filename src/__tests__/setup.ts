@@ -78,6 +78,21 @@ vi.mock('../utils/prisma', () => {
     milestoneEvent: { deleteMany: vi.fn() },
     anomalyEvent: { deleteMany: vi.fn() },
     notificationAuditLog: { create: vi.fn(), count: vi.fn(), deleteMany: vi.fn() },
+    // AI spend breaker reads these; default to an empty window so AI-path tests
+    // are never blocked unless they opt in.
+    apiUsageLog: {
+      create: vi.fn().mockResolvedValue({}),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { costUsdEstimate: 0 }, _count: { _all: 0 } }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    deepResearchJob: {
+      aggregate: vi.fn().mockResolvedValue({ _sum: { costUsdEstimate: 0 } }),
+      count: vi.fn().mockResolvedValue(0),
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     pushSubscription: {
       findMany: vi.fn(),
       findFirst: vi.fn(),

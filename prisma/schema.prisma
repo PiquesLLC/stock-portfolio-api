@@ -1266,6 +1266,10 @@ model ApiUsageLog {
   ticker          String?
   durationMs      Int      @default(0)
   createdAt       DateTime @default(now())
+
+  // The AI spend breaker aggregates cost/count over a rolling 24h window; the
+  // retention sweep also deletes by createdAt. Index it so neither table-scans.
+  @@index([createdAt])
 }
 
 // ─── Background Job Reliability ──────────────────────────────────────

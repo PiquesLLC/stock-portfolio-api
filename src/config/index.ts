@@ -11,6 +11,13 @@ if (process.env.NALA_ENV_FILE) {
   dotenv.config();
 }
 
+/** Parse a numeric env var, falling back if unset or non-numeric (so a typo'd
+ *  value can't silently disable a safety cap). */
+function numEnv(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 // CRITICAL: Required environment variables
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {
@@ -112,6 +119,16 @@ export const config = {
 
   // AI provider toggle: 'perplexity' | 'gemini' — controls which provider briefing/daily-report/behavior/events/qa use
   aiProvider: (process.env.AI_PROVIDER || 'perplexity') as 'perplexity' | 'gemini',
+
+  // AI spend circuit breaker (M6). A platform-wide backstop against runaway or
+  // abusive LLM spend — sized ABOVE normal usage; tune down once you know your
+  // baseline from the admin cost dashboard. Trips on EITHER a rolling-24h USD
+  // cap or a call-count cap (the count catches providers whose per-call cost
+  // logs as ~$0, e.g. Gemini). `AI_DISABLED=true` is an instant kill switch.
+  aiSpendBreakerEnabled: process.env.AI_SPEND_BREAKER_ENABLED !== 'false', // default ON
+  aiDailyCostCapUsd: numEnv(process.env.AI_DAILY_COST_CAP_USD, 100),
+  aiDailyCallCap: numEnv(process.env.AI_DAILY_CALL_CAP, 10000),
+  aiHardDisabled: process.env.AI_DISABLED === 'true', // emergency kill switch
 
   // MFA
   mfaEncryptionKey: process.env.MFA_ENCRYPTION_KEY || '', // 64-char hex (32 bytes) for AES-256-GCM

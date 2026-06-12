@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { config } from '../config';
+import { assertAiBudget } from './ai-spend-guard';
 
 export interface PerplexityMessage {
   role: 'system' | 'user';
@@ -46,6 +47,11 @@ export async function callPerplexity(
   options?: PerplexityCallOptions & { model?: string }
 ): Promise<PerplexityResponse | null> {
   if (!config.perplexityApiKey) return null;
+
+  // Platform-wide spend backstop (M6) — throws if the rolling-24h budget is
+  // exhausted or AI is hard-disabled. Covers every caller, including the direct
+  // callPerplexity in yahoo-finance ETF fallback.
+  await assertAiBudget(options?.feature);
 
   const startMs = Date.now();
   const model = options?.model || 'sonar-pro';

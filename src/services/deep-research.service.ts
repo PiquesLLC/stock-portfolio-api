@@ -3,6 +3,7 @@ import { config } from '../config';
 import { getPortfolio } from './portfolio.service';
 import { extractJson } from '../utils/perplexity';
 import { validateCitationUrl } from '../utils/content-filter';
+import { assertAiBudget } from '../utils/ai-spend-guard';
 import prisma from '../utils/prisma';
 import crypto from 'crypto';
 
@@ -736,6 +737,10 @@ export async function startDeepResearch(
     throw new MonthlyLimitError(config.deepResearchMonthlyLimit, monthlyUsed);
   }
 
+  // Guard: platform-wide AI spend backstop (M6). Deep research is the most
+  // expensive single call ($2-5/run), so block new jobs when the budget trips.
+  await assertAiBudget('deep-research');
+
   // Build full prompt with portfolio context
   const portfolioContext = await buildPortfolioContext(userId);
   const fullPrompt = buildDeepResearchPrompt(portfolioContext, prompt, {
@@ -981,6 +986,9 @@ export async function submitFollowUp(
   if (monthlyUsed >= config.deepResearchMonthlyLimit) {
     throw new MonthlyLimitError(config.deepResearchMonthlyLimit, monthlyUsed);
   }
+
+  // Guard: platform-wide AI spend backstop (M6).
+  await assertAiBudget('deep-research');
 
   // Create follow-up job
   const job = await prisma.deepResearchJob.create({
