@@ -25,10 +25,18 @@ if (!jwtSecret) {
   console.error('Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
   process.exit(1);
 }
-// Warn (never exit) on a weak secret: a short JWT_SECRET weakens HS256 signing, but
-// hard-exiting a running prod over it would do more harm than the weakness itself — so
-// we only alert (→ stderr/Sentry) so it can be rotated. 32 chars ≈ the practical floor.
+// A short JWT_SECRET weakens HS256 signing — a brute-forceable secret means
+// forgeable tokens, i.e. full auth bypass (impersonate any user). In PRODUCTION
+// that is worse than a boot failure, so refuse to start rather than serve
+// forgeable tokens; prod's secret is a 64-byte hex today, so this only guards
+// against a future misconfiguration (a fat-fingered env var). Outside production
+// we keep warning, since local dev may legitimately use a short secret.
+// 32 chars ≈ the practical floor.
 if (jwtSecret.length < 32) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error(`FATAL: JWT_SECRET is only ${jwtSecret.length} chars — production requires >=32 (ideally a 64-byte hex). Refusing to boot with a forgeable signing key.`);
+    process.exit(1);
+  }
   console.error(`WARNING: JWT_SECRET is only ${jwtSecret.length} chars — recommend >=32 (ideally a 64-byte hex). Token signing is weak until rotated.`);
 }
 
