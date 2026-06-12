@@ -1,5 +1,18 @@
 import { vi } from 'vitest';
 
+// The supertest suites lazy-load the full Express app inside their first
+// test (`await import('../app')`) so that module-scope env mutations and
+// vi.mock factories apply before the route tree is built. That first import
+// executes the entire app module graph (hundreds of modules plus heavy deps:
+// stripe, sharp, tesseract.js, aws-sdk, plaid, ...) — a one-time per-file
+// cost of ~1-3s in isolation, but >5s when every vitest fork cold-imports
+// the same graph concurrently during a full run. With vitest's default 5s
+// testTimeout, whichever app-suite files lose the CPU/IO scheduling race
+// fail their FIRST test with "Test timed out in 5000ms" — the shifting-set
+// flakiness seen only in full parallel runs. Give tests/hooks enough budget
+// to absorb that contention; genuine hangs still fail, just at 30s.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 // Set test env vars before any imports
 process.env.JWT_SECRET = 'test-jwt-secret-key-for-testing-only';
 process.env.NODE_ENV = 'development';
