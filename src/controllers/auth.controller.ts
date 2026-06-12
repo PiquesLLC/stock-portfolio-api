@@ -399,18 +399,13 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
     }
 
     const { email } = parsed.data;
-    const result = await resendVerificationEmail(email);
-
-    if (!result.success) {
-      if (result.error === 'RATE_LIMIT') {
-        res.status(429).json({ error: 'Too many resend attempts. Please try again later.' });
-        return;
-      }
-      if (result.error === 'ALREADY_VERIFIED') {
-        res.status(400).json({ error: 'Email is already verified' });
-        return;
-      }
-    }
+    // Perform the work (send a code, or skip if unknown / already-verified / over
+    // the per-account resend cap) but ALWAYS return the same generic response.
+    // Distinct statuses (a 400 "already verified" or a 429) would let an attacker
+    // enumerate which emails are registered/verified. The IP-level limiter on this
+    // route still bounds abuse without leaking account state — matching how
+    // forgot-password / forgot-username already behave.
+    await resendVerificationEmail(email);
 
     res.json({ message: 'If this email is registered, a verification code was sent.' });
   } catch (error: unknown) {

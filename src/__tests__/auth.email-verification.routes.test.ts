@@ -131,7 +131,8 @@ describe('Email verification routes', () => {
       expect(res.body.message).toContain('verification code');
     });
 
-    it('returns 429 when resend is rate limited', async () => {
+    // L4: the response must NOT vary with account state, or it enumerates users.
+    it('returns the same generic 200 when the per-account resend cap is hit (no enumeration)', async () => {
       vi.spyOn(authService, 'resendVerificationEmail').mockResolvedValue({
         success: false,
         error: 'RATE_LIMIT',
@@ -141,10 +142,11 @@ describe('Email verification routes', () => {
         .post('/auth/resend-verification')
         .send({ email: TEST_EMAIL });
 
-      expect(res.status).toBe(429);
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('If this email is registered');
     });
 
-    it('returns 400 when email is already verified', async () => {
+    it('returns the same generic 200 when the email is already verified (no enumeration)', async () => {
       vi.spyOn(authService, 'resendVerificationEmail').mockResolvedValue({
         success: false,
         error: 'ALREADY_VERIFIED',
@@ -154,7 +156,8 @@ describe('Email verification routes', () => {
         .post('/auth/resend-verification')
         .send({ email: TEST_EMAIL });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('If this email is registered');
     });
   });
 });
