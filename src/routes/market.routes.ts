@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { getPrices, getQuote, getFastQuote, getStockDetails, getIntraday, getHourlyCandles, getDailyCandles, getCandles, searchSymbols, getBenchmarkClosesHandler, getMarketNews, getTickerNews, getAIEventsHandler, getETFHoldingsHandler, getAssetAboutHandler, askStockQuestionHandler, getHistoricalCAGRHandler, getHeatmapHandler, getMarketScreenerHandler, getNalaScoreHandler, getEarningsTrackHandler, getThemesHeatmapHandler, getEtfHeatmapHandler, getMarketSentimentHandler, getValueRadarHandler } from '../controllers/market.controller';
 import { getSectorPerformanceHandler } from '../controllers/sector-performance.controller';
-import { heavyReadLimiter, aiLimiter } from '../middleware/rateLimiter';
+import { heavyReadLimiter, aiLimiter, searchLimiter } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requirePlan } from '../middleware/plan.middleware';
 const router = Router();
 
-router.get('/search', searchSymbols);
+router.get('/search', searchLimiter, searchSymbols);
 router.get('/prices', heavyReadLimiter, getPrices);
 router.get('/quote/:ticker', heavyReadLimiter, getQuote);
 router.get('/fast-quote/:ticker', heavyReadLimiter, getFastQuote);

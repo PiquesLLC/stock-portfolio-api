@@ -277,6 +277,29 @@ export const heavyReadLimiter = rateLimit({
   keyGenerator: userOrIpKey,
 });
 
+/**
+ * Symbol search. 60/min prod per IP (route is unauthenticated). Tighter than
+ * heavyReadLimiter (300) because /market/search is a guaranteed paid upstream
+ * call (Finnhub /search, per-query cache key is trivially busted) plus a
+ * market-cap/ADV enrichment fan-out — i.e. real cost amplification, not a
+ * cached dashboard read. Legit use is a 300ms-debounced autocomplete (~3 req/s
+ * while typing), so 60/min leaves comfortable headroom. IP-keyed because no
+ * auth runs before it. Override via SEARCH_RATE_LIMIT_PER_MIN if NAT collisions
+ * appear.
+ */
+const SEARCH_MAX_PER_MIN = (() => {
+  const n = parseInt(process.env.SEARCH_RATE_LIMIT_PER_MIN || '60', 10);
+  return Number.isFinite(n) && n > 0 ? n : 60; // guard a typo'd env from disabling the limit
+})();
+export const searchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isProd ? SEARCH_MAX_PER_MIN : 1000,
+  message: { error: 'Too many searches. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipOnlyKey,
+});
+
 // ---------------------------------------------------------------------------
 // AI endpoint limiters (keyed by user ID — these cost real money)
 // ---------------------------------------------------------------------------
