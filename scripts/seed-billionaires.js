@@ -15,8 +15,16 @@ const path = require('path');
 const { PrismaLibSql } = require('@prisma/adapter-libsql');
 const { PrismaClient } = require('../dist/generated/prisma/client.js');
 
-const dbPath = path.resolve(__dirname, '..', 'prisma', 'dev.db');
-const adapter = new PrismaLibSql({ url: 'file:' + dbPath });
+// Honor DATABASE_URL, mirroring src/utils/prisma.ts resolveDbUrl(): libsql
+// resolves relative file: paths against CWD, but the app and Prisma CLI
+// resolve them against prisma/. The previous hardcoded prisma/dev.db path
+// ignored DATABASE_URL entirely, so every prod boot seeded a nonexistent
+// ephemeral file and the real Billionaire table stayed empty.
+const rawUrl = process.env.DATABASE_URL || 'file:./dev.db';
+const url = rawUrl.startsWith('file:./')
+  ? 'file:' + path.resolve(__dirname, '..', 'prisma', rawUrl.slice(7))
+  : rawUrl;
+const adapter = new PrismaLibSql({ url });
 const prisma = new PrismaClient({ adapter });
 
 const BILLIONAIRES = [
