@@ -1073,6 +1073,15 @@ export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
   }
 }
 
+// Thrown when no provider has a quote for the ticker — the controller maps it
+// to a 404 (it used to surface as a generic 500 for any mistyped symbol).
+export class TickerNotFoundError extends Error {
+  constructor(ticker: string) {
+    super(`No quote data available for ${ticker}`);
+    this.name = 'TickerNotFoundError';
+  }
+}
+
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 
@@ -1085,7 +1094,27 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
   ]);
 
   if (!quote) {
-    throw new Error(`No quote data available for ${upperTicker}`);
+    // A null quote means EITHER the symbol doesn't exist OR every quote
+    // provider transiently failed for a real symbol. Only the first should
+    // 404 (a sticky "not found"); the second must stay a retryable 5xx.
+    // A real symbol still resolves in search when the quote providers blip,
+    // so use an exact search match to disambiguate — and fail toward
+    // "retryable" on any ambiguity (search itself erroring, etc.).
+    let confirmedUnknown = false;
+    try {
+      // meta.partial is set whenever the search providers themselves failed
+      // (Polygon/Finnhub error or rate-limit) — results are then unreliable, so
+      // a partial search must NOT be read as "no such symbol". Only a complete
+      // search that returns no exact symbol match confirms the ticker unknown.
+      const { results, meta } = await searchTickers(upperTicker);
+      confirmedUnknown = !meta.partial && !results.some((r) => r.symbol.toUpperCase() === upperTicker);
+    } catch {
+      confirmedUnknown = false;
+    }
+    if (confirmedUnknown) {
+      throw new TickerNotFoundError(upperTicker);
+    }
+    throw new Error(`No quote data available for ${upperTicker} (transient)`);
   }
 
   // Map profile

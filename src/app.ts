@@ -176,7 +176,7 @@ app.use(helmet({
 }));
 
 // CORS configuration - locked down to specific origins
-app.use(cors({
+const corsMiddleware = cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (same-origin in production, mobile apps, Postman in dev)
     if (!origin) {
@@ -192,10 +192,27 @@ app.use(cors({
         return callback(null, true);
       }
     }
-    callback(new Error(`CORS not allowed for origin: ${origin}`));
+    // Soft deny: omit CORS headers (browser blocks cross-origin reads) instead
+    // of throwing, which the error handler turned into a 500 on every asset.
+    // Cookie-authenticated mutations from foreign origins are still rejected
+    // by the CSRF origin check below.
+    callback(null, false);
   },
   credentials: true, // Required for cookies
-}));
+});
+app.use((req, res, next) => {
+  // Browsers send an Origin header on crossorigin <script>/<link> fetches and
+  // same-origin POSTs. When that origin IS this server (the API serving its
+  // own client), it must never go through the cross-origin allowlist — a
+  // miss there white-screened the whole site (every asset 500'd).
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      if (new URL(origin).host === req.headers.host) return next();
+    } catch { /* malformed Origin: fall through to cors */ }
+  }
+  corsMiddleware(req, res, next);
+});
 
 app.use(cookieParser());
 

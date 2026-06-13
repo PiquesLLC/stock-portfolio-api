@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles, fetchCandles } from '../services/market.service';
+import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles, fetchCandles, TickerNotFoundError } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
@@ -151,6 +151,10 @@ export async function getStockDetails(req: Request, res: Response): Promise<void
     const details = await fetchStockDetails(ticker);
     res.json(details);
   } catch (error: unknown) {
+    if (error instanceof TickerNotFoundError) {
+      res.status(404).json({ error: 'Stock not found' });
+      return;
+    }
     console.error('[Market] getStockDetails error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch stock details' });
   }
