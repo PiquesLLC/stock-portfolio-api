@@ -1,7 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { Portfolio } from '../types';
-import { getMarketSession } from '../utils/market-hours';
+import { getMarketSession, isOpenedTodayET } from '../utils/market-hours';
 
 
 
@@ -91,7 +91,13 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
     const pl = hasValidPrice ? currentValue - cost : 0;
     const plPct = hasValidPrice && cost > 0 ? (pl / cost) * 100 : 0;
 
-    const previousValue = hasValidPrice ? h.shares * previousClose : 0;
+    // Day P&L anchor: positions opened today anchor at cost basis, not
+    // previousClose (the holder didn't own them at yesterday's close). Mirrors
+    // getPortfolio so the profile page and dashboard show the same "today" — and
+    // so the dailyPL this path persists via createUserSnapshotIfNeeded agrees
+    // with the leaderboard-refresh writer for the same snapshot.
+    const dayAnchor = isOpenedTodayET(h.createdAt) && h.averageCost > 0 ? h.averageCost : previousClose;
+    const previousValue = hasValidPrice ? h.shares * dayAnchor : 0;
     const dc = hasValidPrice ? currentValue - previousValue : 0;
     const dcPct = hasValidPrice && previousValue > 0
       ? (dc / previousValue) * 100

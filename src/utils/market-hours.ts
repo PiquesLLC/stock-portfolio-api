@@ -44,6 +44,28 @@ export function getMarketSession(date: Date = new Date()): MarketSession {
 }
 
 /**
+ * True if `createdAt` falls on the current calendar day in US market time (ET).
+ *
+ * Used to anchor a position's day P&L at its cost basis when it was opened
+ * today: the holder did not own it at yesterday's close, so anchoring the
+ * day change at previousClose counts a full-day move the user never
+ * experienced (a position only ever up could show a red "today" loss).
+ *
+ * Note: keyed on the aggregated Holding row's createdAt (when the position was
+ * first opened), so adding shares intraday to a position opened on a prior day
+ * is NOT reclassified as "opened today" — those added shares stay anchored at
+ * previousClose. Per-lot accuracy would require the trade ledger, which the
+ * valuation path intentionally does not load.
+ */
+export function isOpenedTodayET(createdAt: Date, now: Date = new Date()): boolean {
+  // Defensive: a missing/invalid createdAt must not crash valuation — fall back
+  // to "not today" so the day-P&L anchor stays at previousClose.
+  if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) return false;
+  const etDate = (d: Date) => d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  return etDate(createdAt) === etDate(now);
+}
+
+/**
  * Returns a human-readable label for the session
  */
 export function getSessionLabel(session: MarketSession): string {

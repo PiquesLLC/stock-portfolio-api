@@ -8,6 +8,7 @@ import {
 import { fetchPrices } from './market.service';
 import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { etDate } from '../utils/date';
+import { isOpenedTodayET } from '../utils/market-hours';
 import NodeCache from 'node-cache';
 
 const REGION_DB_MAP: Record<LeaderboardRegion, string | null> = {
@@ -112,7 +113,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   const [allHoldings, allSettings] = await Promise.all([
     prisma.holding.findMany({
       where: { userId: { in: userIds } },
-      select: { userId: true, ticker: true, shares: true, averageCost: true },
+      select: { userId: true, ticker: true, shares: true, averageCost: true, createdAt: true },
     }),
     prisma.userSettings.findMany({
       where: { userId: { in: userIds } },
@@ -200,9 +201,12 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         : (quote?.currentPrice ?? 0);
       if (price > 0) { liveHoldings += h.shares * price; liveCount++; }
 
-      // Previous close (for 1D)
-      const prevClose = quote?.previousClose ?? 0;
-      if (prevClose > 0) { prevCloseHoldings += h.shares * prevClose; prevCloseCount++; }
+      // Previous-close baseline (for 1D). A position opened today is anchored
+      // at its cost basis, not previousClose — the user didn't hold it at
+      // yesterday's close — matching getPortfolio's day-P&L anchor so the
+      // leaderboard 1D return agrees with the dashboard.
+      const dayAnchor = isOpenedTodayET(h.createdAt) && h.averageCost > 0 ? h.averageCost : (quote?.previousClose ?? 0);
+      if (dayAnchor > 0) { prevCloseHoldings += h.shares * dayAnchor; prevCloseCount++; }
 
       // Historical price at window start from candle data
       const candles = candleMap.get(ticker);

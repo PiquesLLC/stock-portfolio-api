@@ -84,6 +84,60 @@ describe('getPortfolio valuation', () => {
     expect(pf.quotesUnavailableCount).toBe(1);
   });
 
+  it('anchors day P&L at COST BASIS for a position opened today (not previousClose)', async () => {
+    // BUG-002: a position bought today, on a stock down on the day, must not
+    // show a "today" loss — the holder never owned it at yesterday's close.
+    // Bought 2 @ 290 today; stock at 291.30, previousClose 295.63 (down -1.46%).
+    (prismaMock as any).holding.findMany.mockResolvedValue([
+      { id: 'h1', userId: 'u1', portfolioId: 'pf_1', ticker: 'AAPL', shares: 2, averageCost: 290, holdingType: 'equity', createdAt: new Date() },
+    ]);
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['AAPL', equityQuote(291.30, 295.63)]])));
+    getOptionQuotesMock.mockResolvedValue(new Map());
+
+    const pf = await getPortfolio('u1');
+    const h = pf.holdings.find((x: any) => x.ticker === 'AAPL') as any;
+
+    // Anchored at cost (290), not previousClose (295.63):
+    expect(h.dayChange).toBeCloseTo(2.6, 6);      // 2*(291.30 - 290), a GAIN
+    expect(h.dayChange).toBeGreaterThan(0);        // NOT the buggy 2*(291.30-295.63) = -8.66
+    expect(h.dayChangePercent).toBeCloseTo((1.30 / 290) * 100, 4);
+    // Total return and day change agree in sign for a same-day position:
+    expect(h.profitLoss).toBeCloseTo(2.6, 6);
+    expect(pf.dayChange).toBeCloseTo(2.6, 6);
+  });
+
+  it('still anchors day P&L at previousClose for a position opened BEFORE today', async () => {
+    const lastMonth = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    (prismaMock as any).holding.findMany.mockResolvedValue([
+      { id: 'h1', userId: 'u1', portfolioId: 'pf_1', ticker: 'AAPL', shares: 2, averageCost: 290, holdingType: 'equity', createdAt: lastMonth },
+    ]);
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['AAPL', equityQuote(291.30, 295.63)]])));
+    getOptionQuotesMock.mockResolvedValue(new Map());
+
+    const pf = await getPortfolio('u1');
+    const h = pf.holdings.find((x: any) => x.ticker === 'AAPL') as any;
+
+    // Old position: standard day change vs previousClose (a loss today).
+    expect(h.dayChange).toBeCloseTo(2 * (291.30 - 295.63), 5);  // ≈ -8.66
+    expect(h.dayChange).toBeLessThan(0);
+  });
+
+  it('falls back to previousClose when an opened-today position has zero/unusable cost basis', async () => {
+    // Gifted/transferred-in lot booked at cost 0 must not produce an infinite %
+    // — anchor stays at previousClose.
+    (prismaMock as any).holding.findMany.mockResolvedValue([
+      { id: 'h1', userId: 'u1', portfolioId: 'pf_1', ticker: 'AAPL', shares: 2, averageCost: 0, holdingType: 'equity', createdAt: new Date() },
+    ]);
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['AAPL', equityQuote(291.30, 295.63)]])));
+    getOptionQuotesMock.mockResolvedValue(new Map());
+
+    const pf = await getPortfolio('u1');
+    const h = pf.holdings.find((x: any) => x.ticker === 'AAPL') as any;
+
+    expect(h.dayChange).toBeCloseTo(2 * (291.30 - 295.63), 5);  // previousClose anchor
+    expect(Number.isFinite(h.dayChangePercent)).toBe(true);
+  });
+
   it('values an option with the 100-share contract multiplier (regression guard)', async () => {
     (prismaMock as any).holding.findMany.mockResolvedValue([
       {

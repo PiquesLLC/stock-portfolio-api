@@ -1,7 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { Holding, HoldingInput, HoldingWithQuote, OptionWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
-import { getMarketSession } from '../utils/market-hours';
+import { getMarketSession, isOpenedTodayET } from '../utils/market-hours';
 import { getOptionQuotes } from './options.service';
 import { daysToExpiry, formatOptionDisplay } from '../utils/occ-parser';
 import { PlanLimitError } from '../utils/plan-limit.error';
@@ -354,7 +354,17 @@ export async function getPortfolio(userId: string, options?: { preferPolygon?: b
       ? (profitLoss / holdingTotalCost) * 100
       : 0;
 
-    const previousValue = hasValidPrice ? holding.shares * previousClose : 0;
+    // Day P&L anchor: for a position opened TODAY the holder didn't own it at
+    // yesterday's close, so anchor at their cost basis instead of previousClose
+    // (otherwise a position only ever up can show a red "today" loss). Falls
+    // back to previousClose when cost basis is unusable (0 / gifted / transfer).
+    // The regular/after-hours split below is all relative to previousValue, so
+    // it stays internally consistent (regularDayChange + afterHoursChange always
+    // equals the total dayChange) regardless of which anchor is used.
+    const dayAnchor = isOpenedTodayET(holding.createdAt) && holding.averageCost > 0
+      ? holding.averageCost
+      : previousClose;
+    const previousValue = hasValidPrice ? holding.shares * dayAnchor : 0;
     const holdingDayChange = hasValidPrice ? currentValue - previousValue : 0;
     const holdingDayChangePercent = hasValidPrice && previousValue > 0
       ? (holdingDayChange / previousValue) * 100

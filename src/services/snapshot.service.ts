@@ -6,7 +6,7 @@ import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 import { replayDailyLedger } from './ledger/replay.service';
 import { LEDGER_SETTLEMENT_POLICY, TRADE_SETTLEMENT_POLICY, isValidLedgerEventType } from './ledger/settlement-policy';
-import { getMarketSession } from '../utils/market-hours';
+import { getMarketSession, isOpenedTodayET } from '../utils/market-hours';
 import { etDate } from '../utils/date';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
@@ -903,7 +903,7 @@ export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number
     // Gather all holdings for all leaderboard users in one query
     const allHoldings = await prisma.holding.findMany({
       where: { userId: { in: users.map(u => u.id) } },
-      select: { userId: true, ticker: true, shares: true, averageCost: true },
+      select: { userId: true, ticker: true, shares: true, averageCost: true, createdAt: true },
     });
 
     // Collect unique tickers across all users (normalize to uppercase)
@@ -961,9 +961,12 @@ export async function refreshLeaderboardSnapshots(): Promise<{ refreshed: number
           if (price <= 0) continue;
 
           totalCost += h.shares * h.averageCost; // only count if price is valid
-          const previousClose = quote?.previousClose ?? price;
+          // Positions opened today anchor day P&L at cost basis, not
+          // previousClose (matches getPortfolio so this snapshot's dailyPL
+          // agrees with the live dashboard).
+          const dayAnchor = isOpenedTodayET(h.createdAt) && h.averageCost > 0 ? h.averageCost : (quote?.previousClose ?? price);
           const value = h.shares * price;
-          const prevValue = h.shares * previousClose;
+          const prevValue = h.shares * dayAnchor;
 
           holdingsValue += value;
           dayChange += value - prevValue;
