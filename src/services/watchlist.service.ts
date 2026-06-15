@@ -47,7 +47,7 @@ function dateDaysAgo(days: number): string {
   return etDate(d);
 }
 
-async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
+export async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
   const cacheKey = `wl-perf:${ticker}`;
   const cached = perfCache.get<TickerPerf>(cacheKey);
   if (cached) return cached;
@@ -62,18 +62,22 @@ async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
     }
 
     const closes = data.closes;
+    const timestamps = data.timestamps; // unix seconds, ascending
     const current = closes[closes.length - 1];
+    const nowMs = Date.now();
 
-    // ~5 trading days back for 1 week
-    const weekIdx = Math.max(0, closes.length - 6);
-    const weekAgoPrice = closes[weekIdx];
-
-    // ~21 trading days back for 1 month
-    const monthIdx = Math.max(0, closes.length - 22);
-    const monthAgoPrice = closes[monthIdx];
-
-    // First data point = ~1 year ago
-    const yearAgoPrice = closes[0];
+    // Anchor each window by DATE (first candle within the window), not a fixed
+    // trading-bar count. Fixed bar counts make "1W" drift past 7 calendar days
+    // across holiday weeks and disagree with the heatmap/stock chart. Mirrors the
+    // heatmap period fix.
+    const startClose = (days: number): number => {
+      const cutoff = nowMs - days * 86_400_000;
+      const idx = timestamps.findIndex((t) => t * 1000 >= cutoff);
+      return closes[idx >= 0 ? idx : 0];
+    };
+    const weekAgoPrice = startClose(7);
+    const monthAgoPrice = startClose(30);
+    const yearAgoPrice = startClose(365);
 
     const perf: TickerPerf = {
       weekChangePercent: weekAgoPrice > 0 ? ((current - weekAgoPrice) / weekAgoPrice) * 100 : 0,

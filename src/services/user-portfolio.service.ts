@@ -113,8 +113,11 @@ export async function getUserPortfolio(userId: string): Promise<Portfolio | null
       regularHoldingsValue += regValue;
       regularDayChange += regValue - previousValue;
       afterHoursChange += currentValue - regValue;
+      // Only count cost for priced holdings — mirrors getPortfolio (portfolio.service.ts)
+      // so the public profile and the owner's dashboard show the same total return
+      // when a quote is missing.
+      totalCost += cost;
     }
-    totalCost += cost;
 
     return {
       id: h.id,
