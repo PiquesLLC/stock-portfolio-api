@@ -6,8 +6,8 @@ import prisma from '../utils/prisma';
 import { encrypt, decrypt } from '../utils/encryption';
 import { sendOtpEmail, sendEmailVerification } from './email.service';
 import { OTP_PURPOSE } from '../types/auth';
+import { config } from '../config';
 
-const SALT_ROUNDS = 10;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const TOTP_ISSUER = 'Nala';
@@ -278,7 +278,7 @@ export async function updateEmail(userId: string, email: string): Promise<void> 
   }
 
   const code = generateOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   // Supersede only prior verification codes (same purpose) — must not clobber
@@ -339,7 +339,7 @@ export async function beginEmailOtpSetup(userId: string): Promise<void> {
 
   // Send a setup verification code
   const code = generateOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   await prisma.emailOtpCode.updateMany({
@@ -390,7 +390,7 @@ export async function sendEmailOtp(userId: string): Promise<void> {
   if (!user?.email) throw new Error('No email on file');
 
   const code = generateOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   // Invalidate previous codes of the same purpose only
@@ -449,7 +449,7 @@ export async function generateBackupCodes(userId: string): Promise<string[]> {
     codes.push(code);
     // Hash the normalized form (no hyphen) so verification matches
     const normalized = code.replace(/-/g, '');
-    const codeHash = await bcrypt.hash(normalized, SALT_ROUNDS);
+    const codeHash = await bcrypt.hash(normalized, config.bcryptOtpSaltRounds);
     await prisma.mfaBackupCode.create({
       data: { userId, codeHash },
     });

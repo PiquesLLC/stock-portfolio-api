@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as path from 'path';
+import * as Sentry from '@sentry/node';
 import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
@@ -143,7 +144,9 @@ router.get('/disk-info', requireAuth, requireAdmin, async (_req: AuthRequest, re
 
     res.json({ files, pragma, rowCounts });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] disk-info error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'disk-info' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -242,7 +245,9 @@ router.post('/cleanup-db', requireAuth, requireAdmin, async (req: AuthRequest, r
 
     res.json({ success: true, aggressive, log });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e), log });
+    console.error('[Admin] cleanup-db error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'cleanup-db' } });
+    res.status(500).json({ error: 'Cleanup failed', log });
   }
 });
 
@@ -262,7 +267,9 @@ router.post('/prune-data-backups', requireAuth, requireAdmin, async (req: AuthRe
     const result = pruneBackupsToKeep(keep);
     res.json({ success: true, backupDir: BACKUP_DIR, keep, ...result });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] prune-data-backups error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'prune-data-backups' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -282,7 +289,9 @@ router.get('/users/privacy', requireAuth, requireAdmin, async (_req: AuthRequest
     });
     res.json({ count: users.length, users });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] users/privacy error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'users/privacy' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -315,7 +324,9 @@ router.post('/set-privacy', requireAuth, requireAdmin, async (req: AuthRequest, 
     console.log(`[Admin Privacy] ${req.user!.userId} changed ${userId} (${before.username}) profilePublic: ${before.profilePublic} → ${profilePublic}`);
     res.json({ success: true, before: before.profilePublic, after: user.profilePublic, user });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] set-privacy error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'set-privacy' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -337,7 +348,9 @@ router.post('/bulk-set-privacy', requireAuth, requireAdmin, async (req: AuthRequ
     console.log(`[Admin Privacy] ${req.user!.userId} bulk-set profilePublic=${profilePublic} for ${count.count} users: ${userIds.join(', ')}`);
     res.json({ success: true, updated: count.count });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] bulk-set-privacy error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'bulk-set-privacy' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -393,7 +406,9 @@ router.post('/user/:userId/strike', requireAuth, requireAdmin, async (req: AuthR
       suspended,
     });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] strike error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'strike' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -408,7 +423,9 @@ router.get('/user/:userId/strikes', requireAuth, requireAdmin, async (req: AuthR
     });
     res.json({ userId, strikeCount: strikes.length, strikes });
   } catch (e: unknown) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    console.error('[Admin] strikes error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'strikes' } });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

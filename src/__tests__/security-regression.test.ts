@@ -11,7 +11,7 @@
 
 import express from 'express';
 import request from 'supertest';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // --- Mock rateLimiters as passthrough ---
 vi.mock('../middleware/rateLimiter', async (importOriginal) => {
@@ -133,6 +133,7 @@ vi.mock('../services/market.service', () => ({
 }));
 
 import { __mockPrisma } from '../utils/prisma';
+import { config } from '../config';
 import { saveSubscription } from '../services/push.service';
 import { postDividendsForDate, backfillMissedDividends } from '../services/dividend-post.service';
 import { syncAllHeldTickers, syncDividendEventsForTicker } from '../services/dividend-fetch.service';
@@ -586,5 +587,114 @@ describe('Waitlist join — anti-enumeration', () => {
       .send({ email: 'not-an-email' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('email');
+  });
+});
+
+// ===================================================================
+// 6. Admin error exposure (L5) — 500 responses must not leak raw
+//    exception text (DB column names, SQLITE error codes, etc.)
+// ===================================================================
+describe('Admin error exposure — 500 responses are sanitized', () => {
+  let app: express.Express;
+
+  // A realistic DB error whose text MUST NOT reach the client. The two
+  // sentinel substrings ('secret_xyz', 'SQLITE') stand in for any internal
+  // schema/engine detail that raw `e.message` would otherwise expose.
+  const SENTINEL_ERROR = 'SQLITE_ERROR: no such column: secret_xyz';
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // The shared prisma mock (setup.ts) doesn't define user.findMany, which
+    // GET /admin/users/privacy calls — attach it here so the leak test can
+    // arrange a rejection on it (mirrors the holding.findFirst guard above).
+    if (!(__mockPrisma as any).user.findMany) {
+      (__mockPrisma as any).user.findMany = vi.fn();
+    }
+    // requireAuth mock sets userId='test-user-1'; grant it admin via the
+    // (mocked) config allowlist so requireAdmin lets the request through.
+    config.waitlistAdminUserIds = ['test-user-1'];
+    app = express();
+    app.use(express.json());
+    const adminRoutes = (await import('../routes/admin.routes')).default;
+    app.use('/admin', adminRoutes);
+  });
+
+  afterEach(() => {
+    config.waitlistAdminUserIds = [];
+  });
+
+  // Sanity: the admin gate is actually engaged for these routes. A non-admin
+  // must be rejected before reaching the handler, otherwise the leak tests
+  // below would be testing an unguarded path.
+  it('rejects non-admin callers with 403 (gate is engaged)', async () => {
+    config.waitlistAdminUserIds = [];
+    const res = await request(app).get('/admin/users/privacy');
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Forbidden');
+  });
+
+  // Each case: arrange the underlying prisma call to reject with SENTINEL_ERROR,
+  // hit the endpoint as an admin, and assert (a) the generic body and (b) that
+  // no internal detail survives anywhere in the serialized response.
+  const cases: Array<{
+    name: string;
+    arrange: () => void;
+    call: () => request.Test;
+    expectedError: string;
+  }> = [
+    {
+      name: 'GET /admin/users/privacy',
+      arrange: () => (__mockPrisma as any).user.findMany.mockRejectedValue(new Error(SENTINEL_ERROR)),
+      call: () => request(app).get('/admin/users/privacy'),
+      expectedError: 'Internal server error',
+    },
+    {
+      name: 'POST /admin/set-privacy',
+      arrange: () => (__mockPrisma as any).user.findUnique.mockRejectedValue(new Error(SENTINEL_ERROR)),
+      call: () => request(app).post('/admin/set-privacy').send({ userId: 'u-1', profilePublic: true }),
+      expectedError: 'Internal server error',
+    },
+    {
+      name: 'POST /admin/user/:userId/strike',
+      arrange: () => (__mockPrisma as any).user.findUnique.mockRejectedValue(new Error(SENTINEL_ERROR)),
+      call: () => request(app).post('/admin/user/u-1/strike').send({ reason: 'spam' }),
+      expectedError: 'Internal server error',
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} returns a generic 500 and never leaks raw error text`, async () => {
+      c.arrange();
+      const res = await c.call();
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe(c.expectedError);
+
+      // The whole serialized response (not just .error) must be clean.
+      const raw = JSON.stringify(res.body);
+      expect(raw).not.toContain('secret_xyz');
+      expect(raw).not.toContain('SQLITE');
+    });
+  }
+
+  // cleanup-db is special: it keeps a `log` field (safe partial progress) and
+  // uses a distinct 'Cleanup failed' message. $executeRawUnsafe isn't in the
+  // shared mock, so attach it here. The confirm token is required to get past
+  // the 400 validation guard and reach the leaking 500 path.
+  it("POST /admin/cleanup-db returns 'Cleanup failed' with log, no raw error", async () => {
+    (__mockPrisma as any).$executeRawUnsafe = vi.fn().mockRejectedValue(new Error(SENTINEL_ERROR));
+
+    const res = await request(app)
+      .post('/admin/cleanup-db')
+      .send({ confirm: 'cleanup-db' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Cleanup failed');
+    // `log` stays (it's partial-progress diagnostics, safe to return).
+    expect(res.body).toHaveProperty('log');
+
+    const raw = JSON.stringify(res.body);
+    expect(raw).not.toContain('secret_xyz');
+    expect(raw).not.toContain('SQLITE');
   });
 });

@@ -2,6 +2,7 @@
 import jwt, { SignOptions, Secret, TokenExpiredError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import * as Sentry from '@sentry/node';
 import { config } from '../config';
 import { JwtPayload, LoginResponse, MfaChallengeResponse, OTP_PURPOSE } from '../types/auth';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from './mfa.service';
@@ -9,7 +10,6 @@ import { sendEmailVerification, sendPasswordResetEmail, sendUsernameReminderEmai
 
 
 
-const SALT_ROUNDS = 10;
 export const CURRENT_POLICY_VERSION = '1.0';
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
 // Was 30s. Bumped to 5 min so users mid-rotation across a deploy (which wipes
@@ -383,7 +383,7 @@ async function recoverRecentRefreshRotationWithRetry(
 
 async function issueEmailVerificationCode(userId: string, email: string): Promise<void> {
   const code = generateEmailOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   // Only supersede prior codes of the SAME purpose — a verification resend
@@ -406,7 +406,7 @@ async function issueEmailVerificationCode(userId: string, email: string): Promis
 
 async function issuePasswordResetCode(userId: string, email: string): Promise<void> {
   const code = generateEmailOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   await prisma.emailOtpCode.updateMany({
@@ -429,7 +429,7 @@ async function issuePasswordResetCode(userId: string, email: string): Promise<vo
  * Hash a password using bcrypt
  */
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, SALT_ROUNDS);
+  return bcrypt.hash(password, config.bcryptSaltRounds);
 }
 
 /**
@@ -477,6 +477,25 @@ export async function generateRefreshToken(userId: string, family?: string): Pro
 }
 
 /**
+ * Detection telemetry for probable refresh-token theft. Called when a refresh
+ * token that has already been rotated/revoked is presented and cannot be
+ * legitimately recovered, forcing a family-wide revocation. Logging/telemetry
+ * only — the caller still performs the revoke. `reason` distinguishes the two
+ * call sites for triage.
+ */
+function reportRefreshTokenReuse(
+  userId: string,
+  family: string,
+  reason: 'revoked_token_reused' | 'rotated_token_replayed'
+): void {
+  console.warn('[auth] refresh token reuse detected — revoking family', { userId, family, reason });
+  Sentry.captureException(new Error('refresh_token_reuse_detected'), {
+    tags: { component: 'auth_refresh', reason },
+    extra: { userId, family },
+  });
+}
+
+/**
  * Rotate a refresh token: revoke the old one and issue a new one.
  * Returns null if the provided token is invalid, expired, or already revoked.
  */
@@ -519,6 +538,10 @@ export async function rotateRefreshToken(
       }
     }
 
+    // Recovery failed on an already-revoked token (replay outside the grace
+    // window, or a stolen already-rotated token). Treat as probable token
+    // theft and revoke the whole family. Emit telemetry so this isn't silent.
+    reportRefreshTokenReuse(stored.userId, tokenFamily, 'revoked_token_reused');
     invalidateRecentRefreshRotations({ userId: stored.userId, family: tokenFamily });
     await prisma.refreshToken.updateMany({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
@@ -546,6 +569,10 @@ export async function rotateRefreshToken(
       }
     }
 
+    // We lost the atomic revoke race but couldn't recover the sibling rotation
+    // either — the token was already consumed and isn't a legitimate concurrent
+    // refresh. Treat as probable replay/theft and revoke the family, with telemetry.
+    reportRefreshTokenReuse(stored.userId, tokenFamily, 'rotated_token_replayed');
     invalidateRecentRefreshRotations({ userId: stored.userId, family: tokenFamily });
     await prisma.refreshToken.updateMany({
       where: { userId: stored.userId, family: tokenFamily, revokedAt: null },
@@ -1446,7 +1473,7 @@ export async function requestEmailChange(
   }
 
   const code = generateEmailOtpCode();
-  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+  const codeHash = await bcrypt.hash(code, config.bcryptOtpSaltRounds);
   const expiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
 
   // Invalidate any prior pending changes for this user so only the newest is live.

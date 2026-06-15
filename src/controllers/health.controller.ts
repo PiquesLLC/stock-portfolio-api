@@ -130,10 +130,11 @@ export async function healthStatus(req: Request, res: Response): Promise<void> {
     await prisma.$queryRaw`SELECT 1`;
     database = { connected: true, latencyMs: Date.now() - dbStartedAt };
   } catch (error: unknown) {
+    console.error('[Health] DB status check failed:', error instanceof Error ? error.message : String(error));
     database = {
       connected: false,
       latencyMs: Date.now() - dbStartedAt,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'unavailable',
     };
   }
 

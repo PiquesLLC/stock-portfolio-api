@@ -83,6 +83,23 @@ if (mfaKey && !/^[0-9a-fA-F]{64}$/.test(mfaKey)) {
   process.exit(1);
 }
 
+// bcrypt cost (work factor). Passwords are hashed ONCE per login/signup so a
+// higher cost is affordable and meaningfully slows offline cracking; OTP / backup
+// codes are short-lived AND generateBackupCodes() hashes 10 in a loop, so they
+// stay at the cheaper cost to keep that path responsive. bcryptjs is pure-JS and
+// single-threaded, so cost 12 is ~4x the work of cost 10.
+//
+// Tests drop BOTH to the bcrypt minimum (4): round-trip correctness is what the
+// suite verifies, not the work factor, and cost 12 in a loop would dominate
+// CI time. We honor the repo's existing test-detection convention — the test
+// setup sets NODE_ENV='development', and vitest exports VITEST='true' — see
+// email.service.ts / etf-heatmap.service.ts for the same guard.
+const isTestEnv = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+// Floor the non-test cost at 10 so a blank/typo'd env override (e.g. "" -> 0)
+// can't silently drop hashing below the prior baseline; it can only tune upward.
+const bcryptSaltRounds = isTestEnv ? 4 : Math.max(10, numEnv(process.env.BCRYPT_SALT_ROUNDS, 12));
+const bcryptOtpSaltRounds = isTestEnv ? 4 : Math.max(10, numEnv(process.env.BCRYPT_OTP_SALT_ROUNDS, 10));
+
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -107,6 +124,10 @@ export const config = {
   // Projection settings
   sp500CagrTotalReturn: parseFloat(process.env.SP500_CAGR_TOTAL_RETURN || '0.10'), // 10% default
   riskFreeRate: parseFloat(process.env.RISK_FREE_RATE || '0.02'), // 2% default
+
+  // bcrypt work factors — passwords (12) vs OTP/backup codes (10); both 4 in tests.
+  bcryptSaltRounds,
+  bcryptOtpSaltRounds,
 
   // JWT Authentication
   jwtSecret,

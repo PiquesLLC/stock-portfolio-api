@@ -455,6 +455,9 @@ describe('Auth Service', () => {
       });
       prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
+      // Detection telemetry: family revocation on reuse must NOT be silent.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
       const result = await rotateRefreshToken('revoked-token-recent');
       // Revoked token reuse triggers family-wide revocation and returns null
       expect(result).toBeNull();
@@ -464,6 +467,12 @@ describe('Auth Service', () => {
           where: expect.objectContaining({ userId: 'user-1', family: 'family-1', revokedAt: null }),
         })
       );
+      // Verify the reuse-detection signal fired with the offending user/family.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('refresh token reuse detected'),
+        expect.objectContaining({ userId: 'user-1', family: 'family-1' })
+      );
+      warnSpy.mockRestore();
     });
 
     it('should revoke the family when a recently rotated token is replayed after a cache miss', async () => {
@@ -523,6 +532,10 @@ describe('Auth Service', () => {
         return { count: 0 };
       });
 
+      // Detection telemetry: the cross-deploy replay path also revokes the
+      // family and must emit the reuse signal.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
       const replayResult = await replayService.rotateRefreshToken(oldToken);
 
       expect(replayResult).toBeNull();
@@ -531,6 +544,12 @@ describe('Auth Service', () => {
           where: expect.objectContaining({ userId: user.id, family: 'family-rotate-1', revokedAt: null }),
         })
       );
+      // Verify the reuse-detection signal fired for the replayed token.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('refresh token reuse detected'),
+        expect.objectContaining({ userId: user.id, family: 'family-rotate-1' })
+      );
+      warnSpy.mockRestore();
     });
 
     it('should allow only one cached recovery for a recently rotated refresh token', async () => {
