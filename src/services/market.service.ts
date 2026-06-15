@@ -1082,15 +1082,35 @@ export class TickerNotFoundError extends Error {
   }
 }
 
+/**
+ * Resolve market cap in BILLIONS from a cached fundamentals overview, mirroring the
+ * heatmap's resolveMarketCapB (direct marketCapB else absolute marketCap / 1e9). Kept
+ * local to avoid a circular import with market-heatmap.service.
+ */
+function resolveCapBFromOverview(overview: any): number | null {
+  const directB = overview?.marketCapB;
+  if (typeof directB === 'number' && Number.isFinite(directB)) return directB;
+  const raw = overview?.marketCap ?? overview?.MarketCapitalization;
+  const n = typeof raw === 'number' ? raw : (typeof raw === 'string' ? parseFloat(raw.replace(/[$,]/g, '')) : NaN);
+  if (Number.isFinite(n)) return n / 1_000_000_000;
+  return null;
+}
+
 export async function fetchStockDetails(ticker: string): Promise<StockDetailsResponse> {
   const upperTicker = ticker.toUpperCase();
 
   // Return the required quote fast, and treat fundamentals/history as best-effort.
-  const [quote, profileRaw, metricsRaw, candles] = await Promise.all([
+  const [quote, profileRaw, metricsRaw, candles, fundRow] = await Promise.all([
     fetchFastQuote(upperTicker),
     withSoftTimeout(getStockProfile(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} profile`),
     withSoftTimeout(getStockMetrics(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} metrics`),
     withSoftTimeout(fetchStockDetailCandles(upperTicker), STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, null, `${upperTicker} detail candles`),
+    (async () => {
+      try {
+        const { default: prisma } = await import('../utils/prisma');
+        return (await prisma.fundamentalsCache.findUnique({ where: { ticker: upperTicker } })) ?? null;
+      } catch { return null; }
+    })(),
   ]);
 
   if (!quote) {
@@ -1120,13 +1140,24 @@ export async function fetchStockDetails(ticker: string): Promise<StockDetailsRes
   // Map profile
   let profile: StockProfile | null = null;
   if (profileRaw) {
+    // Market cap: prefer the canonical Polygon/Yahoo cap (the SAME fundamentalsCache the
+    // heatmap reads) so a ticker shows the same cap on the heatmap tile and the detail
+    // page; fall back to Finnhub's profile cap when the cache has none. Kept in millions
+    // to match the existing marketCapM unit / formatLargeNumber.
+    let marketCapM = profileRaw.marketCapitalization || 0;
+    if (fundRow?.overviewJson) {
+      try {
+        const capB = resolveCapBFromOverview(JSON.parse(fundRow.overviewJson));
+        if (capB != null && capB > 0) marketCapM = Math.round(capB * 1000);
+      } catch { /* keep Finnhub cap */ }
+    }
     profile = {
       ticker: upperTicker,
       name: profileRaw.name || upperTicker,
       description: '', // profile2 doesn't include description
       logo: profileRaw.logo || '',
       industry: profileRaw.finnhubIndustry || '',
-      marketCapM: profileRaw.marketCapitalization || 0,
+      marketCapM,
       ipoDate: profileRaw.ipo || '',
       weburl: profileRaw.weburl || '',
       country: profileRaw.country || '',
