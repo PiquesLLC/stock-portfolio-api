@@ -358,10 +358,11 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   entries.sort((a, b) => {
     const aVal = a.twrPct ?? a.returnPct;
     const bVal = b.twrPct ?? b.returnPct;
-    if (aVal === null && bVal === null) return 0;
+    if (aVal === null && bVal === null) return a.userId.localeCompare(b.userId);
     if (aVal === null) return 1;
     if (bVal === null) return -1;
-    return bVal - aVal;
+    // deterministic tie-break for equal returns — stable ordering across requests
+    return (bVal - aVal) || a.userId.localeCompare(b.userId);
   });
 
   return {

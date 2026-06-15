@@ -65,15 +65,17 @@ vi.mock('../middleware/rateLimiter', async (importOriginal) => {
   );
 });
 
-// optionalAuth supports x-skip-auth header to simulate unauthenticated requests
+// optionalAuth supports x-skip-auth header to simulate unauthenticated requests.
+// x-test-plan header overrides the injected plan (defaults to 'pro' so existing
+// tests are unaffected) — used by the plan-gating suite to exercise free vs pro.
 vi.mock('../middleware/auth.middleware', () => {
   const authHandler = (req: any, _res: any, next: any) => {
-    req.user = { userId: 'test-user-id-123', username: 'testuser', plan: 'pro' };
+    req.user = { userId: 'test-user-id-123', username: 'testuser', plan: (req.headers['x-test-plan'] as string) || 'pro' };
     next();
   };
   const optionalAuthHandler = (req: any, _res: any, next: any) => {
     if (req.headers['x-skip-auth'] !== '1') {
-      req.user = { userId: 'test-user-id-123', username: 'testuser', plan: 'pro' };
+      req.user = { userId: 'test-user-id-123', username: 'testuser', plan: (req.headers['x-test-plan'] as string) || 'pro' };
     }
     next();
   };
@@ -796,6 +798,94 @@ describe('GET /portfolio/history/chart?period=1D', () => {
       expect(res.status).toBe(200);
       expect(res.body.delegated).toBe(true);
       expect(getUserChartHandlerMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =========================================================================
+  // Category 7: Plan Gating on Chart Periods
+  // =========================================================================
+  // getChartHandler (portfolio.controller.ts) gates non-free periods behind a
+  // pro+ plan. FREE_CHART_PERIODS = {1D, 1W, YTD}. A free plan requesting any
+  // other valid period (1M/3M/6M/1Y/ALL) gets 403 { error: 'upgrade_required',
+  // requiredPlan: 'pro' }. The plan is injected by the auth mock from the
+  // x-test-plan header (see auth.middleware mock above).
+  describe('plan gating', () => {
+    // Periods a free plan may NOT access (valid periods minus FREE_CHART_PERIODS)
+    const GATED_PERIODS = ['1M', '3M', '6M', '1Y', 'ALL'];
+    // Periods always allowed for free
+    const FREE_PERIODS = ['1D', '1W', 'YTD'];
+
+    // getPortfolioChartData is mocked; give every non-1D period a 2-point,
+    // wide-span dataset so the controller's progressive-unlock gate (3M+/YTD/1Y/ALL)
+    // does not short-circuit to insufficientData before the 200 we assert.
+    const wideSpanData = {
+      points: [
+        { time: NOW - 200 * 86400000, value: 50000 },
+        { time: NOW, value: 51000 },
+      ],
+      periodStartValue: 50000,
+      source: 'snapshot',
+    };
+
+    for (const period of GATED_PERIODS) {
+      it(`free plan → ${period} returns 403 upgrade_required`, async () => {
+        getPortfolioChartDataMock.mockResolvedValue(wideSpanData);
+
+        const app = (await import('../app')).default;
+        const res = await request(app)
+          .get(`/portfolio/history/chart?period=${period}`)
+          .set('Cookie', `authToken=${token}`)
+          .set('x-test-plan', 'free');
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('upgrade_required');
+        expect(res.body.requiredPlan).toBe('pro');
+        // Gate fires before any data fetch
+        expect(getPortfolioChartDataMock).not.toHaveBeenCalled();
+      });
+    }
+
+    for (const period of FREE_PERIODS) {
+      it(`free plan → ${period} returns 200`, async () => {
+        getPortfolioChartDataMock.mockResolvedValue(wideSpanData);
+
+        const app = (await import('../app')).default;
+        const res = await request(app)
+          .get(`/portfolio/history/chart?period=${period}`)
+          .set('Cookie', `authToken=${token}`)
+          .set('x-test-plan', 'free');
+
+        expect(res.status).toBe(200);
+        expect(res.body.period).toBe(period);
+      });
+    }
+
+    it('pro plan → 1M returns 200 (gated period unlocked)', async () => {
+      // 1M is NOT a free period, but pro unlocks it. 1M is also exempt from
+      // progressive unlock (controller: !['1D','1W','1M'].includes(period)),
+      // so the default happy-path mock (121 points) is returned verbatim.
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get('/portfolio/history/chart?period=1M')
+        .set('Cookie', `authToken=${token}`)
+        .set('x-test-plan', 'pro');
+
+      expect(res.status).toBe(200);
+      expect(res.body.period).toBe('1M');
+      expect(getPortfolioChartDataMock).toHaveBeenCalled();
+    });
+
+    it('premium plan → 6M returns 200 (higher tier also unlocks)', async () => {
+      getPortfolioChartDataMock.mockResolvedValue(wideSpanData);
+
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get('/portfolio/history/chart?period=6M')
+        .set('Cookie', `authToken=${token}`)
+        .set('x-test-plan', 'premium');
+
+      expect(res.status).toBe(200);
+      expect(res.body.period).toBe('6M');
     });
   });
 });

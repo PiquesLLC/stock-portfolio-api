@@ -64,7 +64,7 @@ vi.mock('../utils/prisma', () => ({
   },
 }));
 
-import { getNalaScore, gradeFromScore } from '../services/nala-score.service';
+import { getNalaScore, gradeFromScore, invalidateNalaScoreCache } from '../services/nala-score.service';
 
 describe('nala-score.service', () => {
   beforeEach(() => {
@@ -189,6 +189,226 @@ describe('nala-score.service', () => {
     expect(result.composite).toBeLessThanOrEqual(100);
     expect(['Strong', 'Good', 'Fair', 'Weak']).toContain(result.grade);
     expect(result.dimensions).toBeTruthy();
+  });
+
+  // ── Test 1: Golden-pin composite + weights (characterization / drift guard) ──
+  it('pins the exact composite and per-dimension scores for the NOW fixture', async () => {
+    const result = await getNalaScore('NOW');
+
+    // Structural assertions — stock path, the 5 stock dimensions with documented weights.
+    expect(result.isETF).toBe(false);
+
+    const { value, quality, growth, dividends, momentum } = result.dimensions;
+    expect(value).toBeTruthy();
+    expect(quality).toBeTruthy();
+    expect(growth).toBeTruthy();
+    expect(dividends).toBeTruthy();
+    expect(momentum).toBeTruthy();
+
+    expect(value.weight).toBe(0.25);
+    expect(quality.weight).toBe(0.25);
+    expect(growth.weight).toBe(0.20);
+    expect(dividends.weight).toBe(0.15);
+    expect(momentum.weight).toBe(0.15);
+
+    // Composite is an integer in [0, 100].
+    expect(Number.isInteger(result.composite)).toBe(true);
+    expect(result.composite).toBeGreaterThanOrEqual(0);
+    expect(result.composite).toBeLessThanOrEqual(100);
+
+    // GOLDEN PINS — characterization values captured from the current scorer.
+    // composite == round(56*.25 + 87*.25 + 87*.20 + 50*.15 + 90*.15) == round(74.15) == 74.
+    // If the scoring math changes, these break on purpose (drift guard).
+    expect(result.composite).toBe(74);
+    expect(value.score).toBe(56);
+    expect(quality.score).toBe(87);
+    expect(growth.score).toBe(87);
+    expect(dividends.score).toBe(50);
+    expect(momentum.score).toBe(90);
+  });
+
+  // ── Test 2: Cache hit short-circuits recompute ──
+  it('returns the cached score and skips all recomputation on a cache hit', async () => {
+    const cachedScore = {
+      ticker: 'NOW',
+      composite: 42,
+      grade: 'Fair',
+      dimensions: {},
+      keyInsights: [],
+      dataAge: 'cached',
+      isETF: false,
+      availableDimensions: [],
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+    };
+    cacheGetMock.mockImplementation((key: string) =>
+      key === 'nala-score:NOW' ? cachedScore : undefined,
+    );
+
+    const result = await getNalaScore('NOW');
+
+    // Returns the exact cached object.
+    expect(result).toBe(cachedScore);
+    expect(result.composite).toBe(42);
+
+    // No recomputation happened.
+    expect(getCompanyFundamentalsMock).not.toHaveBeenCalled();
+    expect(fetchFastQuoteMock).not.toHaveBeenCalled();
+    expect(cacheSetMock).not.toHaveBeenCalled();
+  });
+
+  // ── Test 3: invalidateNalaScoreCache (both modes) ──
+  it('invalidates a single ticker cache key (upper-cased)', () => {
+    invalidateNalaScoreCache('now');
+
+    expect(cacheDelMock).toHaveBeenCalledWith('nala-score:NOW');
+    expect(cacheDelMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates only nala-score:* keys when called with no argument', () => {
+    cacheKeysMock.mockReturnValue(['nala-score:AAPL', 'quote:MSFT', 'nala-score:TSLA']);
+
+    invalidateNalaScoreCache();
+
+    expect(cacheDelMock).toHaveBeenCalledWith('nala-score:AAPL');
+    expect(cacheDelMock).toHaveBeenCalledWith('nala-score:TSLA');
+    expect(cacheDelMock).not.toHaveBeenCalledWith('quote:MSFT');
+    expect(cacheDelMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ── Test 4: Empty / brand-new fundamentals stays finite & bounded ──
+  it('produces a finite, bounded score when all data sources are empty/null', async () => {
+    getCompanyFundamentalsMock.mockResolvedValue({
+      overview: null,
+      incomeStatements: { annual: [], quarterly: [] },
+      balanceSheets: { annual: [], quarterly: [] },
+      cashFlows: { annual: [], quarterly: [] },
+      dataAge: 'fresh',
+    });
+    getStockMetricsMock.mockResolvedValue(null);
+    fetchFastQuoteMock.mockResolvedValue(null); // currentPrice -> 0
+    fetchDailyCandlesMock.mockResolvedValue([]);
+    dividendFindManyMock.mockResolvedValue([]);
+    getAnalystSnapshotMock.mockResolvedValue(null);
+
+    const result = await getNalaScore('NEW');
+
+    expect(Number.isFinite(result.composite)).toBe(true);
+    expect(Number.isNaN(result.composite)).toBe(false);
+    expect(result.composite).toBeGreaterThanOrEqual(0);
+    expect(result.composite).toBeLessThanOrEqual(100);
+    expect(['Strong', 'Good', 'Fair', 'Weak']).toContain(result.grade);
+
+    for (const dim of Object.values(result.dimensions)) {
+      expect(Number.isFinite(dim.score)).toBe(true);
+      expect(Number.isInteger(dim.score)).toBe(true);
+    }
+  });
+
+  // ── Test 5: Monotonicity — better fundamentals -> higher composite ──
+  it('scores strong fundamentals strictly higher than weak fundamentals', async () => {
+    cacheGetMock.mockReturnValue(undefined);
+
+    // ---- Run A: weak fundamentals ----
+    getCompanyFundamentalsMock.mockResolvedValue({
+      overview: {
+        name: 'Weak Co.',
+        description: '',
+        sector: 'Technology',
+        industry: 'Software',
+        marketCap: 10_000_000_000,
+        peRatio: 60,
+        pegRatio: 4,
+        forwardPE: 65,
+        eps: 1,
+        profitMargin: -0.02,
+        returnOnEquity: -0.05,
+        revenueTTM: 1_000_000_000,
+        dividendYield: null,
+        beta: 2.2,
+        analystTargetPrice: 50,
+        fiftyTwoWeekHigh: 200,
+        fiftyTwoWeekLow: 50,
+        bookValue: 0,
+        sharesOutstanding: 1_000_000,
+      },
+      balanceSheets: {
+        annual: [{ longTermDebt: 5_000_000, currentDebt: 3_000_000, totalShareholderEquity: 2_000_000 }],
+      },
+      cashFlows: {
+        annual: [{ freeCashFlow: 800_000 }, { freeCashFlow: 1_200_000 }],
+      },
+      incomeStatements: {
+        annual: [
+          { totalRevenue: 8_000_000, netIncome: -200_000 },
+          { totalRevenue: 10_000_000, netIncome: 400_000 },
+          { totalRevenue: 12_000_000, netIncome: 600_000 },
+        ],
+      },
+      dataAge: 'fresh',
+    });
+    getStockMetricsMock.mockResolvedValue(null);
+    getAnalystSnapshotMock.mockResolvedValue({ strongBuy: 0, buy: 1, hold: 3, sell: 6, strongSell: 4 });
+    fetchDailyCandlesMock.mockResolvedValue([{ close: 200 }, { close: 120 }, { close: 60 }]);
+    fetchFastQuoteMock.mockResolvedValue({
+      ticker: 'WEAK', currentPrice: 60, previousClose: 65, change: -5, changePercent: -7.7,
+      high: 66, low: 58, open: 64, timestamp: 1, updatedAt: 1,
+      isStale: false, isRepricing: false, quoteAgeSeconds: 0, session: 'REG',
+    });
+    dividendFindManyMock.mockResolvedValue([]);
+
+    const weak = await getNalaScore('WEAK');
+
+    // ---- Run B: strong fundamentals (distinct ticker so cache.get->undefined recomputes) ----
+    getCompanyFundamentalsMock.mockResolvedValue({
+      overview: {
+        name: 'Strong Co.',
+        description: '',
+        sector: 'Technology',
+        industry: 'Software',
+        marketCap: 500_000_000_000,
+        peRatio: 12,
+        pegRatio: 0.8,
+        forwardPE: 10,
+        eps: 10,
+        profitMargin: 0.25,
+        returnOnEquity: 0.30,
+        revenueTTM: 50_000_000_000,
+        dividendYield: null,
+        beta: 1.0,
+        analystTargetPrice: 150,
+        fiftyTwoWeekHigh: 110,
+        fiftyTwoWeekLow: 60,
+        bookValue: 0,
+        sharesOutstanding: 1_000_000,
+      },
+      balanceSheets: {
+        annual: [{ longTermDebt: 500_000, currentDebt: 100_000, totalShareholderEquity: 10_000_000 }],
+      },
+      cashFlows: {
+        annual: [{ freeCashFlow: 3_000_000 }, { freeCashFlow: 2_000_000 }],
+      },
+      incomeStatements: {
+        annual: [
+          { totalRevenue: 15_625_000, netIncome: 3_125_000 },
+          { totalRevenue: 12_500_000, netIncome: 2_500_000 },
+          { totalRevenue: 10_000_000, netIncome: 2_000_000 },
+        ],
+      },
+      dataAge: 'fresh',
+    });
+    getStockMetricsMock.mockResolvedValue(null);
+    getAnalystSnapshotMock.mockResolvedValue({ strongBuy: 18, buy: 6, hold: 1, sell: 0, strongSell: 0 });
+    fetchDailyCandlesMock.mockResolvedValue([{ close: 60 }, { close: 85 }, { close: 100 }]);
+    fetchFastQuoteMock.mockResolvedValue({
+      ticker: 'STRONG', currentPrice: 100, previousClose: 98, change: 2, changePercent: 2.04,
+      high: 101, low: 97, open: 99, timestamp: 1, updatedAt: 1,
+      isStale: false, isRepricing: false, quoteAgeSeconds: 0, session: 'REG',
+    });
+    dividendFindManyMock.mockResolvedValue([]);
+
+    const strong = await getNalaScore('STRONG');
+
+    expect(strong.composite).toBeGreaterThan(weak.composite);
   });
 });
 
