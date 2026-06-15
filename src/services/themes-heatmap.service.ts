@@ -158,7 +158,13 @@ async function fetchThemePeriodChanges(
       batch.map(async (ticker) => {
         const candles = await fetchDailyCandles(ticker, days);
         if (candles.length < 2) return { ticker, change: 0 };
-        const startPrice = candles[0].close;
+        // fetchDailyCandles over-fetches `days + 10` calendar days as a trading-day
+        // buffer, so candles[0] is ~10 days OLDER than the requested window. Anchor the
+        // start at the first candle within the actual `days`-day window (mirrors the
+        // stock chart) — otherwise e.g. a "1W" change is really a ~2.5-week change.
+        const cutoffMs = Date.now() - days * 86_400_000;
+        const startCandle = candles.find((c) => new Date(c.time).getTime() >= cutoffMs) ?? candles[0];
+        const startPrice = startCandle.close;
         const endPrice = candles[candles.length - 1].close;
         if (startPrice <= 0) return { ticker, change: 0 };
         return { ticker, change: Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100 };
