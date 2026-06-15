@@ -1,4 +1,5 @@
 ﻿import { Request, Response } from 'express';
+import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import crypto from 'crypto';
 import {
@@ -47,6 +48,32 @@ import { revokePlaidItemTokenBestEffort } from '../services/plaid.service';
 import { getCapturedEmailVerificationCode, sendNewSignupNotification, sendWelcomeEmail } from '../services/email.service';
 
 
+
+/**
+ * Fire-and-forget a side effect for the enumeration-safe auth endpoints
+ * (resend-verification, forgot-password, forgot-username). Those endpoints already
+ * return an identical generic 200 for every account state, but AWAITING the work
+ * would reopen the same leak as a *timing* oracle: a registered email runs a bcrypt
+ * hash + OTP DB writes + an awaited Resend email send (~hundreds of ms), while an
+ * unknown email returns after a single lookup. Measuring response latency would then
+ * reveal which addresses exist. We invoke the work but do NOT await it, so the
+ * response is sent in account-independent time — the first `await` inside the service
+ * yields control back here before any registered-only work runs.
+ *
+ * Errors are reported to Sentry, logged, and swallowed so a background rejection can't
+ * crash the process via an unhandled rejection. Do NOT re-add `await` to these handlers
+ * — that reopens the timing oracle.
+ */
+function detachAuthSideEffect(work: Promise<unknown>, label: string): void {
+  void work.catch((err: unknown) => {
+    // A detached failure carries no request to surface it, so report it to Sentry (as
+    // the webhook handlers do) and log the full Error (stack). Without this, a real
+    // Resend/DB outage would silently stop reset/verification emails with nothing
+    // paging us.
+    console.error(`[auth:${label}] background task failed:`, err);
+    Sentry.captureException(err, { tags: { component: 'auth_detached', flow: label } });
+  });
+}
 
 /** Check if user is a waitlist admin by ID or verified email */
 function isWaitlistAdmin(userId: string, email?: string | null, emailVerified?: boolean): boolean {
@@ -399,13 +426,14 @@ export async function resendVerificationHandler(req: Request, res: Response): Pr
     }
 
     const { email } = parsed.data;
-    // Perform the work (send a code, or skip if unknown / already-verified / over
-    // the per-account resend cap) but ALWAYS return the same generic response.
-    // Distinct statuses (a 400 "already verified" or a 429) would let an attacker
-    // enumerate which emails are registered/verified. The IP-level limiter on this
-    // route still bounds abuse without leaking account state — matching how
-    // forgot-password / forgot-username already behave.
-    await resendVerificationEmail(email);
+    // Always return the SAME generic response, in account-independent TIME. Distinct
+    // statuses (a 400 "already verified" or a 429) would let an attacker enumerate
+    // which emails are registered/verified — and so would latency: awaiting the
+    // registered-only work (OTP hash + DB writes + Resend send) makes a known email
+    // respond hundreds of ms slower than an unknown one. Fire-and-forget closes both
+    // the status and the timing oracle; the IP-level limiter still bounds abuse, as
+    // with forgot-password / forgot-username.
+    detachAuthSideEffect(resendVerificationEmail(email), 'resend-verification');
 
     res.json({ message: 'If this email is registered, a verification code was sent.' });
   } catch (error: unknown) {
@@ -425,7 +453,9 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
       return;
     }
 
-    await requestPasswordReset(parsed.data.email);
+    // Fire-and-forget: never await account-dependent work, so response latency
+    // can't reveal whether the email is registered (see detachAuthSideEffect).
+    detachAuthSideEffect(requestPasswordReset(parsed.data.email), 'forgot-password');
     res.json({ message: 'If this email is registered, a reset code was sent.' });
   } catch (error: unknown) {
     console.error('Forgot password error:', error instanceof Error ? error.message : String(error));
@@ -444,7 +474,9 @@ export async function forgotUsernameHandler(req: Request, res: Response): Promis
       return;
     }
 
-    await requestUsernameReminder(parsed.data.email);
+    // Fire-and-forget: never await account-dependent work, so response latency
+    // can't reveal whether the email is registered (see detachAuthSideEffect).
+    detachAuthSideEffect(requestUsernameReminder(parsed.data.email), 'forgot-username');
     res.json({ message: 'If this email is registered, your username was sent.' });
   } catch (error: unknown) {
     console.error('Forgot username error:', error instanceof Error ? error.message : String(error));

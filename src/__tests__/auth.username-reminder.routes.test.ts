@@ -37,5 +37,40 @@ describe('Username reminder routes', () => {
 
       expect(res.status).toBe(400);
     });
+
+    // Timing-oracle de-enumeration: the handler must NOT await the account-dependent
+    // work. A never-resolving service mock would hang the request if it were awaited;
+    // fire-and-forget returns the generic 200 immediately regardless of email state.
+    it('responds without awaiting the work (no enumeration timing oracle)', async () => {
+      let release: (v: { success: true }) => void = () => {};
+      vi.spyOn(authService, 'requestUsernameReminder').mockReturnValue(
+        new Promise<{ success: true }>((resolve) => {
+          release = resolve;
+        }),
+      );
+
+      const res = await request(app)
+        .post('/auth/forgot-username')
+        .send({ email: TEST_EMAIL });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('If this email is registered');
+
+      release({ success: true }); // settle the dangling promise
+    });
+
+    // The safety model rests on detachAuthSideEffect's .catch: if the background work
+    // rejects, the endpoint must still answer 200 and must NOT leak an unhandled
+    // rejection (vitest fails the run on one) or surface a 500.
+    it('swallows a background failure and still returns the generic 200', async () => {
+      vi.spyOn(authService, 'requestUsernameReminder').mockRejectedValue(new Error('DB/Resend failure'));
+
+      const res = await request(app)
+        .post('/auth/forgot-username')
+        .send({ email: TEST_EMAIL });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('If this email is registered');
+    });
   });
 });
