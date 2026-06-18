@@ -244,11 +244,13 @@ export async function getProfileHandler(req: AuthRequest, res: Response): Promis
       }
     }
 
-    // Fetch performance stats for the profile (1M window, SPY benchmark)
+    // Fetch performance stats for the profile. AUTO window = the largest period
+    // the user's history can fill, so the return / benchmark / alpha the profile
+    // shows are all measured over the SAME window (no chart-vs-benchmark mismatch).
     let performance = null;
     if ((user.profilePublic || isOwner) && !holdingsHidden) {
       try {
-        performance = await getPerformanceComparison('1M', 'SPY', userId);
+        performance = await getPerformanceComparison('AUTO', 'SPY', userId);
       } catch {
         // Performance data is optional
       }

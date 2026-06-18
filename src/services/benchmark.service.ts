@@ -73,11 +73,28 @@ function getWindowStartDate(window: PerformanceWindow): Date {
 }
 
 export async function getPerformanceComparison(
-  window: PerformanceWindow = '1M',
+  windowParam: PerformanceWindow | 'AUTO' = '1M',
   benchmarkTicker: string = 'SPY',
   userId: string,
   portfolioId?: string
 ): Promise<PerformanceData> {
+  // Resolve AUTO to the largest standard window the user's snapshot history can
+  // fill, so the portfolio return, benchmark return, and alpha are all measured
+  // over the SAME period (mirrors the profile chart's 1M->1W->1D fallback). The
+  // resolved window is returned in PerformanceData.window for the UI to label.
+  let window: PerformanceWindow = windowParam === 'AUTO' ? '1M' : windowParam;
+  if (windowParam === 'AUTO') {
+    const earliest = await prisma.portfolioSnapshot.findFirst({
+      where: { userId },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    });
+    const spanDays = earliest ? (Date.now() - earliest.timestamp.getTime()) / 86400000 : 0;
+    // Require the window to be FULLY filled by history (thresholds = each window's
+    // own length) so the portfolio return and the windowStart-anchored benchmark
+    // cover the same dates — otherwise alpha would mismatch for short histories.
+    window = spanDays >= 30 ? '1M' : spanDays >= 7 ? '1W' : '1D';
+  }
   const windowStart = getWindowStartDate(window);
   const tradingDays = getWindowTradingDays(window);
 
