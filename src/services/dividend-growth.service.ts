@@ -1,5 +1,6 @@
 import prisma from '../utils/prisma';
-import { fetchPrices, ETF_REFERENCE_DATA } from './market.service';
+import { fetchPrices } from './market.service';
+import { computeForwardAnnualIncome } from './dividend-income.service';
 
 
 
@@ -67,32 +68,28 @@ export async function getDividendGrowthRates(
   const holdingsResults: any[] = [];
   const currentYear = new Date().getFullYear();
   const excludeCurrentYear = options.excludeCurrentYear ?? true;
-  let totalAnnualIncome = 0;
   let weightedGrowthNumerator = 0;
   let weightedGrowthDenominator = 0;
 
+  // Canonical forward annual income (shared with income-insights) — one place
+  // resolves per-share / yield / total so the figure can't diverge by screen.
+  const fwd = computeForwardAnnualIncome(
+    holdings.map(h => ({
+      ticker: h.ticker,
+      shares: h.shares,
+      currentPrice: quotesResult.quotes.get(h.ticker.toUpperCase())?.currentPrice ?? null,
+    })),
+    screenerMap,
+  );
+
   for (const holding of holdings) {
     const ticker = holding.ticker.toUpperCase();
-    const quote = quotesResult.quotes.get(ticker);
-    const currentPrice = quote?.currentPrice ?? null;
+    const entry = fwd.byTicker.get(ticker);
+    if (!entry) continue; // Non-dividend payer
 
-    // Resolve annual dividend per share: ScreenerCache → ETF reference yield → skip
-    let annualDivPerShare = screenerMap.get(ticker) ?? 0;
-    if (annualDivPerShare <= 0 && currentPrice && currentPrice > 0) {
-      const etfRef = ETF_REFERENCE_DATA[ticker];
-      if (etfRef?.dividendYield) {
-        annualDivPerShare = round((etfRef.dividendYield / 100) * currentPrice, 4);
-      }
-    }
-    if (annualDivPerShare <= 0) continue; // Non-dividend payer
-
-    const currentAnnualDividend = round(annualDivPerShare, 2);
-    const dividendYield = currentPrice && currentPrice > 0
-      ? round((currentAnnualDividend / currentPrice) * 100, 2)
-      : null;
-
-    const annualIncome = currentAnnualDividend * holding.shares;
-    totalAnnualIncome += annualIncome;
+    const currentAnnualDividend = entry.annualDivPerShare;
+    const dividendYield = entry.yieldPct;
+    const annualIncome = entry.annualIncome;
 
     // Growth rates from DividendEvent history (optional — only if we have 2+ years)
     let growth1yr: number | null = null;
@@ -182,8 +179,8 @@ export async function getDividendGrowthRates(
     holdings: holdingsResults,
     portfolio: {
       weightedAvgGrowthRate,
-      totalAnnualIncome: round(totalAnnualIncome, 2),
-      totalMonthlyIncome: round(totalAnnualIncome / 12, 2),
+      totalAnnualIncome: fwd.totalAnnualIncome,
+      totalMonthlyIncome: fwd.totalMonthlyIncome,
     },
   };
 }

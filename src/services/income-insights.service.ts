@@ -7,6 +7,7 @@ import { getPortfolio } from './portfolio.service';
 import { getDividendSummary, getDividendCredits } from './dividend-post.service';
 import { insightsCache } from '../utils/finnhub';
 import { ETF_REFERENCE_DATA } from './market.service';
+import { computeForwardAnnualIncome } from './dividend-income.service';
 import prisma from '../utils/prisma';
 
 
@@ -242,13 +243,22 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   const totalThisYear = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
   const totalLastYear = creditsLastYear.reduce((sum, c) => sum + c.amountGross, 0);
 
-  // Calculate averages based on YTD
-  const monthsInYear = now.getMonth() + 1;
-  const daysInYear = Math.floor((now.getTime() - ytdStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  // Forward annual dividend income (canonical — shared with dividend-growth via
+  // computeForwardAnnualIncome): current holdings x forward rate, NOT a YTD
+  // run-rate, so "Cash Flow /yr" matches the DRIP projector's "Annual Income".
+  // (Realized YTD received stays above for the reliability/momentum signals.)
+  const incomeScreenerRows = await prisma.screenerCache.findMany({
+    where: { ticker: { in: allHoldingTickers } },
+    select: { ticker: true, annualDividend: true },
+  });
+  const forwardIncome = computeForwardAnnualIncome(
+    holdings.map((h: any) => ({ ticker: h.ticker, shares: h.shares, currentPrice: h.currentPrice, currentValue: h.currentValue })),
+    new Map(incomeScreenerRows.map(r => [r.ticker.toUpperCase(), r.annualDividend ?? 0])),
+  );
 
-  const annualIncome = monthsInYear > 0 ? Math.round((totalYTD / monthsInYear) * 12 * 100) / 100 : 0;
-  const monthlyIncome = Math.round(totalYTD / monthsInYear * 100) / 100;
-  const dailyIncome = daysInYear > 0 ? Math.round(totalYTD / daysInYear * 100) / 100 : 0;
+  const annualIncome = forwardIncome.totalAnnualIncome;
+  const monthlyIncome = forwardIncome.totalMonthlyIncome;
+  const dailyIncome = Math.round((forwardIncome.totalAnnualIncome / 365) * 100) / 100;
 
   // Project next month based on same month last year or average
   const nextMonth = (now.getMonth() + 1) % 12 + 1;
@@ -342,40 +352,20 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
   // CONTRIBUTORS (based on current holdings × annual dividend per share)
   // ============================================================================
 
-  // Use ScreenerCache + ETF reference data to get annual dividend for every holding
-  const contribScreener = await prisma.screenerCache.findMany({
-    where: { ticker: { in: allHoldingTickers } },
-    select: { ticker: true, annualDividend: true },
-  });
-  const contribDivMap = new Map(contribScreener.map(r => [r.ticker.toUpperCase(), r.annualDividend ?? 0]));
-
+  // Contributors read the SAME canonical forward income computed above, so the
+  // per-ticker $ and the totals can't disagree with "Cash Flow /yr".
   const contributors: IncomeContributor[] = [];
-  let totalAnnualDividendIncome = 0;
+  const totalAnnualDividendIncome = forwardIncome.totalAnnualIncome;
 
   for (const holding of holdings) {
     const ticker = (holding as any).ticker.toUpperCase();
-    let annualDivPerShare = contribDivMap.get(ticker) ?? 0;
-
-    // ETF fallback: use reference yield × price
-    if (annualDivPerShare <= 0) {
-      const etfRef = ETF_REFERENCE_DATA[ticker];
-      if (etfRef?.dividendYield && etfRef.dividendYield > 0 && holding.currentPrice > 0) {
-        annualDivPerShare = (etfRef.dividendYield / 100) * holding.currentPrice;
-      }
-    }
-    if (annualDivPerShare <= 0) continue; // Non-dividend payer
-
-    const annualIncome = annualDivPerShare * (holding as any).shares;
-    totalAnnualDividendIncome += annualIncome;
-
-    const yieldPct = holding.currentValue > 0
-      ? Math.round((annualIncome / holding.currentValue) * 10000) / 100
-      : null;
+    const entry = forwardIncome.byTicker.get(ticker);
+    if (!entry) continue; // Non-dividend payer
 
     contributors.push({
       ticker,
-      dividendDollar: Math.round(annualIncome * 100) / 100,
-      yieldPct,
+      dividendDollar: entry.annualIncome,
+      yieldPct: entry.yieldPct,
       percentOfTotal: 0, // Filled in below
       paymentCount: 0,   // Not applicable for forward-looking view
     });
