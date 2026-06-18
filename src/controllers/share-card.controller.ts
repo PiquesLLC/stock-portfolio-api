@@ -1,7 +1,11 @@
 import { Request, Response } from 'express';
 import { generatePerformanceCard, generateStockShareCard } from '../services/share-card.service';
 
-const VALID_PERIODS = new Set(['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL']);
+// 'AUTO' lets the server pick the largest window the user's history fully fills,
+// matching the WINDOW their profile shows (see resolveAutoWindow). It is the
+// default for the performance card so a young portfolio's shared image never shows
+// a stale hardcoded 1M number the profile already dropped.
+const VALID_PERIODS = new Set(['AUTO', '1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL']);
 
 export async function getStockShareCardHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -39,9 +43,9 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
       return;
     }
 
-    const periodRaw = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : '1M';
+    const periodRaw = typeof req.query.period === 'string' ? req.query.period.toUpperCase() : 'AUTO';
     if (!VALID_PERIODS.has(periodRaw)) {
-      res.status(400).json({ error: 'period must be one of: 1D, 1W, 1M, 3M, 6M, YTD, 1Y, ALL' });
+      res.status(400).json({ error: 'period must be one of: AUTO, 1D, 1W, 1M, 3M, 6M, YTD, 1Y, ALL' });
       return;
     }
 
@@ -52,8 +56,11 @@ export async function getPerformanceCardHandler(req: Request, res: Response): Pr
       return;
     }
 
+    // AUTO resolves to a concrete window server-side; keep the filename generic
+    // rather than leaking the literal "AUTO".
+    const fileSuffix = periodRaw === 'AUTO' ? '' : `-${periodRaw}`;
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `attachment; filename="nala-performance-${periodRaw}.png"`);
+    res.setHeader('Content-Disposition', `attachment; filename="nala-performance${fileSuffix}.png"`);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');

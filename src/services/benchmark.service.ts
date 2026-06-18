@@ -72,6 +72,27 @@ function getWindowStartDate(window: PerformanceWindow): Date {
   return d;
 }
 
+/**
+ * Resolve the 'AUTO' performance window to the largest standard window the user's
+ * snapshot history can FULLY fill: span >= 30d -> 1M, >= 7d -> 1W, else 1D.
+ * Thresholds equal each window's own length so real history covers the whole
+ * window — the portfolio return and the windowStart-anchored benchmark then span
+ * the same dates (otherwise alpha mismatches for short histories).
+ *
+ * Single source of truth shared by the profile performance stat
+ * (getPerformanceComparison) and the shareable performance card, so the window a
+ * profile shows can never drift from the window its share image shows.
+ */
+export async function resolveAutoWindow(userId: string): Promise<PerformanceWindow> {
+  const earliest = await prisma.portfolioSnapshot.findFirst({
+    where: { userId },
+    orderBy: { timestamp: 'asc' },
+    select: { timestamp: true },
+  });
+  const spanDays = earliest ? (Date.now() - earliest.timestamp.getTime()) / 86400000 : 0;
+  return spanDays >= 30 ? '1M' : spanDays >= 7 ? '1W' : '1D';
+}
+
 export async function getPerformanceComparison(
   windowParam: PerformanceWindow | 'AUTO' = '1M',
   benchmarkTicker: string = 'SPY',
@@ -79,22 +100,11 @@ export async function getPerformanceComparison(
   portfolioId?: string
 ): Promise<PerformanceData> {
   // Resolve AUTO to the largest standard window the user's snapshot history can
-  // fill, so the portfolio return, benchmark return, and alpha are all measured
-  // over the SAME period (mirrors the profile chart's 1M->1W->1D fallback). The
-  // resolved window is returned in PerformanceData.window for the UI to label.
-  let window: PerformanceWindow = windowParam === 'AUTO' ? '1M' : windowParam;
-  if (windowParam === 'AUTO') {
-    const earliest = await prisma.portfolioSnapshot.findFirst({
-      where: { userId },
-      orderBy: { timestamp: 'asc' },
-      select: { timestamp: true },
-    });
-    const spanDays = earliest ? (Date.now() - earliest.timestamp.getTime()) / 86400000 : 0;
-    // Require the window to be FULLY filled by history (thresholds = each window's
-    // own length) so the portfolio return and the windowStart-anchored benchmark
-    // cover the same dates — otherwise alpha would mismatch for short histories.
-    window = spanDays >= 30 ? '1M' : spanDays >= 7 ? '1W' : '1D';
-  }
+  // fully fill (mirrors the profile chart's 1M->1W->1D fallback). The resolved
+  // window is returned in PerformanceData.window for the UI to label.
+  const window: PerformanceWindow = windowParam === 'AUTO'
+    ? await resolveAutoWindow(userId)
+    : windowParam;
   const windowStart = getWindowStartDate(window);
   const tradingDays = getWindowTradingDays(window);
 

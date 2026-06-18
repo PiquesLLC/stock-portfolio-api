@@ -7,6 +7,7 @@ import { getPortfolioChartData } from './snapshot.service';
 import { getPortfolio } from './portfolio.service';
 import { fetchHourlyCandles, fetchIntradayCandles, fetchStockDetails } from './market.service';
 import { etDate } from '../utils/date';
+import { resolveAutoWindow } from './benchmark.service';
 
 // Load and cache logos as base64 at startup
 let _LOGO_B64 = '';
@@ -341,7 +342,15 @@ async function getPerformanceShareCardData(userId: string, periodInput: string, 
   // Don't generate performance cards for users who hide their holdings
   if (user.holdingsVisibility !== 'all') return null;
 
-  const period = normalizePeriod(periodInput);
+  // 'AUTO' resolves to the same history-aware window the profile stat uses
+  // (resolveAutoWindow), so a shared performance card and the profile it links to
+  // show the SAME window and label for the account. (The headline % itself can
+  // still differ slightly — the card derives it from getPortfolioChartData while
+  // the profile uses getPerformanceComparison; unifying that return math is a
+  // separate numbers-trust follow-up.)
+  const period: ShareCardPeriod = (periodInput ?? '').toUpperCase() === 'AUTO'
+    ? await resolveAutoWindow(userId)
+    : normalizePeriod(periodInput);
 
   // Fetch chart data and live portfolio in parallel
   const [chartData, livePortfolio] = await Promise.all([

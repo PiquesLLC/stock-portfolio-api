@@ -82,4 +82,21 @@ describe('performance share card period mapping', () => {
     expect(getPortfolioChartDataMock).toHaveBeenCalledTimes(1);
     expect(getPortfolioChartDataMock).toHaveBeenCalledWith('user-1', period);
   });
+
+  // 'AUTO' must resolve to the SAME history-span window the profile stat uses
+  // (resolveAutoWindow), so a shared card never shows a window the profile dropped.
+  it.each([
+    { spanDays: 60, expectedWindow: '1M' },
+    { spanDays: 14, expectedWindow: '1W' },
+    { spanDays: 3, expectedWindow: '1D' },
+  ])('AUTO resolves to $expectedWindow for a $spanDays-day history', async ({ spanDays, expectedWindow }) => {
+    // resolveAutoWindow's earliest-snapshot lookup is the first findFirst call.
+    (prismaMock.portfolioSnapshot as any).findFirst.mockResolvedValueOnce({
+      timestamp: new Date(Date.now() - spanDays * 86400000),
+    });
+
+    const card = await generatePerformanceCard('user-1', 'AUTO');
+    expect(card).toBeTruthy();
+    expect(getPortfolioChartDataMock).toHaveBeenCalledWith('user-1', expectedWindow);
+  });
 });
