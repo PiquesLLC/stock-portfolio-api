@@ -143,6 +143,9 @@ export interface Quote {
 }
 
 export interface HoldingWithQuote extends Holding {
+  /** Canonical sector from utils/sectors.getSector — the single source of
+   *  truth for ticker -> sector so the UI never reclassifies. */
+  sector?: string;
   currentPrice: number;
   currentValue: number;
   totalCost: number;

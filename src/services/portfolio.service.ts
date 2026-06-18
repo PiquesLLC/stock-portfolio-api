@@ -1,6 +1,7 @@
 ﻿import prisma from '../utils/prisma';
 import { fetchPrices } from './market.service';
 import { Holding, HoldingInput, HoldingWithQuote, OptionWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
+import { getSector } from '../utils/sectors';
 import { getMarketSession, isOpenedTodayET } from '../utils/market-hours';
 import { getOptionQuotes } from './options.service';
 import { daysToExpiry, formatOptionDisplay } from '../utils/occ-parser';
@@ -386,6 +387,7 @@ export async function getPortfolio(userId: string, options?: { preferPolygon?: b
 
     return {
       ...holding,
+      sector: getSector(holding.ticker),
       currentPrice: hasValidPrice ? currentPrice : 0,
       currentValue,
       totalCost: holdingTotalCost,
