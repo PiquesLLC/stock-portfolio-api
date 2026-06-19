@@ -16,6 +16,7 @@ import { getSnapshotsAfter, getAllSnapshots, reconstructPortfolioHistory } from 
 import { getTotalDividendsBetween } from './dividend.service';
 
 import { config } from '../config';
+import { sharpeRatio } from '../utils/finance-math';
 
 // Horizon periods in years
 const HORIZONS: { key: keyof ProjectionHorizons; years: number }[] = [
@@ -184,12 +185,11 @@ function calculateRealizedMetrics(
     maxDrawdown = -Math.round(maxDD * 10000) / 10000; // Negative to show as loss
   }
 
-  // Sharpe Ratio: (CAGR - riskFreeRate) / volatility
-  let sharpe: number | null = null;
-  if (cagr !== null && volatility !== null && volatility > 0) {
-    sharpe = (cagr - config.riskFreeRate) / volatility;
-    sharpe = Math.round(sharpe * 100) / 100;
-  }
+  // Sharpe Ratio — canonical rf=0 definition shared with the risk forecast.
+  // (Previously subtracted config.riskFreeRate=0.02, which disagreed with the
+  // risk-forecast Sharpe's rf=0 and produced a different number for the same data.)
+  let sharpe = sharpeRatio(cagr, volatility);
+  if (sharpe !== null) sharpe = Math.round(sharpe * 100) / 100;
 
   return { metrics: { cagr, volatility, maxDrawdown, sharpe }, notes };
 }

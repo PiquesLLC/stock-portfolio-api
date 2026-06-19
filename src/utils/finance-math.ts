@@ -4,6 +4,18 @@
  */
 
 // ============================================================================
+// SHARED RISK CONSTANTS — the single source for risk-adjusted metrics so a
+// portfolio's Sharpe / annualized volatility are identical on every screen.
+// ============================================================================
+
+/** Risk-free rate for ALL Sharpe ratios. The app standardizes on 0 (Sharpe =
+ *  return / volatility); change here and every Sharpe across the app moves together. */
+export const RISK_FREE_RATE = 0;
+
+/** Trading days per year — the one annualization factor for volatility and return. */
+export const TRADING_DAYS = 252;
+
+// ============================================================================
 // TIME-WEIGHTED RETURN (TWR)
 // ============================================================================
 
@@ -274,7 +286,23 @@ export function annualizedVolatility(dailyReturns: number[]): number | null {
   const squaredDiffs = dailyReturns.map(r => Math.pow(r - mean, 2));
   const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (dailyReturns.length - 1);
 
-  return Math.sqrt(variance) * Math.sqrt(252);
+  return Math.sqrt(variance) * Math.sqrt(TRADING_DAYS);
+}
+
+/**
+ * Sharpe ratio = (annualized return − RISK_FREE_RATE) / annualized volatility.
+ * One definition shared by realized metrics, the risk forecast, and every other
+ * caller, so the figure can't disagree between screens. Returns null when
+ * volatility is null or <= 0 (Sharpe undefined).
+ */
+export function sharpeRatio(
+  annualizedReturn: number | null,
+  annualizedVol: number | null,
+): number | null {
+  if (annualizedReturn === null || annualizedVol === null) return null;
+  // Reject NaN/Infinity defensively (shared math used app-wide) and undefined vol.
+  if (!Number.isFinite(annualizedReturn) || !Number.isFinite(annualizedVol) || annualizedVol <= 0) return null;
+  return (annualizedReturn - RISK_FREE_RATE) / annualizedVol;
 }
 
 /**

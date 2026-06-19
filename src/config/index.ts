@@ -123,7 +123,8 @@ export const config = {
 
   // Projection settings
   sp500CagrTotalReturn: parseFloat(process.env.SP500_CAGR_TOTAL_RETURN || '0.10'), // 10% default
-  riskFreeRate: parseFloat(process.env.RISK_FREE_RATE || '0.02'), // 2% default
+  // (risk-free rate is canonical in finance-math.RISK_FREE_RATE = 0; all Sharpe
+  //  ratios share it via finance-math.sharpeRatio so screens can't disagree.)
 
   // bcrypt work factors — passwords (12) vs OTP/backup codes (10); both 4 in tests.
   bcryptSaltRounds,

@@ -17,6 +17,7 @@ import {
   HoldingWithQuote,
 } from '../types';
 import { getSector } from '../utils/sectors';
+import { TRADING_DAYS, sharpeRatio } from '../utils/finance-math';
 
 
 
@@ -923,8 +924,10 @@ export async function getLeakDetector(userId: string, portfolioId?: string): Pro
 
 // Configuration for Monte Carlo
 const MONTE_CARLO_SIMULATIONS = 5000;  // Number of simulation paths
-const TRADING_DAYS_PER_YEAR = 252;
-const RISK_FREE_RATE = 0.0;  // Assume 0 for Sharpe ratio (simplicity)
+// Canonical from finance-math (single source) — keep the local alias for clear
+// references; the value can no longer drift from other screens. rf=0 lives in
+// finance-math.RISK_FREE_RATE and is applied via the shared sharpeRatio() helper.
+const TRADING_DAYS_PER_YEAR = TRADING_DAYS;
 
 // Target lookback periods (in trading days)
 const TARGET_LOOKBACK_1Y = 252;
@@ -1032,11 +1035,8 @@ function calculateAnnualizedReturn(returns: number[]): number | null {
 function calculateSharpeRatio(returns: number[], annualVol: number | null): number | null {
   if (returns.length < MIN_LOOKBACK_DAYS || annualVol === null || annualVol === 0) return null;
 
-  const annualReturn = calculateAnnualizedReturn(returns);
-  if (annualReturn === null) return null;
-
-  // Sharpe = (return - rf) / volatility
-  return (annualReturn - RISK_FREE_RATE) / annualVol;
+  // Canonical rf=0 Sharpe (shared with realized metrics via finance-math).
+  return sharpeRatio(calculateAnnualizedReturn(returns), annualVol);
 }
 
 /**
@@ -1168,14 +1168,14 @@ export async function getRiskForecast(userId: string, portfolioId?: string): Pro
   let annualReturn: number | null = null;
   let annualVolatility: number | null = null;
   let maxDrawdown: number | null = null;
-  let sharpeRatio: number | null = null;
+  let sharpe: number | null = null;
   let scenarios: RiskForecastScenarios | null = null;
 
   if (hasEnoughData) {
     // Calculate annualized metrics from portfolio returns
     annualVolatility = calculateAnnualizedVolatility(portfolioReturns);
     annualReturn = calculateAnnualizedReturn(portfolioReturns);
-    sharpeRatio = calculateSharpeRatio(portfolioReturns, annualVolatility);
+    sharpe = calculateSharpeRatio(portfolioReturns, annualVolatility);
 
     // Calculate historical max drawdown
     const equityCurve: number[] = [100];
@@ -1222,7 +1222,7 @@ export async function getRiskForecast(userId: string, portfolioId?: string): Pro
       annualReturn: annualReturn !== null ? Math.round(annualReturn * 10000) / 10000 : null,
       annualVolatility: annualVolatility !== null ? Math.round(annualVolatility * 10000) / 10000 : null,
       maxDrawdown: maxDrawdown !== null ? Math.round(maxDrawdown * 10000) / 10000 : null,
-      sharpeRatio: sharpeRatio !== null ? Math.round(sharpeRatio * 100) / 100 : null,
+      sharpeRatio: sharpe !== null ? Math.round(sharpe * 100) / 100 : null,
     },
     scenarios,
     currentValue: Math.round(currentValue * 100) / 100,
