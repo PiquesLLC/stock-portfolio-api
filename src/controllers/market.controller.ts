@@ -13,6 +13,7 @@ import { MarketIndex } from '../utils/sectors';
 import { AxiosError } from 'axios';
 import { AuthRequest } from '../types/auth';
 import { EmailVerificationRequiredError } from '../services/email-verification-guard.service';
+import { config } from '../config';
 import {
   aiEventsQuerySchema,
   benchmarkParamSchema,
@@ -459,7 +460,9 @@ export async function getHistoricalCAGRHandler(req: Request, res: Response): Pro
     const { tickers } = parsed.data;
 
     const cagrs = await getHistoricalCAGRs(tickers);
-    res.json({ cagrs });
+    // Expose the canonical market-average rate used to blend short-history
+    // CAGRs, so the UI doesn't keep its own hardcoded copy.
+    res.json({ cagrs, marketAvgRate: config.sp500CagrTotalReturn });
   } catch (error: unknown) {
     console.error('[Market] getHistoricalCAGR error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch historical CAGR data' });

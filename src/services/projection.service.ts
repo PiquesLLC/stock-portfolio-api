@@ -49,16 +49,21 @@ function getLookbackStartDate(lookback: LookbackPeriod): Date | null {
 }
 
 /**
- * Project portfolio value using S&P 500 long-run total return
+ * Project a current value forward across the standard HORIZONS using
+ * monthly-compounded growth at a flat annual rate.
+ *
+ * With `clamp` enabled it reproduces the realized path's safety treatment:
+ * non-finite results reset to currentValue (reported via `onReset`), values
+ * are capped at 1000x currentValue and floored at 0. Left disabled (the
+ * default) the raw compounded value is returned, matching the previous
+ * unguarded SP500 / sub-portfolio behaviour exactly.
  */
-export async function getSP500Projections(userId: string, portfolioId?: string): Promise<SP500ProjectionResponse> {
-  const portfolio = await getPortfolio(userId, { portfolioId });
-  const currentValue = portfolio.netEquity;
-  const annualReturn = config.sp500CagrTotalReturn;
-
-  // Monthly compounding: (1 + r)^(years*12) where r = monthly rate
-  const monthlyRate = Math.pow(1 + annualReturn, 1 / 12) - 1;
-
+function projectMonthlyCompound(
+  currentValue: number,
+  annualRate: number,
+  opts: { clamp?: boolean; onReset?: () => void } = {},
+): ProjectionHorizons {
+  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const horizons: ProjectionHorizons = {
     '6m': { base: 0 },
     '1y': { base: 0 },
@@ -68,9 +73,38 @@ export async function getSP500Projections(userId: string, portfolioId?: string):
 
   for (const { key, years } of HORIZONS) {
     const months = years * 12;
-    const futureValue = currentValue * Math.pow(1 + monthlyRate, months);
+    let futureValue = currentValue * Math.pow(1 + monthlyRate, months);
+
+    if (opts.clamp) {
+      if (!isFinite(futureValue) || isNaN(futureValue)) {
+        futureValue = currentValue;
+        opts.onReset?.();
+      }
+      const maxMultiplier = 1000;
+      if (futureValue > currentValue * maxMultiplier) {
+        futureValue = currentValue * maxMultiplier;
+      }
+      if (futureValue < 0) {
+        futureValue = 0;
+      }
+    }
+
     horizons[key] = { base: Math.round(futureValue * 100) / 100 };
   }
+
+  return horizons;
+}
+
+/**
+ * Project portfolio value using S&P 500 long-run total return
+ */
+export async function getSP500Projections(userId: string, portfolioId?: string): Promise<SP500ProjectionResponse> {
+  const portfolio = await getPortfolio(userId, { portfolioId });
+  const currentValue = portfolio.netEquity;
+  const annualReturn = config.sp500CagrTotalReturn;
+
+  // Monthly-compounded growth at the long-run S&P 500 rate (shared helper).
+  const horizons = projectMonthlyCompound(currentValue, annualReturn);
 
   return {
     mode: 'sp500',
@@ -242,21 +276,8 @@ export async function getRealizedProjections(
   // to avoid mixing scoped current data with unscoped historical data.
   if (portfolioId) {
     const annualReturn = config.sp500CagrTotalReturn;
-    const monthlyRate = Math.pow(1 + annualReturn, 1 / 12) - 1;
     const notes: string[] = ['Sub-portfolio: using SP500 projections (historical snapshots are user-wide)'];
-
-    const horizons: ProjectionHorizons = {
-      '6m': { base: 0 },
-      '1y': { base: 0 },
-      '5y': { base: 0 },
-      '10y': { base: 0 },
-    };
-
-    for (const { key, years } of HORIZONS) {
-      const months = years * 12;
-      const futureValue = currentValue * Math.pow(1 + monthlyRate, months);
-      horizons[key] = { base: Math.round(futureValue * 100) / 100 };
-    }
+    const horizons = projectMonthlyCompound(currentValue, annualReturn);
 
     return {
       mode: 'realized',
@@ -291,40 +312,17 @@ export async function getRealizedProjections(
   // Calculate metrics
   const { metrics: realized, notes } = calculateRealizedMetrics(snapshots, totalDividends);
 
-  // Build projections using realized CAGR (or 0 if unavailable)
+  // Build projections using realized CAGR (or 0 if unavailable), with the same
+  // safety clamps as before (non-finite resets to current, cap 1000x, floor 0).
   const projectionRate = realized.cagr ?? 0;
-  const monthlyRate = Math.pow(1 + projectionRate, 1 / 12) - 1;
-
-  const horizons: ProjectionHorizons = {
-    '6m': { base: 0 },
-    '1y': { base: 0 },
-    '5y': { base: 0 },
-    '10y': { base: 0 },
-  };
-
-  for (const { key, years } of HORIZONS) {
-    const months = years * 12;
-    let futureValue = currentValue * Math.pow(1 + monthlyRate, months);
-
-    // Prevent insane values
-    if (!isFinite(futureValue) || isNaN(futureValue)) {
-      futureValue = currentValue;
+  const horizons = projectMonthlyCompound(currentValue, projectionRate, {
+    clamp: true,
+    onReset: () => {
       if (!notes.includes('Some projections reset to current value due to calculation issues')) {
         notes.push('Some projections reset to current value due to calculation issues');
       }
-    }
-
-    // Cap at reasonable multipliers
-    const maxMultiplier = 1000;
-    if (futureValue > currentValue * maxMultiplier) {
-      futureValue = currentValue * maxMultiplier;
-    }
-    if (futureValue < 0) {
-      futureValue = 0;
-    }
-
-    horizons[key] = { base: Math.round(futureValue * 100) / 100 };
-  }
+    },
+  });
 
   if (lookbackUsed !== lookback) {
     notes.push(`Requested ${lookback} lookback not available, used ${lookbackUsed} instead`);
