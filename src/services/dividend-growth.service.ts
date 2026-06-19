@@ -48,6 +48,9 @@ export async function getDividendGrowthRates(
     where: {
       ticker: { in: tickers },
       dividendType: 'regular',
+      // Realized (paid) dividends only — a declared-but-not-yet-paid future
+      // dividend must never inflate a year's per-share total or growth history.
+      payDate: { lt: new Date() },
     },
     orderBy: { payDate: 'asc' },
   });

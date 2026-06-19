@@ -147,6 +147,58 @@ export async function fetchUpcomingDividend(ticker: string): Promise<ParsedDivid
 }
 
 /**
+ * Fetch DECLARED dividends whose ex-date is still in the future (announced but
+ * not yet ex) from Polygon. Polygon exposes declaration_date + cash_amount, so
+ * ingesting these lets the dividend-change detector fire within ~24h of the
+ * ANNOUNCEMENT instead of only at the ex-date (~10 days later) via the historical
+ * Yahoo feed. Regular cash dividends only — specials would create false raise/cut
+ * signals. Returns [] when no Polygon key, nothing upcoming, or on error.
+ */
+export async function fetchPolygonUpcomingDividends(ticker: string): Promise<ParsedDividend[]> {
+  try {
+    const { config } = await import('../config');
+    if (!config.polygonApiKey) return [];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const url = `https://api.polygon.io/v3/reference/dividends?ticker=${ticker.toUpperCase()}&ex_dividend_date.gte=${today}&limit=10&order=asc&apiKey=${config.polygonApiKey}`;
+    const resp = await axios.get(url, { timeout: 10000 });
+
+    const results = resp.data?.results;
+    if (!Array.isArray(results) || results.length === 0) return [];
+
+    const parsed: ParsedDividend[] = [];
+    for (const div of results) {
+      if (!div.cash_amount || div.cash_amount <= 0) continue;
+      if (!div.ex_dividend_date) continue;
+      // Regular cash dividends only ('CD'); skip specials/variable distributions.
+      if (div.dividend_type && div.dividend_type !== 'CD') continue;
+
+      const exDate = new Date(div.ex_dividend_date + 'T14:30:00Z');
+      const payDate = div.pay_date
+        ? new Date(div.pay_date + 'T14:30:00Z')
+        : new Date(exDate.getTime() + 21 * 86400000);
+
+      parsed.push({
+        ticker: ticker.toUpperCase(),
+        exDate,
+        payDate,
+        amountPerShare: Math.round(div.cash_amount * 10000) / 10000,
+        source: 'polygon',
+        payDateEstimated: !div.pay_date,
+      });
+    }
+
+    if (parsed.length > 0) {
+      console.log(`[Dividend Fetch] Polygon: ${parsed.length} declared upcoming dividend(s) for ${ticker}`);
+    }
+    return parsed;
+  } catch (err) {
+    console.warn(`[Dividend Fetch] Polygon upcoming failed for ${ticker}:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
  * Sync dividend events for a single ticker into the database.
  * Upserts by (ticker, exDate, amountPerShare) unique constraint.
  */
@@ -158,6 +210,9 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
 
   const historical = await fetchYahooDividends(upperTicker);
   const upcoming = await fetchUpcomingDividend(upperTicker);
+  // Declared-but-not-yet-ex dividends (future ex-date) — this is what lets the
+  // change detector fire within ~24h of the ANNOUNCEMENT, not only at ex-date.
+  const declared = await fetchPolygonUpcomingDividends(upperTicker);
 
   // If upcoming has a real pay date, try to match/update the most recent historical event
   if (upcoming && upcoming.payDate && !upcoming.payDateEstimated) {
@@ -170,8 +225,18 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
     }
   }
 
+  // Merge freshly-declared future dividends not already present in the historical feed.
+  const events = [...historical];
+  for (const d of declared) {
+    const dup = events.some(
+      h => Math.abs(h.exDate.getTime() - d.exDate.getTime()) < 2 * 86400000
+        && Math.abs(h.amountPerShare - d.amountPerShare) < 1e-9
+    );
+    if (!dup) events.push(d);
+  }
+
   let upserted = 0;
-  for (const div of historical) {
+  for (const div of events) {
     try {
       await prisma.dividendEvent.upsert({
         where: {
@@ -188,6 +253,9 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
           amountPerShare: div.amountPerShare,
           source: div.source,
           status: div.payDateEstimated ? 'preliminary' : 'confirmed',
+          // Explicit so the change detector / growth math (which filter on
+          // dividendType: 'regular') keep matching even if the column default moves.
+          dividendType: 'regular',
         },
         update: {
           // Only update pay date if we now have a confirmed one

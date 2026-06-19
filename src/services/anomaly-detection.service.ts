@@ -12,6 +12,46 @@ import { sendPushToUser, sendNativePushToUser } from './push.service';
 const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h — one alert per stock per day
 const DIVIDEND_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 
+// A dividend change is only "news" if it's genuinely recent. A freshly-DECLARED
+// dividend has a FUTURE ex-date (we ingest declarations ~24h after the
+// announcement), and a just-paid one is within a few days — both pass. Anything
+// older is stale (e.g. a newly-added holding surfacing a months-old change) and
+// must NOT alert as if it just happened. This replaces the old 60-day window
+// that let weeks-old changes through stamped "just now".
+const DIVIDEND_FRESH_WINDOW_MS = 10 * 24 * 60 * 60 * 1000; // 10 days
+
+/**
+ * Whether a dividend change is recent enough to alert on. Future ex-dates
+ * (freshly declared) always pass; ex-dates older than the window are stale.
+ */
+export function isDividendChangeFresh(exDate: Date, now: Date = new Date()): boolean {
+  return exDate.getTime() >= now.getTime() - DIVIDEND_FRESH_WINDOW_MS;
+}
+
+/**
+ * Choose the dividend to compare `latest` against when measuring a change.
+ * For a freshly-DECLARED dividend (future ex-date) use the immediately previous
+ * payout — "raised from last quarter" is the right, always-detectable basis for
+ * an announcement (a YoY comparison can equal the new amount for non-monotonic
+ * histories and wrongly skip the raise). For already-ex history prefer the
+ * year-over-year same-quarter dividend (9–15 months back), else the previous
+ * payout. `events` must be ordered by exDate desc with events[0] === latest.
+ */
+export function pickDividendCompareEvent<T extends { exDate: Date; amountPerShare: number }>(
+  latest: T,
+  events: T[],
+  now: Date = new Date(),
+): T | undefined {
+  const isDeclared = latest.exDate.getTime() > now.getTime();
+  const compare = isDeclared
+    ? events[1]
+    : events.find(e => {
+        const monthsAgo = (latest.exDate.getTime() - e.exDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
+        return monthsAgo >= 9 && monthsAgo <= 15;
+      });
+  return compare ?? events[1];
+}
+
 // ETFs with variable distributions — skip from dividend raise/cut detection
 const ETF_VARIABLE_DISTRIBUTIONS = new Set([
   'DIA', 'SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'EEM', 'EFA',
@@ -358,12 +398,12 @@ export async function detectDividendChanges(userId: string): Promise<void> {
 
     const latest = events[0];
 
-    // Only alert on recent dividend changes — the latest dividend's exDate
-    // must be within 60 days of now (covers quarterly) OR in the future.
-    // This prevents stale alerts when old dividend events are bulk-synced
-    // (all getting a fresh createdAt despite exDates months/years ago).
-    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-    if (latest.exDate < sixtyDaysAgo) continue;
+    // Freshness gate — only alert on genuinely recent dividend news. A freshly
+    // DECLARED dividend has a future ex-date (ingested ~24h after announcement)
+    // so it passes; a months-old change (e.g. a newly-added holding's historical
+    // raise) is stale and skipped, so it can never surface as if it just
+    // happened. See isDividendChangeFresh / DIVIDEND_FRESH_WINDOW_MS.
+    if (!isDividendChangeFresh(latest.exDate)) continue;
 
     // Only alert if the amount actually changed from the immediately previous
     // payout. This prevents re-alerting every quarter on a stale YoY comparison
@@ -371,13 +411,10 @@ export async function detectDividendChanges(userId: string): Promise<void> {
     // from a year ago).
     if (latest.amountPerShare === events[1].amountPerShare) continue;
 
-    // Try YoY same-quarter comparison first: find a dividend ~12 months ago (9-15 month window)
-    let compareEvent = events.find(e => {
-      const monthsAgo = (latest.exDate.getTime() - e.exDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
-      return monthsAgo >= 9 && monthsAgo <= 15;
-    });
-    // Fallback: compare to the immediately previous dividend
-    if (!compareEvent) compareEvent = events[1];
+    // Pick what to compare against: the previous payout for a freshly-declared
+    // dividend (announcement basis — always detectable), else the YoY same-quarter
+    // dividend. See pickDividendCompareEvent.
+    const compareEvent = pickDividendCompareEvent(latest, events) ?? events[1];
 
     if (latest.amountPerShare === compareEvent.amountPerShare) continue;
 
@@ -421,8 +458,10 @@ export async function detectDividendChanges(userId: string): Promise<void> {
     const annualImpact = changeAmount * stillHeld.shares * estimatedFrequency;
     const severity = Math.abs(changePct) >= 20 ? 'critical' : Math.abs(changePct) >= 10 ? 'warning' : 'info';
 
+    const exDateStr = latest.exDate.toISOString().slice(0, 10);
+    const exDateLabel = latest.exDate.getTime() > Date.now() ? `effective ${exDateStr}` : `ex-date ${exDateStr}`;
     const divTitle = `${ticker} ${direction} dividend ${Math.abs(changePct).toFixed(1)}%`;
-    const divDescription = `${ticker} ${direction} its dividend from $${compareEvent.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share vs ${comparisonLabel} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`;
+    const divDescription = `${ticker} ${direction} its dividend from $${compareEvent.amountPerShare.toFixed(4)} to $${latest.amountPerShare.toFixed(4)} per share vs ${comparisonLabel} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%, ${exDateLabel}). Your annual income ${changeAmount > 0 ? 'rose' : 'fell'} by $${Math.abs(annualImpact).toFixed(2)}/yr.`;
 
     await prisma.anomalyEvent.create({
       data: {
