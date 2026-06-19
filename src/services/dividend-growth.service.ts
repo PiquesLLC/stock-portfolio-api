@@ -31,7 +31,7 @@ export async function getDividendGrowthRates(
   });
 
   if (holdings.length === 0) {
-    return { holdings: [], portfolio: { weightedAvgGrowthRate: null, totalAnnualIncome: 0, totalMonthlyIncome: 0 } };
+    return { holdings: [], portfolio: { weightedAvgGrowthRate: null, totalAnnualIncome: 0, totalMonthlyIncome: 0, forwardYield: null } };
   }
 
   const tickers = holdings.map(h => h.ticker.toUpperCase());
@@ -74,11 +74,16 @@ export async function getDividendGrowthRates(
   // Canonical forward annual income (shared with income-insights) — one place
   // resolves per-share / yield / total so the figure can't diverge by screen.
   const fwd = computeForwardAnnualIncome(
-    holdings.map(h => ({
-      ticker: h.ticker,
-      shares: h.shares,
-      currentPrice: quotesResult.quotes.get(h.ticker.toUpperCase())?.currentPrice ?? null,
-    })),
+    holdings.map(h => {
+      const currentPrice = quotesResult.quotes.get(h.ticker.toUpperCase())?.currentPrice ?? null;
+      return {
+        ticker: h.ticker,
+        shares: h.shares,
+        currentPrice,
+        // currentValue feeds the canonical (value-weighted) portfolio forward yield.
+        currentValue: currentPrice != null ? currentPrice * h.shares : null,
+      };
+    }),
     screenerMap,
   );
 
@@ -181,6 +186,9 @@ export async function getDividendGrowthRates(
       weightedAvgGrowthRate,
       totalAnnualIncome: fwd.totalAnnualIncome,
       totalMonthlyIncome: fwd.totalMonthlyIncome,
+      // Canonical value-weighted forward portfolio yield (income / total value), so
+      // the DRIP projector's reinvest rate matches the dividend-income figure.
+      forwardYield: fwd.portfolioYieldPct,
     },
   };
 }
