@@ -58,17 +58,20 @@ const SECTOR_ORDER = ['AI', 'Healthcare', 'Defense', 'Energy'];
  * Layers not in this list get appended in alphabetical order.
  */
 const LAYER_ORDER = [
-  // AI layers
+  // AI layers — ranked by current market relevance. 2026 has shifted the binding
+  // constraint toward power (grid interconnect, transformer/switchgear/gas-turbine
+  // lead times) with HBM/DRAM in acute shortage, so the power complex and memory
+  // sit near the top while Compute remains the foundational anchor. Reviewed 2026-06-18.
   'Compute',
-  'Lithography',
+  'Power & Cooling',
   'Memory',
+  'Energy',
+  'Lithography',
   'Foundry',
   'Advanced Packaging',
-  'Power & Cooling',
   'Networking',
   'Optical',
   'EDA',
-  'Energy',
   // Healthcare layers
   'GLP-1 & Obesity',
   'CDMO / Bio Manufacturing',
