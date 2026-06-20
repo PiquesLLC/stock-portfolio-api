@@ -31,6 +31,7 @@ interface HeatmapStock {
   regularChangePercent: number;
   dayChange: number;
   weekChangePercent: number;
+  noTradeData?: boolean; // true when we have no real quote/period data — UI dims it as "–", never "+0.00%"
   marketCapB: number;
   volume: number;
   avgVolume: number;
@@ -66,6 +67,7 @@ export interface HeatmapResponse {
   period: HeatmapPeriod;
   generated: number;
   session: ReturnType<typeof getMarketSession>;
+  coverage: number; // fraction of tiles with real data (0..1); the UI gates its loading skeleton on this
 }
 
 function parseMarketCapB(raw: unknown): number | null {
@@ -450,6 +452,14 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           ? ((currentPrice - quote.previousClose) / quote.previousClose) * 100
           : changePercent;
 
+        // No real data ⇒ render a dimmed "–", never a fabricated "+0.00%". 1D needs a
+        // priced quote (or extended / candle fallback); other periods need a valid anchor.
+        const noTradeData = period === '1D'
+          ? !(useExtendedForRow
+              || (quote != null && quote.currentPrice > 0 && (quote.previousClose ?? 0) > 0)
+              || (oneDayChanges?.has(upper) ?? false))
+          : !(periodRef != null && periodRef.anchor > 0 && livePrice > 0);
+
         return {
           ticker: upper,
           name: resolveName(overview, upper),
@@ -457,6 +467,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           regularPrice: currentPrice,
           changePercent,
           regularChangePercent,
+          noTradeData,
           dayChange,
           weekChangePercent: (weekRef && weekRef.anchor > 0 && livePrice > 0)
             ? Math.round(((livePrice - weekRef.anchor) / weekRef.anchor) * 10000) / 100
@@ -510,15 +521,22 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   // Remove empty sectors (can happen when filtering by index)
   const filteredSectors = sectors.filter(s => s.stocks.length > 0);
 
+  const allTiles = filteredSectors.flatMap(s => s.stocks);
+  const coverage = allTiles.length > 0
+    ? allTiles.filter(t => !t.noTradeData).length / allTiles.length
+    : 1;
+
   const response: HeatmapResponse = {
     sectors: filteredSectors,
     period,
     generated: Date.now(),
     session,
+    coverage,
   };
 
-  // Cache: 1D=120s (prices don't change meaningfully in 2min), longer periods=300s
-  const ttl = period === '1D' ? 120 : 300;
+  // Don't freeze a low-coverage (cold/partial) response as if it were final — cache it
+  // only briefly so it self-heals on the next refresh instead of serving fake zeros for 2min.
+  const ttl = coverage >= 0.95 ? (period === '1D' ? 120 : 300) : 10;
   heatmapCache.set(cacheKey, response, ttl);
   return response;
 }
