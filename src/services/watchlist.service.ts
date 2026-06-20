@@ -4,6 +4,7 @@ import { fetchPolygonAggs } from '../utils/yahoo-http';
 import { etDate } from '../utils/date';
 import NodeCache from 'node-cache';
 import { PlanLimitError } from '../utils/plan-limit.error';
+import { periodStartCloseFromArrays } from '../utils/candle-window';
 
 
 // Cache performance data for 15 minutes — balances freshness vs rate-limit protection
@@ -64,17 +65,12 @@ export async function fetchTickerPerf(ticker: string): Promise<TickerPerf> {
     const closes = data.closes;
     const timestamps = data.timestamps; // unix seconds, ascending
     const current = closes[closes.length - 1];
-    const nowMs = Date.now();
 
-    // Anchor each window by DATE (first candle within the window), not a fixed
-    // trading-bar count. Fixed bar counts make "1W" drift past 7 calendar days
-    // across holiday weeks and disagree with the heatmap/stock chart. Mirrors the
-    // heatmap period fix.
-    const startClose = (days: number): number => {
-      const cutoff = nowMs - days * 86_400_000;
-      const idx = timestamps.findIndex((t) => t * 1000 >= cutoff);
-      return closes[idx >= 0 ? idx : 0];
-    };
+    // Anchor each window by DATE (the close of the first candle on/after the cutoff
+    // date) via the shared helper — NOT a timestamp compare (which skipped the
+    // boundary day) or a fixed bar count (which drifts across holiday weeks).
+    const startClose = (days: number): number =>
+      periodStartCloseFromArrays(closes, timestamps, days) ?? closes[0];
     const weekAgoPrice = startClose(7);
     const monthAgoPrice = startClose(30);
     const yearAgoPrice = startClose(365);

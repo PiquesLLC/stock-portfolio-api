@@ -19,6 +19,7 @@ import { insightsCache } from '../utils/finnhub';
 import { getCompanyFundamentals, FundamentalsResponse, ParsedOverview } from './polygon-fundamentals.service';
 import { getAnalystSnapshot } from './analyst.service';
 import { fetchDailyCandles, fetchFastQuote } from './market.service';
+import { periodStartClose } from '../utils/candle-window';
 import { getAssetAbout } from '../utils/yahoo-finance';
 import { getStockMetrics } from '../utils/finnhub';
 import { StockMetrics, AssetAbout } from '../types';
@@ -354,9 +355,10 @@ async function scoreMomentum(ticker: string, overview: ParsedOverview | null, cu
   try {
     const candles = prefetchedCandles ?? await fetchDailyCandles(ticker, 180);
     if (candles.length >= 2) {
-      const oldPrice = candles[0].close;
+      // Date-anchored 6mo start (candles[0] is the ~190d over-fetch buffer).
+      const oldPrice = periodStartClose(candles, 180);
       const newPrice = candles[candles.length - 1].close;
-      if (oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
+      if (oldPrice != null && oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
     }
   } catch { /* candles unavailable */ }
 
@@ -492,9 +494,10 @@ async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null,
   try {
     const candles = prefetchedCandles ?? await fetchDailyCandles(ticker, 180);
     if (candles.length >= 2) {
-      const oldPrice = candles[0].close;
+      // Date-anchored 6mo start (candles[0] is the ~190d over-fetch buffer).
+      const oldPrice = periodStartClose(candles, 180);
       const newPrice = candles[candles.length - 1].close;
-      if (oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
+      if (oldPrice != null && oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
 
       // 3-month return from midpoint
       const mid = Math.floor(candles.length / 2);

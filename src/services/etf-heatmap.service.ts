@@ -2,6 +2,7 @@ import { fetchPrices, fetchDailyCandles } from './market.service';
 import etfData from '../data/etf-universe.json';
 import type { HeatmapPeriod } from './market-heatmap.service';
 import { runJob } from './job-runner.service';
+import { periodStartClose } from '../utils/candle-window';
 
 // ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
 
@@ -154,15 +155,11 @@ async function fetchEtfPeriodChanges(
       batch.map(async (ticker) => {
         const candles = await fetchDailyCandles(ticker, days);
         if (candles.length < 2) return { ticker, change: 0 };
-        // fetchDailyCandles over-fetches `days + 10` calendar days as a trading-day
-        // buffer, so candles[0] is ~10 days OLDER than the requested window. Anchor the
-        // start at the first candle within the actual `days`-day window (mirrors the
-        // stock chart) — otherwise e.g. a "1W" change is really a ~2.5-week change.
-        const cutoffMs = Date.now() - days * 86_400_000;
-        const startCandle = candles.find((c) => new Date(c.time).getTime() >= cutoffMs) ?? candles[0];
-        const startPrice = startCandle.close;
+        // Date-anchored start ("price N days ago") via the shared helper — the old
+        // timestamp anchor skipped the boundary day and understated the change.
+        const startPrice = periodStartClose(candles, days);
         const endPrice = candles[candles.length - 1].close;
-        if (startPrice <= 0) return { ticker, change: 0 };
+        if (startPrice == null || startPrice <= 0) return { ticker, change: 0 };
         return { ticker, change: Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100 };
       }),
     );

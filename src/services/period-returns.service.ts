@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
 import { fetchDailyCandles, fetchPrices } from './market.service';
+import { periodStartCloseByDate, candleDateStr } from '../utils/candle-window';
 
 const periodReturnsCache = new NodeCache({ stdTTL: 1800 });
 const POLYGON_BATCH_SIZE = 10;
@@ -36,12 +37,14 @@ function getLookbackDays(period: Exclude<HoldingReturnPeriod, 'daily'>): number 
 }
 
 function getPeriodStartClose(candles: { time: string; close: number }[], startMs: number): number | null {
+  // Date-anchored (see utils/candle-window): close of the first candle on/after the
+  // period's start DATE. The previous timestamp compare (time >= startMs) skipped the
+  // boundary day and understated the return.
   const sorted = candles
     .filter(candle => Number.isFinite(candle.close) && candle.close > 0)
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
-  const firstOnOrAfter = sorted.find(candle => new Date(candle.time).getTime() >= startMs);
-  return firstOnOrAfter?.close ?? null;
+  return periodStartCloseByDate(sorted, candleDateStr(startMs));
 }
 
 export async function getHoldingPeriodReturns(
