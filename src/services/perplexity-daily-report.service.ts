@@ -63,6 +63,7 @@ export interface DailyReportResponse {
   }[];
   watchToday: string[];
   cached: boolean;
+  generating?: boolean; // true on a "still generating" fallback — client shows a generating state + polls faster
   sample?: boolean;
 }
 
@@ -180,6 +181,7 @@ function buildQuickFallback(weekend: boolean): DailyReportResponse {
     topStories: [],
     watchToday: [],
     cached: false,
+    generating: true,
   };
 }
 
@@ -249,7 +251,7 @@ function buildFallbackReport(
     watchToday,
     positionMoves,
     cached: false,
-    _fallback: true,
+    generating: true,
   } as DailyReportResponse;
 }
 
@@ -630,7 +632,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       const fallback = buildQuickFallback(weekend);
       // Let pipeline finish in background and cache
       fullPipeline.then(aiResult => {
-        if (aiResult.topStories.length > 0 && !(aiResult as any)._fallback) {
+        if (aiResult.topStories.length > 0 && !aiResult.generating) {
           reportCache.set(cacheKey, aiResult, ttlForState(marketState));
           console.log(`[Daily Report] Background generation complete, cached`);
         }
@@ -640,12 +642,11 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 
     const result = raceResult;
     // Only cache AI-generated reports, never fallback reports
-    if (result.topStories.length > 0 && !(result as any)._fallback) {
+    if (result.topStories.length > 0 && !result.generating) {
       reportCache.set(cacheKey, result, ttlForState(marketState));
     }
-    console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms${(result as any)._fallback ? ' (fallback — not cached)' : ''}`);
-    // Strip internal _fallback flag before returning to client
-    if ((result as any)._fallback) delete (result as any)._fallback;
+    console.log(`[Daily Report] Generated ${result.topStories.length} stories in ${Date.now() - startTime}ms${result.generating ? ' (fallback — not cached)' : ''}`);
+    // Keep `generating` on the response so the client can show a generating state + poll faster.
     return result;
   } catch (_error) {
     if (strictFailures) {
