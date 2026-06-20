@@ -499,10 +499,11 @@ async function scoreETFPerformance(ticker: string, metrics: StockMetrics | null,
       const newPrice = candles[candles.length - 1].close;
       if (oldPrice != null && oldPrice > 0) sixMonthReturn = ((newPrice - oldPrice) / oldPrice) * 100;
 
-      // 3-month return from midpoint
-      const mid = Math.floor(candles.length / 2);
-      if (mid > 0 && candles[mid].close > 0) {
-        threeMonthReturn = ((newPrice - candles[mid].close) / candles[mid].close) * 100;
+      // Date-anchored 3mo start (mirrors the 6mo path above; was the array midpoint,
+      // which drifts from a real 3-month date — especially with the ~190d over-fetch).
+      const threeMonthAnchor = periodStartClose(candles, 90);
+      if (threeMonthAnchor != null && threeMonthAnchor > 0) {
+        threeMonthReturn = ((newPrice - threeMonthAnchor) / threeMonthAnchor) * 100;
       }
     }
   } catch { /* candles unavailable */ }
