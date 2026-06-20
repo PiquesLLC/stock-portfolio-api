@@ -26,7 +26,9 @@ interface HeatmapStock {
   ticker: string;
   name: string;
   price: number;
+  regularPrice: number;
   changePercent: number;
+  regularChangePercent: number;
   dayChange: number;
   weekChangePercent: number;
   marketCapB: number;
@@ -63,6 +65,7 @@ export interface HeatmapResponse {
   sectors: HeatmapSector[];
   period: HeatmapPeriod;
   generated: number;
+  session: ReturnType<typeof getMarketSession>;
 }
 
 function parseMarketCapB(raw: unknown): number | null {
@@ -267,7 +270,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
   // For non-1D: period changes are essential (the main changePercent).
   // Week changes are always fetched — Top 100 view shows 7D column regardless of period.
   const candleDays = PERIOD_DAYS[period];
-  const marketIsClosed = getMarketSession() === 'CLOSED';
+  const session = getMarketSession();
+  const marketIsClosed = session === 'CLOSED';
   const use1DCandles = period === '1D' && marketIsClosed;
   const needsPeriodChanges = period !== '1D' && candleDays > 0;
 
@@ -435,11 +439,24 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           if (screener.week52Low != null) week52Low = screener.week52Low;
         }
 
+        // Regular-session 1D % for the heatmap's After-hours toggle: when this row
+        // shows the extended-hours move, also expose the regular close % (regular
+        // price vs previous close), computed symmetrically with the extended % above
+        // (both anchored on previousClose). Using quote.changePercent here would be
+        // unsafe — it can already carry the after-hours overlay, collapsing the toggle.
+        // useExtendedForRow guarantees quote + previousClose > 0. Non-1D / non-extended
+        // rows have no separate regular value, so it equals changePercent.
+        const regularChangePercent = (period === '1D' && useExtendedForRow && (quote?.previousClose ?? 0) > 0)
+          ? ((currentPrice - quote.previousClose) / quote.previousClose) * 100
+          : changePercent;
+
         return {
           ticker: upper,
           name: resolveName(overview, upper),
           price: displayPrice,
+          regularPrice: currentPrice,
           changePercent,
+          regularChangePercent,
           dayChange,
           weekChangePercent: (weekRef && weekRef.anchor > 0 && livePrice > 0)
             ? Math.round(((livePrice - weekRef.anchor) / weekRef.anchor) * 10000) / 100
@@ -497,6 +514,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     sectors: filteredSectors,
     period,
     generated: Date.now(),
+    session,
   };
 
   // Cache: 1D=120s (prices don't change meaningfully in 2min), longer periods=300s
