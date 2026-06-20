@@ -212,7 +212,9 @@ describe('getHeatmapData — extended-hours overlay (1D)', () => {
     const resp = await getHeatmapData('1W');
 
     const googl = resp.sectors[0]?.stocks[0];
-    // 1W must come from candles, not the after-hours pop.
-    expect(googl?.changePercent).toBeCloseTo(5, 1);
+    // 1W = the date-anchored candle close -> the REGULAR live price (99.84), NOT the
+    // after-hours pop (106.84): (95 -> 99.84) ≈ +5.1%.
+    expect(googl?.changePercent).toBeCloseTo(5.09, 1);
+    expect(googl?.changePercent).toBeLessThan(6); // ignores the after-hours 106.84
   });
 });

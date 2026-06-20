@@ -141,11 +141,35 @@ async function fetchYahooFundamentalsBatch(tickers: string[]): Promise<Map<strin
  * Uses fetchDailyCandles (which has 1hr cache per ticker via Polygon).
  * Returns Map<ticker, changePercent>.
  */
-async function fetchPeriodChanges(
+interface PeriodReference {
+  anchor: number; // close as-of `days` ago (date-anchored, like the stock chart)
+  latest: number; // most recent candle close (live-price fallback for dropped quotes)
+}
+
+/** Date string (YYYY-MM-DD, UTC) for a candle timestamp; '' when missing/invalid. */
+function candleDateStr(time: unknown): string {
+  if (time == null) return '';
+  const d = new Date(time as string | number);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+/**
+ * For each ticker, returns the reference (anchor) close `days` ago plus the most
+ * recent candle close.
+ *
+ * The anchor is matched BY DATE — the first candle whose calendar date is on/after
+ * (today - days) — exactly mirroring the stock chart (useStockChart). The previous
+ * code compared timestamps (`>= now - days*ms`): because a daily bar is stamped at
+ * the START of its day, the boundary day's candle fell just before the cutoff's
+ * time-of-day and was SKIPPED, so a "7-day" change was really ~6 days and understated
+ * the move (e.g. AMAT's Top 100 7D read +5.35% vs the chart's correct +9.21%).
+ */
+async function fetchPeriodReferencePrices(
   tickers: string[],
   days: number,
-): Promise<Map<string, number>> {
-  const changes = new Map<string, number>();
+): Promise<Map<string, PeriodReference>> {
+  const refs = new Map<string, PeriodReference>();
+  const cutoffDate = candleDateStr(Date.now() - days * 86_400_000);
 
   // Process in batches of 50 concurrent requests (Polygon paid plan allows high concurrency)
   const BATCH_SIZE = 50;
@@ -154,31 +178,31 @@ async function fetchPeriodChanges(
     const results = await Promise.allSettled(
       batch.map(async (ticker) => {
         const candles = await fetchDailyCandles(ticker, days);
-        if (candles.length < 2) return { ticker, change: 0 };
+        if (candles.length < 1) return { ticker, ref: null as PeriodReference | null };
 
-        // fetchDailyCandles over-fetches `days + 10` calendar days as a trading-day
-        // buffer, so candles[0] is ~10 days OLDER than the requested window. Anchor the
-        // start at the first candle within the actual `days`-day window (mirrors the
-        // stock chart) — otherwise e.g. a "1W" change is really a ~2.5-week change.
-        const cutoffMs = Date.now() - days * 86_400_000;
-        const startCandle = candles.find((c) => new Date(c.time).getTime() >= cutoffMs) ?? candles[0];
-        const startPrice = startCandle.close;
-        const endPrice = candles[candles.length - 1].close;
-        if (startPrice <= 0) return { ticker, change: 0 };
+        // fetchDailyCandles over-fetches `days + 10` calendar days as a buffer, so
+        // candles[0] is older than the window. Anchor at the first candle whose DATE
+        // is on/after (today - days); fall back to candles[0] if none qualify.
+        const startCandle = candles.find((c) => {
+          const d = candleDateStr((c as { time?: unknown }).time);
+          return d !== '' && d >= cutoffDate;
+        }) ?? candles[0];
 
-        const change = ((endPrice - startPrice) / startPrice) * 100;
-        return { ticker, change: Math.round(change * 100) / 100 };
+        return {
+          ticker,
+          ref: { anchor: startCandle.close, latest: candles[candles.length - 1].close } as PeriodReference | null,
+        };
       }),
     );
 
     for (const result of results) {
-      if (result.status === 'fulfilled') {
-        changes.set(result.value.ticker, result.value.change);
+      if (result.status === 'fulfilled' && result.value.ref) {
+        refs.set(result.value.ticker, result.value.ref);
       }
     }
   }
 
-  return changes;
+  return refs;
 }
 
 /**
@@ -253,7 +277,8 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     Promise<Map<string, number>>,
     Promise<any[]>,
     Promise<Map<string, number> | null>,
-    Promise<Map<string, number> | null>,
+    Promise<Map<string, PeriodReference> | null>,
+    Promise<Map<string, PeriodReference>>,
   ] = [
     fetchPrices(uniqueTickers),
     prisma.fundamentalsCache.findMany({
@@ -264,16 +289,16 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
     prisma.screenerCache.findMany({
       where: { ticker: { in: uniqueTickers } },
     }),
-    // Period changes — for non-1D, or for 1D when market is CLOSED
+    // 1D-from-candles — only when the 1D tab is viewed while the market is CLOSED
     // (live quotes are flaky on weekends/holidays, so use archived daily candles).
-    use1DCandles
-      ? fetchOneDayChangesFromCandles(uniqueTickers)
-      : (needsPeriodChanges ? fetchPeriodChanges(uniqueTickers, candleDays) : Promise.resolve(null)),
-    // Week changes — always fetched (Top 100 shows 7D column)
-    fetchPeriodChanges(uniqueTickers, 7),
+    use1DCandles ? fetchOneDayChangesFromCandles(uniqueTickers) : Promise.resolve(null),
+    // Period anchor prices — for non-1D periods (drives the tile's main change).
+    needsPeriodChanges ? fetchPeriodReferencePrices(uniqueTickers, candleDays) : Promise.resolve(null),
+    // Week anchor prices — always fetched (Top 100 shows the 7D column regardless of period).
+    fetchPeriodReferencePrices(uniqueTickers, 7),
   ];
 
-  const [{ quotes }, fundamentals, polygonVolumes, screenerRows, periodChanges, weekChanges] =
+  const [{ quotes }, fundamentals, polygonVolumes, screenerRows, oneDayChanges, periodRefs, weekRefs] =
     await Promise.all(parallelFetches);
 
   // Build screener lookup map
@@ -336,6 +361,16 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         const overview = fundamentalsMap.get(upper);
         const marketCapB = resolveMarketCapB(overview) ?? 0;
 
+        const periodRef = periodRefs?.get(upper);
+        const weekRef = weekRefs.get(upper);
+        // Live price for change math + display. Fall back to the most recent daily
+        // candle close when the live quote is missing/zero, so a dropped quote can't
+        // surface as a "$0.00" row (e.g. RBLX) or a bogus -100% change.
+        const quoteLivePrice = quote?.currentPrice ?? 0;
+        const livePrice = quoteLivePrice > 0
+          ? quoteLivePrice
+          : (weekRef?.latest ?? periodRef?.latest ?? 0);
+
         // 1D changePercent priority — preserve extended-hours moves across all sessions:
         //   1. extendedPrice + extendedChangePercent set (live PRE/POST) → total change from
         //      previousClose using extendedPrice. Mirrors themes-heatmap.service.ts.
@@ -357,10 +392,15 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           } else if (quote?.changePercent) {
             changePercent = quote.changePercent;
           } else {
-            changePercent = periodChanges?.get(upper) ?? 0;
+            changePercent = oneDayChanges?.get(upper) ?? 0;
           }
         } else {
-          changePercent = periodChanges?.get(upper) ?? (quote?.changePercent ?? 0);
+          // Non-1D: (live price - the close N days ago) / that close, date-anchored to
+          // match the stock chart. Uses the regular-session live price (not the
+          // after-hours pop) — non-1D tiles deliberately ignore extended hours.
+          changePercent = (periodRef && periodRef.anchor > 0 && livePrice > 0)
+            ? Math.round(((livePrice - periodRef.anchor) / periodRef.anchor) * 10000) / 100
+            : (quote?.changePercent ?? 0);
         }
         const dayChange = period === '1D'
           ? (quote?.change ?? 0)
@@ -372,7 +412,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         // it tracks extendedPrice during extended hours so the tooltip is consistent
         // with the displayed change.
         const screener = screenerMap.get(upper);
-        const currentPrice = quote?.currentPrice ?? 0;
+        const currentPrice = livePrice;
         const displayPrice = useExtendedForRow ? (quote?.extendedPrice ?? currentPrice) : currentPrice;
 
         let pe: number | null = overview?.peRatio ?? null;
@@ -401,7 +441,9 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           price: displayPrice,
           changePercent,
           dayChange,
-          weekChangePercent: weekChanges?.get(upper) ?? 0,
+          weekChangePercent: (weekRef && weekRef.anchor > 0 && livePrice > 0)
+            ? Math.round(((livePrice - weekRef.anchor) / weekRef.anchor) * 10000) / 100
+            : 0,
           marketCapB,
           volume: polygonVolumes.get(upper) ?? 0,
           avgVolume: getCachedAdv(upper) ?? 0,

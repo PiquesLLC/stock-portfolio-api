@@ -84,4 +84,41 @@ describe('getHeatmapData — period change uses the requested window, not the ca
     const amzn = resp.sectors[0]?.stocks[0];
     expect(amzn?.changePercent).toBeCloseTo(-9.23, 1);
   });
+
+  it('1W anchors at the candle exactly 7 days ago (date-based), not the next day (the timestamp-skip bug)', async () => {
+    // The bug: the old code compared candle TIMESTAMPS to (now - 7*24h). A daily bar
+    // is stamped at the START of its day, so the day-exactly-7-days-ago bar fell just
+    // before the cutoff's time-of-day and was SKIPPED — measuring ~6 days. AMAT read
+    // +5.35% on the Top 100 instead of the chart's correct +9.21%.
+    const sevenDaysAgoDate = new Date(Date.now() - 7 * DAY_MS).toISOString().slice(0, 10);
+    mocks.fetchPrices.mockResolvedValue({
+      quotes: new Map([['AMZN', { currentPrice: 120, changePercent: 0, change: 0 }]]),
+    });
+    mocks.fetchDailyCandles.mockResolvedValue([
+      { time: sevenDaysAgoDate + 'T00:00:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1 },
+      { time: isoDaysAgo(3), open: 110, high: 111, low: 109, close: 110, volume: 1 },
+      { time: isoDaysAgo(0.2), open: 119, high: 121, low: 118, close: 119, volume: 1 },
+    ]);
+    const { getHeatmapData } = await import('../services/market-heatmap.service');
+    const resp = await getHeatmapData('1W');
+    const amzn = resp.sectors[0]?.stocks[0];
+    // Date-anchored: start at the exactly-7d-ago $100 -> live $120 = +20%.
+    // The old timestamp-skip would have started at the 3d-ago $110 (+9.1%).
+    expect(amzn?.changePercent).toBeCloseTo(20, 1);
+  });
+
+  it('falls back to the latest candle close when the live quote is $0 (no "$0.00" rows like RBLX)', async () => {
+    mocks.fetchPrices.mockResolvedValue({
+      quotes: new Map([['AMZN', { currentPrice: 0, changePercent: 0, change: 0 }]]),
+    });
+    mocks.fetchDailyCandles.mockResolvedValue([
+      { time: isoDaysAgo(6), open: 100, high: 101, low: 99, close: 100, volume: 1 },
+      { time: isoDaysAgo(0.2), open: 109, high: 111, low: 108, close: 110, volume: 1 },
+    ]);
+    const { getHeatmapData } = await import('../services/market-heatmap.service');
+    const resp = await getHeatmapData('1W');
+    const amzn = resp.sectors[0]?.stocks[0];
+    expect(amzn?.price).toBe(110);                   // last candle close, not $0.00
+    expect(amzn?.changePercent).toBeCloseTo(10, 1);  // (100 -> 110) = +10%
+  });
 });
