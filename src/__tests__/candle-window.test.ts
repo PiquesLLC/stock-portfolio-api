@@ -4,6 +4,7 @@ import {
   periodStartClose,
   periodStartCloseByDate,
   periodStartCloseFromArrays,
+  periodStartCloseFromDateStrings,
 } from '../utils/candle-window';
 
 const DAY_MS = 86_400_000;
@@ -58,5 +59,20 @@ describe('candle-window — date-anchored period start (the bug that hit Top 100
     const timestamps = [dayStartSec, Math.floor((Date.now() - 3 * DAY_MS) / 1000), Math.floor((Date.now() - 0.2 * DAY_MS) / 1000)];
     expect(periodStartCloseFromArrays(closes, timestamps, 7)).toBe(100);
     expect(periodStartCloseFromArrays([], [], 7)).toBeNull();
+  });
+
+  it('periodStartCloseFromDateStrings handles parallel closes[]/dates[] (date strings)', () => {
+    const sevenDaysAgo = new Date(Date.now() - 7 * DAY_MS).toISOString().slice(0, 10);
+    const closes = [100, 110, 120];
+    const dates = [
+      sevenDaysAgo,
+      new Date(Date.now() - 3 * DAY_MS).toISOString().slice(0, 10),
+      new Date(Date.now() - 0.2 * DAY_MS).toISOString().slice(0, 10),
+    ];
+    // Includes the bar exactly 7d ago (date-anchored), mirroring periodStartCloseFromArrays.
+    expect(periodStartCloseFromDateStrings(closes, dates, 7)).toBe(100);
+    // Falls back to the oldest close when none are within the window; null when empty.
+    expect(periodStartCloseFromDateStrings([90, 95], ['2020-01-01', '2020-01-02'], 7)).toBe(90);
+    expect(periodStartCloseFromDateStrings([], [], 7)).toBeNull();
   });
 });

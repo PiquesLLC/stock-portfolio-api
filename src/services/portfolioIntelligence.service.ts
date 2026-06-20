@@ -5,6 +5,7 @@ import {
   getMultipleCandlesGradual,
   HistoricalCandles,
 } from '../utils/candle-cache';
+import { periodStartCloseFromDateStrings } from '../utils/candle-window';
 import { HoldingWithQuote, HeroStats } from '../types';
 import { getSector } from '../utils/sectors';
 import { yahooGet } from '../utils/yahoo-http';
@@ -148,16 +149,19 @@ async function computeContributions(
   const contributionPromises = holdings.map(async h => {
     const candles = candleData.get(h.ticker);
     let closes: number[] | null = null;
+    let dates: (string | Date)[] | null = null;
 
     // Try Finnhub first
     if (candles && !candles.partial && candles.closes.length >= daysBack + 1) {
       closes = candles.closes;
+      dates = candles.dates;
     }
     // Fallback to Yahoo for this ticker if Finnhub doesn't have enough data
     else {
       const yahooData = await fetchYahooCandlesFallback(h.ticker);
       if (yahooData && yahooData.closes.length >= daysBack + 1) {
         closes = yahooData.closes;
+        dates = yahooData.dates;
       }
     }
 
@@ -168,7 +172,11 @@ async function computeContributions(
     }
 
     const currentPrice = closes[closes.length - 1];
-    const referenceClose = closes[closes.length - 1 - daysBack];
+    // '1m' = calendar-month date-anchor (was 22 fixed bars → holiday drift); '5d' = 5
+    // trading days, which is exact on a daily series, so keep the bar offset there.
+    const referenceClose = window === '1m'
+      ? (periodStartCloseFromDateStrings(closes, dates, 30) ?? closes[closes.length - 1 - daysBack])
+      : closes[closes.length - 1 - daysBack];
     if (referenceClose <= 0) return { ticker: h.ticker, contributionDollar: 0, percentReturn: null, ...holdingMeta };
     const priceChange = currentPrice - referenceClose;
     const percentReturn = Math.round(((currentPrice - referenceClose) / referenceClose) * 1000) / 10;

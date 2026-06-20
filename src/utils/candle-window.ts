@@ -70,3 +70,22 @@ export function periodStartCloseFromArrays(
   }
   return closes[0];
 }
+
+/**
+ * Same date-anchored start close, for parallel closes[]/dates[] arrays where
+ * `dates` are calendar strings (YYYY-MM-DD) or any Date-parseable value, ascending.
+ * For HistoricalCandles-style {closes, dates} data.
+ */
+export function periodStartCloseFromDateStrings(
+  closes: number[] | null | undefined,
+  dates: (string | number | Date)[] | null | undefined,
+  days: number,
+): number | null {
+  if (!closes || closes.length === 0 || !dates) return null;
+  const cutoff = windowCutoffDate(days);
+  const n = Math.min(closes.length, dates.length);
+  for (let i = 0; i < n; i++) {
+    if (candleDateStr(dates[i]) >= cutoff) return closes[i];
+  }
+  return closes[0];
+}

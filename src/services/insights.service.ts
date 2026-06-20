@@ -7,6 +7,7 @@ import {
   getCacheStats,
   getBenchmarkReturns,
 } from '../utils/candle-cache';
+import { periodStartCloseFromDateStrings } from '../utils/candle-window';
 import {
   HealthScore,
   HealthScoreDetails,
@@ -601,7 +602,11 @@ export async function getAttribution(userId: string, window: AttributionWindow =
       // Use available data: go back daysBack if possible, otherwise use earliest available
       const availableBack = Math.min(daysBack, candles.closes.length - 1);
       const currentPrice = candles.closes[candles.closes.length - 1];
-      const pastPrice = candles.closes[candles.closes.length - 1 - availableBack];
+      // '1m' = calendar-month date-anchor (was 22 fixed bars → holiday drift); '5d' = 5
+      // trading days, exact on a daily series, so keep the bar offset there.
+      const pastPrice = window === '1m'
+        ? (periodStartCloseFromDateStrings(candles.closes, candles.dates, 30) ?? candles.closes[candles.closes.length - 1 - availableBack])
+        : candles.closes[candles.closes.length - 1 - availableBack];
 
       if (pastPrice <= 0) {
         return { ticker: h.ticker, contributionDollar: 0, contributionPct: 0 };
