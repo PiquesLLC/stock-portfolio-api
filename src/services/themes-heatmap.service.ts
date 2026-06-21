@@ -3,6 +3,8 @@ import themesData from '../data/finviz-themes-detailed.json';
 import type { HeatmapPeriod } from './market-heatmap.service';
 import { runJob } from './job-runner.service';
 import { periodStartClose } from '../utils/candle-window';
+import { getMarketSession } from '../utils/market-hours';
+import { deriveHeatmapQuoteFields, type HeatmapQuoteFields } from '../utils/heatmap-quote';
 
 // ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
 
@@ -11,6 +13,8 @@ interface HeatmapStock {
   name: string;
   price: number;
   changePercent: number;
+  regularChangePercent?: number; // regular-session 1D % for the After-hours toggle
+  regularPrice?: number;         // regular-session price for the After-hours toggle
   dayChange: number;
   marketCapB: number;
   subSector: string;
@@ -22,6 +26,7 @@ interface HeatmapSubSector {
   stocks: HeatmapStock[];
   totalMarketCapB: number;
   avgChangePercent: number;
+  avgRegularChangePercent: number; // regular-session avg — the subtheme tile's toggle value
 }
 
 interface HeatmapSector {
@@ -38,13 +43,12 @@ interface HeatmapResponse {
   sectors: HeatmapSector[];
   period: string;
   generated: number;
+  session: ReturnType<typeof getMarketSession>; // drives the UI After-hours badge/toggle
 }
 
 // ── Cache ──────────────────────────────────────────────────────
 
-type QuoteSource = 'regular' | 'extended' | 'prevClose';
-
-let quotesCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+let quotesCache = new Map<string, HeatmapQuoteFields>();
 let cacheUpdatedAt: number | null = null;
 let refreshInProgress = false;
 
@@ -78,38 +82,14 @@ async function refreshQuotesBackground(): Promise<void> {
 
   try {
     const allTickers = getAllUniqueTickers();
-    const newCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+    const newCache = new Map<string, HeatmapQuoteFields>();
 
     for (let i = 0; i < allTickers.length; i += BATCH_SIZE) {
       const batch = allTickers.slice(i, i + BATCH_SIZE);
       try {
         const result = await fetchPrices(batch, { preferPolygon: true });
         for (const [ticker, quote] of result.quotes) {
-          // Prefer extended-hours data (Yahoo enrichment) during PRE/POST/CLOSED
-          const hasExtended = quote.extendedChangePercent != null && quote.extendedPrice != null;
-          const price = hasExtended ? quote.extendedPrice! : quote.currentPrice;
-
-          // During extended hours, compute TOTAL change from previous close
-          // (not just the after-hours delta). This matches Finviz behavior.
-          let changePercent: number;
-          if (hasExtended && quote.previousClose > 0) {
-            changePercent = ((quote.extendedPrice! - quote.previousClose) / quote.previousClose) * 100;
-          } else {
-            changePercent = quote.changePercent;
-          }
-
-          // Detect prevClose fallback: price equals previousClose and change is 0
-          const isPrevCloseFallback = !hasExtended
-            && quote.changePercent === 0
-            && quote.change === 0
-            && quote.currentPrice === quote.previousClose
-            && quote.previousClose > 0;
-
-          const source: QuoteSource = hasExtended ? 'extended'
-            : isPrevCloseFallback ? 'prevClose'
-            : 'regular';
-
-          newCache.set(ticker, { changePercent, price, source });
+          newCache.set(ticker, deriveHeatmapQuoteFields(quote));
         }
       } catch (err) {
         console.error(`[ThemesHeatmap] Batch ${i}-${i + batch.length} failed:`, err);
@@ -211,11 +191,15 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
         const changePercent = periodChangeMap
           ? (periodChangeMap.get(t) ?? 0)
           : (q?.changePercent ?? 0);
+        // Non-1D: regular == the period change (the toggle is 1D-only). 1D: the regular split.
+        const regularChangePercent = periodChangeMap ? changePercent : (q?.regularChangePercent ?? changePercent);
         const stock: HeatmapStock = {
           ticker: t,
           name: t,
           price: q?.price ?? 0,
           changePercent,
+          regularChangePercent,
+          regularPrice: q?.regularPrice ?? q?.price ?? 0,
           dayChange: 0,
           marketCapB: 1,
           subSector: sub.name,
@@ -224,11 +208,13 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
         return stock;
       });
 
-      const validChanges = tickerStocks
-        .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)))
-        .map(s => s.changePercent);
-      const avg = validChanges.length > 0
-        ? validChanges.reduce((s, c) => s + c, 0) / validChanges.length
+      const valid = tickerStocks
+        .filter(s => !s.noTradeData && (periodChangeMap ? periodChangeMap.has(s.ticker) : quotesCache.has(s.ticker)));
+      const avg = valid.length > 0
+        ? valid.reduce((s, c) => s + c.changePercent, 0) / valid.length
+        : 0;
+      const avgRegular = valid.length > 0
+        ? valid.reduce((s, c) => s + (c.regularChangePercent ?? c.changePercent), 0) / valid.length
         : 0;
 
       return {
@@ -236,6 +222,7 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
         stocks: tickerStocks,
         totalMarketCapB: sub.tickers.length,
         avgChangePercent: Math.round(avg * 100) / 100,
+        avgRegularChangePercent: Math.round(avgRegular * 100) / 100,
       };
     });
 
@@ -245,6 +232,7 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
       name: sub.name,
       price: 0,
       changePercent: sub.avgChangePercent,
+      regularChangePercent: sub.avgRegularChangePercent, // toggle target for the subtheme tile
       dayChange: 0,
       marketCapB: sub.stocks.length, // weight by ticker count
       subSector: sub.name,     // must match subSector name for tooltip lookup
@@ -273,6 +261,7 @@ export async function getThemesHeatmapData(period: HeatmapPeriod = '1D'): Promis
     sectors,
     period,
     generated: cacheUpdatedAt ?? Date.now(),
+    session: getMarketSession(),
   };
 
   // Cache non-1D results for 5 min, 1D for 1 min

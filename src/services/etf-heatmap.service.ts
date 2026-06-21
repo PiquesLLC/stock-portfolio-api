@@ -3,6 +3,8 @@ import etfData from '../data/etf-universe.json';
 import type { HeatmapPeriod } from './market-heatmap.service';
 import { runJob } from './job-runner.service';
 import { periodStartClose } from '../utils/candle-window';
+import { getMarketSession } from '../utils/market-hours';
+import { deriveHeatmapQuoteFields, type HeatmapQuoteFields } from '../utils/heatmap-quote';
 
 // ── Types (matches HeatmapResponse shape from market-heatmap.service) ──
 
@@ -11,6 +13,8 @@ interface HeatmapStock {
   name: string;
   price: number;
   changePercent: number;
+  regularChangePercent?: number; // regular-session 1D % for the After-hours toggle
+  regularPrice?: number;         // regular-session price for the After-hours toggle
   dayChange: number;
   marketCapB: number;
   subSector: string;
@@ -38,13 +42,12 @@ interface HeatmapResponse {
   sectors: HeatmapSector[];
   period: string;
   generated: number;
+  session: ReturnType<typeof getMarketSession>; // drives the UI After-hours badge/toggle
 }
 
 // ── Cache ──────────────────────────────────────────────────────
 
-type QuoteSource = 'regular' | 'extended' | 'prevClose';
-
-let quotesCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+let quotesCache = new Map<string, HeatmapQuoteFields>();
 let cacheUpdatedAt: number | null = null;
 let refreshInProgress = false;
 
@@ -78,34 +81,14 @@ async function refreshQuotesBackground(): Promise<void> {
 
   try {
     const allTickers = getAllUniqueTickers();
-    const newCache = new Map<string, { changePercent: number; price: number; source: QuoteSource }>();
+    const newCache = new Map<string, HeatmapQuoteFields>();
 
     for (let i = 0; i < allTickers.length; i += BATCH_SIZE) {
       const batch = allTickers.slice(i, i + BATCH_SIZE);
       try {
         const result = await fetchPrices(batch, { preferPolygon: true });
         for (const [ticker, quote] of result.quotes) {
-          const hasExtended = quote.extendedChangePercent != null && quote.extendedPrice != null;
-          const price = hasExtended ? quote.extendedPrice! : quote.currentPrice;
-
-          let changePercent: number;
-          if (hasExtended && quote.previousClose > 0) {
-            changePercent = ((quote.extendedPrice! - quote.previousClose) / quote.previousClose) * 100;
-          } else {
-            changePercent = quote.changePercent;
-          }
-
-          const isPrevCloseFallback = !hasExtended
-            && quote.changePercent === 0
-            && quote.change === 0
-            && quote.currentPrice === quote.previousClose
-            && quote.previousClose > 0;
-
-          const source: QuoteSource = hasExtended ? 'extended'
-            : isPrevCloseFallback ? 'prevClose'
-            : 'regular';
-
-          newCache.set(ticker, { changePercent, price, source });
+          newCache.set(ticker, deriveHeatmapQuoteFields(quote));
         }
       } catch (err) {
         console.error(`[EtfHeatmap] Batch ${i}-${i + batch.length} failed:`, err);
@@ -194,11 +177,15 @@ export async function getEtfHeatmapData(period: HeatmapPeriod = '1D'): Promise<H
         const changePercent = periodChangeMap
           ? (periodChangeMap.get(t) ?? 0)
           : (q?.changePercent ?? 0);
+        // Non-1D: regular == the period change (the toggle is 1D-only). 1D: the regular split.
+        const regularChangePercent = periodChangeMap ? changePercent : (q?.regularChangePercent ?? changePercent);
         const stock: HeatmapStock = {
           ticker: t,
           name: t,
           price: q?.price ?? 0,
           changePercent,
+          regularChangePercent,
+          regularPrice: q?.regularPrice ?? q?.price ?? 0,
           dayChange: 0,
           marketCapB: 1, // equal weight — ETF AUM isn't useful for visualization
           subSector: group.name,
@@ -247,6 +234,7 @@ export async function getEtfHeatmapData(period: HeatmapPeriod = '1D'): Promise<H
     sectors,
     period,
     generated: cacheUpdatedAt ?? Date.now(),
+    session: getMarketSession(),
   };
 
   // Cache non-1D results for 5 min, 1D for 1 min
