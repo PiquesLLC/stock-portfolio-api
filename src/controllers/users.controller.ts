@@ -5,11 +5,28 @@ import { createUserSnapshotIfNeeded, getUserChartSnapshots, getSnapshotChartPoin
 import { AuthRequest } from '../types/auth';
 import { resolveAccessLevel } from '../services/creator.service';
 import { ActivityPayload } from '../services/activity.service';
+import { getSector } from '../utils/sectors';
+import { Portfolio } from '../types';
 
 
 
 const VALID_CHART_PERIODS = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', 'ALL'];
 const FREE_CHART_PERIODS = new Set(['1D', '1W', 'YTD']);
+
+// Privacy modes that expose NO positions ('hidden'/'sectors') must also strip the
+// performance + net-worth aggregates, so the return %, day P&L, and total value the
+// profile already withholds for these users can't simply be read off the portfolio
+// payload instead. Keeps /users/:id/portfolio consistent with the profile and the
+// gated /portfolio/performance endpoint. ('top5' deliberately keeps them — that user
+// opted to share their top positions, so the rollup is expected.)
+function zeroPortfolioFinancials(p: Portfolio): void {
+  p.holdingsValue = 0; p.totalAssets = 0; p.netEquity = 0; p.totalValue = 0;
+  p.totalCost = 0; p.totalPL = 0; p.totalPLPercent = 0;
+  p.cashBalance = 0; p.marginDebt = 0;
+  p.dayChange = 0; p.dayChangePercent = 0;
+  p.regularDayChange = 0; p.regularDayChangePercent = 0;
+  p.afterHoursChange = 0; p.afterHoursChangePercent = 0;
+}
 
 /**
  * GET /users/by-username/:username
@@ -259,25 +276,32 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
         // Paid subscriber — skip visibility filter, show everything
       } else if (vis === 'hidden') {
         portfolio.holdings = [];
+        zeroPortfolioFinancials(portfolio);
       } else if (vis === 'top5') {
         portfolio.holdings = portfolio.holdings
           .sort((a, b) => b.currentValue - a.currentValue)
           .slice(0, 5);
       } else if (vis === 'sectors') {
-        // Show only sector names, zero out individual holding details including currentValue
-        portfolio.holdings = portfolio.holdings.map(h => ({
-          ...h,
-          shares: 0,
-          averageCost: 0,
-          totalCost: 0,
-          currentPrice: 0,
-          currentValue: 0,
-          previousClose: 0,
-          pl: 0,
-          plPercent: 0,
-          dayChange: 0,
-          dayChangePercent: 0,
-        }));
+        // Sector-only privacy: expose the value-weighted sector allocation but
+        // NEVER the individual holdings. Tickers/shares/values must not leave the
+        // server — a viewer must not learn WHICH stocks are held. (The old code
+        // zeroed the values but spread `...h`, KEEPING `ticker`, which leaked the
+        // full holdings list anywhere holdings.length>0 was treated as "visible" —
+        // e.g. the profile-compare "Shared / Only You / Only Them" lists.) Compute
+        // the breakdown from real values first, then drop the holdings entirely.
+        const sectorsTotal = portfolio.holdings.reduce((s, h) => s + (h.currentValue || 0), 0);
+        const bySector = new Map<string, number>();
+        for (const h of portfolio.holdings) {
+          const sec = getSector(h.ticker) || 'Other';
+          bySector.set(sec, (bySector.get(sec) || 0) + (h.currentValue || 0));
+        }
+        portfolio.sectorBreakdown = sectorsTotal > 0
+          ? [...bySector.entries()]
+              .map(([sector, dollar]) => ({ sector, exposurePercent: (dollar / sectorsTotal) * 100 }))
+              .sort((a, b) => b.exposurePercent - a.exposurePercent)
+          : [];
+        portfolio.holdings = [];
+        zeroPortfolioFinancials(portfolio);
       }
     }
 

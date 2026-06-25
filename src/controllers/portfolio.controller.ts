@@ -52,19 +52,14 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       // User-specific portfolio (public profile/leaderboard views only)
       // Privacy check: if viewer is not the owner, verify profile is public
       const viewerId = req.user?.userId;
+      // Owner-only. Cross-user portfolio views MUST go through
+      // GET /users/:userId/portfolio, which enforces holdingsVisibility AND the
+      // creator paywall. This endpoint returns the RAW portfolio (full holdings),
+      // so serving another user here would leak hidden/sectors/top5 holdings and
+      // bypass the creator paywall. (The old code only checked profilePublic.)
       if (viewerId !== userId) {
-        const targetUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { profilePublic: true },
-        });
-        if (!targetUser) {
-          res.status(404).json({ error: 'User not found' });
-          return;
-        }
-        if (!targetUser.profilePublic) {
-          res.status(404).json({ error: 'Not found' });
-          return;
-        }
+        res.status(403).json({ error: 'Forbidden' });
+        return;
       }
       portfolio = await getUserPortfolio(userId);
       if (!portfolio) {
@@ -540,13 +535,21 @@ export async function getPerformanceHandler(req: AuthRequest, res: Response): Pr
       if (viewerId !== userId) {
         const targetUser = await prisma.user.findUnique({
           where: { id: userId },
-          select: { profilePublic: true },
+          select: { profilePublic: true, holdingsVisibility: true },
         });
         if (!targetUser) {
           res.status(404).json({ error: 'User not found' });
           return;
         }
         if (!targetUser.profilePublic) {
+          res.status(404).json({ error: 'Not found' });
+          return;
+        }
+        // Performance (return/alpha/beta) is holdings-derived: the profile hides it
+        // whenever holdings aren't fully public (holdingsVisibility !== 'all'). Gate
+        // this standalone endpoint the same way so a hidden/sectors/top5 user's
+        // performance can't be read here after the profile already withholds it.
+        if (targetUser.holdingsVisibility !== 'all') {
           res.status(404).json({ error: 'Not found' });
           return;
         }

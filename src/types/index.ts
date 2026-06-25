@@ -210,6 +210,10 @@ export interface Portfolio {
   session?: MarketSession;  // current market session
   paceProjection?: PaceProjection; // MTD-based pace projections
   holdingsPaywalled?: boolean; // true when creator paywall hides holdings detail
+  /** Sectors-only privacy: value-weighted sector allocation shown IN PLACE OF
+   *  individual holdings. Present only when holdingsVisibility='sectors' (holdings
+   *  is then []). Never includes tickers/shares/values. */
+  sectorBreakdown?: { sector: string; exposurePercent: number }[];
 }
 
 // Dividend types

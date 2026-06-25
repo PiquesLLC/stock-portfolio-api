@@ -456,3 +456,109 @@ describe('Leaderboard — creator trade delay returns', () => {
     expect(serviceSource).toContain('Creators with trade delay still show return percentages');
   });
 });
+
+/* ================================================================== */
+/*  Audit 2026-06-25 — holdings-leak fixes                             */
+/*  (compare glitch via 'sectors' + /portfolio?userId= IDOR + perf)    */
+/* ================================================================== */
+describe('Holdings privacy — audit 2026-06-25 leak fixes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveAccessLevelMock.mockResolvedValue('public'); // non-paid viewer
+    getUserPortfolioMock.mockImplementation(() =>
+      Promise.resolve(JSON.parse(JSON.stringify(mockPortfolio))),
+    );
+    getPerformanceComparisonMock.mockResolvedValue(mockPerformance);
+    prismaMock.activityEvent.findMany.mockResolvedValue([]);
+    prismaMock.creator.findUnique.mockResolvedValue(null);
+  });
+
+  /* ---- Leak 1: GET /portfolio?userId= must be owner-only ---- */
+  describe('Leak 1 — /portfolio?userId= is owner-only', () => {
+    it('returns 403 when an authenticated non-owner passes another userId', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...baseUser, holdingsVisibility: 'all' });
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/portfolio?userId=${TARGET_USER_ID}`)
+        .set('x-test-auth', '1'); // viewer-user-id !== TARGET_USER_ID
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 403 for an unauthenticated cross-user request', async () => {
+      const app = (await import('../app')).default;
+      const res = await request(app).get(`/portfolio?userId=${TARGET_USER_ID}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
+  /* ---- Leak 2: holdingsVisibility='sectors' must not leak tickers ---- */
+  describe("Leak 2 — holdingsVisibility='sectors' exposes ONLY sector allocation", () => {
+    it('returns empty holdings + sectorBreakdown, and NO ticker anywhere', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...baseUser, holdingsVisibility: 'sectors', creator: null });
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+
+      expect(res.status).toBe(200);
+      expect(res.body.holdings).toEqual([]);                       // no per-stock rows
+      expect(Array.isArray(res.body.sectorBreakdown)).toBe(true);  // sector allocation exposed
+      expect(res.body.sectorBreakdown.length).toBeGreaterThan(0);
+      // CRITICAL: the held tickers must not appear ANYWHERE in the response body
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain('AAPL');
+      expect(body).not.toContain('TSLA');
+    });
+  });
+
+  /* ---- top5 caps the list; hidden empties it (regression guards) ---- */
+  describe('holdingsVisibility tiers on /users/:id/portfolio', () => {
+    it("'top5' returns at most 5 holdings", async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...baseUser, holdingsVisibility: 'top5', creator: null });
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+      expect(res.status).toBe(200);
+      expect(res.body.holdings.length).toBeLessThanOrEqual(5);
+    });
+
+    it("'hidden' returns no holdings", async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...baseUser, holdingsVisibility: 'hidden', creator: null });
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/users/${TARGET_USER_ID}/portfolio`)
+        .set('x-test-auth', '1');
+      expect(res.status).toBe(200);
+      expect(res.body.holdings).toEqual([]);
+    });
+  });
+
+  /* ---- Leak 3: performance endpoint gated by holdingsVisibility ---- */
+  describe('Leak 3 — /portfolio/performance?userId= gated by holdingsVisibility', () => {
+    it('returns 404 for a non-owner when holdings are not fully public', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...baseUser, holdingsVisibility: 'hidden' });
+      const app = (await import('../app')).default;
+      const res = await request(app)
+        .get(`/portfolio/performance?userId=${TARGET_USER_ID}&window=1M&benchmark=SPY`)
+        .set('x-test-auth', '1');
+      expect(res.status).toBe(404);
+    });
+  });
+
+  /* ---- Leak 4: activity feed must filter holdings-restricted users ---- */
+  describe('Leak 4 — activity feed respects holdingsVisibility', () => {
+    it('getFeed loads + filters on holdingsVisibility (only "all" broadcasts trades)', async () => {
+      const fs = await import('fs');
+      const path = await import('path');
+      const src = fs.readFileSync(
+        path.resolve(__dirname, '../services/activity.service.ts'),
+        'utf-8',
+      );
+      // The followed user's holdingsVisibility must be loaded with the event...
+      expect(src).toMatch(/holdingsVisibility:\s*true/);
+      // ...and used to drop non-'all' users' trades from the feed.
+      expect(src).toMatch(/holdingsVisibility\s*!==\s*'all'/);
+    });
+  });
+});

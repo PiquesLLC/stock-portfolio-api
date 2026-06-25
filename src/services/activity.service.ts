@@ -119,7 +119,7 @@ export async function getFeed(
     where,
     include: {
       user: {
-        select: { id: true, username: true, displayName: true, profilePublic: true },
+        select: { id: true, username: true, displayName: true, profilePublic: true, holdingsVisibility: true },
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -130,6 +130,10 @@ export async function getFeed(
   return events
     .filter((e) => {
       if (!e.user.profilePublic) return false;
+      // Holdings privacy: a user who restricts their holdings (hidden/sectors/top5)
+      // hides their activity on their own profile, so their trades must not surface
+      // in followers' feeds either (feed entries name tickers). Only 'all' broadcasts.
+      if (e.user.holdingsVisibility !== 'all') return false;
       // Paid creator — hide trades from non-subscribers
       if (paidCreatorIds.has(e.userId) && !subscribedCreatorIds.has(e.userId)) return false;
       // Apply trade delay: minimum 24hr for all users, creator delay if higher

@@ -74,7 +74,7 @@ describe('trade delay filtering', () => {
           type: 'holding_added',
           payload: JSON.stringify({ ticker: 'BP', shares: 10, averageCost: 30 }),
           createdAt: twoHoursAgo,
-          user: { id: 'creator_user_1', username: 'mario', displayName: 'Mario', profilePublic: true },
+          user: { id: 'creator_user_1', username: 'mario', displayName: 'Mario', profilePublic: true, holdingsVisibility: 'all' },
         },
         {
           id: 'evt_old',
@@ -82,7 +82,7 @@ describe('trade delay filtering', () => {
           type: 'holding_added',
           payload: JSON.stringify({ ticker: 'AAPL', shares: 5, averageCost: 185 }),
           createdAt: twoDaysAgo,
-          user: { id: 'creator_user_1', username: 'mario', displayName: 'Mario', profilePublic: true },
+          user: { id: 'creator_user_1', username: 'mario', displayName: 'Mario', profilePublic: true, holdingsVisibility: 'all' },
         },
       ]);
 
@@ -109,7 +109,7 @@ describe('trade delay filtering', () => {
           type: 'holding_added',
           payload: JSON.stringify({ ticker: 'BP', shares: 10, averageCost: 30 }),
           createdAt: twoHoursAgo,
-          user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true },
+          user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true, holdingsVisibility: 'all' },
         },
         {
           id: 'evt_old',
@@ -117,7 +117,7 @@ describe('trade delay filtering', () => {
           type: 'holding_added',
           payload: JSON.stringify({ ticker: 'KO', shares: 50, averageCost: 25 }),
           createdAt: twoDaysAgo,
-          user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true },
+          user: { id: 'creator_user_1', username: 'regularuser', displayName: 'Regular', profilePublic: true, holdingsVisibility: 'all' },
         },
       ]);
 
