@@ -484,6 +484,20 @@ if (fs.existsSync(clientDir)) {
     console.error('[SPA] Failed to read index.html for OG injection:', error);
   }
 
+  // The kill-switch service worker MUST be served as real JavaScript with
+  // no-cache, and MUST win over the SPA catch-all below (which would return
+  // index.html — invalid as a worker script, so the browser rejects the update
+  // and the stale precaching worker never dies). This explicit route guarantees
+  // the JS MIME type and freshness; without it /sw.js falls through to the
+  // catch-all and returns HTML. See stock-portfolio-ui/public/sw.js.
+  app.get('/sw.js', (_req, res, next) => {
+    const swPath = path.join(clientDir, 'sw.js');
+    if (!fs.existsSync(swPath)) return next();
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(swPath);
+  });
+
   // Hashed assets (Vite fingerprints filenames) cache aggressively
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
   // Other static files (favicon, icons) short cache, but NEVER serve index.html from here
