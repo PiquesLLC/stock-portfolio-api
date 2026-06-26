@@ -53,7 +53,10 @@ export async function markAnomalyReadHandler(req: AuthRequest, res: Response): P
 export async function markAllAnomaliesReadHandler(req: AuthRequest, res: Response): Promise<void> {
   try {
     await prisma.anomalyEvent.updateMany({
-      where: { userId: req.user!.userId, read: false },
+      // Exclude 'concentration' anomalies: they surface in the Health Score, not the
+      // notification bell, so "mark all read" must not touch them (mirrors the bell's
+      // display + count, which also exclude concentration).
+      where: { userId: req.user!.userId, read: false, type: { not: 'concentration' } },
       data: { read: true },
     });
     res.json({ success: true });
