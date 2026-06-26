@@ -864,6 +864,11 @@ const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
     sector: 'Technology',
     industry: 'Semiconductors',
   },
+  ON: {
+    description: 'ON Semiconductor Corporation (doing business as onsemi) designs and manufactures power and sensing semiconductors — power management ICs, analog and mixed-signal devices, image sensors, and discrete components — for the automotive, industrial, cloud, and consumer markets. onsemi is a leading supplier of silicon carbide (SiC) power technology central to electric vehicles, EV charging, renewable energy infrastructure, and data-center power efficiency. Originally a semiconductor division of Motorola, it became an independent company in 1999 and is headquartered in Scottsdale, Arizona. The listed name for ON is ON Semiconductor Corporation.',
+    sector: 'Technology',
+    industry: 'Semiconductors',
+  },
   VRT: {
     description: 'Vertiv Holdings Co designs, manufactures, and services critical digital infrastructure technologies and life cycle services for data centers, communication networks, and commercial and industrial environments worldwide. The Americas and Asia Pacific segments provide power management products including uninterruptible power supplies (UPS), power distribution, and switchgear. The company also offers thermal management solutions including precision cooling systems for data centers. Vertiv serves hyperscale cloud providers, colocation providers, enterprises, and telecommunications companies. The company was formerly known as Emerson Network Power before being spun off and is headquartered in Westerville, OH. The listed name for VRT is Vertiv Holdings Co Class A Common Stock.',
     sector: 'Technology',
@@ -1454,6 +1459,20 @@ async function fetchWikipediaDescription(companyName: string): Promise<string | 
       if (lastPeriod > 400) {
         extract = extract.substring(0, lastPeriod + 1);
       }
+    }
+
+    // Validate the article is actually about THIS company. Wikipedia's full-text
+    // search (srlimit 1) can return a more prominent company for a weak/short name —
+    // e.g. ticker ON / "ON Semiconductor" resolved to TSMC's page. Require the company
+    // name to appear in the extract; if it doesn't, treat it as a mismatch and return
+    // null (showing NO description is far better than a confidently WRONG one).
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const normName = normalize(searchName);
+    // If we can't form a name to verify against (e.g. a non-Latin name stripped to
+    // empty), reject rather than trust an unvalidated match.
+    if (extract && (!normName || !normalize(extract).includes(normName))) {
+      console.warn(`[Wikipedia] discarded likely mismatch for "${searchName}" -> page "${pageTitle}"`);
+      return null;
     }
 
     return extract || null;
