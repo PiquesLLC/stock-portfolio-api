@@ -49,7 +49,62 @@ vi.mock('../utils/market-hours', () => ({
   getMarketSessionForTicker: getMarketSessionForTickerMock,
 }));
 
-import { fetchStockDetails, STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, TickerNotFoundError } from '../services/market.service';
+import { fetchStockDetails, fetchPrices, STOCK_DETAILS_OPTIONAL_TIMEOUT_MS, TickerNotFoundError } from '../services/market.service';
+
+describe('market.service fetchPrices — Yahoo confirmation clears false staleness', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    getMarketSessionMock.mockReturnValue('POST');
+    getMarketSessionForTickerMock.mockReturnValue('POST');
+    getQuotesMock.mockResolvedValue({ quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: [], provider: 'finnhub' });
+  });
+
+  // An aged Polygon cache entry during POST: real price, but flagged stale/repricing
+  // because getPolygonQuotes saw it was >30min old.
+  const agedPolygonQuote = (ticker: string) => ({
+    quotes: new Map([[ticker, {
+      ticker, currentPrice: 255, previousClose: 250, change: 5, changePercent: 2,
+      high: 256, low: 254, open: 250, timestamp: 1, updatedAt: 1,
+      isStale: true, isRepricing: true, quoteAgeSeconds: 4200, session: 'POST',
+    }]]),
+    staleCount: 1, repricingCount: 1, failedTickers: [] as string[], provider: 'polygon',
+  });
+
+  it('clears isStale/isRepricing and zeroes the counts when a fresh Yahoo quote CONFIRMS an aged Polygon price within tolerance (POST)', async () => {
+    getPolygonQuotesMock.mockResolvedValue(agedPolygonQuote('AAPL'));
+    // Yahoo POST price 255.5 vs Polygon 255 = ~0.2% divergence -> confirm, do NOT overwrite.
+    yahooGetMock.mockResolvedValue({ data: { quoteResponse: { result: [{
+      symbol: 'AAPL', marketState: 'POST', regularMarketPreviousClose: 250,
+      regularMarketPrice: 250, postMarketPrice: 255.5,
+    }] } } });
+
+    const result = await fetchPrices(['AAPL']);
+    const quote = result.quotes.get('AAPL')!;
+
+    expect(quote.isStale).toBe(false);
+    expect(quote.isRepricing).toBe(false);
+    expect(quote.currentPrice).toBe(255); // within tolerance -> price NOT overwritten
+    expect(result.staleCount).toBe(0);
+    expect(result.repricingCount).toBe(0);
+  });
+
+  it('leaves the quote stale/repricing when Yahoo has no fresh price to confirm it (never masks a real outage)', async () => {
+    // Guard, not a revert-catch: with no Yahoo data the overlay never touches the quote, so
+    // Polygon's flags/counts pass through unchanged with or without the fix. It pins the
+    // safety invariant — staleness only ever clears on a real confirmation, never otherwise.
+    getPolygonQuotesMock.mockResolvedValue(agedPolygonQuote('NVDA'));
+    yahooGetMock.mockResolvedValue({ data: { quoteResponse: { result: [] } } }); // Yahoo returns nothing usable
+
+    const result = await fetchPrices(['NVDA']);
+    const quote = result.quotes.get('NVDA')!;
+
+    expect(quote.isStale).toBe(true);
+    expect(quote.isRepricing).toBe(true);
+    expect(result.staleCount).toBe(1);
+    expect(result.repricingCount).toBe(1);
+  });
+});
 
 describe('market.service fetchStockDetails', () => {
   beforeEach(() => {

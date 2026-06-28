@@ -888,6 +888,15 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
           result.quotes.set(ticker, newQuote);
           result.failedTickers = result.failedTickers.filter(t => t !== ticker);
         } else if (yahooData.price > 0 && existing.currentPrice > 0) {
+          // A successful Yahoo quote is live confirmation of the price, so this quote is
+          // NOT stale/repricing even when we DON'T overwrite it (PRE/POST with <=0.5%
+          // divergence: Yahoo agrees with the cached Polygon price). getPolygonQuotes may
+          // have flagged an aged cache entry stale/repricing; Yahoo's fresh confirmation
+          // clears it. (staleCount/repricingCount are recomputed from the final quotes below.)
+          existing.isStale = false;
+          existing.isRepricing = false;
+          existing.quoteAgeSeconds = 0;
+
           // During REGULAR hours: always prefer Yahoo (near-real-time) over Polygon (~15-min delayed).
           // During PRE/POST: only override on >0.5% divergence (extended hours data is spottier).
           const alwaysPreferYahoo = currentSession === 'REG';
@@ -900,8 +909,6 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
               ? (existing.change / existing.previousClose) * 100 : 0;
             existing.updatedAt = Date.now();
             existing.timestamp = Math.floor(Date.now() / 1000);
-            existing.quoteAgeSeconds = 0;
-            existing.isStale = false;
             // Set regularClose/extendedPrice for PRE/POST portfolio split
             const tickerSession = getMarketSessionForTicker(ticker);
             if (tickerSession === 'PRE' || tickerSession === 'POST') {
@@ -936,6 +943,21 @@ export async function fetchPrices(tickers: string[], options?: { preferPolygon?:
       result.failedTickers = result.failedTickers.filter((t) => !candleQuotes.has(t.toUpperCase()));
     } catch { /* Candle fallback failed — leave failedTickers as-is */ }
   }
+
+  // Recompute stale/repricing counts from the FINAL quote set. getPolygonQuotes set these
+  // from its cache snapshot, but the Yahoo overlay (and Finnhub/candle fallbacks) above may
+  // have refreshed or live-confirmed quotes it flagged stale/repricing — e.g. a fresh Yahoo
+  // quote that CONFIRMS the cached price during PRE/POST (<=0.5%, no overwrite) still proves
+  // the price is current. Counting the post-overlay flags keeps the "Repricing..." signal
+  // honest: it only clears when we actually have fresh data, and never masks a real outage.
+  let finalStaleCount = 0;
+  let finalRepricingCount = 0;
+  for (const quote of result.quotes.values()) {
+    if (quote.isStale) finalStaleCount++;
+    if (quote.isRepricing) finalRepricingCount++;
+  }
+  result.staleCount = finalStaleCount;
+  result.repricingCount = finalRepricingCount;
 
   return result;
 }
