@@ -616,6 +616,9 @@ export interface AssetAbout {
 }
 
 const aboutCache = new NodeCache({ stdTTL: 86400 }); // 24 hour cache
+// When Wikipedia rate-limits us (429), pause all Wikipedia lookups until this time so a
+// cache-cold burst (e.g. right after a deploy clears aboutCache) can't keep hammering it.
+let wikipediaBackoffUntil = 0;
 
 // Static descriptions for common tickers (fallback when API fails)
 const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
@@ -1392,6 +1395,7 @@ const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
  */
 export async function fetchWikipediaDescription(companyName: string): Promise<string | null> {
   if (!companyName) return null;
+  if (Date.now() < wikipediaBackoffUntil) return null; // backing off after a recent Wikipedia 429
 
   try {
     const SUFFIX_RE = /,?\s*(Inc\.?|Corp\.?|Corporation|Company|Ltd\.?|Limited|PLC|N\.V\.?|S\.A\.?|AG|SE|Holdings?|Group)\.?\s*$/gi;
@@ -1492,7 +1496,15 @@ export async function fetchWikipediaDescription(companyName: string): Promise<st
     }
     return await extractForTitle(chosen.title);
   } catch (err) {
-    console.warn('Wikipedia fetch failed:', err instanceof Error ? err.message : err);
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 429) {
+      // Wikipedia rate-limited us — stop calling it for a few minutes so a cache-cold
+      // burst can't make it worse. getAssetAbout short-TTLs the empty result so it retries.
+      wikipediaBackoffUntil = Date.now() + 5 * 60 * 1000;
+      console.warn('[Wikipedia] 429 rate-limited — backing off for 5 minutes');
+    } else {
+      console.warn('Wikipedia fetch failed:', err instanceof Error ? err.message : err);
+    }
     return null;
   }
 }
@@ -1731,9 +1743,11 @@ export async function getAssetAbout(ticker: string): Promise<AssetAbout | null> 
     headquarters: null,
   };
 
-  // Only cache and return if we got meaningful data
+  // Only cache and return if we got meaningful data. When the description is missing —
+  // typically a transient Wikipedia failure (e.g. a 429 during a cache-cold burst) — cache
+  // only briefly so it self-heals, instead of pinning an empty description for 24h.
   if (about.description || about.sector || about.industry) {
-    aboutCache.set(cacheKey, about);
+    aboutCache.set(cacheKey, about, about.description ? 86400 : 600);
     return about;
   }
 
