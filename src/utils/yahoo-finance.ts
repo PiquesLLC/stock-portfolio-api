@@ -1390,92 +1390,107 @@ const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
 /**
  * Fetch description from Wikipedia based on company name
  */
-async function fetchWikipediaDescription(companyName: string): Promise<string | null> {
+export async function fetchWikipediaDescription(companyName: string): Promise<string | null> {
   if (!companyName) return null;
 
   try {
-    // Clean up company name for Wikipedia search
-    // Remove common suffixes that might interfere with search
-    const searchName = companyName
-      .replace(/,?\s*(Inc\.?|Corp\.?|Corporation|Company|Ltd\.?|Limited|PLC|N\.V\.?|S\.A\.?|AG|SE|Holdings?|Group)\.?\s*$/gi, '')
-      .trim();
+    const SUFFIX_RE = /,?\s*(Inc\.?|Corp\.?|Corporation|Company|Ltd\.?|Limited|PLC|N\.V\.?|S\.A\.?|AG|SE|Holdings?|Group)\.?\s*$/gi;
+    const stripSuffix = (s: string) => s.replace(SUFFIX_RE, '').trim();
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-    // Search Wikipedia for the company
+    const searchName = stripSuffix(companyName);
+    const normName = normalize(searchName);
+    // If we can't form a name to verify against (e.g. a non-Latin name stripped to
+    // empty), reject rather than trust an unvalidated match.
+    if (!normName) return null;
+
     // Wikipedia requires a proper User-Agent header
     const headers = {
       'User-Agent': 'StockPortfolioApp/1.0 (https://github.com/stock-portfolio; contact@example.com)',
     };
 
+    // Trim a Wikipedia intro extract to ~2 paragraphs / 800 chars on a sentence boundary.
+    const cleanExtract = (raw: string | undefined): string => {
+      let extract = raw || '';
+      const paragraphs = extract.split('\n').filter((p: string) => p.trim().length > 50);
+      extract = paragraphs.slice(0, 2).join(' ').trim();
+      if (extract.length > 800) {
+        extract = extract.substring(0, 800);
+        const lastPeriod = extract.lastIndexOf('.');
+        if (lastPeriod > 400) extract = extract.substring(0, lastPeriod + 1);
+      }
+      return extract;
+    };
+
+    // Look up a page by EXACT title, following redirects. Returns the validated intro
+    // extract, or null if the page is missing, a disambiguation page, or doesn't actually
+    // mention this company (so we never serve a confidently WRONG description).
+    const extractForTitle = async (title: string): Promise<string | null> => {
+      const resp = await axios.get('https://en.wikipedia.org/w/api.php', {
+        params: {
+          action: 'query',
+          titles: title,
+          prop: 'extracts|pageprops',
+          exintro: true,
+          explaintext: true,
+          redirects: 1,
+          format: 'json',
+        },
+        headers,
+        timeout: 5000,
+      });
+      const pages = resp.data?.query?.pages;
+      if (!pages) return null;
+      const pageId = Object.keys(pages)[0];
+      if (pageId === '-1') return null; // no such page
+      const page = pages[pageId];
+      if (page?.pageprops && 'disambiguation' in page.pageprops) return null; // "X may refer to…"
+      const extract = cleanExtract(page?.extract);
+      if (!extract || !normalize(extract).includes(normName)) return null;
+      return extract;
+    };
+
+    // 1) DIRECT title lookup first. Wikipedia resolves redirects + corporate-suffix
+    //    variants, so this lands on the company's OWN article instead of a named
+    //    subsidiary, a generic concept, or a same-name entity that full-text search ranks
+    //    above it — the bug class here: ticker TU / "Telus Corporation" full-text search
+    //    resolved to the "Telus Communications" (subsidiary) article; "Shell plc" to the
+    //    "shell corporation" concept; "Sea Limited" to the 1711 "South Sea Company". Try
+    //    the full provider name first (most specific), then the suffix-stripped name.
+    for (const candidate of [companyName, searchName]) {
+      const extract = await extractForTitle(candidate);
+      if (extract) return extract;
+    }
+
+    // 2) Fallback: full-text search, used only when neither exact title exists (the
+    //    article is titled differently from the provider name). Pick the result whose
+    //    TITLE is the company (suffix-insensitive, or a leading sub-name like "Toyota"
+    //    for "Toyota Motor"); a named subsidiary EXTENDS the name with a non-suffix word
+    //    and is correctly skipped. No confident title match -> NO description.
     const searchResponse = await axios.get('https://en.wikipedia.org/w/api.php', {
       params: {
         action: 'query',
         list: 'search',
         srsearch: `${searchName} company`,
         format: 'json',
-        srlimit: 1,
+        srlimit: 6,
       },
       headers,
       timeout: 5000,
     });
+    const searchResults: Array<{ title: string }> | undefined = searchResponse.data?.query?.search;
+    if (!searchResults || searchResults.length === 0) return null;
 
-    const searchResults = searchResponse.data?.query?.search;
-    if (!searchResults || searchResults.length === 0) {
+    const titleIsCompany = (raw: string): boolean => {
+      const ts = normalize(stripSuffix(raw));
+      return !!ts && (ts === normName || normName.startsWith(`${ts} `));
+    };
+    const chosen = searchResults.find((r) => titleIsCompany(r.title));
+    if (!chosen) {
+      console.warn(`[Wikipedia] no confident match for "${searchName}" among [${searchResults.map((r) => r.title).join(', ')}]`);
       return null;
     }
-
-    const pageTitle = searchResults[0].title;
-
-    // Get the page extract (summary)
-    const extractResponse = await axios.get('https://en.wikipedia.org/w/api.php', {
-      params: {
-        action: 'query',
-        titles: pageTitle,
-        prop: 'extracts',
-        exintro: true,
-        explaintext: true,
-        format: 'json',
-      },
-      headers,
-      timeout: 5000,
-    });
-
-    const pages = extractResponse.data?.query?.pages;
-    if (!pages) return null;
-
-    const pageId = Object.keys(pages)[0];
-    if (pageId === '-1') return null;
-
-    let extract = pages[pageId].extract || '';
-
-    // Clean up the extract - take first 2-3 paragraphs, limit length
-    const paragraphs = extract.split('\n').filter((p: string) => p.trim().length > 50);
-    extract = paragraphs.slice(0, 2).join(' ').trim();
-
-    // Limit to ~800 characters for a reasonable description length
-    if (extract.length > 800) {
-      extract = extract.substring(0, 800);
-      // Cut at last sentence
-      const lastPeriod = extract.lastIndexOf('.');
-      if (lastPeriod > 400) {
-        extract = extract.substring(0, lastPeriod + 1);
-      }
-    }
-
-    // Validate the article is actually about THIS company. Wikipedia's full-text
-    // search (srlimit 1) can return a more prominent company for a weak/short name —
-    // e.g. ticker ON / "ON Semiconductor" resolved to TSMC's page. Require the company
-    // name to appear in the extract; if it doesn't, treat it as a mismatch and return
-    // null (showing NO description is far better than a confidently WRONG one).
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    const normName = normalize(searchName);
-    // If we can't form a name to verify against (e.g. a non-Latin name stripped to
-    // empty), reject rather than trust an unvalidated match.
-    if (extract && (!normName || !normalize(extract).includes(normName))) {
-      console.warn(`[Wikipedia] discarded likely mismatch for "${searchName}" -> page "${pageTitle}"`);
-      return null;
-    }
-
-    return extract || null;
+    return await extractForTitle(chosen.title);
   } catch (err) {
     console.warn('Wikipedia fetch failed:', err instanceof Error ? err.message : err);
     return null;
