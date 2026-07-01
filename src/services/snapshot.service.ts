@@ -431,12 +431,20 @@ export async function getRecentHoldingSnapshots(userId: string, days: number = 5
   dayPLPercent: number;
   timestamp: Date;
 }[]> {
-  // Get the N most recent distinct calendar dates for THIS user via raw SQL
+  // Get the N most recent distinct calendar dates for THIS user. Query PortfolioSnapshot
+  // (one row per snapshot) directly instead of JOINing HoldingSnapshot (one row PER HOLDING
+  // per snapshot — millions of rows). The computed date() expression defeats any index, so
+  // scanning that huge table just to find recent dates cost ~40s. PortfolioSnapshot is many
+  // times smaller, and "WHERE userId = ? AND timestamp >= ?" is a range-seek on the existing
+  // @@index([userId, timestamp]), so the scan is bounded to the user's recent snapshots.
+  // Dates match the old JOIN except on days the user held zero positions (a cash-only day
+  // writes a parent snapshot with no holding rows); such a date only trims history slightly
+  // and never affects streaks, which are computed only for currently-held tickers.
+  const cutoffMs = Date.now() - days * 3 * 24 * 60 * 60 * 1000;
   const recentDates = await prisma.$queryRaw<{ d: string }[]>`
-    SELECT DISTINCT date(hs.timestamp / 1000, 'unixepoch') AS d
-    FROM HoldingSnapshot hs
-    INNER JOIN PortfolioSnapshot ps ON hs.snapshotId = ps.id
-    WHERE ps.userId = ${userId}
+    SELECT DISTINCT date(ps.timestamp / 1000, 'unixepoch') AS d
+    FROM PortfolioSnapshot ps
+    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoffMs}
     ORDER BY d DESC
     LIMIT ${days}
   `;
