@@ -431,41 +431,31 @@ export async function getRecentHoldingSnapshots(userId: string, days: number = 5
   dayPLPercent: number;
   timestamp: Date;
 }[]> {
-  // Get the N most recent distinct calendar dates for THIS user. Query PortfolioSnapshot
-  // (one row per snapshot) directly instead of JOINing HoldingSnapshot (one row PER HOLDING
-  // per snapshot — millions of rows). The computed date() expression defeats any index, so
-  // scanning that huge table just to find recent dates cost ~40s. PortfolioSnapshot is many
-  // times smaller, and "WHERE userId = ? AND timestamp >= ?" is a range-seek on the existing
-  // @@index([userId, timestamp]), so the scan is bounded to the user's recent snapshots.
-  // Dates match the old JOIN except on days the user held zero positions (a cash-only day
-  // writes a parent snapshot with no holding rows); such a date only trims history slightly
-  // and never affects streaks, which are computed only for currently-held tickers.
+  // Streaks need ONE value per ticker per day, not every intraday snapshot. This used to
+  // (a) scan HoldingSnapshot (one row per holding per snapshot — millions) computing date()
+  // for a DISTINCT, then (b) load EVERY snapshot since the oldest date (60s cadence -> thousands
+  // of rows) through a giant IN clause capped at 5000 — tens of seconds for active users.
+  // Instead: take the LAST snapshot id of each of the user's most recent `days` calendar days
+  // (bounded to a recent window served by @@index([userId, timestamp])), then load holdings for
+  // just those ~N snapshots. SQLite fills the bare `id` from the row holding MAX(timestamp)
+  // (single-aggregate rule), so each id is that day's final snapshot — the end-of-day value the
+  // streak logic wants. Two small, index-bounded queries instead of three heavy scans.
   const cutoffMs = Date.now() - days * 3 * 24 * 60 * 60 * 1000;
-  const recentDates = await prisma.$queryRaw<{ d: string }[]>`
-    SELECT DISTINCT date(ps.timestamp / 1000, 'unixepoch') AS d
+  const dailySnapshots = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT ps.id AS id, MAX(ps.timestamp) AS ts
     FROM PortfolioSnapshot ps
     WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoffMs}
-    ORDER BY d DESC
+    GROUP BY date(ps.timestamp / 1000, 'unixepoch')
+    ORDER BY ts DESC
     LIMIT ${days}
   `;
-
-  if (recentDates.length === 0) return [];
-
-  const oldestDate = new Date(recentDates[recentDates.length - 1].d);
-
-  // Get user's snapshot IDs for the date range, then filter HoldingSnapshots
-  const userSnapshots = await prisma.portfolioSnapshot.findMany({
-    where: { userId, timestamp: { gte: oldestDate } },
-    select: { id: true },
-  });
-  const snapshotIds = userSnapshots.map(s => s.id);
+  const snapshotIds = dailySnapshots.map(s => s.id);
   if (snapshotIds.length === 0) return [];
 
   return prisma.holdingSnapshot.findMany({
-    where: { snapshotId: { in: snapshotIds }, timestamp: { gte: oldestDate } },
+    where: { snapshotId: { in: snapshotIds } },
     select: { ticker: true, dayPL: true, dayPLPercent: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
-    take: 5000,
   });
 }
 
