@@ -16,9 +16,14 @@ const yahooCache = new NodeCache({ stdTTL: 3600 }); // 1 hour cache
 
 async function fetchYahooCandlesFallback(ticker: string): Promise<{ closes: number[]; dates: string[] } | null> {
   const cacheKey = `yahoo-intel:${ticker}`;
-  const cached = yahooCache.get<{ closes: number[]; dates: string[] }>(cacheKey);
-  if (cached) return cached;
+  // `undefined` = never fetched; `null` = fetched and FAILED/empty (negative-cached). Returning the
+  // cached null is the whole point: without it a slow/rate-limited ticker was re-fetched on every
+  // phase (contributions, streaks) and every compute — and the '1m' streak loop does those serially,
+  // so N tickers x the 5s Yahoo timeout stalled the whole "Gathering Intelligence" step for minutes.
+  const cached = yahooCache.get<{ closes: number[]; dates: string[] } | null>(cacheKey);
+  if (cached !== undefined) return cached;
 
+  const NEGATIVE_TTL = 300; // 5 min — retry a failing/throttled ticker soon, but not every compute
   try {
     const now = Math.floor(Date.now() / 1000);
     const from = now - 60 * 24 * 60 * 60; // 60 days back
@@ -26,7 +31,10 @@ async function fetchYahooCandlesFallback(ticker: string): Promise<{ closes: numb
     const resp = await yahooGet(url);
 
     const result = resp.data?.chart?.result?.[0];
-    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) {
+      yahooCache.set(cacheKey, null, NEGATIVE_TTL);
+      return null;
+    }
 
     const timestamps: number[] = result.timestamp;
     const q = result.indicators.quote[0];
@@ -40,12 +48,16 @@ async function fetchYahooCandlesFallback(ticker: string): Promise<{ closes: numb
       }
     }
 
-    if (closes.length === 0) return null;
+    if (closes.length === 0) {
+      yahooCache.set(cacheKey, null, NEGATIVE_TTL);
+      return null;
+    }
 
     const data = { closes, dates };
     yahooCache.set(cacheKey, data);
     return data;
   } catch {
+    yahooCache.set(cacheKey, null, NEGATIVE_TTL); // negative-cache the failure so we don't re-hit it
     return null;
   }
 }
