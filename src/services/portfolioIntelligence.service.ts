@@ -732,6 +732,10 @@ interface CachedIntelligence {
 
 const intelligenceCache = new Map<string, CachedIntelligence>();
 const refreshInFlight = new Map<string, Promise<PortfolioIntelligenceResponse>>();
+// Dedupes SYNCHRONOUS cold-miss computes (distinct from refreshInFlight, which is for
+// background SWR refreshes): concurrent requests + client polls for the same cold key
+// share ONE computation instead of each kicking off a duplicate heavy (~10-15s) job.
+const computeInFlight = new Map<string, Promise<PortfolioIntelligenceResponse>>();
 
 function getFreshTtlMs(window: IntelligenceWindow, isIncomplete: boolean): number {
   if (isIncomplete) return 60_000;
@@ -881,8 +885,21 @@ export async function getPortfolioIntelligence(
   const legacyCached = insightsCache.get<PortfolioIntelligenceResponse>(cacheKey);
   if (legacyCached) return legacyCached;
 
-  // Cold miss — compute synchronously
-  const result = await computeIntelligence(userId, window, portfolioId);
-  cacheResult(cacheKey, result, window);
-  return result;
+  // Cold miss — compute, but DEDUPE concurrent cold computes for the same key so a client
+  // poll (or a second viewer) JOINS the one in-flight computation instead of starting a
+  // duplicate heavy job. Without this, every retry/poll re-ran the full ~10-15s compute,
+  // which thrashed the server and made cold loads slow and flaky ("refresh… refresh… loads").
+  let pending = computeInFlight.get(cacheKey);
+  if (!pending) {
+    pending = computeIntelligence(userId, window, portfolioId)
+      .then((result) => {
+        cacheResult(cacheKey, result, window);
+        return result;
+      })
+      .finally(() => {
+        computeInFlight.delete(cacheKey);
+      });
+    computeInFlight.set(cacheKey, pending);
+  }
+  return pending;
 }
