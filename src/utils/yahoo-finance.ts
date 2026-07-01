@@ -619,6 +619,19 @@ const aboutCache = new NodeCache({ stdTTL: 86400 }); // 24 hour cache
 // When Wikipedia rate-limits us (429), pause all Wikipedia lookups until this time so a
 // cache-cold burst (e.g. right after a deploy clears aboutCache) can't keep hammering it.
 let wikipediaBackoffUntil = 0;
+// Serialize Wikipedia API calls (~3/sec) so a cache-cold burst — e.g. right after a
+// deploy clears aboutCache and every /about re-fetches at once — can't fire dozens of
+// requests simultaneously and trip the rate limit (prod is a datacenter IP). Skipped
+// under tests so they stay fast.
+let nextWikiSlotAt = 0;
+async function wikiThrottle(): Promise<void> {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  const now = Date.now();
+  const slot = Math.max(now, nextWikiSlotAt);
+  nextWikiSlotAt = slot + 300;
+  const wait = slot - now;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+}
 
 // Static descriptions for common tickers (fallback when API fails)
 const STATIC_DESCRIPTIONS: Record<string, Partial<AssetAbout>> = {
@@ -1410,7 +1423,7 @@ export async function fetchWikipediaDescription(companyName: string): Promise<st
 
     // Wikipedia requires a proper User-Agent header
     const headers = {
-      'User-Agent': 'StockPortfolioApp/1.0 (https://github.com/stock-portfolio; contact@example.com)',
+      'User-Agent': 'NalaAI/1.0 (https://nalaai.com)',
     };
 
     // Trim a Wikipedia intro extract to ~2 paragraphs / 800 chars on a sentence boundary.
@@ -1430,6 +1443,7 @@ export async function fetchWikipediaDescription(companyName: string): Promise<st
     // extract, or null if the page is missing, a disambiguation page, or doesn't actually
     // mention this company (so we never serve a confidently WRONG description).
     const extractForTitle = async (title: string): Promise<string | null> => {
+      await wikiThrottle();
       const resp = await axios.get('https://en.wikipedia.org/w/api.php', {
         params: {
           action: 'query',
@@ -1471,6 +1485,7 @@ export async function fetchWikipediaDescription(companyName: string): Promise<st
     //    TITLE is the company (suffix-insensitive, or a leading sub-name like "Toyota"
     //    for "Toyota Motor"); a named subsidiary EXTENDS the name with a non-suffix word
     //    and is correctly skipped. No confident title match -> NO description.
+    await wikiThrottle();
     const searchResponse = await axios.get('https://en.wikipedia.org/w/api.php', {
       params: {
         action: 'query',
