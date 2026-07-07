@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-28T00:00:00Z",
+  "generatedAt": "2026-07-07T00:00:00Z",
   "entries": [
     {
       "id": "lng-cheniere-export-monopoly",
@@ -711,8 +711,8 @@
         "Urenco USA breaking the HALEU monopoly",
         "Equity dilution to fund commercial cascade buildout"
       ],
-      "featured": false,
-      "lastUpdated": "2026-04-28"
+      "featured": true,
+      "lastUpdated": "2026-07-07"
     },
     {
       "id": "solar-fslr-domestic-module-monopoly",
