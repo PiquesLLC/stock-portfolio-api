@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T00:00:00Z",
+  "generatedAt": "2026-07-08T00:00:00Z",
   "entries": [
     {
       "id": "lly-tirzepatide-franchise",
@@ -39,7 +39,7 @@
       "sector": "Healthcare",
       "layer": "GLP-1 & Obesity",
       "primaryTicker": "NVO",
-      "relatedTickers": ["LLY", "CTLT", "WST"],
+      "relatedTickers": ["LLY", "TMO", "WST"],
       "thesisShort": "Novo Nordisk still owns roughly 60% of branded obesity GLP-1 volume globally and used the $16.5B Catalent deal to vertically integrate three fill-finish sites that gate Wegovy and Ozempic supply.",
       "thesisLong": "Novo is the incumbent GLP-1 power. 2025 Wegovy sales reached DKK 79.1B and Ozempic DKK 127.1B, with obesity care growing 26% in DKK and the company maintaining a 59.6% branded volume share in obesity GLP-1s. Even after Lilly's tirzepatide caught up on weight-loss efficacy, Novo's installed prescriber base and DTC machine kept semaglutide growing.\n\nThe Catalent transaction is the structural story. Novo Holdings closed the $16.5B Catalent acquisition and routed three fill-finish sites (Anagni Italy, Brussels Belgium, Bloomington Indiana) to Novo Nordisk in an $11B sub-deal. Brussels capacity is set to double to 100–150M vials/year and Indiana adds another 70M vials, with first-volume contribution beginning in 2026 — the structural fix to the multi-year supply shortage.\n\nNovo also slashed US GLP-1 prices up to 70% in late 2025 to widen access and head off compounders, but management still expects 2026 semaglutide revenue to hold or grow on volume. The Akero acquisition layered on a MASH thesis adjacent to the obesity franchise.\n\nThe risk is Lilly. Tirzepatide's efficiency edge and orforglipron's oral path narrowed Novo's lead, and CagriSema's mixed Phase 3 readout in late 2025 dented the next-gen story. But the installed manufacturing footprint, the Catalent vertical integration, and 60% share of branded obesity make Novo a permanent fixture in the GLP-1 chokepoint map.",
       "chokepointMetrics": [
@@ -63,7 +63,7 @@
         "Compounding reentry if FDA shortage list reactivates"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-07-08"
     },
     {
       "id": "vktx-vk2735-dual-agonist",
@@ -102,31 +102,31 @@
       "name": "Sterile Fill-Finish Capacity",
       "sector": "Healthcare",
       "layer": "CDMO / Bio Manufacturing",
-      "primaryTicker": "CTLT",
+      "primaryTicker": "TMO",
       "relatedTickers": ["NVO", "LLY", "WST"],
-      "thesisShort": "Catalent — now Novo Holdings-owned — controls three of the most strategically important sterile fill-finish sites in the world, with the Anagni / Brussels / Bloomington trio gating GLP-1 vial supply through the late 2020s.",
-      "thesisLong": "Catalent is the textbook bottleneck story. Novo Holdings closed the $16.5B take-private of Catalent in late 2024, and Novo Nordisk took ownership of three fill-finish sites (Anagni IT, Brussels BE, Bloomington IN) for $11B. Those sites were already producing semaglutide pens under contract; the deal converted contractual capacity into owned capacity.\n\nThe industry context: GLP-1 demand outpaced sterile injectable fill-finish capacity by 2–3x for two consecutive years, and Lonza, Recipharm, Thermo Fisher, and Catalent all sat on multi-year backlogs. Brussels is targeted to scale to 100–150M vials/year and Bloomington to 70M vials, with the first incremental volume hitting in 2026.\n\nWhat's left of public Catalent is no longer investable as a standalone, but the lesson for the CDMO sector is that fill-finish, not API synthesis, is the binding constraint for injectable biologics — and any third-party CDMO with proven sterile fill capacity (Lonza, Samsung Biologics, WuXi Bio outside US, Thermo Fisher Patheon) is effectively a long-dated GLP-1 royalty.\n\nFor portfolio purposes the cleanest public proxies are LLY and NVO themselves (vertical integration), WST (elastomer components in every pen), and RGEN / TMO / DHR on the upstream bioprocessing side. Catalent stays in the entry as the historical chokepoint that defined the trade.",
+      "thesisShort": "With Catalent taken private by Novo Holdings, Thermo Fisher's Patheon sterile network is now the largest listed independent representative of the fill-finish chokepoint — the binding constraint on how many GLP-1 pens and injectable-biologic vials reach patients.",
+      "thesisLong": "Sterile fill-finish — filling drug substance into vials, syringes, and pens under aseptic conditions — is the textbook injectable-biologics bottleneck, and the public representative shifted in 2024. Novo Holdings took Catalent private for $16.5B and Novo Nordisk absorbed its three marquee sites (Anagni IT, Brussels BE, Bloomington IN) for $11B, removing the sector's largest merchant fill-finish name from public markets. Thermo Fisher Scientific (TMO), through its Patheon sterile drug-product network, is now the largest listed independent representative of this chokepoint.\n\nThe industry context is unchanged: GLP-1 demand outpaced sterile injectable fill-finish capacity by 2–3x for two consecutive years, and Patheon, Lonza, Samsung Biologics, and the former Catalent sites all sat on multi-year backlogs, with aseptic fill lead times still routinely exceeding a year at peak. Thermo Fisher has been expanding sterile fill-finish across its Patheon footprint to absorb spillover demand as Novo internalizes its own semaglutide volume.\n\nThe structural lesson holds: fill-finish, not API synthesis, is the binding constraint for injectable biologics — and any listed CDMO with proven sterile fill capacity (Thermo Fisher / Patheon most prominently, with Lonza and Samsung Biologics on foreign exchanges) is effectively a long-dated royalty on the GLP-1 and biologics build-out.\n\nFor portfolio purposes the cleanest vertically integrated public proxies remain LLY and NVO themselves, with WST supplying the elastomer components in every pen. Thermo Fisher is a diversified tools-and-CDMO conglomerate, so Patheon fill-finish is one line within a much larger story rather than a pure play.",
       "chokepointMetrics": [
-        { "label": "Novo Holdings deal value", "value": "$16.5B" },
-        { "label": "Sites transferred to Novo Nordisk", "value": "3 (IT/BE/US)" },
-        { "label": "Brussels target capacity", "value": "100-150M vials/yr" },
-        { "label": "Bloomington target capacity", "value": "~70M vials/yr" },
-        { "label": "GLP-1 demand vs fill capacity", "value": "2-3x backlog" }
+        { "label": "Largest listed fill-finish rep", "value": "TMO / Patheon" },
+        { "label": "GLP-1 demand vs fill capacity", "value": "2-3x backlog" },
+        { "label": "Aseptic fill lead times (peak)", "value": ">12 months" },
+        { "label": "Catalent sites taken private (2024)", "value": "3 (IT/BE/US)" },
+        { "label": "Former Catalent Brussels capacity", "value": "100-150M vials/yr" }
       ],
       "catalysts": [
-        "Novo Nordisk semaglutide volume reaccelerating in 2026",
-        "FDA inspections clearing transferred sites",
-        "Spillover demand to Lonza, Thermo, Samsung Bio",
-        "Sterile injectable price increases on tight capacity",
-        "Annex 1 reinvestment cycle across smaller CDMOs"
+        "Patheon sterile fill-finish capacity expansions absorbing spillover demand",
+        "GLP-1 and injectable-biologics volume growth into 2026",
+        "Annex 1 reinvestment cycle lifting demand for high-spec aseptic fill",
+        "Biosimilar and ADC launches broadening sterile fill pipelines",
+        "Sterile injectable pricing firm on multi-year backlogs"
       ],
       "risks": [
-        "Catalent equity no longer publicly tradable",
-        "GLP-1 demand surprise to the downside post price cut",
-        "Antitrust restrictions on customer mix at Catalent sites"
+        "GLP-1 demand surprise to the downside after price cuts",
+        "Patheon fill-finish is a small slice of a diversified TMO conglomerate",
+        "Novo internalizing volume reduces merchant CDMO demand"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-07-08"
     },
     {
       "id": "rgen-bioprocessing-consumables",
