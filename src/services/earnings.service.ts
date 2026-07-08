@@ -81,7 +81,7 @@ async function saveEarningsToCache(
   });
 }
 
-async function fetchAlphaVantageFallback(
+async function _fetchAlphaVantageFallback(
   ticker: string,
   cached?: { earningsJson: string | null; lastFetchedAt: Date } | null,
 ): Promise<EarningsResponse> {
@@ -184,7 +184,7 @@ export async function getEarningsData(ticker: string): Promise<EarningsResponse>
  * Used when Polygon returns no usable data.
  * Finnhub provides ~4 quarters of history + upcoming earnings dates.
  */
-async function fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
+async function _fetchFinnhubFallback(ticker: string): Promise<EarningsResponse> {
   if (!config.finnhubApiKey) {
     return { ticker, quarterly: [], annual: [], lastUpdated: '', dataAge: 'stale' };
   }

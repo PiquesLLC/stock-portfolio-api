@@ -156,7 +156,7 @@ export function filterPerformanceShareCardPoints(points: ChartPoint[], period: S
   }
 
   const nowDate = new Date(now);
-  const nowMs = nowDate.getTime();
+  const _nowMs = nowDate.getTime();
 
   const datedPoints = points.map(point => {
     const etMeta = getEtHourFloat(new Date(point.time));
@@ -525,7 +525,7 @@ async function buildStockSvg(data: StockShareCardData): Promise<string> {
     }
   }
 
-  const logoEl = _LOGO_B64
+  const _logoEl = _LOGO_B64
     ? `<image x="48" y="${H - 64}" width="32" height="32" href="data:image/png;base64,${_LOGO_B64}"/>`
     : '';
 
@@ -611,7 +611,7 @@ async function buildPerformanceSvg(data: PerformanceShareCardData): Promise<stri
   const vals = data.sparklineValues;
   const sparkMin = vals.length > 0 ? Math.min(...vals) : 0;
   const sparkMax = vals.length > 0 ? Math.max(...vals) : 0;
-  const sparkRange = Math.max(1e-6, sparkMax - sparkMin);
+  const _sparkRange = Math.max(1e-6, sparkMax - sparkMin);
 
   // Reference line at periodStartValue (previous close for 1D, start-of-period for others)
   // Include periodStartValue in min/max so the baseline is always visible on the chart

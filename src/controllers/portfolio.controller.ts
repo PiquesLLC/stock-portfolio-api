@@ -142,30 +142,38 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     const existingHoldings = await getHoldings(req.user!.userId, portfolioId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
-    const holding = await upsertHolding({ ticker, shares, averageCost }, req.user!.userId, 'replace', portfolioId);
+    // Atomic: the holding write and its compensating TWR transaction commit
+    // together — a position change without the offsetting cash-flow row would
+    // silently inflate returns. (getHoldings above already ensured the default
+    // portfolio exists, so upsertHolding does no writes outside this tx.)
+    const holding = await prisma.$transaction(async (tx) => {
+      const upserted = await upsertHolding({ ticker, shares, averageCost }, req.user!.userId, 'replace', portfolioId, tx);
+
+      // Auto-create transaction for TWR tracking (unless skipTransaction is set)
+      // This ensures adding/removing stocks doesn't artificially inflate returns
+      if (!skipTransaction) {
+        const newCostBasis = shares * averageCost;
+        const oldCostBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
+        const costBasisDiff = newCostBasis - oldCostBasis;
+
+        if (Math.abs(costBasisDiff) >= 0.01) {
+          const transactionType = costBasisDiff > 0 ? 'deposit' : 'withdrawal';
+          await addTransaction({
+            type: transactionType,
+            amount: Math.abs(costBasisDiff),
+            date: new Date().toISOString(),
+            userId: req.user!.userId,
+          }, tx);
+        }
+      }
+      return upserted;
+    });
+
     try {
       await recordCompositionChange(req.user!.userId, 'holding_update');
       await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding update:');
-    }
-
-    // Auto-create transaction for TWR tracking (unless skipTransaction is set)
-    // This ensures adding/removing stocks doesn't artificially inflate returns
-    if (!skipTransaction) {
-      const newCostBasis = shares * averageCost;
-      const oldCostBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
-      const costBasisDiff = newCostBasis - oldCostBasis;
-
-      if (Math.abs(costBasisDiff) >= 0.01) {
-        const transactionType = costBasisDiff > 0 ? 'deposit' : 'withdrawal';
-        await addTransaction({
-          type: transactionType,
-          amount: Math.abs(costBasisDiff),
-          date: new Date().toISOString(),
-          userId: req.user!.userId,
-        });
-      }
     }
 
     // Fire activity event using authenticated user ID
@@ -230,23 +238,29 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
-    await deleteHolding(ticker, req.user!.userId, portfolioId);
+    // Atomic: the cascade delete and its compensating TWR withdrawal commit
+    // together (see addHolding above). getHoldings already ensured the default
+    // portfolio exists, so deleteHolding does no writes outside this tx.
+    await prisma.$transaction(async (tx) => {
+      await deleteHolding(ticker, req.user!.userId, portfolioId, tx);
+
+      // Auto-create withdrawal transaction for TWR tracking
+      if (!skipTransaction && costBasis >= 0.01) {
+        await addTransaction({
+          type: 'withdrawal',
+          amount: costBasis,
+          date: new Date().toISOString(),
+          userId: req.user!.userId,
+        }, tx);
+        console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
+      }
+    });
+
     try {
       await recordCompositionChange(req.user!.userId, 'holding_remove');
       await resetSnapshotsForCompositionChange(req.user!.userId);
     } catch (_err) {
       console.warn('[Snapshot] Reset failed after holding removal:');
-    }
-
-    // Auto-create withdrawal transaction for TWR tracking
-    if (!skipTransaction && costBasis >= 0.01) {
-      await addTransaction({
-        type: 'withdrawal',
-        amount: costBasis,
-        date: new Date().toISOString(),
-        userId: req.user!.userId,
-      });
-      console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
     }
 
     // Fire activity event using authenticated user ID

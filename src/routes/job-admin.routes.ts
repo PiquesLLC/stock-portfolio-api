@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import {
   getJobStats,
-  getDeadLetterEntries,
   resolveDeadLetterEntry,
   pruneOldJobRuns,
   healStuckJobs,

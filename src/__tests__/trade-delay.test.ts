@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
-import { getFeed, getUserActivity } from '../services/activity.service';
+import { getFeed } from '../services/activity.service';
 import { getLockedContent } from '../services/creator.service';
 
 vi.mock('../services/follow.service', () => ({
@@ -211,7 +211,7 @@ describe('trade delay filtering', () => {
         { ticker: 'AAPL', type: 'buy', date: twoDaysAgo, shares: 10, price: 185 },
       ]);
 
-      const result = await getLockedContent('creator_user_1', 'paid_viewer_1', 'tradeHistory') as any[];
+      const _result = await getLockedContent('creator_user_1', 'paid_viewer_1', 'tradeHistory') as any[];
 
       // The portfolioTrade.findMany call should use the delay cutoff filter
       const findManyCall = (prismaMock as any).portfolioTrade.findMany.mock.calls[0][0];

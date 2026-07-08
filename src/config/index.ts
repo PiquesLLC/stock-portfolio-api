@@ -53,6 +53,11 @@ if (process.env.NODE_ENV === 'production') {
     // dev-mode path instead of sending — fail closed at boot in prod.
     'RESEND_API_KEY',
   ];
+  if (process.env.APPLE_IAP_ENABLED === 'true') {
+    // The App Store server-notification verifier requires the numeric app ID
+    // in production — fail fast at boot rather than at the first webhook.
+    requiredKeys.push('APPLE_APP_APPLE_ID');
+  }
   if (plaidEnabled) {
     requiredKeys.push('PLAID_CLIENT_ID', 'PLAID_SECRET');
   }
@@ -248,6 +253,9 @@ export const config = {
   // Apple IAP
   appleIapEnabled: process.env.APPLE_IAP_ENABLED === 'true',
   appleBundleId: process.env.APPLE_BUNDLE_ID || 'com.nala.portfolio',
+  // Numeric App Store app ID — required to verify PRODUCTION server
+  // notifications (the library matches it against the payload's appAppleId).
+  appleAppAppleId: process.env.APPLE_APP_APPLE_ID ? Number(process.env.APPLE_APP_APPLE_ID) : undefined,
   appleIapSharedSecret: process.env.APPLE_IAP_SHARED_SECRET || '',
 
   // OAuth

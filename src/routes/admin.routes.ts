@@ -592,7 +592,7 @@ router.get('/reports/latest', requireAuth, requireAdmin, async (req: AuthRequest
       if (report) latest[type] = { ...report, data: JSON.parse(report.data) };
     }
     res.json(latest);
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch reports' });
   }
 });

@@ -58,7 +58,6 @@ async function fetchFmpTrades(endpoint: string): Promise<FmpCongressTrade[]> {
 
 // ── QuiverQuant fetch (placeholder — activate when subscribed) ──
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _fetchQuiverTrades(): Promise<FmpCongressTrade[]> {
   // TODO: Implement when QuiverQuant API key is available
   // const url = `https://api.quiverquant.com/beta/live/congresstrading`;

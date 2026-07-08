@@ -263,7 +263,7 @@ export async function checkCongressTradeAlerts(): Promise<void> {
 
   if (alerts.length === 0) return;
 
-  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const _twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   // Use filingDate (disclosure date) instead of fetchedAt to avoid re-alerting
   // on the same trades being re-fetched by congress_sync
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

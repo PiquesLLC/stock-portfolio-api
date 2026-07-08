@@ -814,7 +814,7 @@ export async function discoverCreators(params: {
   const cursorData = params.cursor ? decodeCursor(params.cursor) : null;
 
   // Include creator + visibility data (LEFT JOIN — null for non-creators)
-  const includeRelations = {
+  const _includeRelations = {
     leaderboardCaches: { where: { window: '1M' }, take: 1 },
     creator: {
       include: { visibility: true },

@@ -25,6 +25,8 @@ export default [
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', 'prisma/'],
+    // src/generated is Prisma codegen output — never lint generated code
+    // (its blanket eslint-disable banners read as "unused directive" here).
+    ignores: ['dist/', 'node_modules/', 'prisma/', 'src/generated/'],
   },
 ];

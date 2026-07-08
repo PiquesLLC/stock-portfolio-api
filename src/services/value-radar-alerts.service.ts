@@ -309,7 +309,7 @@ export async function sendValueRadarDigest(): Promise<void> {
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function tierRank(tier: string): number {
+function _tierRank(tier: string): number {
   switch (tier) {
     case 'deep_value': return 0;
     case 'attractive': return 1;

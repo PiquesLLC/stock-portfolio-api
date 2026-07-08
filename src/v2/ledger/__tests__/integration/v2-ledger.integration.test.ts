@@ -468,7 +468,6 @@ describe.skipIf(!run)('v2 ledger integration (against Postgres)', () => {
 
 // Tell developers running locally without docker that the suite was skipped.
 if (!run) {
-  // eslint-disable-next-line no-console
   console.info(
     '[v2-ledger-integration] RUN_V2_INTEGRATION not set — skipping integration suite. ' +
       'Run `npm run test:v2:integration` to exercise these tests against Postgres.',

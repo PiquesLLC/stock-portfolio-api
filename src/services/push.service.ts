@@ -229,7 +229,7 @@ export async function sendNativePushToUser(userId: string, payload: PushPayload)
       data: payload.data,
     });
 
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       tokens.filter(t => t.platform === 'ios').map(async (t) => {
         const res = await fetch(`${apnsHost}/3/device/${t.token}`, {
           method: 'POST',

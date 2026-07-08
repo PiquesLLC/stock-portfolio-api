@@ -155,7 +155,7 @@ async function computeContributions(
   const daysBack = window === '5d' ? 5 : 22;
 
   // Check if Finnhub data is mostly empty (paid plan limitation)
-  const finnhubHasData = Array.from(candleData.values()).some(c => c && !c.partial && c.closes.length >= daysBack + 1);
+  const _finnhubHasData = Array.from(candleData.values()).some(c => c && !c.partial && c.closes.length >= daysBack + 1);
 
   // Build contributions - use Yahoo as fallback when Finnhub is unavailable
   const contributionPromises = holdings.map(async h => {

@@ -37,7 +37,7 @@ router.get('/economic-calendar', heavyReadLimiter, async (_req, res) => {
     const { getUpcomingEconomicEvents } = await import('../services/economic-calendar.service');
     const events = await getUpcomingEconomicEvents();
     res.json({ events });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch economic calendar' });
   }
 });

@@ -1,24 +1,56 @@
 import * as jose from 'jose';
 import { createHash } from 'crypto';
+import {
+  Environment,
+  SignedDataVerifier,
+  VerificationException,
+  VerificationStatus,
+} from '@apple/app-store-server-library';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { JobExecutionError, runJob } from './job-runner.service';
+import { APPLE_ROOT_CERTS } from '../certs/apple-root-certs';
 
-// Apple's public keys for JWS verification (cached)
-let applePublicKeys: jose.JWK[] | null = null;
-let appleKeysExpiry = 0;
+// App Store JWS verifier — validates each signed payload's x5c certificate
+// chain up to Apple's pinned root CAs, plus bundleId/environment claims.
+// (StoreKit payloads are signed by the App Store PKI; the Sign in with Apple
+// JWKS this service previously used signs ID tokens and can never match them.)
+let signedDataVerifier: SignedDataVerifier | null = null;
 
-async function getApplePublicKeys(): Promise<jose.JWK[]> {
-  if (applePublicKeys && Date.now() < appleKeysExpiry) {
-    return applePublicKeys;
+function getVerifier(): SignedDataVerifier {
+  if (!signedDataVerifier) {
+    const environment = config.nodeEnv === 'production' ? Environment.PRODUCTION : Environment.SANDBOX;
+    signedDataVerifier = new SignedDataVerifier(
+      APPLE_ROOT_CERTS,
+      true, // online OCSP revocation checks
+      environment,
+      config.appleBundleId,
+      config.appleAppAppleId,
+    );
   }
+  return signedDataVerifier;
+}
 
-  const res = await fetch('https://appleid.apple.com/auth/keys');
-  if (!res.ok) throw new Error(`Failed to fetch Apple public keys: ${res.status}`);
-  const data = await res.json() as { keys: jose.JWK[] };
-  applePublicKeys = data.keys;
-  appleKeysExpiry = Date.now() + 24 * 60 * 60 * 1000; // cache 24h
-  return applePublicKeys;
+/**
+ * Map library exceptions onto the existing error-message contract —
+ * classifyAppleNotificationError keys on these phrases to mark failures
+ * PERMANENT, and RETRYABLE_VERIFICATION_FAILURE (e.g. an OCSP fetch flake)
+ * must NOT match any permanent phrase so the job runner retries it.
+ */
+function mapVerificationError(err: unknown): Error {
+  if (err instanceof VerificationException) {
+    switch (err.status) {
+      case VerificationStatus.INVALID_APP_IDENTIFIER:
+        return new Error(`Bundle ID mismatch: expected ${config.appleBundleId}`);
+      case VerificationStatus.INVALID_ENVIRONMENT:
+        return new Error('Sandbox transaction rejected in production environment');
+      case VerificationStatus.RETRYABLE_VERIFICATION_FAILURE:
+        return new Error('Apple JWS verification temporarily unavailable (retryable)');
+      default:
+        return new Error(`Failed to verify Apple JWS transaction - ${VerificationStatus[err.status]}`);
+    }
+  }
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 function decodeNotificationMetadata(signedPayload: string): { notificationUUID?: string; notificationType?: string } {
@@ -76,41 +108,30 @@ function mapAppleProductToPlan(productId: string): string {
 }
 
 /**
- * Decode and verify a StoreKit 2 JWS signed transaction.
- * Validates signature, bundleId, and environment claims.
- * Returns the decoded transaction payload.
+ * Decode and verify a StoreKit 2 JWS signed transaction via the x5c chain.
+ * The library validates signature, certificate chain to Apple's roots,
+ * bundleId, and environment. Returns the decoded transaction payload.
  */
 export async function verifySignedTransaction(signedTransaction: string): Promise<any> {
-  const keys = await getApplePublicKeys();
-
-  // Try each key until one verifies
-  for (const key of keys) {
-    try {
-      const publicKey = await jose.importJWK(key, 'ES256');
-      const { payload } = await jose.jwtVerify(signedTransaction, publicKey, {
-        algorithms: ['ES256'],
-      });
-
-      // Validate app-scoped claims to prevent cross-app transaction injection
-      if (payload.bundleId && payload.bundleId !== config.appleBundleId) {
-        throw new Error(`Bundle ID mismatch: expected ${config.appleBundleId}, got ${payload.bundleId}`);
-      }
-
-      // Validate environment: reject sandbox transactions in production
-      if (config.nodeEnv === 'production' && payload.environment === 'Sandbox') {
-        throw new Error('Sandbox transaction rejected in production environment');
-      }
-
-      return payload;
-    } catch (err: any) {
-      // If this was a claim validation failure (not a key mismatch), re-throw immediately
-      if (err?.message?.includes('mismatch') || err?.message?.includes('rejected')) {
-        throw err;
-      }
-      continue;
-    }
+  try {
+    return await getVerifier().verifyAndDecodeTransaction(signedTransaction);
+  } catch (err) {
+    throw mapVerificationError(err);
   }
-  throw new Error('Failed to verify Apple JWS transaction - no matching key');
+}
+
+/**
+ * Decode and verify an App Store Server Notification V2 envelope.
+ * Notifications carry their app identifiers inside `data`/`summary`, so they
+ * need the notification-specific verifier (which, in production, also matches
+ * `appAppleId` against config.appleAppAppleId — set APPLE_APP_APPLE_ID).
+ */
+export async function verifySignedNotification(signedPayload: string): Promise<any> {
+  try {
+    return await getVerifier().verifyAndDecodeNotification(signedPayload);
+  } catch (err) {
+    throw mapVerificationError(err);
+  }
 }
 
 /**
@@ -250,8 +271,8 @@ export async function handleAppleNotification(signedPayload: string): Promise<vo
 }
 
 async function processAppleNotification(signedPayload: string): Promise<void> {
-  // Decode outer notification JWS
-  const notification = await verifySignedTransaction(signedPayload);
+  // Decode outer notification JWS (notification-specific verification)
+  const notification = await verifySignedNotification(signedPayload);
   const notificationType = notification.notificationType as string;
   const notificationUUID = notification.notificationUUID as string;
 

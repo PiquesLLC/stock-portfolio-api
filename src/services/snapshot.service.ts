@@ -7,7 +7,7 @@ import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
 import { replayDailyLedger } from './ledger/replay.service';
 import { LEDGER_SETTLEMENT_POLICY, TRADE_SETTLEMENT_POLICY, isValidLedgerEventType } from './ledger/settlement-policy';
 import { getMarketSession, isOpenedTodayET } from '../utils/market-hours';
-import { etDate } from '../utils/date';
+import { etDate, etDateHour, etMidnightUtc } from '../utils/date';
 
 const chartCandleCache = new NodeCache({ stdTTL: 86400 });
 const hiresCache = new NodeCache({ stdTTL: 300 }); // 5-min cache for intraday/hourly candles
@@ -338,9 +338,11 @@ export async function getSnapshotChartPoints(
   const byBucket = new Map<string, { time: number; value: number }>();
   for (const p of allPoints) {
     const d = new Date(p.time);
+    // Bucket by ET day/hour (market calendar) — UTC bucketing put late-evening
+    // ET snapshots (after 8 PM ET) into the NEXT day's bucket.
     const bucket = useHourlyResolution
-      ? `${d.toISOString().slice(0, 13)}` // YYYY-MM-DDTHH (hourly)
-      : d.toISOString().slice(0, 10);     // YYYY-MM-DD (daily)
+      ? etDateHour(d) // "YYYY-MM-DD HH" (hourly, ET)
+      : etDate(d);    // "YYYY-MM-DD" (daily, ET)
     byBucket.set(bucket, p);
   }
   const dailyPoints = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
@@ -1120,8 +1122,10 @@ export async function getUserChartSnapshots(userId: string, period: string): Pro
 
   switch (period) {
     case '1D':
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
+      // ET midnight, not server-local: on a UTC host setHours(0,0,0,0) starts
+      // "today" at ~8 PM ET the previous evening, pulling prior-day after-hours
+      // into the 1D window and anchoring the baseline on the wrong day.
+      startDate = etMidnightUtc(now);
       break;
     case '1W':
       startDate = new Date(now);
@@ -1287,8 +1291,8 @@ export async function getChartSnapshots(userId: string, period: string): Promise
 
   switch (period) {
     case '1D': {
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
+      // ET midnight, not server-local — see getUserChartSnapshots above.
+      startDate = etMidnightUtc(now);
       break;
     }
     case '1W':

@@ -142,7 +142,7 @@ export async function sendEarningsAlerts(windowDays = 7): Promise<{ sent: number
           }
         }
         else skipped++;
-      } catch (err) {
+      } catch {
         // Retry once after 2s for transient failures (API timeouts, rate limits)
         console.warn(`[Notifications] Earnings alert first attempt failed for ${ticker}, retrying in 2s...`);
         await new Promise(r => setTimeout(r, 2000));

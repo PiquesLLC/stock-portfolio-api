@@ -283,7 +283,7 @@ describe('Profile Visibility — holdingsVisibility=hidden', () => {
       prismaMock.leaderboardCache.deleteMany.mockResolvedValue({ count: 0 });
       (prismaMock as any).leaderboardCache.createMany = vi.fn().mockResolvedValue({ count: 0 });
 
-      const result = await realGetLeaderboard('1M', 'world');
+      const _result = await realGetLeaderboard('1M', 'world');
 
       // Verify Prisma query includes holdingsVisibility filter
       expect(capturedArgs).not.toBeNull();

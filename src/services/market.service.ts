@@ -823,7 +823,10 @@ export async function fetchPrice(ticker: string): Promise<Quote> {
   }
 }
 
-export async function fetchPrices(tickers: string[], options?: { preferPolygon?: boolean }): Promise<QuotesResult> {
+// NOTE: `preferPolygon` is vestigial — Polygon is now unconditionally the
+// primary source with a Yahoo overlay, so the option is accepted but ignored
+// (kept for call-site compatibility).
+export async function fetchPrices(tickers: string[], _options?: { preferPolygon?: boolean }): Promise<QuotesResult> {
   // Polygon is always primary — paid plan provides batch snapshots with
   // lastTrade.p (extended hours), prevDay.c (correct previousClose), and
   // no rate limit issues. Finnhub free tier (60 calls/min) is only used

@@ -465,7 +465,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
 
     if (!portfolio || portfolio.holdings.length === 0) {
       const now = new Date();
-      const formattedDate = now.toLocaleDateString('en-US', {
+      const _formattedDate = now.toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
       });
       return {

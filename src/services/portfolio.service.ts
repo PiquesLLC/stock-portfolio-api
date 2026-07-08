@@ -1,4 +1,5 @@
 ﻿import prisma from '../utils/prisma';
+import type { Prisma } from '../generated/prisma/client';
 import { fetchPrices } from './market.service';
 import { Holding, HoldingInput, HoldingWithQuote, OptionWithQuote, Portfolio, Settings, SettingsUpdateInput, QuotesMeta } from '../types';
 import { getSector } from '../utils/sectors';
@@ -36,11 +37,16 @@ export async function getHoldings(userId: string, portfolioId?: string): Promise
   });
 }
 
+/** Either the global client or an in-flight interactive transaction — lets a
+ *  caller make a holding write atomic with its compensating TWR Transaction. */
+type DbClient = Prisma.TransactionClient | typeof prisma;
+
 export async function upsertHolding(
   input: HoldingInput,
   userId: string,
   mode: 'replace' | 'add' = 'replace',
   portfolioId?: string,
+  db: DbClient = prisma,
 ): Promise<Holding> {
   if (!Number.isFinite(input.shares) || input.shares <= 0) {
     throw new Error('shares must be a positive number');
@@ -60,7 +66,7 @@ export async function upsertHolding(
     resolvedPortfolioId = defaultPortfolio.id;
   }
 
-  const existing = await prisma.holding.findFirst({
+  const existing = await db.holding.findFirst({
     where: { ticker, portfolioId: resolvedPortfolioId },
   });
 
@@ -71,7 +77,7 @@ export async function upsertHolding(
       const blendedCost = totalShares > 0
         ? (existing.shares * existing.averageCost + input.shares * input.averageCost) / totalShares
         : input.averageCost;
-      return prisma.holding.update({
+      return db.holding.update({
         where: { id: existing.id },
         data: {
           shares: totalShares,
@@ -80,7 +86,7 @@ export async function upsertHolding(
       });
     }
     // mode === 'replace': explicit overwrite
-    return prisma.holding.update({
+    return db.holding.update({
       where: { id: existing.id },
       data: {
         shares: input.shares,
@@ -90,8 +96,10 @@ export async function upsertHolding(
   }
 
   // Wrap count check + create in a transaction to prevent TOCTOU race
-  // (two concurrent requests both reading count=9, both passing, both creating → 11 holdings)
-  return prisma.$transaction(async (tx) => {
+  // (two concurrent requests both reading count=9, both passing, both creating → 11 holdings).
+  // When the caller already supplied a transaction client, run on it directly —
+  // interactive transactions do not nest.
+  const createWithPlanLimit = async (tx: Prisma.TransactionClient): Promise<Holding> => {
     const user = await tx.user.findUnique({
       where: { id: uid },
       select: { plan: true },
@@ -113,35 +121,46 @@ export async function upsertHolding(
         portfolioId: resolvedPortfolioId,
       },
     });
-  });
+  };
+
+  if (db === prisma) {
+    return prisma.$transaction(createWithPlanLimit);
+  }
+  return createWithPlanLimit(db as Prisma.TransactionClient);
 }
 
-export async function deleteHolding(ticker: string, userId: string, portfolioId?: string): Promise<void> {
+export async function deleteHolding(ticker: string, userId: string, portfolioId?: string, db: DbClient = prisma): Promise<void> {
   const normalizedTicker = ticker.toUpperCase();
 
   let existing;
   if (portfolioId) {
-    existing = await prisma.holding.findFirst({
+    existing = await db.holding.findFirst({
       where: { ticker: normalizedTicker, portfolioId },
     });
   } else {
     // Resolve to default portfolio
     const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
     const defaultPortfolio = await getOrCreateDefaultPortfolio(userId);
-    existing = await prisma.holding.findFirst({
+    existing = await db.holding.findFirst({
       where: { ticker: normalizedTicker, portfolioId: defaultPortfolio.id },
     });
   }
 
   if (existing) {
-    await prisma.$transaction(async (tx) => {
+    const cascade = async (tx: Prisma.TransactionClient) => {
       // Cascade cleanup: lots, trades, and dividend records tied to this ticker
       await tx.lot.deleteMany({ where: { ticker: normalizedTicker, userId } });
       await tx.portfolioTrade.deleteMany({ where: { ticker: normalizedTicker, userId } });
       await tx.dividendCredit.deleteMany({ where: { ticker: normalizedTicker, userId } });
       await tx.dividendReinvestment.deleteMany({ where: { ticker: normalizedTicker, userId } });
       await tx.holding.delete({ where: { id: existing.id } });
-    });
+    };
+    // Interactive transactions do not nest — reuse the caller's when given.
+    if (db === prisma) {
+      await prisma.$transaction(cascade);
+    } else {
+      await cascade(db as Prisma.TransactionClient);
+    }
   }
 }
 

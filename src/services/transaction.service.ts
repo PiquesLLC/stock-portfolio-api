@@ -1,4 +1,5 @@
 import prisma from '../utils/prisma';
+import type { Prisma } from '../generated/prisma/client';
 
 
 
@@ -9,8 +10,14 @@ export interface TransactionInput {
   userId: string;
 }
 
-export async function addTransaction(input: TransactionInput) {
-  return prisma.transaction.create({
+/** Optional `db` lets callers make this atomic with a holding write (see
+ *  addHolding/removeHolding — the compensating TWR cash-flow row must not be
+ *  able to go missing while the position change commits). */
+export async function addTransaction(
+  input: TransactionInput,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+) {
+  return db.transaction.create({
     data: {
       type: input.type,
       amount: input.amount,

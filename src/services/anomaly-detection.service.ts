@@ -71,7 +71,7 @@ const volumeCache = new NodeCache({ stdTTL: 21600 });
 const VOLUME_SPIKE_MULTIPLIER = 2.0;
 const VOLUME_CRITICAL_MULTIPLIER = 5.0;
 const PRICE_SPIKE_PCT = 3.0;
-const PRICE_CRITICAL_PCT = 5.0;
+const _PRICE_CRITICAL_PCT = 5.0;
 const CONCENTRATION_PCT = 25.0;
 
 interface AnomalyCandidate {

@@ -19,7 +19,6 @@ import { pruneBackupsToKeep, BACKUP_DIR } from '../backup.service';
 
 describe('pruneBackupsToKeep daily-only filter', () => {
   let tmpDir: string;
-  let originalBackupDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-prune-'));
