@@ -900,35 +900,10 @@ const server = app.listen(config.port, async () => {
     console.log('[Deep Research] Disabled (DEEP_RESEARCH_ENABLED not set)');
   }
 
-  // Congress trade sync — fetch latest trades every 2 hours
-  console.log('[Congress Sync] Running every 2 hours');
-  setTimeout(() => {
-    runJob({ name: 'congress_sync', fn: syncLatestCongressTrades, idempotencyKey: buildTimeBucketIdempotencyKey('congress_sync', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
-  }, 60000);
-  setInterval(() => {
-    runJob({ name: 'congress_sync', fn: syncLatestCongressTrades, idempotencyKey: buildTimeBucketIdempotencyKey('congress_sync', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
-  }, 2 * 60 * 60 * 1000);
-
-  // Congress trade alert evaluation — check every 2 hours (offset 30 min from sync)
-  console.log('[Congress Alert Eval] Running every 2 hours');
-  setTimeout(() => {
-    runJob({ name: 'congress_alert_eval', fn: checkCongressTradeAlerts, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('congress_alert_eval', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
-  }, 30 * 60 * 1000);
-  setInterval(() => {
-    runJob({ name: 'congress_alert_eval', fn: checkCongressTradeAlerts, maxAttempts: 1, idempotencyKey: buildTimeBucketIdempotencyKey('congress_alert_eval', 2 * 60 * 60 * 1000), idempotencyTtlMs: 2 * 60 * 60 * 1000 });
-  }, 2 * 60 * 60 * 1000);
-
-  // Politician roster refresh — pull latest legislators-current.json from
-  // unitedstates/congress-legislators every 7 days. Also runs once 90s after
-  // boot so a brand-new instance gets the roster without waiting a week.
-  console.log('[Politician Refresh] Running weekly (7d), seed run at +90s');
-  const POLITICIAN_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
-  setTimeout(() => {
-    runJob({ name: 'politician_refresh', fn: refreshPoliticianRoster, maxAttempts: 2, idempotencyKey: buildTimeBucketIdempotencyKey('politician_refresh', POLITICIAN_REFRESH_MS), idempotencyTtlMs: POLITICIAN_REFRESH_MS });
-  }, 90 * 1000);
-  setInterval(() => {
-    runJob({ name: 'politician_refresh', fn: refreshPoliticianRoster, maxAttempts: 2, idempotencyKey: buildTimeBucketIdempotencyKey('politician_refresh', POLITICIAN_REFRESH_MS), idempotencyTtlMs: POLITICIAN_REFRESH_MS });
-  }, POLITICIAN_REFRESH_MS);
+  // Congress feature RETIRED from the UI 2026-07-08 (user request) — trade
+  // sync, alert evaluation, and politician-roster refresh schedules removed.
+  // The services/routes/job handlers remain registered for manual runs and
+  // easy reinstatement; nothing generates congress_trade notifications now.
 
   // Webhook threshold evaluation — check every 5 minutes for failure rate spikes
   setInterval(() => {
