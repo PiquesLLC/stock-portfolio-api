@@ -11,7 +11,12 @@ import { getSector } from '../utils/sectors';
 import { callAI } from '../utils/ai-provider';
 import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 
-const cache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — tax situation only changes on trades
+// 15-min cache: the candidate math (currentValue/unrealizedLoss/potentialTaxSavings)
+// is derived from LIVE prices, so a 24h TTL showed day-stale losses in a tax tool.
+const cache = new NodeCache({ stdTTL: 900 });
+// The paid Perplexity analysis is cached separately for 24h keyed on the candidate
+// set — it only re-runs when the candidates actually change, not every 15 minutes.
+const aiCache = new NodeCache({ stdTTL: 86400 });
 
 const SHORT_TERM_TAX_RATE = 0.25;
 const LONG_TERM_TAX_RATE = 0.15;
@@ -75,10 +80,14 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
 
   for (const holding of holdings) {
     const quote = quotes.get(holding.ticker);
-    if (!quote) continue;
+    // A 0-price quote would fabricate a 100% "loss" — skip like getPortfolio does.
+    if (!quote || quote.currentPrice <= 0) continue;
 
     const currentValue = holding.shares * quote.currentPrice;
     const costBasis = holding.shares * holding.averageCost;
+    // Note: costBasis === 0 is safe — with the price guard above, unrealized is
+    // then positive, so it takes the gain branch and never reaches the percent
+    // division in the loss branch.
     const unrealized = currentValue - costBasis;
 
     if (unrealized >= 0) {
@@ -155,7 +164,12 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
   let aiAnalysis: string | null = null;
   let aiCitations: string[] = [];
 
-  if (candidates.length > 0) {
+  const aiKey = `tax-ai:${userId}:${candidates.slice(0, 8).map(c => `${c.ticker}:${c.holdingPeriod}`).join(',')}`;
+  const cachedAi = aiCache.get<{ analysis: string | null; citations: string[] }>(aiKey);
+  if (cachedAi) {
+    aiAnalysis = cachedAi.analysis;
+    aiCitations = cachedAi.citations;
+  } else if (candidates.length > 0) {
     try {
       const candidateSummary = candidates.slice(0, 8).map(c =>
         `${c.ticker} (${c.sector}): $${Math.abs(c.unrealizedLoss).toFixed(0)} loss (${c.unrealizedLossPct.toFixed(1)}%), ${c.holdingPeriod}, held ${c.daysHeld ?? '?'} days`
@@ -172,6 +186,7 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
       if (result) {
         aiAnalysis = sanitizeContent(result.content);
         aiCitations = (result.citations ?? []).filter(validateCitationUrl);
+        aiCache.set(aiKey, { analysis: aiAnalysis, citations: aiCitations });
       }
     } catch (err) {
       console.error('[Tax Harvest] Perplexity analysis failed:', (err as Error).message);

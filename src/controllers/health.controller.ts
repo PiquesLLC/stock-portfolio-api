@@ -40,13 +40,17 @@ export async function authMetrics(req: Request, res: Response): Promise<void> {
 }
 
 export async function apiUsage(req: Request, res: Response): Promise<void> {
-  const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 90);
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 90);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const logs = await prisma.apiUsageLog.findMany({
-    where: { createdAt: { gte: since } },
-    orderBy: { createdAt: 'desc' },
-  });
+    const logs = await prisma.apiUsageLog.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: 'desc' },
+      // Only the columns the aggregation below reads — the table grows on every
+      // AI call, so a 90-day scan of full rows is needless memory pressure.
+      select: { feature: true, inputTokens: true, outputTokens: true, costUsdEstimate: true, createdAt: true },
+    });
 
   // Totals
   let totalCalls = logs.length;
@@ -103,6 +107,12 @@ export async function apiUsage(req: Request, res: Response): Promise<void> {
         .map(([k, v]) => [k, { ...v, cost: round4(v.cost) }])
     ),
   });
+  } catch (error: unknown) {
+    // Express 4 doesn't catch async throws — without this, a DB rejection
+    // hangs the request to a 504 instead of returning 500.
+    console.error('[Health] apiUsage error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to load API usage' });
+  }
 }
 
 export async function webhookMetrics(req: Request, res: Response): Promise<void> {
@@ -114,9 +124,16 @@ export async function providerMetrics(req: Request, res: Response): Promise<void
 }
 
 export async function jobMetrics(req: Request, res: Response): Promise<void> {
-  const hours = Math.min(Math.max(parseInt(req.query.hours as string) || 24, 1), 168);
-  const metrics = await getJobRunnerMetrics(hours);
-  res.json(metrics);
+  try {
+    const hours = Math.min(Math.max(parseInt(req.query.hours as string) || 24, 1), 168);
+    const metrics = await getJobRunnerMetrics(hours);
+    res.json(metrics);
+  } catch (error: unknown) {
+    // Express 4 doesn't catch async throws — without this, a DB rejection
+    // hangs the request to a 504 instead of returning 500.
+    console.error('[Health] jobMetrics error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to load job metrics' });
+  }
 }
 
 export async function healthStatus(req: Request, res: Response): Promise<void> {

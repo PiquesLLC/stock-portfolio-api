@@ -70,7 +70,7 @@ npx prisma studio  # Database GUI
 
 ## Environment Variables
 
-- `PORT` - Server port (default: 3000)
+- `PORT` - Server port (default: 3001, matching the UI dev proxy)
 - `FINNHUB_API_KEY` - Required for market data
 - `DATABASE_URL` - SQLite path (default: file:./dev.db)
 - `PRICE_CACHE_TTL` - Cache duration in seconds (default: 5)

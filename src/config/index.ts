@@ -49,6 +49,9 @@ if (process.env.NODE_ENV === 'production') {
     'FINNHUB_API_KEY',
     'POLYGON_API_KEY',
     'MFA_ENCRYPTION_KEY',
+    // Without Resend, verification/reset emails silently fall through to a
+    // dev-mode path instead of sending — fail closed at boot in prod.
+    'RESEND_API_KEY',
   ];
   if (plaidEnabled) {
     requiredKeys.push('PLAID_CLIENT_ID', 'PLAID_SECRET');
@@ -101,7 +104,10 @@ const bcryptSaltRounds = isTestEnv ? 4 : Math.max(10, numEnv(process.env.BCRYPT_
 const bcryptOtpSaltRounds = isTestEnv ? 4 : Math.max(10, numEnv(process.env.BCRYPT_OTP_SALT_ROUNDS, 10));
 
 export const config = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  // 3001 matches the UI dev proxy (vite.config.ts) and scripts/kill-port.js —
+  // a 3000 default left a fresh clone's UI proxying at a port nothing listens on.
+  // Prod is unaffected: Railway always injects PORT explicitly.
+  port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   finnhubApiKey: process.env.FINNHUB_API_KEY || '',
   fmpApiKey: process.env.FMP_API_KEY || '',

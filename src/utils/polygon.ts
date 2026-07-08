@@ -751,8 +751,11 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
           }
 
           quotes.set(ticker, quote);
-          cache.set(`polygon:${ticker}`, quote);
-          backupCache.set(`polygon:${ticker}`, quote);
+          // Store copies — consumers (market.service's Yahoo overlay) mutate the
+          // returned objects in place; sharing refs would let that rewrite the
+          // cached entries (resetting updatedAt/isStale for later cache readers).
+          cache.set(`polygon:${ticker}`, { ...quote });
+          backupCache.set(`polygon:${ticker}`, { ...quote });
 
           if (isRepricing) {
             repricingCount++;

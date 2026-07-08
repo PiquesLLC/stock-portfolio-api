@@ -218,6 +218,13 @@ export async function verifyTotpSetup(userId: string, code: string): Promise<str
   return backupCodes;
 }
 
+// Replay guard: a TOTP code stays valid for the whole ±window (~90s), so without
+// tracking the last-accepted time step an intercepted code can be reused. Email
+// OTP and backup codes already enforce single-use; this closes the TOTP gap.
+// In-memory is sufficient for the single-process deployment (worst case a restart
+// briefly re-opens the window); one small entry per active TOTP user.
+const lastAcceptedTotpStep = new Map<string, number>();
+
 export async function verifyTotpCode(userId: string, code: string): Promise<boolean> {
   const method = await prisma.mfaMethod.findUnique({
     where: { userId_type: { userId, type: 'totp' } },
@@ -234,7 +241,14 @@ export async function verifyTotpCode(userId: string, code: string): Promise<bool
   });
 
   const delta = totp.validate({ token: code, window: TOTP_WINDOW });
-  return delta !== null;
+  if (delta === null) return false;
+
+  // Reject reuse of an already-accepted (or older) time step for this user.
+  const step = Math.floor(Date.now() / 1000 / 30) + delta;
+  const last = lastAcceptedTotpStep.get(userId);
+  if (last !== undefined && step <= last) return false;
+  lastAcceptedTotpStep.set(userId, step);
+  return true;
 }
 
 export async function disableTotp(userId: string): Promise<void> {

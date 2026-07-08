@@ -209,28 +209,28 @@ export async function getSettings(userId: string, portfolioId?: string): Promise
 }
 
 export async function updateCashBalance(userId: string, cashBalance: number, portfolioId?: string): Promise<Settings> {
-  if (portfolioId) {
-    // Update the specific portfolio's cash balance
-    await prisma.portfolio.update({
-      where: { id: portfolioId },
-      data: { cashBalance },
-    });
-  } else {
+  let targetPortfolioId = portfolioId;
+  if (!targetPortfolioId) {
     // Update default portfolio's cash balance
     const { getOrCreateDefaultPortfolio } = await import('./portfolio-management.service');
     const defaultPortfolio = await getOrCreateDefaultPortfolio(userId);
-    await prisma.portfolio.update({
-      where: { id: defaultPortfolio.id },
-      data: { cashBalance },
-    });
+    targetPortfolioId = defaultPortfolio.id;
   }
 
-  // Also keep UserSettings in sync for backward compatibility
-  await prisma.userSettings.upsert({
-    where: { userId },
-    update: { cashBalance },
-    create: { userId, cashBalance, marginDebt: 0 },
-  });
+  // Atomic: the portfolio balance and its UserSettings mirror (the fallback
+  // getSettings reads when a user has no portfolio rows) must not diverge.
+  await prisma.$transaction([
+    prisma.portfolio.update({
+      where: { id: targetPortfolioId },
+      data: { cashBalance },
+    }),
+    // Also keep UserSettings in sync for backward compatibility
+    prisma.userSettings.upsert({
+      where: { userId },
+      update: { cashBalance },
+      create: { userId, cashBalance, marginDebt: 0 },
+    }),
+  ]);
 
   // Return aggregated settings
   return getSettings(userId);

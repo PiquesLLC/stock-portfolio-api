@@ -80,39 +80,6 @@ export async function getUserIntelligenceHandler(req: AuthRequest, res: Response
   const viewerId = req.user?.userId;
   const isOwner = viewerId === userId;
 
-  // Privacy check: verify user exists and profile is public (or viewer is owner)
-  if (!isOwner) {
-    const targetUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { profilePublic: true, holdingsVisibility: true },
-    });
-    if (!targetUser) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-    if (!targetUser.profilePublic) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-    const vis = targetUser.holdingsVisibility ?? 'all';
-    if (vis !== 'all') {
-      // Intelligence reveals full-position signals — deny unless holdings are fully public
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-
-    // Trade delay: intelligence contributors/detractors reveal recent trades.
-    // Block for creators with active trade delay — the data would expose what they traded.
-    const creator = await prisma.creator.findUnique({
-      where: { userId },
-      select: { status: true, visibility: { select: { tradeDelayHours: true } } },
-    });
-    if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-  }
-
   const windowParam = req.query.window as string | undefined;
   let window: IntelligenceWindow = '1d';
 
@@ -120,7 +87,43 @@ export async function getUserIntelligenceHandler(req: AuthRequest, res: Response
     window = windowParam as IntelligenceWindow;
   }
 
+  // try covers the privacy-gate prisma awaits below — Express 4 does not catch
+  // async handler throws, so an uncaught DB rejection here used to hang the
+  // request to a 504 instead of returning 500.
   try {
+    // Privacy check: verify user exists and profile is public (or viewer is owner)
+    if (!isOwner) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePublic: true, holdingsVisibility: true },
+      });
+      if (!targetUser) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      if (!targetUser.profilePublic) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      const vis = targetUser.holdingsVisibility ?? 'all';
+      if (vis !== 'all') {
+        // Intelligence reveals full-position signals — deny unless holdings are fully public
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+
+      // Trade delay: intelligence contributors/detractors reveal recent trades.
+      // Block for creators with active trade delay — the data would expose what they traded.
+      const creator = await prisma.creator.findUnique({
+        where: { userId },
+        select: { status: true, visibility: { select: { tradeDelayHours: true } } },
+      });
+      if (creator?.status === 'active' && creator.visibility?.tradeDelayHours) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+    }
+
     const intelligence = await fetchWithTimeout(userId, window);
     res.json(intelligence);
   } catch (err) {

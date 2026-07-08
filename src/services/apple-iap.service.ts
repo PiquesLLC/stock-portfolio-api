@@ -131,6 +131,16 @@ export async function verifyAndActivatePlan(
     throw new Error(`Unknown Apple product ID: ${productId}`);
   }
 
+  // Reject revoked (refunded) transactions and require a future expiry:
+  // plan.middleware treats planExpiresAt === null as never-expiring, so an
+  // undated or stale transaction must not mint a permanent/zombie paid plan.
+  if (txn.revocationDate) {
+    throw new Error('This Apple transaction has been revoked.');
+  }
+  if (!expiresDate || expiresDate.getTime() <= Date.now()) {
+    throw new Error('This Apple subscription is expired.');
+  }
+
   // Atomic: check for conflicting subscriptions + activate plan in one transaction
   // Prevents races on both Stripe conflict and Apple transaction replay
   const result = await prisma.$transaction(async (tx) => {
@@ -187,7 +197,12 @@ export async function restorePurchases(
   for (const signed of signedTransactions) {
     try {
       const txn = await verifySignedTransaction(signed);
+      // Skip revoked (refunded) and already-expired transactions during
+      // selection — a revoked txn with the latest expiry would otherwise make
+      // verifyAndActivatePlan throw AND mask a valid earlier subscription.
+      if (txn.revocationDate) continue;
       const expiry = txn.expiresDate ? (txn.expiresDate as number) : 0;
+      if (expiry <= Date.now()) continue;
       if (expiry > latestExpiry) {
         latestTxn = txn;
         latestExpiry = expiry;
@@ -198,7 +213,7 @@ export async function restorePurchases(
     }
   }
 
-  if (!latestTxn || latestExpiry < Date.now()) {
+  if (!latestTxn) {
     return null; // No active subscription to restore
   }
 

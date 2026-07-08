@@ -79,34 +79,54 @@ export function invalidateAllNewsCache(): void {
   tickerNewsCache.flushAll();
 }
 
+// In-flight dedup: concurrent cache-miss callers share one upstream request
+// instead of stampeding Finnhub's shared 60 req/min budget on cold caches.
+const inFlightNews = new Map<string, Promise<MarketNewsItem[]>>();
+
 export async function fetchTickerNews(ticker: string, limit = 30): Promise<MarketNewsItem[]> {
   const upper = ticker.toUpperCase();
-  const cached = tickerNewsCache.get<MarketNewsItem[]>(`news-${upper}`);
+  const key = `news-${upper}`;
+  const cached = tickerNewsCache.get<MarketNewsItem[]>(key);
   if (cached) return cached.slice(0, limit);
 
-  // Finnhub company news: last 30 days
-  const to = new Date().toISOString().slice(0, 10);
-  const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const resp = await axios.get<MarketNewsItem[]>('https://finnhub.io/api/v1/company-news', {
-    params: { symbol: upper, from, to, token: config.finnhubApiKey },
-    timeout: 8000,
-  });
+  let pending = inFlightNews.get(key);
+  if (!pending) {
+    pending = (async () => {
+      // Finnhub company news: last 30 days
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const resp = await axios.get<MarketNewsItem[]>('https://finnhub.io/api/v1/company-news', {
+        params: { symbol: upper, from, to, token: config.finnhubApiKey },
+        timeout: 8000,
+      });
 
-  const items = (resp.data || []).slice(0, 50);
-  tickerNewsCache.set(`news-${upper}`, items);
-  return items.slice(0, limit);
+      const items = (resp.data || []).slice(0, 50);
+      tickerNewsCache.set(key, items);
+      return items;
+    })().finally(() => inFlightNews.delete(key));
+    inFlightNews.set(key, pending);
+  }
+  return (await pending).slice(0, limit);
 }
 
 export async function fetchMarketNews(limit = 20): Promise<MarketNewsItem[]> {
-  const cached = newsCache.get<MarketNewsItem[]>('market-news');
+  const key = 'market-news';
+  const cached = newsCache.get<MarketNewsItem[]>(key);
   if (cached) return cached.slice(0, limit);
 
-  const resp = await axios.get<MarketNewsItem[]>('https://finnhub.io/api/v1/news', {
-    params: { category: 'general', token: config.finnhubApiKey },
-    timeout: 8000,
-  });
+  let pending = inFlightNews.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const resp = await axios.get<MarketNewsItem[]>('https://finnhub.io/api/v1/news', {
+        params: { category: 'general', token: config.finnhubApiKey },
+        timeout: 8000,
+      });
 
-  const items = (resp.data || []).filter(isMarketRelevant);
-  newsCache.set('market-news', items);
-  return items.slice(0, limit);
+      const items = (resp.data || []).filter(isMarketRelevant);
+      newsCache.set(key, items);
+      return items;
+    })().finally(() => inFlightNews.delete(key));
+    inFlightNews.set(key, pending);
+  }
+  return (await pending).slice(0, limit);
 }

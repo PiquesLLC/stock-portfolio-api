@@ -60,9 +60,11 @@ export async function fetchPortfolioNews(userId: string, limit = 30, portfolioId
 
   // Fetch news for top 10 tickers + market news concurrently
   const tickersToFetch = holdings.slice(0, 10).map(h => h.ticker);
+  // Market news failure must not poison the batch — ticker news that already
+  // succeeded should still render (one Finnhub 429 here used to 500 the endpoint).
   const [tickerResults, marketNews] = await Promise.all([
     Promise.allSettled(tickersToFetch.map(t => fetchTickerNews(t, 15))),
-    fetchMarketNews(30),
+    fetchMarketNews(30).catch(() => [] as MarketNewsItem[]),
   ]);
 
   // Flatten all news items

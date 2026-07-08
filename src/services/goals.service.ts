@@ -125,6 +125,10 @@ function calculateTimeToGoalMonths(
   // If no contributions, calculate pure growth time
   if (monthlyContribution <= 0) {
     if (monthlyRate <= 0) return null;
+    // Growth alone can never lift a zero/negative balance — and without this
+    // guard the log() below returns Infinity, which used to blow up
+    // monthsToDate (Invalid Date → toISOString throws → goals list 500s).
+    if (currentValue <= 0) return null;
     const months = Math.log(targetValue / currentValue) / Math.log(1 + monthlyRate);
     return Math.ceil(months);
   }
@@ -163,7 +167,9 @@ function calculateTimeToGoalMonths(
  * Convert months to projected date
  */
 function monthsToDate(months: number | null): string | null {
-  if (months === null) return null;
+  // Non-finite months (defensive) would make setMonth produce an Invalid Date,
+  // whose toISOString() THROWS — never let that escape to the endpoint.
+  if (months === null || !Number.isFinite(months)) return null;
   const date = new Date();
   date.setMonth(date.getMonth() + months);
   return date.toISOString().split('T')[0];

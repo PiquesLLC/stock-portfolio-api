@@ -205,12 +205,12 @@ export async function deletePortfolio(userId: string, portfolioId: string) {
     return { status: 'is_default' as const };
   }
 
-  // Cascade delete: remove all holdings first, then the portfolio
-  if (existing._count.holdings > 0) {
-    await prisma.holding.deleteMany({ where: { portfolioId } });
-  }
-
-  await prisma.portfolio.delete({ where: { id: portfolioId } });
+  // Cascade delete atomically: holdings must not be destroyed if the portfolio
+  // delete itself fails (deleteMany on zero holdings is a harmless no-op).
+  await prisma.$transaction([
+    prisma.holding.deleteMany({ where: { portfolioId } }),
+    prisma.portfolio.delete({ where: { id: portfolioId } }),
+  ]);
   return { status: 'deleted' as const };
 }
 

@@ -106,6 +106,16 @@ class AlphaVantageQueue {
     while (this.queue.length > 0) {
       const req = this.queue[0];
 
+      // Re-check the daily budget at execution time — the enqueue-time check is
+      // TOCTOU-racy (usage only increments after execution), so a concurrent
+      // burst near the cap could otherwise overrun the 25/day free tier.
+      const remainingNow = await getDailyCallsRemaining();
+      if (remainingNow <= 0) {
+        req.reject(new Error('AV_DAILY_LIMIT_REACHED: Alpha Vantage daily call limit exhausted'));
+        this.queue.shift();
+        continue;
+      }
+
       // Enforce minimum delay between requests
       const elapsed = Date.now() - this.lastRequestTime;
       if (elapsed < MIN_REQUEST_DELAY_MS) {

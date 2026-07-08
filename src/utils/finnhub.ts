@@ -156,6 +156,8 @@ async function fetchAndCacheQuote(
   throw lastError || new Error(`Failed to fetch quote for ${upperTicker}`);
 }
 
+const inFlightQuotes = new Map<string, Promise<Quote>>();
+
 export async function getQuote(ticker: string): Promise<Quote> {
   const upperTicker = ticker.toUpperCase();
   const cacheKey = `quote:${upperTicker}`;
@@ -191,7 +193,16 @@ export async function getQuote(ticker: string): Promise<Quote> {
     throw new Error(`Rate limited and no cached data for ${upperTicker}`);
   }
 
-  return fetchAndCacheQuote(upperTicker, { allowBackupOnFailure: true });
+  // In-flight dedup: concurrent cold-cache callers for the same ticker share
+  // one upstream fetch instead of multiplying load against the 60 req/min limit
+  // exactly when the provider is already stressed.
+  let pending = inFlightQuotes.get(cacheKey);
+  if (!pending) {
+    pending = fetchAndCacheQuote(upperTicker, { allowBackupOnFailure: true })
+      .finally(() => inFlightQuotes.delete(cacheKey));
+    inFlightQuotes.set(cacheKey, pending);
+  }
+  return pending;
 }
 
 export interface QuotesResult {

@@ -38,7 +38,10 @@ export async function sendOtpEmail(to: string, code: string): Promise<void> {
 
   const r = getResend();
   if (!r) {
-    console.log(`[Email] Dev mode — OTP code for ${to}: ${code}`);
+    // Never log OTP codes in production (see sendEmailVerification below).
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Email] Dev mode — OTP code for ${to}: ${code}`);
+    }
     return;
   }
   await r.emails.send({
@@ -69,7 +72,11 @@ export async function sendEmailVerification(to: string, code: string): Promise<v
 
   const r = getResend();
   if (!r) {
-    console.log(`[Email] Dev mode — verification code for ${to}: ${code}`);
+    // Never log OTP codes in production — they're account-takeover-grade secrets
+    // (RESEND_API_KEY is boot-required in prod, so this path is dev/test only).
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Email] Dev mode — verification code for ${to}: ${code}`);
+    }
     return;
   }
   await r.emails.send({
@@ -100,7 +107,10 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
 
   const r = getResend();
   if (!r) {
-    console.log(`[Email] Dev mode — password reset code for ${to}: ${code}`);
+    // Never log OTP codes in production (see sendEmailVerification above).
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Email] Dev mode — password reset code for ${to}: ${code}`);
+    }
     return;
   }
   await r.emails.send({
@@ -160,7 +170,10 @@ export async function sendEmailChangeVerification(to: string, code: string): Pro
 
   const r = getResend();
   if (!r) {
-    console.log(`[Email] Dev mode — email-change verification code for ${to}: ${code}`);
+    // Never log OTP codes in production (see sendEmailVerification above).
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Email] Dev mode — email-change verification code for ${to}: ${code}`);
+    }
     return;
   }
   await r.emails.send({

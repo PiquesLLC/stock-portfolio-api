@@ -2172,11 +2172,15 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
         res.status(404).json({ error: 'Portfolio not found' });
         return;
       }
-      const deleted = await prisma.holding.deleteMany({ where: { portfolioId } });
-      await prisma.portfolio.update({
-        where: { id: portfolioId },
-        data: { cashBalance: 0, marginDebt: 0 },
-      });
+      // Atomic: the holdings delete and the cash reset must not partially apply —
+      // holdings-gone-but-cash-stale corrupts the displayed portfolio value.
+      const [deleted] = await prisma.$transaction([
+        prisma.holding.deleteMany({ where: { portfolioId } }),
+        prisma.portfolio.update({
+          where: { id: portfolioId },
+          data: { cashBalance: 0, marginDebt: 0 },
+        }),
+      ]);
       try {
         await recordCompositionChange(req.user!.userId, 'portfolio_clear');
         await resetSnapshotsForCompositionChange(req.user!.userId);
@@ -2192,23 +2196,24 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       where: { userId: req.user!.userId }, select: { id: true },
     });
     const snapshotIds = userSnapshots.map(s => s.id);
+    // Cash/margin resets ride in the SAME transaction as the deletes — a partial
+    // apply (holdings gone, stale cash) corrupts the displayed portfolio value.
     const [deleted, tradesDeleted, ledgerDeleted, , snapshotsDeleted] = await prisma.$transaction([
       prisma.holding.deleteMany({ where: { userId: req.user!.userId } }),
       prisma.portfolioTrade.deleteMany({ where: { userId: req.user!.userId } }),
       prisma.ledgerEvent.deleteMany({ where: { userId: req.user!.userId } }),
       prisma.holdingSnapshot.deleteMany({ where: { snapshotId: { in: snapshotIds } } }),
       prisma.portfolioSnapshot.deleteMany({ where: { userId: req.user!.userId } }),
+      prisma.userSettings.upsert({
+        where: { userId: req.user!.userId },
+        update: { cashBalance: 0, marginDebt: 0 },
+        create: { userId: req.user!.userId, cashBalance: 0, marginDebt: 0 },
+      }),
+      prisma.portfolio.updateMany({
+        where: { userId: req.user!.userId },
+        data: { cashBalance: 0, marginDebt: 0 },
+      }),
     ]);
-    await prisma.userSettings.upsert({
-      where: { userId: req.user!.userId },
-      update: { cashBalance: 0, marginDebt: 0 },
-      create: { userId: req.user!.userId, cashBalance: 0, marginDebt: 0 },
-    });
-    // Reset all portfolio cash/margin too
-    await prisma.portfolio.updateMany({
-      where: { userId: req.user!.userId },
-      data: { cashBalance: 0, marginDebt: 0 },
-    });
     try {
       await recordCompositionChange(req.user!.userId, 'portfolio_clear');
       await resetSnapshotsForCompositionChange(req.user!.userId);
