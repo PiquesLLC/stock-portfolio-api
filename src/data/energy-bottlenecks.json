@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T00:00:00Z",
+  "generatedAt": "2026-07-08T00:00:00Z",
   "entries": [
     {
       "id": "lng-cheniere-export-monopoly",
@@ -674,16 +674,16 @@
         "DNN",
         "URA"
       ],
-      "thesisShort": "Centrus Energy is the only US producer of High-Assay Low-Enriched Uranium (HALEU), with a DOE contract extension through June 2026 and broader LEU re-shoring optionality as the Russia uranium ban reorders the fuel cycle.",
-      "thesisLong": "Centrus Energy (LEU) operates the only US-licensed cascade producing High-Assay Low-Enriched Uranium (HALEU) — the 5-20% U-235 fuel required by the next generation of advanced reactors (TerraPower Natrium, X-energy Xe-100, Kairos KP-FHR, Oklo Aurora, BWXT TRISO microreactors). The American Centrifuge Plant in Piketon, Ohio was recently extended by DOE through June 30, 2026 at an annual rate of 900 kg HALEU UF6, with up to eight additional years available under the contract.\n\nBeyond HALEU, Centrus is also the largest US-based supplier of Low-Enriched Uranium (LEU) for existing light-water reactors. The Russia Uranium Ban (signed 2024) phases out US imports of Russian enriched uranium through 2027 — Russia historically supplied roughly 20% of US enriched uranium needs through TENEX. This forced re-shoring/diversification creates a multi-decade Western enrichment capacity shortage that benefits Centrus alongside Urenco and Orano.\n\nWhere this differs from the AI-sector nuclear utility plays (CEG/VST for hyperscaler PPAs, OKLO for SMR design, CCJ for uranium mining): Centrus is the bottleneck in the conversion + enrichment step of the fuel cycle. Without HALEU, none of the advanced reactor designs reach commercial operation. Without re-shored LEU, existing US reactors face supply disruption.\n\nRisks are heavy: dependence on DOE contract renewals, slow advanced reactor commercialization timelines (most won't operate until 2028+), competition from Urenco USA HALEU plans, and equity capital requirements for ACP-2 commercial-scale capacity expansion.",
+      "thesisShort": "Centrus Energy is the only US producer of High-Assay Low-Enriched Uranium (HALEU), and in July 2026 signed a $900M DOE award to transition its Piketon cascade toward commercial-scale HALEU and LEU production as the Russia uranium ban reorders the Western fuel cycle.",
+      "thesisLong": "Centrus Energy (LEU) operates the only US-licensed cascade producing High-Assay Low-Enriched Uranium (HALEU) — the 5-20% U-235 fuel required by the next generation of advanced reactors (TerraPower Natrium, X-energy Xe-100, Kairos KP-FHR, Oklo Aurora, BWXT TRISO microreactors). The American Centrifuge Plant in Piketon, Ohio produced the nation's first HALEU under DOE contract; on July 1, 2026 Centrus signed a new $900M DOE award to transition that cascade to commercial operation and anchor a multi-billion-dollar capacity expansion spanning both HALEU and LEU. A June 2026 Oklo letter of intent commits Centrus to supply enough domestic HALEU to power up to five Aurora powerhouses, with deliveries beginning 2029.\n\nBeyond HALEU, Centrus is also the largest US-based supplier of Low-Enriched Uranium (LEU) for existing light-water reactors. The Russia Uranium Ban (signed 2024) phases out US imports of Russian enriched uranium through 2027 — Russia historically supplied roughly 20% of US enriched uranium needs through TENEX. This forced re-shoring/diversification creates a multi-decade Western enrichment capacity shortage that benefits Centrus alongside Urenco and Orano.\n\nWhere this differs from the AI-sector nuclear utility plays (CEG/VST for hyperscaler PPAs, OKLO for SMR design, CCJ for uranium mining): Centrus is the bottleneck in the conversion + enrichment step of the fuel cycle. Without HALEU, none of the advanced reactor designs reach commercial operation. Without re-shored LEU, existing US reactors face supply disruption.\n\nRisks are heavy: dependence on DOE contract renewals, slow advanced reactor commercialization timelines (most won't operate until 2028+), competition from Urenco USA HALEU plans, and equity capital requirements for ACP-2 commercial-scale capacity expansion.",
       "chokepointMetrics": [
         {
-          "label": "DOE HALEU contract extension",
-          "value": "Through June 30, 2026 (~900 kg/year)"
+          "label": "DOE HALEU award (Jul 2026)",
+          "value": "$900M — commercial-scale transition"
         },
         {
-          "label": "Total contract option period",
-          "value": "Up to 8 additional years if exercised"
+          "label": "Piketon cascade HALEU baseline",
+          "value": "~900 kg/year, scaling to commercial"
         },
         {
           "label": "Russia historical share of US enriched uranium",
@@ -699,20 +699,20 @@
         }
       ],
       "catalysts": [
-        "DOE HALEU contract Phase III/IV award post-June 2026",
+        "Commercial HALEU/LEU cascade scale-up under the $900M DOE award",
+        "Oklo HALEU supply LOI (up to five Aurora powerhouses, deliveries from 2029)",
         "Russia uranium ban full phaseout by 2028",
         "Advanced reactor FOAK construction starts (TerraPower 2030 target)",
-        "ACP-2 commercial expansion FID with private capital",
-        "Long-term supply contracts with X-energy, Kairos, TerraPower"
+        "ACP-2 commercial expansion FID with private capital"
       ],
       "risks": [
-        "DOE contract not extended beyond June 2026",
+        "Execution risk on the commercial cascade transition",
         "Advanced reactor commercialization slipping to 2030+",
         "Urenco USA breaking the HALEU monopoly",
         "Equity dilution to fund commercial cascade buildout"
       ],
       "featured": true,
-      "lastUpdated": "2026-07-07"
+      "lastUpdated": "2026-07-08"
     },
     {
       "id": "solar-fslr-domestic-module-monopoly",
