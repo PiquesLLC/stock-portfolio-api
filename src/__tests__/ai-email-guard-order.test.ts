@@ -61,6 +61,7 @@ vi.mock('../controllers/market.controller', () => {
     getNalaScoreHandler: ok,
     getEarningsTrackHandler: ok,
     getValueRadarHandler: ok,
+    getRiskTemperatureHandler: ok,
     getCandles: ok,
   };
 });

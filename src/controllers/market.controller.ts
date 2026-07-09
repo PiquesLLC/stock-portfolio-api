@@ -256,6 +256,25 @@ export async function getCandles(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Canonical per-stock risk metrics (Risk Temperature) — server-side port of
+// the UI WarningPanel engine so every surface reads the same numbers.
+import { getRiskTemperature } from '../services/risk-temperature.service';
+
+export async function getRiskTemperatureHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const data = await getRiskTemperature(parsed.data.ticker);
+    res.json(data);
+  } catch (error: unknown) {
+    console.error('[Market] getRiskTemperature error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to compute risk temperature' });
+  }
+}
+
 export async function searchSymbols(req: Request, res: Response): Promise<void> {
   try {
     const parsed = searchSymbolsQuerySchema.safeParse(req.query);
