@@ -764,10 +764,8 @@ async function computeIntelligence(
   window: IntelligenceWindow,
   portfolioId?: string
 ): Promise<PortfolioIntelligenceResponse> {
-  const __t0 = Date.now();
   const portfolio = await getPortfolio(userId, { portfolioId });
   const holdings = portfolio.holdings;
-  const __tPortfolio = Date.now();
 
   if (holdings.length === 0) {
     return {
@@ -790,7 +788,6 @@ async function computeIntelligence(
 
   // Compute attribution
   const { contributions, candleData } = await computeContributions(holdings, window);
-  const __tContrib = Date.now();
   const { contributors, detractors, winnersCount, losersCount } = splitContributors(contributions);
   const totalGains = contributions
     .filter(c => c.contributionDollar > 0)
@@ -806,14 +803,12 @@ async function computeIntelligence(
 
   // Compute beta (reuse candle data if available)
   const beta = await computeBeta(holdings, candleData);
-  const __tBeta = Date.now();
 
   // Generate explanation
   const explanation = generateExplanation(contributions, window);
 
   // Compute hero stats for all windows
   const heroStats = await computeHeroStats(holdings, contributions, window, userId, candleData);
-  console.log(`[Intelligence:timing] window=${window} holdings=${holdings.length} portfolio=${__tPortfolio - __t0}ms contrib=${__tContrib - __tPortfolio}ms beta=${__tBeta - __tContrib}ms hero=${Date.now() - __tBeta}ms total=${Date.now() - __t0}ms`);
 
   const hasContributions = contributors.length > 0 || detractors.length > 0;
   const isIncomplete = window !== '1d' && !hasContributions;
