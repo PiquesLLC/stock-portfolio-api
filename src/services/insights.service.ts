@@ -373,8 +373,25 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   const volDrivers: { label: string; value: string; impact: string }[] = [];
   const volFixes: string[] = [];
 
-  let computedVol: number | null = null;
+  // Candle-based fallback when the account's own daily history is too short
+  // (new accounts, cleared/dev databases): volatility/drawdown come from the
+  // RiskForecast engine (current holdings over up to 1Y of daily candles) so
+  // any portfolio with listed tickers gets measured instead of N/A. Account
+  // history stays the primary basis; evidence bullets disclose which was used.
   const riskReturnsCount = riskSeries?.returns.length ?? 0;
+  let fallbackVol: number | null = null;
+  let fallbackDD: number | null = null;
+  let fallbackLookbackDays = 0;
+  if ((!riskSeries || riskReturnsCount < MIN_RISK_SERIES_POINTS) && holdings.length > 0) {
+    try {
+      const rf = await getRiskForecast(userId, portfolioId);
+      fallbackVol = rf.metrics.annualVolatility;
+      fallbackDD = rf.metrics.maxDrawdown;
+      fallbackLookbackDays = rf.basis.lookbackDays;
+    } catch { /* both dims fall through to insufficient */ }
+  }
+
+  let computedVol: number | null = null;
   if (riskSeries && riskReturnsCount >= MIN_RISK_SERIES_POINTS) {
     computedVol = annualizedVolatility(riskSeries.returns);
     volEvidence.push(`End-of-day values used: ${riskSeries.points} (${riskReturnsCount} deposit-adjusted daily returns).`);
@@ -384,6 +401,30 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
       const volPct = (computedVol * 100).toFixed(1);
       volEvidence.push(`Portfolio annualized volatility: ${volPct}%.`);
 
+      if (computedVol > 0.4) {
+        volatilityScore = 5;
+        reasons.push(`Very high volatility (${(computedVol * 100).toFixed(0)}% annualized)`);
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 5/25 (>40% threshold).' });
+        volFixes.push('Add lower-volatility assets (bonds, dividend stocks, or broad-market ETFs).');
+        quickFixes.push('Add lower-volatility assets like bonds or dividend stocks');
+      } else if (computedVol > 0.25) {
+        volatilityScore = 15;
+        reasons.push(`Elevated volatility (${(computedVol * 100).toFixed(0)}% annualized)`);
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 15/25 (>25% threshold).' });
+        volFixes.push('Consider adding lower-vol assets to bring portfolio vol below 25%.');
+      } else if (computedVol > 0.15) {
+        volatilityScore = 20;
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Score set to 20/25 (>15% threshold).' });
+      } else {
+        volDrivers.push({ label: 'Annualized vol', value: `${volPct}%`, impact: 'Full score - below 15% threshold.' });
+      }
+    }
+  } else if (fallbackVol !== null) {
+    computedVol = fallbackVol;
+    volEvidence.push(`Candle-based estimate: current holdings over ${fallbackLookbackDays} trading days (account history has only ${riskReturnsCount} daily returns).`);
+    if (computedVol !== null) {
+      const volPct = (computedVol * 100).toFixed(1);
+      volEvidence.push(`Portfolio annualized volatility: ${volPct}%.`);
       if (computedVol > 0.4) {
         volatilityScore = 5;
         reasons.push(`Very high volatility (${(computedVol * 100).toFixed(0)}% annualized)`);
@@ -450,6 +491,27 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
       } else {
         ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Full score - below 5% threshold.' });
       }
+    }
+  } else if (fallbackDD !== null) {
+    const maxDD = fallbackDD;
+    const ddPct = (maxDD * 100).toFixed(1);
+    ddEvidence.push(`Candle-based estimate: current holdings over ${fallbackLookbackDays} trading days (account history has only ${riskReturnsCount} daily returns).`);
+    ddEvidence.push(`Max drawdown: -${ddPct}%.`);
+    if (maxDD > 0.2) {
+      drawdownScore = 5;
+      ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 5/25 (>20% threshold).' });
+      if (!reasons.some(r => r.includes('drawdown'))) {
+        reasons.push(`Historical max drawdown of ${(maxDD * 100).toFixed(0)}%`);
+      }
+      ddFixes.push('Consider adding defensive positions to limit future drawdowns.');
+    } else if (maxDD > 0.1) {
+      drawdownScore = 15;
+      ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 15/25 (>10% threshold).' });
+    } else if (maxDD > 0.05) {
+      drawdownScore = 20;
+      ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Score set to 20/25 (>5% threshold).' });
+    } else {
+      ddDrivers.push({ label: 'Max drawdown', value: `-${ddPct}%`, impact: 'Full score - below 5% threshold.' });
     }
   } else {
     drawdownInsufficient = true;
