@@ -1,5 +1,6 @@
 ﻿import { getPortfolio } from './portfolio.service';
-import { getAllSnapshots } from './snapshot.service';
+import { getDailyPortfolioValues } from './snapshot.service';
+import prisma from '../utils/prisma';
 import { insightsCache } from '../utils/finnhub';
 import {
   getMultipleCandlesGradual,
@@ -18,7 +19,7 @@ import {
   HoldingWithQuote,
 } from '../types';
 import { getSector } from '../utils/sectors';
-import { TRADING_DAYS, sharpeRatio } from '../utils/finance-math';
+import { TRADING_DAYS, sharpeRatio, annualizedVolatility } from '../utils/finance-math';
 
 
 
@@ -27,6 +28,87 @@ const CORRELATION_TRADING_DAYS = 180;
 // Minimum days needed for analysis
 const MIN_CORRELATION_DAYS = 60;
 // Minimum days for Monte Carlo
+
+// Health-score risk series: trailing window and minimum daily returns required
+// before volatility/drawdown are scored (below it they stay 25/25 but are
+// flagged in HealthScore.insufficientDims so the UI can say "not enough data").
+const RISK_SERIES_WINDOW_DAYS = 365;
+const MIN_RISK_SERIES_POINTS = 30;
+
+export interface DailyRiskSeries {
+  returns: number[]; // deposit-adjusted daily returns, oldest-first
+  equityIndex: number[]; // chain-linked from 100 — deposit-neutral equity curve
+  dates: string[]; // YYYY-MM-DD per equityIndex point
+  points: number; // end-of-day values used
+}
+
+/**
+ * Deposit-neutral daily return series for portfolio risk metrics.
+ * One end-of-day snapshot per calendar day over the trailing year (newest
+ * window — NOT the account's oldest rows), netEquity preferred over
+ * totalValue, and each day's return is flow-adjusted TWR-style
+ * (r = V_t / (V_{t-1} + CF_t) - 1) so deposits/withdrawals don't register
+ * as market gains/losses. Exported for tests.
+ */
+export async function getDailyRiskSeries(userId: string): Promise<DailyRiskSeries | null> {
+  const daily = await getDailyPortfolioValues(userId, RISK_SERIES_WINDOW_DAYS);
+  if (daily.length < 2) return null;
+
+  // Prefer netEquity when the account has real values (same rule as
+  // benchmark.service): DROP days lacking a positive netEquity rather than
+  // substituting totalValue — totalValue = netEquity + marginDebt, so a mixed
+  // series would fabricate a ~marginDebt "drop" at the boundary (a fake
+  // drawdown/vol spike, the exact artifact class this series eliminates).
+  const hasNetEquity = daily.some(d => d.netEquity !== null && d.netEquity > 0);
+  const points = daily
+    .map(d => ({
+      date: d.date,
+      value: hasNetEquity
+        ? (d.netEquity !== null && d.netEquity > 0 ? d.netEquity : null)
+        : d.totalValue,
+    }))
+    .filter((p): p is { date: string; value: number } => p.value !== null && p.value > 0);
+  if (points.length < 2) return null;
+
+  const windowStart = new Date(Date.now() - RISK_SERIES_WINDOW_DAYS * 86400000);
+  const txns = await prisma.transaction.findMany({
+    // Explicit type filter: a future non-cashflow transaction type must not
+    // silently count as a withdrawal.
+    where: { userId, date: { gte: windowStart }, type: { in: ['deposit', 'withdrawal'] } },
+    orderBy: { date: 'asc' },
+  });
+  const flowByDay = new Map<string, number>();
+  for (const t of txns) {
+    const key = t.date.toISOString().slice(0, 10);
+    flowByDay.set(key, (flowByDay.get(key) ?? 0) + (t.type === 'deposit' ? t.amount : -t.amount));
+  }
+
+  const returns: number[] = [];
+  const equityIndex: number[] = [100];
+  const dates: string[] = [points[0].date];
+  for (let i = 1; i < points.length; i++) {
+    const base = points[i - 1].value + (flowByDay.get(points[i].date) ?? 0);
+    if (base <= 0) continue; // full-withdrawal day — skip, chain resumes on next valid pair
+    const r = points[i].value / base - 1;
+    returns.push(r);
+    equityIndex.push(equityIndex[equityIndex.length - 1] * (1 + r));
+    dates.push(points[i].date);
+  }
+  if (returns.length === 0) return null;
+  return { returns, equityIndex, dates, points: points.length };
+}
+
+/**
+ * Drop every cached insight for a user (health score, leak detector, risk
+ * forecast, attribution) so the next request recomputes from current
+ * holdings. Called from portfolio mutation handlers — a trade/deposit must
+ * be reflected immediately, not when the TTLs (5min–24h) happen to expire.
+ */
+export function invalidateUserInsights(userId: string): void {
+  for (const key of insightsCache.keys()) {
+    if (key.includes(userId)) insightsCache.del(key);
+  }
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -184,7 +266,11 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   if (cached) return cached;
 
   const portfolio = await getPortfolio(userId, { portfolioId });
-  const snapshots = await getAllSnapshots(userId);
+  // Deposit-neutral, one-point-per-day series over the trailing year. The old
+  // getAllSnapshots path fed the OLDEST 2000 intraday (60s) snapshots into a
+  // sqrt(252) daily annualization — ancient window, minute returns annualized
+  // as daily, and deposits counted as gains. This series fixes all three.
+  const riskSeries = await getDailyRiskSeries(userId);
   const holdings = portfolio.holdings;
 
   const reasons: string[] = [];
@@ -195,6 +281,8 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   let drawdownScore = 25;
   let diversificationScore = 25;
   let marginPenalty = 0;
+  let volatilityInsufficient = false;
+  let drawdownInsufficient = false;
 
   // ============================================================
   // CONCENTRATION DETAIL
@@ -278,7 +366,7 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   // ============================================================
   const volCalc: string[] = [
     'Score starts at 25/25.',
-    'Computed from annualized standard deviation of daily portfolio snapshot returns.',
+    'Annualized standard deviation of deposit-adjusted daily returns (one end-of-day value per day, trailing 12 months).',
     '>40% annualized -> 5/25, >25% -> 15/25, >15% -> 20/25, <=15% -> 25/25.',
   ];
   const volEvidence: string[] = [];
@@ -286,22 +374,11 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   const volFixes: string[] = [];
 
   let computedVol: number | null = null;
-  if (snapshots.length >= 30) {
-    const values = snapshots.map(s => s.totalValue);
-    const returns: number[] = [];
-    for (let i = 1; i < values.length; i++) {
-      if (values[i - 1] > 0) {
-        returns.push((values[i] - values[i - 1]) / values[i - 1]);
-      }
-    }
-
-    computedVol = calculateAnnualizedVolatility(returns);
-    volEvidence.push(`Snapshots used: ${snapshots.length} (${returns.length} daily returns).`);
-    if (snapshots.length > 0) {
-      const oldest = snapshots[0].timestamp;
-      const newest = snapshots[snapshots.length - 1].timestamp;
-      volEvidence.push(`Date range: ${oldest.toISOString().slice(0, 10)} to ${newest.toISOString().slice(0, 10)}.`);
-    }
+  const riskReturnsCount = riskSeries?.returns.length ?? 0;
+  if (riskSeries && riskReturnsCount >= MIN_RISK_SERIES_POINTS) {
+    computedVol = annualizedVolatility(riskSeries.returns);
+    volEvidence.push(`End-of-day values used: ${riskSeries.points} (${riskReturnsCount} deposit-adjusted daily returns).`);
+    volEvidence.push(`Date range: ${riskSeries.dates[0]} to ${riskSeries.dates[riskSeries.dates.length - 1]}.`);
 
     if (computedVol !== null) {
       const volPct = (computedVol * 100).toFixed(1);
@@ -326,8 +403,9 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
       }
     }
   } else {
-    volEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for volatility analysis).`);
-    volDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data - default score 25/25.' });
+    volatilityInsufficient = true;
+    volEvidence.push(`Only ${riskReturnsCount} daily returns available (need ${MIN_RISK_SERIES_POINTS}+ for volatility analysis).`);
+    volDrivers.push({ label: 'Data', value: `${riskReturnsCount} daily returns`, impact: 'Insufficient data - default score 25/25.' });
   }
 
   // ============================================================
@@ -335,28 +413,26 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   // ============================================================
   const ddCalc: string[] = [
     'Score starts at 25/25.',
-    'Max drawdown = largest peak-to-trough decline in portfolio snapshot history.',
+    'Max drawdown = largest peak-to-trough decline of the deposit-adjusted daily equity curve (trailing 12 months).',
     '>20% -> 5/25, >10% -> 15/25, >5% -> 20/25, <=5% -> 25/25.',
   ];
   const ddEvidence: string[] = [];
   const ddDrivers: { label: string; value: string; impact: string }[] = [];
   const ddFixes: string[] = [];
 
-  if (snapshots.length >= 30) {
-    const values = snapshots.map(s => s.totalValue);
-    const { maxDD, peakIdx, troughIdx } = calculateMaxDrawdownWithDates(values);
+  if (riskSeries && riskReturnsCount >= MIN_RISK_SERIES_POINTS) {
+    // Deposit-neutral: computed on the chain-linked equity index, so a deposit
+    // can't mask a real drawdown and a withdrawal can't fabricate one.
+    const { maxDD, peakIdx, troughIdx } = calculateMaxDrawdownWithDates(riskSeries.equityIndex);
 
-    ddEvidence.push(`Snapshots analysed: ${snapshots.length}.`);
-    if (snapshots.length > 0) {
-      ddEvidence.push(`Period: ${snapshots[0].timestamp.toISOString().slice(0, 10)} to ${snapshots[snapshots.length - 1].timestamp.toISOString().slice(0, 10)}.`);
-    }
+    ddEvidence.push(`End-of-day values analysed: ${riskSeries.points} (deposit-adjusted equity curve).`);
+    ddEvidence.push(`Period: ${riskSeries.dates[0]} to ${riskSeries.dates[riskSeries.dates.length - 1]}.`);
 
     if (maxDD !== null) {
       const ddPct = (maxDD * 100).toFixed(1);
-      const peakDate = snapshots[peakIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
-      const troughDate = snapshots[troughIdx]?.timestamp?.toISOString().slice(0, 10) || '?';
+      const peakDate = riskSeries.dates[peakIdx] || '?';
+      const troughDate = riskSeries.dates[troughIdx] || '?';
       ddEvidence.push(`Max drawdown: -${ddPct}% (peak ${peakDate} -> trough ${troughDate}).`);
-      ddEvidence.push(`Peak value: $${Math.round(values[peakIdx]).toLocaleString()}, trough value: $${Math.round(values[troughIdx]).toLocaleString()}.`);
 
       if (maxDD > 0.2) {
         drawdownScore = 5;
@@ -376,8 +452,9 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
       }
     }
   } else {
-    ddEvidence.push(`Only ${snapshots.length} snapshots available (need 30+ for drawdown analysis).`);
-    ddDrivers.push({ label: 'Data', value: `${snapshots.length} snapshots`, impact: 'Insufficient data - default score 25/25.' });
+    drawdownInsufficient = true;
+    ddEvidence.push(`Only ${riskReturnsCount} daily returns available (need ${MIN_RISK_SERIES_POINTS}+ for drawdown analysis).`);
+    ddDrivers.push({ label: 'Data', value: `${riskReturnsCount} daily returns`, impact: 'Insufficient data - default score 25/25.' });
   }
 
   // ============================================================
@@ -385,7 +462,7 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
   // ============================================================
   const divCalc: string[] = [
     '15+ holdings -> 25/25, 10-14 -> 22, 7-9 -> 18, 5-6 -> 15, 3-4 -> 10, <3 -> 5.',
-    'Also penalised if sector concentration is extreme (HHI of weights).',
+    'Sector concentration and HHI are shown as advisory context (no score penalty).',
   ];
   const divEvidence: string[] = [];
   const divDrivers: { label: string; value: string; impact: string }[] = [];
@@ -528,6 +605,14 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
     },
   };
 
+  // NOTE: insufficient dims still contribute their 25/25 placeholder to the
+  // OVERALL 0-100 score (product choice: don't punish new accounts), so the
+  // overall can read healthier than what's measurable — consumers that care
+  // must check insufficientDims (the radar/composite exclude them).
+  const insufficientDims: string[] = [];
+  if (volatilityInsufficient) insufficientDims.push('volatility');
+  if (drawdownInsufficient) insufficientDims.push('drawdown');
+
   const result: HealthScore = {
     overall,
     breakdown: {
@@ -540,6 +625,7 @@ export async function getHealthScore(userId: string, portfolioId?: string): Prom
     reasons: reasons.slice(0, 3),
     quickFixes: quickFixes.slice(0, 2),
     partial: holdings.length === 0,
+    ...(insufficientDims.length > 0 ? { insufficientDims } : {}),
     details,
   };
 

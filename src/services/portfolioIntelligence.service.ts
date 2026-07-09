@@ -870,6 +870,26 @@ function refreshInBackground(userId: string, window: IntelligenceWindow, cacheKe
   refreshInFlight.set(cacheKey, promise);
 }
 
+/**
+ * Drop a user's cached intelligence (all windows/portfolios) so the next
+ * request recomputes from current holdings. Called from portfolio mutation
+ * handlers. In-flight computes are also forgotten; a compute that started
+ * pre-mutation can still finish and briefly re-cache pre-trade data (~0.6s
+ * window) — accepted, the SWR refresh corrects it on the next request.
+ */
+export function invalidateUserIntelligence(userId: string): void {
+  const prefix = `intelligence:${userId}:`;
+  for (const key of intelligenceCache.keys()) {
+    if (key.startsWith(prefix)) intelligenceCache.delete(key);
+  }
+  for (const key of computeInFlight.keys()) {
+    if (key.startsWith(prefix)) computeInFlight.delete(key);
+  }
+  for (const key of refreshInFlight.keys()) {
+    if (key.startsWith(prefix)) refreshInFlight.delete(key);
+  }
+}
+
 export async function getPortfolioIntelligence(
   userId: string,
   window: IntelligenceWindow = '1d',

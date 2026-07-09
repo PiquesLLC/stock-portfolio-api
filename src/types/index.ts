@@ -490,6 +490,10 @@ export interface HealthScore {
   reasons: string[];       // top 3 reasons
   quickFixes: string[];    // top 2 actionable tips
   partial: boolean;
+  // Dims whose score is the 25/25 placeholder because the account lacks the
+  // ~30 daily returns needed to measure them ('volatility' | 'drawdown').
+  // UIs should render these as "not enough data", not as a real measurement.
+  insufficientDims?: string[];
   details?: HealthScoreDetails;
 }
 

@@ -461,6 +461,38 @@ export async function getRecentHoldingSnapshots(userId: string, days: number = 5
   });
 }
 
+export interface DailyPortfolioValue {
+  date: string; // YYYY-MM-DD (UTC)
+  totalValue: number;
+  netEquity: number | null;
+}
+
+/**
+ * One end-of-day portfolio value per calendar day over the trailing `days`
+ * window, oldest-first. Same bare-column MAX(timestamp) idiom as
+ * getRecentHoldingSnapshots: SQLite fills totalValue/netEquity from the row
+ * holding each day's MAX(timestamp), served by @@index([userId, timestamp]),
+ * so intraday 60s snapshots collapse to one final value per day in the DB.
+ */
+export async function getDailyPortfolioValues(userId: string, days: number): Promise<DailyPortfolioValue[]> {
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  const rows = await prisma.$queryRaw<{ day: string; ts: number | bigint; totalValue: number; netEquity: number | null }[]>`
+    SELECT date(ps.timestamp / 1000, 'unixepoch') AS day,
+           MAX(ps.timestamp) AS ts,
+           ps.totalValue AS totalValue,
+           ps.netEquity AS netEquity
+    FROM PortfolioSnapshot ps
+    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoffMs}
+    GROUP BY date(ps.timestamp / 1000, 'unixepoch')
+    ORDER BY ts ASC
+  `;
+  return rows.map(r => ({
+    date: r.day,
+    totalValue: Number(r.totalValue),
+    netEquity: r.netEquity == null ? null : Number(r.netEquity),
+  }));
+}
+
 /**
  * Reconstruct historical portfolio value from current holdings + candle data.
  * Uses each holding's shares Ã— historical close price, summed across all tickers.

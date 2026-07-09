@@ -36,6 +36,22 @@ import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership'
 import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 import { getAccountHistory, HistoryCategory } from '../services/account-history.service';
+import { invalidateUserInsights } from '../services/insights.service';
+import { invalidateUserIntelligence } from '../services/portfolioIntelligence.service';
+
+/**
+ * Risk/insight caches (health score, leak detector, risk forecast,
+ * intelligence) must reflect a portfolio mutation immediately — their TTLs
+ * run 5min–24h, which left the risk radar showing pre-trade numbers.
+ */
+function invalidateRiskCaches(userId: string): void {
+  try {
+    invalidateUserInsights(userId);
+    invalidateUserIntelligence(userId);
+  } catch (err) {
+    console.warn('[Portfolio] risk-cache invalidation failed:', err instanceof Error ? err.message : String(err));
+  }
+}
 
 const VALID_MODES: ProjectionMode[] = ['sp500', 'realized'];
 const VALID_LOOKBACKS: LookbackPeriod[] = ['1d', '1w', '1m', '6m', '1y', 'max'];
@@ -176,6 +192,8 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       console.warn('[Snapshot] Reset failed after holding update:');
     }
 
+    invalidateRiskCaches(req.user!.userId);
+
     // Fire activity event using authenticated user ID
     // Skip activity events for data corrections (CSV import fixups, manual edits
     // that aren't real trades). Without this, editing holdings after a CSV import
@@ -263,6 +281,8 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       console.warn('[Snapshot] Reset failed after holding removal:');
     }
 
+    invalidateRiskCaches(req.user!.userId);
+
     // Fire activity event using authenticated user ID
     const authUserId = req.user?.userId;
     if (authUserId && !skipActivity) {
@@ -302,6 +322,7 @@ export async function setCashBalance(req: AuthRequest, res: Response): Promise<v
 
     // Single atomic write to UserSettings (or Portfolio if scoped)
     const settings = await updateCashBalance(req.user!.userId, cashBalance, portfolioId);
+    invalidateRiskCaches(req.user!.userId);
     res.json({ cashBalance: settings.cashBalance });
   } catch (error: unknown) {
     const status = (error as any)?.status;
@@ -1938,6 +1959,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         }
       });
 
+      invalidateRiskCaches(req.user!.userId);
       res.json({
         added: 0,
         updated: 0,
@@ -2156,6 +2178,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       console.warn('[Snapshot] Reset failed after import confirm:');
     }
 
+    invalidateRiskCaches(req.user!.userId);
     res.json({ added, updated, removed, ...(skippedDuplicates > 0 ? { skippedDuplicates } : {}) });
   } catch (error) {
     if (error instanceof PlanLimitError) {
@@ -2201,6 +2224,7 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
       } catch (_err) {
         console.warn('[Snapshot] Reset failed after clear portfolio:');
       }
+      invalidateRiskCaches(req.user!.userId);
       res.json({ cleared: true, holdingsRemoved: deleted.count, tradesRemoved: 0, ledgerEventsRemoved: 0 });
       return;
     }
@@ -2236,6 +2260,7 @@ export async function clearPortfolioHandler(req: AuthRequest, res: Response): Pr
     }
     console.log(`[Clear] userId=${req.user!.userId.slice(0, 8)} holdings=${deleted.count} trades=${tradesDeleted.count} ledger=${ledgerDeleted.count} snapshots=${snapshotsDeleted.count}`);
 
+    invalidateRiskCaches(req.user!.userId);
     res.json({ cleared: true, holdingsRemoved: deleted.count, tradesRemoved: tradesDeleted.count, ledgerEventsRemoved: ledgerDeleted.count });
   } catch (error: unknown) {
     console.error('[Portfolio] clearPortfolio error:', error instanceof Error ? error.message : String(error));
@@ -2338,6 +2363,7 @@ export async function seedSamplePortfolio(req: AuthRequest, res: Response): Prom
       console.warn('[Snapshot] Reset failed after sample seed:');
     }
 
+    invalidateRiskCaches(req.user!.userId);
     res.json({ seeded: true, holdings: SAMPLE_HOLDINGS.length });
   } catch (error: unknown) {
     const status = (error as any)?.status;
