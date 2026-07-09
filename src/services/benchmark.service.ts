@@ -10,8 +10,6 @@ import {
   calculateCorrelation,
   annualizedVolatility,
   maxDrawdown,
-  bestWorstDays,
-  dailyReturnsFromValues,
   calculateXIRR,
   SnapshotPoint,
   CashflowEvent,
@@ -200,6 +198,10 @@ export async function getPerformanceComparison(
     : allSnapshots;
   const effectiveSnapshots = reliableSnapshots.length >= 2 ? reliableSnapshots : allSnapshots;
 
+  // Tracks whether snapshotPoints is raw account history (deposits/withdrawals
+  // are IN the values and must be flow-adjusted out of the risk metrics) or a
+  // candle reconstruction (holds cash constant — no flows in the series).
+  let seriesFromSnapshots = true;
   let snapshotPoints: SnapshotPoint[] = effectiveSnapshots.map(s => ({
     date: s.timestamp,
     // Use netEquity if it's a real value (> 0), otherwise fall back to totalValue.
@@ -263,6 +265,7 @@ export async function getPerformanceComparison(
         date: new Date(p.time),
         value: p.value,
       }));
+      seriesFromSnapshots = false;
     }
   }
 
@@ -340,65 +343,83 @@ export async function getPerformanceComparison(
     ? Math.round((simpleReturnPct - benchmarkReturnPct) * 100) / 100
     : null;
 
-  // Risk metrics â€” date-align portfolio and benchmark returns for accuracy.
-  // Portfolio daily returns from candle reconstruction are date-indexed;
-  // benchmark returns must match the same trading dates.
-  const values = snapshotPoints.map(s => s.value);
-  const portfolioReturns = dailyReturnsFromValues(values);
-
-  // Build date-aligned benchmark returns from the same dates as portfolio
-  const benchmarkData = getBenchmarkCandles(benchmarkTicker);
-  let benchmarkReturns: number[] | null = null;
-
-  if (benchmarkData && snapshotPoints.length >= 2) {
-    // Create a date â†’ close lookup for the benchmark
-    const bmCloseMap = new Map<string, number>();
-    for (let i = 0; i < benchmarkData.dates.length; i++) {
-      bmCloseMap.set(benchmarkData.dates[i], benchmarkData.closes[i]);
-    }
-
-    // For each portfolio snapshot date, find the matching benchmark close
-    const alignedBmReturns: number[] = [];
-    for (let i = 1; i < snapshotPoints.length; i++) {
-      const dateKey = snapshotPoints[i].date.toISOString().slice(0, 10);
-      const prevDateKey = snapshotPoints[i - 1].date.toISOString().slice(0, 10);
-      const bmClose = bmCloseMap.get(dateKey);
-      const bmPrevClose = bmCloseMap.get(prevDateKey);
-      if (bmClose != null && bmPrevClose != null && bmPrevClose > 0) {
-        alignedBmReturns.push((bmClose - bmPrevClose) / bmPrevClose);
-      }
-    }
-
-    // Only use aligned returns if we got enough matching dates
-    if (alignedBmReturns.length >= 10) {
-      benchmarkReturns = alignedBmReturns;
-      // Trim portfolio returns to match aligned length (in case some dates didn't match)
-      while (portfolioReturns.length > alignedBmReturns.length) {
-        portfolioReturns.shift();
-      }
+  // Risk metrics — flow-adjusted daily returns, date-paired with the benchmark.
+  // When the series is raw account history, each day's return is TWR-style
+  // flow-adjusted (r = V_t / (V_{t-1} + CF_t) - 1) so deposits/withdrawals
+  // don't read as market moves (same rule as the health score's risk series).
+  // The candle-reconstruction series holds cash constant — nothing to remove.
+  const flowByDay = new Map<string, number>();
+  if (seriesFromSnapshots) {
+    for (const cf of cashflows) {
+      const key = cf.date.toISOString().slice(0, 10);
+      flowByDay.set(key, (flowByDay.get(key) ?? 0) + cf.amount);
     }
   }
 
-  // Fallback to tail-slicing if date alignment failed
-  if (!benchmarkReturns) {
+  const benchmarkData = getBenchmarkCandles(benchmarkTicker);
+  const bmCloseMap = new Map<string, number>();
+  if (benchmarkData) {
+    for (let i = 0; i < benchmarkData.dates.length; i++) {
+      bmCloseMap.set(benchmarkData.dates[i], benchmarkData.closes[i]);
+    }
+  }
+
+  // One pass builds: flow-adjusted portfolio returns (volatility), the
+  // deposit-neutral equity index (drawdown), best/worst day, and PAIRED
+  // portfolio/benchmark returns for beta/correlation — a pair is pushed only
+  // when BOTH sides have data for that date, so a mid-series benchmark gap
+  // can't shift the pairing (the old code trimmed the portfolio array from
+  // the FRONT, misaligning every pair before a mid-window gap).
+  const portfolioReturns: number[] = [];
+  const pairedPortfolioReturns: number[] = [];
+  const pairedBenchmarkReturns: number[] = [];
+  const equityIndex: number[] = [100];
+  let bestDay: { date: string; returnPct: number } | null = null;
+  let worstDay: { date: string; returnPct: number } | null = null;
+  for (let i = 1; i < snapshotPoints.length; i++) {
+    const dateKey = snapshotPoints[i].date.toISOString().slice(0, 10);
+    const base = snapshotPoints[i - 1].value + (flowByDay.get(dateKey) ?? 0);
+    if (base <= 0) continue;
+    const r = snapshotPoints[i].value / base - 1;
+    portfolioReturns.push(r);
+    equityIndex.push(equityIndex[equityIndex.length - 1] * (1 + r));
+
+    const retPct = Math.round(r * 10000) / 100;
+    if (!bestDay || retPct > bestDay.returnPct) bestDay = { date: dateKey, returnPct: retPct };
+    if (!worstDay || retPct < worstDay.returnPct) worstDay = { date: dateKey, returnPct: retPct };
+
+    const bmClose = bmCloseMap.get(dateKey);
+    const bmPrevClose = bmCloseMap.get(snapshotPoints[i - 1].date.toISOString().slice(0, 10));
+    if (bmClose != null && bmPrevClose != null && bmPrevClose > 0) {
+      pairedPortfolioReturns.push(r);
+      pairedBenchmarkReturns.push((bmClose - bmPrevClose) / bmPrevClose);
+    }
+  }
+
+  // Use the date-paired series when enough dates matched; otherwise fall back
+  // to tail-sliced benchmark returns (calculateBeta/Correlation tail-align).
+  let betaPortfolioReturns = portfolioReturns;
+  let benchmarkReturns: number[] | null;
+  if (pairedBenchmarkReturns.length >= 10) {
+    betaPortfolioReturns = pairedPortfolioReturns;
+    benchmarkReturns = pairedBenchmarkReturns;
+  } else {
     benchmarkReturns = getBenchmarkReturns(benchmarkTicker, tradingDays);
   }
 
   const beta = benchmarkReturns
-    ? calculateBeta(portfolioReturns, benchmarkReturns)
+    ? calculateBeta(betaPortfolioReturns, benchmarkReturns)
     : null;
 
   const correlation = benchmarkReturns
-    ? calculateCorrelation(portfolioReturns, benchmarkReturns)
+    ? calculateCorrelation(betaPortfolioReturns, benchmarkReturns)
     : null;
 
   const vol = annualizedVolatility(portfolioReturns);
   const volatilityPct = vol !== null ? Math.round(vol * 10000) / 100 : null;
 
-  const mdd = maxDrawdown(values);
-  const maxDrawdownPct = values.length >= 2 ? Math.round(mdd * 10000) / 100 : null;
-
-  const { bestDay: bd, worstDay: wd } = bestWorstDays(snapshotPoints);
+  const mdd = maxDrawdown(equityIndex);
+  const maxDrawdownPct = equityIndex.length >= 2 ? Math.round(mdd * 10000) / 100 : null;
 
   return {
     window,
@@ -412,8 +433,8 @@ export async function getPerformanceComparison(
     correlation: correlation !== null ? Math.round(correlation * 100) / 100 : null,
     volatilityPct,
     maxDrawdownPct,
-    bestDay: bd ? { date: bd.date.toISOString().slice(0, 10), returnPct: bd.returnPct } : null,
-    worstDay: wd ? { date: wd.date.toISOString().slice(0, 10), returnPct: wd.returnPct } : null,
+    bestDay,
+    worstDay,
     snapshotCount: snapshots.length,
     dataStartDate: allSnapshots.length > 0 ? allSnapshots[0].timestamp.toISOString() : null,
     dataEndDate: allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1].timestamp.toISOString() : null,
