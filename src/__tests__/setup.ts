@@ -52,7 +52,7 @@ vi.mock('../utils/prisma', () => {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     portfolio: { findFirst: vi.fn().mockResolvedValue({ id: 'default-portfolio-id', name: 'Default', isDefault: true, userId: 'test-user-1' }), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-    holding: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), upsert: vi.fn(), delete: vi.fn() },
+    holding: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), upsert: vi.fn(), delete: vi.fn(), count: vi.fn().mockResolvedValue(0) },
     portfolioTrade: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     ledgerEvent: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
     holdingSnapshot: { deleteMany: vi.fn() },
@@ -86,7 +86,7 @@ vi.mock('../utils/prisma', () => {
     dividendReinvestment: { deleteMany: vi.fn() },
     dividendCredit: { deleteMany: vi.fn() },
     lot: { deleteMany: vi.fn() },
-    transaction: { deleteMany: vi.fn() },
+    transaction: { create: vi.fn().mockResolvedValue({}), deleteMany: vi.fn() },
     // Insights & notifications
     milestoneEvent: { deleteMany: vi.fn() },
     anomalyEvent: { deleteMany: vi.fn() },

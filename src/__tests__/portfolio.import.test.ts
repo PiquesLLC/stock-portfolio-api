@@ -386,4 +386,115 @@ GOOG,3,0,ok`;
       );
     });
   });
+
+  describe('POST /portfolio/import/confirm — flow compensation & validation', () => {
+    it('records a compensating deposit for injected cost basis', async () => {
+      (prismaMock as any).transaction.create.mockClear();
+      // Call order: orphan-dedup scan (getOrCreateDefaultPortfolio) →
+      // existingHoldings (pre-tx) → beforeRows (in-tx) → afterRows (in-tx)
+      prismaMock.holding.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ticker: 'AMZN', shares: 100, averageCost: 200 }]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: [{ ticker: 'AMZN', shares: 100, averageCost: 200 }] });
+
+      expect(res.status).toBe(200);
+      expect((prismaMock as any).transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ type: 'deposit', amount: 20000 }) }),
+      );
+    });
+
+    it('records a withdrawal when the import shrinks cost basis', async () => {
+      (prismaMock as any).transaction.create.mockClear();
+      // orphan scan → existingHoldings → beforeRows → afterRows
+      prismaMock.holding.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ticker: 'AAPL', shares: 100, averageCost: 500 }])
+        .mockResolvedValueOnce([{ ticker: 'AAPL', shares: 100, averageCost: 500 }])
+        .mockResolvedValueOnce([{ ticker: 'AAPL', shares: 10, averageCost: 500 }]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: [{ ticker: 'AAPL', shares: 10, averageCost: 500 }] });
+
+      expect(res.status).toBe(200);
+      expect((prismaMock as any).transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ type: 'withdrawal', amount: 45000 }) }),
+      );
+    });
+
+    it('records no Transaction when cost basis is unchanged', async () => {
+      (prismaMock as any).transaction.create.mockClear();
+      // Same holdings before and after — merge of an identical position
+      prismaMock.holding.findMany.mockResolvedValue([{ ticker: 'AAPL', shares: 10, averageCost: 100 }]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue({ id: 'hold-1', ticker: 'AAPL', shares: 10, averageCost: 100 });
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'merge', holdings: [{ ticker: 'AAPL', shares: 10, averageCost: 100 }] });
+
+      expect(res.status).toBe(200);
+      expect((prismaMock as any).transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-finite shares', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: [{ ticker: 'AAPL', shares: 'Infinity', averageCost: 1 }] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('aggregates duplicate tickers into one weighted-average position', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+      (prismaMock.holding as any).create.mockClear();
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({
+          mode: 'replace',
+          holdings: [
+            { ticker: 'AAPL', shares: 10, averageCost: 100 },
+            { ticker: 'AAPL', shares: 30, averageCost: 200 },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.added).toBe(1);
+      expect((prismaMock.holding as any).create).toHaveBeenCalledTimes(1);
+      expect((prismaMock.holding as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ticker: 'AAPL', shares: 40, averageCost: 175 }) }),
+      );
+    });
+
+    it('enforces the free-plan 10-holding cap on import', async () => {
+      prismaMock.holding.findMany.mockResolvedValue([]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+      prismaMock.user.findUnique.mockResolvedValueOnce({ plan: 'free' } as any);
+      (prismaMock.holding as any).count.mockResolvedValueOnce(11);
+
+      const tickers = ['TA', 'TB', 'TC', 'TD', 'TE', 'TF', 'TG', 'TH', 'TI', 'TJ', 'TK'];
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: tickers.map(t => ({ ticker: t, shares: 1, averageCost: 1 })) });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('limit_reached');
+    });
+  });
 });

@@ -1109,6 +1109,15 @@ export async function importPortfolioCsvHandler(req: AuthRequest, res: Response)
       relax_column_count: true,
     }) as Record<string, unknown>[];
 
+    // Cap parsed rows — a 10MB CSV of tiny rows is ~1.4M in-memory objects.
+    // The mapped handler caps at 2000 and confirm caps trades at 5000; 10k
+    // leaves headroom for noise rows while preventing memory abuse.
+    const MAX_CSV_ROWS = 10000;
+    if (data.length > MAX_CSV_ROWS) {
+      res.status(400).json({ error: `CSV has too many rows (${data.length}). Maximum is ${MAX_CSV_ROWS}.` });
+      return;
+    }
+
     // Try Robinhood transaction history format first
     const robinhoodResult = parseRobinhoodTransactionCsv(data);
     if (robinhoodResult) {
@@ -1702,6 +1711,11 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     const MAX_HOLDINGS = 500;
     const MAX_TRADES = 5000;
     const MAX_LEDGER_EVENTS = 5000;
+    // Numeric sanity bounds — Number("Infinity") > 0 is true, so a finite
+    // check alone isn't enough; huge values poison averageCost and every
+    // downstream valuation.
+    const MAX_SHARES = 1e9;
+    const MAX_PRICE = 1e7;
     if (Array.isArray(holdings) && holdings.length > MAX_HOLDINGS) {
       res.status(400).json({ error: `holdings array exceeds maximum of ${MAX_HOLDINGS}` });
       return;
@@ -1734,7 +1748,31 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       ticker: String(h.ticker || '').trim().toUpperCase(),
       shares: Number(h.shares),
       averageCost: Number(h.averageCost),
-    })).filter(h => isValidTicker(h.ticker) && h.shares > 0 && Number.isFinite(h.averageCost) && h.averageCost >= 0);
+    })).filter(h =>
+      isValidTicker(h.ticker) &&
+      Number.isFinite(h.shares) && h.shares > 0 && h.shares <= MAX_SHARES &&
+      Number.isFinite(h.averageCost) && h.averageCost >= 0 && h.averageCost <= MAX_PRICE
+    );
+
+    // Aggregate duplicate tickers (e.g. two lots of AAPL in one file) into one
+    // weighted-average position. Without this the normalized upsert path was
+    // last-wins while the trades path summed — same file, different results.
+    if (normalized.length > 1) {
+      const byTicker = new Map<string, { shares: number; totalCost: number }>();
+      for (const h of normalized) {
+        const agg = byTicker.get(h.ticker) || { shares: 0, totalCost: 0 };
+        agg.shares += h.shares;
+        agg.totalCost += h.shares * h.averageCost;
+        byTicker.set(h.ticker, agg);
+      }
+      if (byTicker.size !== normalized.length) {
+        normalized.splice(0, normalized.length, ...[...byTicker.entries()].map(([ticker, agg]) => ({
+          ticker,
+          shares: agg.shares,
+          averageCost: agg.shares > 0 ? agg.totalCost / agg.shares : 0,
+        })));
+      }
+    }
 
     if (normalized.length === 0 && !hasTradesToProcess) {
       res.status(400).json({ error: 'No valid holdings or trades found' });
@@ -1776,7 +1814,11 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         sourceBroker: normalizeSourceBroker(t.sourceBroker),
         rawAction: typeof t.rawAction === 'string' ? t.rawAction : null,
       }))
-      .filter(t => !isNaN(t.date.getTime()) && isValidTicker(t.ticker));
+      .filter(t =>
+        !isNaN(t.date.getTime()) && isValidTicker(t.ticker) &&
+        Number.isFinite(t.shares) && t.shares >= 0 && t.shares <= MAX_SHARES &&
+        Number.isFinite(t.price) && t.price >= 0 && t.price <= MAX_PRICE
+      );
 
     const ledgerRecords = (Array.isArray(ledgerEvents) ? ledgerEvents : [])
       .filter((e: any) => e.effectiveDate && e.eventType)
@@ -1993,6 +2035,16 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
     }
 
     await prisma.$transaction(async (tx) => {
+      // Aggregate cost basis BEFORE any mutation — the delta vs. after-import
+      // is recorded as a compensating deposit/withdrawal Transaction below
+      // (the same invariant addHolding enforces), so the TWR/risk engine
+      // reads an import as a cash flow, not a market gain.
+      const beforeRows = await tx.holding.findMany({
+        where: { portfolioId: importPortfolioId },
+        select: { shares: true, averageCost: true },
+      });
+      const costBasisBefore = beforeRows.reduce((sum, h) => sum + h.shares * h.averageCost, 0);
+
       if (mode === 'replace') {
         // Delete all holdings in this portfolio — will be re-created below
         await tx.holding.deleteMany({ where: { portfolioId: importPortfolioId } });
@@ -2017,8 +2069,9 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           }
           const shares = Number(t.shares) || 0;
           const price = Number(t.price) || 0;
-          if (shares <= 0) {
-            console.log(`[Import] skipped ${ticker}: shares=${t.shares} → ${shares}`);
+          if (shares <= 0 || !Number.isFinite(shares) || shares > MAX_SHARES ||
+              !Number.isFinite(price) || price < 0 || price > MAX_PRICE) {
+            console.log(`[Import] skipped ${ticker}: shares=${t.shares} price=${t.price}`);
             continue;
           }
           const existing = positionMap.get(ticker) || { shares: 0, totalCost: 0 };
@@ -2162,13 +2215,47 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
           create: { userId: req.user!.userId, marginDebt: rounded },
         });
       }
+
+      // Compensating cash-flow row (mirrors addHolding lines above): the net
+      // cost basis this import injected/removed is a deposit/withdrawal, not
+      // performance. Without it, importing a $500k export over a $50k account
+      // reads as a +900% return and corrupts vol/drawdown/beta/TWR.
+      const afterRows = await tx.holding.findMany({
+        where: { portfolioId: importPortfolioId },
+        select: { shares: true, averageCost: true },
+      });
+      const costBasisAfter = afterRows.reduce((sum, h) => sum + h.shares * h.averageCost, 0);
+      const costBasisDiff = costBasisAfter - costBasisBefore;
+      if (Math.abs(costBasisDiff) >= 0.01) {
+        await addTransaction({
+          type: costBasisDiff > 0 ? 'deposit' : 'withdrawal',
+          amount: Math.abs(costBasisDiff),
+          date: new Date().toISOString(),
+          userId: req.user!.userId,
+        }, tx);
+      }
+
+      // Free-plan holding cap — imports must respect the same 10-holding
+      // limit addHolding enforces via upsertHolding. Thrown inside the tx so
+      // an over-limit import rolls back atomically (surfaced as 403 by the
+      // PlanLimitError handler in the catch below).
+      const planUser = await tx.user.findUnique({
+        where: { id: req.user!.userId },
+        select: { plan: true },
+      });
+      if ((planUser?.plan ?? 'free') === 'free') {
+        const holdingCount = await tx.holding.count({ where: { userId: req.user!.userId } });
+        if (holdingCount > 10) {
+          throw new PlanLimitError(10, 'free');
+        }
+      }
     });
 
     if (tradeRecords.length > 0) {
-      console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
+      console.log(`[Import] Saved ${tradeRecords.length} portfolio trades for user ${req.user!.userId.slice(0, 8)}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
     }
     if (ledgerRecords.length > 0) {
-      console.log(`[Import] Saved ${ledgerRecords.length} ledger events for user ${req.user!.userId}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
+      console.log(`[Import] Saved ${ledgerRecords.length} ledger events for user ${req.user!.userId.slice(0, 8)}${sourceFileId ? ` (batch ${sourceFileId})` : ''}`);
     }
 
     try {
