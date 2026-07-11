@@ -18,6 +18,10 @@ process.env.JWT_SECRET = 'test-jwt-secret-key-for-testing-only';
 process.env.NODE_ENV = 'development';
 process.env.DATABASE_URL = 'file:./test.db';
 process.env.AI_PREMIUM_ENABLED = 'true';
+// Hermetic tests: never let an inherited shell key route the screenshot
+// import through the live Claude API (vision path activates on key presence)
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.ANTHROPIC_VISION_MODEL;
 
 // Mock Prisma singleton globally
 vi.mock('../utils/prisma', () => {

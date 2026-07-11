@@ -10,6 +10,7 @@ import { getUserPortfolio } from '../services/user-portfolio.service';
 import { createActivityEvent, getUserActivityByTicker } from '../services/activity.service';
 import { createSnapshotIfNeeded, createUserSnapshotIfNeeded, getAllSnapshots, getLedgerReplayGapSummary, resetSnapshotsForCompositionChange, recordCompositionChange, getPortfolioChartData } from '../services/snapshot.service';
 import { extractBestOcrForHoldings, parseHoldingsFromText } from '../services/screenshot-ocr.service';
+import { extractHoldingsWithVision, visionExtractionAvailable } from '../services/screenshot-vision.service';
 import { addTransaction } from '../services/transaction.service';
 import { setBaseline } from '../services/settings.service';
 
@@ -2373,17 +2374,58 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       return;
     }
 
-    const { text, confidence, variant, parsed: parsedResult } = await extractBestOcrForHoldings(file.buffer, {
-      mimeType: file.mimetype,
-      fileName: file.originalname,
-    });
-    const result = parsedResult ?? parseHoldingsFromText(text);
+    // Media type derived from the validated magic bytes (client MIME untrusted)
+    const mediaType = isPng ? 'image/png' as const : isJpeg ? 'image/jpeg' as const : 'image/webp' as const;
 
-    // Apply overall OCR confidence to row confidence (simple heuristic)
-    const parsed = result.parsed.map(row => ({
-      ...row,
-      confidence: confidence >= 85 ? 'high' : confidence >= 70 ? 'medium' : 'low',
-    }));
+    let parsed: { rowNumber: number; ticker: string; shares: number; averageCost: number; confidence: 'high' | 'medium' | 'low' }[] = [];
+    let rowWarnings: { rowNumber: number; message: string; line?: string }[] = [];
+    let stats = { totalRows: 0, validRows: 0, skippedRows: 0 };
+    let debug: Record<string, unknown> | null = null;
+    let engine = 'ocr';
+
+    // Vision-first: Claude reads any broker layout/theme and infers tickers
+    // from company names. Falls back to the tesseract path when no API key
+    // is configured or the call fails.
+    if (visionExtractionAvailable()) {
+      try {
+        const vision = await extractHoldingsWithVision(file.buffer, mediaType);
+        parsed = vision.parsed;
+        rowWarnings = vision.warnings;
+        stats = {
+          totalRows: vision.parsed.length + vision.skippedCount,
+          validRows: vision.parsed.length,
+          skippedRows: vision.skippedCount,
+        };
+        engine = `vision:${vision.model}`;
+      } catch (err) {
+        console.warn('[Import] Vision extraction failed; falling back to OCR:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    if (engine === 'ocr') {
+      const { text, confidence, variant, parsed: parsedResult } = await extractBestOcrForHoldings(file.buffer, {
+        mimeType: file.mimetype,
+        fileName: file.originalname,
+      });
+      const result = parsedResult ?? parseHoldingsFromText(text);
+
+      // Apply overall OCR confidence to row confidence (simple heuristic)
+      parsed = result.parsed.map(row => ({
+        ...row,
+        confidence: confidence >= 85 ? 'high' as const : confidence >= 70 ? 'medium' as const : 'low' as const,
+      }));
+      rowWarnings = result.warnings;
+      stats = {
+        totalRows: parsed.length + result.warnings.length,
+        validRows: parsed.length,
+        skippedRows: result.warnings.length,
+      };
+      debug = {
+        rawText: text,
+        rawLines: text.split(/\r?\n/).map(line => line.trim()).filter(Boolean),
+        ocrVariant: variant,
+      };
+    }
 
     const guidanceWarning = {
       rowNumber: 0,
@@ -2394,27 +2436,17 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
       reviewRequired: true,
       editableFields: ['ticker', 'shares', 'averageCost'],
       parsed,
-      warnings: [guidanceWarning, ...result.warnings],
-      totalRows: parsed.length + result.warnings.length,
-      validRows: parsed.length,
-      skippedRows: result.warnings.length,
+      warnings: [guidanceWarning, ...rowWarnings],
+      ...stats,
     };
 
     if (process.env.NODE_ENV !== 'production' && String(req.query.debug) === '1') {
-      responsePayload.debug = {
-        rawText: text,
-        rawLines: text.split(/\r?\n/).map(line => line.trim()).filter(Boolean),
-        ocrVariant: variant,
-      };
+      responsePayload.debug = { engine, ...(debug ?? {}) };
     }
 
     res.json(responsePayload);
   } catch (error) {
-    console.error('Screenshot OCR error:', error instanceof Error ? error.message : String(error));
-    if (String((error as Error)?.message || '').includes('HEIC conversion failed')) {
-      res.status(400).json({ error: 'Unsupported image format. Please upload PNG or JPG.' });
-      return;
-    }
+    console.error('Screenshot import error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to process screenshot' });
   }
 }
