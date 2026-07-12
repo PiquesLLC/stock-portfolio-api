@@ -4,8 +4,12 @@ import { Prisma } from '../generated/prisma/client';
 
 // Database corruption must never fail silently — in the 2026-07 incident,
 // background jobs dead-lettered against a corrupt table for weeks with only
-// console noise. Throttled so a corrupt hot path doesn't flood Sentry.
+// console noise. Console line repeats hourly for log visibility; Sentry is
+// told ONCE per process lifetime — it's a detector, not a metronome (hourly
+// events meant hourly notification emails; each boot re-alerts once while
+// the corruption persists, which is heartbeat enough).
 let lastCorruptionAlertAt = 0;
+let sentryCorruptionAlerted = false;
 const CORRUPTION_ALERT_INTERVAL_MS = 60 * 60 * 1000;
 
 export function alertOnCorruption(source: string, errorMsg: string): void {
@@ -13,17 +17,21 @@ export function alertOnCorruption(source: string, errorMsg: string): void {
     return;
   }
   const now = Date.now();
-  if (now - lastCorruptionAlertAt < CORRUPTION_ALERT_INTERVAL_MS) return;
-  lastCorruptionAlertAt = now;
-  console.error(`[DB] CRITICAL: SQLITE_CORRUPT detected via ${source} — the database file needs a rebuild-and-swap. Reads may work while writes fail; do NOT run VACUUM/REINDEX on a full disk.`);
-  try {
-    Sentry.captureMessage(`[DB] SQLITE_CORRUPT detected via ${source}`, {
-      level: 'error',
-      tags: { component: 'db-corruption' },
-      extra: { errorMsg },
-    });
-  } catch {
-    // Sentry not initialised (tests / dev without DSN)
+  if (now - lastCorruptionAlertAt >= CORRUPTION_ALERT_INTERVAL_MS) {
+    lastCorruptionAlertAt = now;
+    console.error(`[DB] CRITICAL: SQLITE_CORRUPT detected via ${source} — the database file needs a rebuild-and-swap. Reads may work while writes fail; do NOT run VACUUM/REINDEX on a full disk.`);
+  }
+  if (!sentryCorruptionAlerted) {
+    sentryCorruptionAlerted = true;
+    try {
+      Sentry.captureMessage(`[DB] SQLITE_CORRUPT detected via ${source}`, {
+        level: 'error',
+        tags: { component: 'db-corruption' },
+        extra: { errorMsg },
+      });
+    } catch {
+      // Sentry not initialised (tests / dev without DSN)
+    }
   }
 }
 
