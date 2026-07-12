@@ -1,5 +1,31 @@
+import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import { Prisma } from '../generated/prisma/client';
+
+// Database corruption must never fail silently — in the 2026-07 incident,
+// background jobs dead-lettered against a corrupt table for weeks with only
+// console noise. Throttled so a corrupt hot path doesn't flood Sentry.
+let lastCorruptionAlertAt = 0;
+const CORRUPTION_ALERT_INTERVAL_MS = 60 * 60 * 1000;
+
+export function alertOnCorruption(source: string, errorMsg: string): void {
+  if (!errorMsg.includes('SQLITE_CORRUPT') && !errorMsg.includes('database disk image is malformed')) {
+    return;
+  }
+  const now = Date.now();
+  if (now - lastCorruptionAlertAt < CORRUPTION_ALERT_INTERVAL_MS) return;
+  lastCorruptionAlertAt = now;
+  console.error(`[DB] CRITICAL: SQLITE_CORRUPT detected via ${source} — the database file needs a rebuild-and-swap. Reads may work while writes fail; do NOT run VACUUM/REINDEX on a full disk.`);
+  try {
+    Sentry.captureMessage(`[DB] SQLITE_CORRUPT detected via ${source}`, {
+      level: 'error',
+      tags: { component: 'db-corruption' },
+      extra: { errorMsg },
+    });
+  } catch {
+    // Sentry not initialised (tests / dev without DSN)
+  }
+}
 
 export type JobFailureCategory = 'TRANSIENT' | 'PERMANENT' | 'RATE_LIMITED' | 'DATA_QUALITY' | 'UNKNOWN';
 export type JobAlertSeverity = 'none' | 'warning' | 'critical';
@@ -447,6 +473,7 @@ export async function runJob(options: JobOptions): Promise<void> {
         if (!canRetry) {
           // Retries exhausted OR classified as non-retryable
           console.error(`[JobRunner] ${name} DEAD LETTERED after ${attempt} attempts (${classified.category}): ${errorMsg}`);
+          alertOnCorruption(`job:${name}`, errorMsg);
           if (typeof prismaClient.deadLetterEntry?.create === 'function') {
             await prismaClient.deadLetterEntry.create({
               data: {

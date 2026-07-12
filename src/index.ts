@@ -40,6 +40,7 @@ import { refreshPoliticianRoster } from './services/politician.service';
 import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
+import { scheduleSnapshotRetention } from './services/snapshot-retention.service';
 import { cleanupStaleData } from './services/cleanup.service';
 import { runDiskGuard } from './services/disk-guard.service';
 import * as Sentry from '@sentry/node';
@@ -1057,6 +1058,11 @@ const server = app.listen(config.port, async () => {
   console.log('[Backup] Scheduled daily');
   setTimeout(() => backupDatabase(), 30000);
   setInterval(() => backupDatabase(), 24 * 60 * 60 * 1000);
+
+  // Snapshot retention — nightly prune so 60s snapshots can't refill the
+  // volume (2026-07 incident). No-op until SNAPSHOT_RETENTION_ENABLED=true
+  // (flip after the DB rebuild-and-swap; deletes fail on the corrupt file).
+  scheduleSnapshotRetention();
 
   // v1↔v2 ledger reconciliation — daily drift check during shadow-write
   // epoch. No-op if V2_DATABASE_URL is not set. Delete this call once
