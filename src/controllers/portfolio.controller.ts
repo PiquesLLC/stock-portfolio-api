@@ -1848,6 +1848,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         sourceFileId,
         sourceBroker: normalizeSourceBroker(t.sourceBroker),
         rawAction: typeof t.rawAction === 'string' ? t.rawAction : null,
+        portfolioId: importPortfolioId,
       }))
       .filter(t =>
         !isNaN(t.date.getTime()) && isValidTicker(t.ticker) &&

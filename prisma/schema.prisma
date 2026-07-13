@@ -511,10 +511,12 @@ model DividendCredit {
   createdAt       DateTime               @default(now())
   user            User?                  @relation(fields: [userId], references: [id])
   reinvestment    DividendReinvestment?
+  portfolioId     String?
 
   @@unique([userId, dividendEventId])
   @@index([userId])
   @@index([ticker])
+  @@index([portfolioId, ticker])
 }
 
 model DividendReinvestment {
@@ -530,9 +532,11 @@ model DividendReinvestment {
   status           String         @default("completed")
   createdAt        DateTime       @default(now())
   user             User?          @relation(fields: [userId], references: [id])
+  portfolioId      String?
 
   @@index([userId])
   @@index([ticker])
+  @@index([portfolioId, ticker])
 }
 
 model Lot {
@@ -548,9 +552,11 @@ model Lot {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   user          User?    @relation(fields: [userId], references: [id])
+  portfolioId   String?
 
   @@index([userId, ticker])
   @@index([ticker])
+  @@index([portfolioId, ticker])
 }
 
 model Goal {
@@ -1033,8 +1039,10 @@ model PortfolioTrade {
   sourceBroker String?                // Canonical: 'robinhood' | 'schwab' | 'mapped' | 'plaid' | 'unknown'
   rawAction    String?                // Original action text from CSV (e.g. "Buy", "Reinvest Shares")
   createdAt    DateTime @default(now())
+  portfolioId  String?
 
   @@index([userId, date])
+  @@index([portfolioId, ticker])
 }
 
 // ─── Ledger Events (cash/non-trade account events) ──────────────────

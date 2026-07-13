@@ -3,10 +3,10 @@ import { __mockPrisma as prismaMock } from '../utils/prisma';
 import { deleteHolding } from '../services/portfolio.service';
 
 /**
- * Regression tests for M-17 (Step 0 mitigation): deleteHolding must NOT cascade the
- * ticker's Lot/PortfolioTrade/DividendCredit/DividendReinvestment deletes when the
- * user holds the same ticker in more than one portfolio — those tables have no
- * portfolioId, so a (ticker,userId) delete wiped the OTHER portfolio's history too.
+ * Regression tests for M-17: deleteHolding must not wipe a ticker's
+ * Lot/PortfolioTrade/DividendCredit/DividendReinvestment history across the user's
+ * OTHER portfolios. Single-portfolio ticker → unscoped delete (also cleans legacy
+ * NULL-portfolioId rows); multi-portfolio ticker → delete scoped to THIS portfolio.
  */
 describe('deleteHolding — cross-portfolio cascade guard (M-17 Step 0)', () => {
   let tx: any;
@@ -28,23 +28,25 @@ describe('deleteHolding — cross-portfolio cascade guard (M-17 Step 0)', () => 
     p.$transaction = vi.fn(async (cb: any) => cb(tx));
   });
 
-  it('cascades all history deletes when the ticker is in ONE portfolio', async () => {
+  it('deletes all history UNSCOPED when the ticker is in ONE portfolio', async () => {
     tx.holding.count.mockResolvedValue(1);
     await deleteHolding('AAPL', 'u1', 'pfA');
-    expect(tx.lot.deleteMany).toHaveBeenCalledTimes(1);
-    expect(tx.portfolioTrade.deleteMany).toHaveBeenCalledTimes(1);
-    expect(tx.dividendCredit.deleteMany).toHaveBeenCalledTimes(1);
-    expect(tx.dividendReinvestment.deleteMany).toHaveBeenCalledTimes(1);
+    const unscoped = { ticker: 'AAPL', userId: 'u1' };
+    expect(tx.lot.deleteMany).toHaveBeenCalledWith({ where: unscoped });
+    expect(tx.portfolioTrade.deleteMany).toHaveBeenCalledWith({ where: unscoped });
+    expect(tx.dividendCredit.deleteMany).toHaveBeenCalledWith({ where: unscoped });
+    expect(tx.dividendReinvestment.deleteMany).toHaveBeenCalledWith({ where: unscoped });
     expect(tx.holding.delete).toHaveBeenCalledTimes(1);
   });
 
-  it('SKIPS the cascade when the ticker is in MULTIPLE portfolios (no cross-portfolio wipe)', async () => {
+  it('SCOPES the cascade to THIS portfolio when the ticker is in MULTIPLE portfolios', async () => {
     tx.holding.count.mockResolvedValue(2);
     await deleteHolding('AAPL', 'u1', 'pfA');
-    expect(tx.lot.deleteMany).not.toHaveBeenCalled();
-    expect(tx.portfolioTrade.deleteMany).not.toHaveBeenCalled();
-    expect(tx.dividendCredit.deleteMany).not.toHaveBeenCalled();
-    expect(tx.dividendReinvestment.deleteMany).not.toHaveBeenCalled();
+    const scoped = { ticker: 'AAPL', userId: 'u1', portfolioId: 'pfA' };
+    expect(tx.lot.deleteMany).toHaveBeenCalledWith({ where: scoped });
+    expect(tx.portfolioTrade.deleteMany).toHaveBeenCalledWith({ where: scoped });
+    expect(tx.dividendCredit.deleteMany).toHaveBeenCalledWith({ where: scoped });
+    expect(tx.dividendReinvestment.deleteMany).toHaveBeenCalledWith({ where: scoped });
     // The holding itself is still removed from its own portfolio.
     expect(tx.holding.delete).toHaveBeenCalledTimes(1);
   });

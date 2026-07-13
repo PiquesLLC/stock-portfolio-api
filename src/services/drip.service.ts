@@ -167,6 +167,7 @@ export async function reinvestDividend(
         totalAmount: amountToReinvest,
         fillDate: now,
         status: 'completed',
+        portfolioId: current.portfolioId ?? null,
       },
     });
 
@@ -196,6 +197,7 @@ export async function reinvestDividend(
         acquiredAt: now,
         source: 'drip',
         notes: `DRIP from dividend credit ${creditId}`,
+        portfolioId: current.portfolioId ?? null,
       },
     });
 

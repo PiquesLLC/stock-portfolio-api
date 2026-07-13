@@ -149,19 +149,21 @@ export async function deleteHolding(ticker: string, userId: string, portfolioId?
   if (existing) {
     const cascade = async (tx: Prisma.TransactionClient) => {
       // Cascade cleanup: lots, trades, and dividend records tied to this ticker.
-      // ONLY when this is the user's ONLY holding of the ticker. Lot/PortfolioTrade/
-      // DividendCredit/DividendReinvestment carry no portfolioId, so a (ticker,userId)
-      // delete would wipe the SAME ticker's history in the user's OTHER portfolios
-      // (M-17 data loss). When the ticker is in >1 portfolio we skip the cascade and
-      // leave harmless orphan rows rather than lose data. Full per-portfolio fix:
-      // docs/M17-migration-draft.md.
+      // These tables now carry portfolioId (M-17). If this is the user's ONLY holding
+      // of the ticker, delete all its rows by (ticker,userId) — that also cleans up
+      // legacy rows whose portfolioId is still NULL, which can only belong to this
+      // portfolio. If the ticker is in MORE THAN ONE portfolio, scope the delete to
+      // THIS portfolio so the other portfolios' history is preserved (legacy
+      // NULL-portfolioId rows are left intact until the backfill resolves them —
+      // see docs/M17-migration-draft.md).
       const holdingCount = await tx.holding.count({ where: { userId, ticker: normalizedTicker } });
-      if (holdingCount <= 1) {
-        await tx.lot.deleteMany({ where: { ticker: normalizedTicker, userId } });
-        await tx.portfolioTrade.deleteMany({ where: { ticker: normalizedTicker, userId } });
-        await tx.dividendCredit.deleteMany({ where: { ticker: normalizedTicker, userId } });
-        await tx.dividendReinvestment.deleteMany({ where: { ticker: normalizedTicker, userId } });
-      }
+      const scope = holdingCount <= 1
+        ? { ticker: normalizedTicker, userId }
+        : { ticker: normalizedTicker, userId, portfolioId: existing.portfolioId };
+      await tx.lot.deleteMany({ where: scope });
+      await tx.portfolioTrade.deleteMany({ where: scope });
+      await tx.dividendCredit.deleteMany({ where: scope });
+      await tx.dividendReinvestment.deleteMany({ where: scope });
       await tx.holding.delete({ where: { id: existing.id } });
     };
     // Interactive transactions do not nest — reuse the caller's when given.

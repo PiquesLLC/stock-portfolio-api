@@ -1,6 +1,12 @@
 # M-17 Migration Draft — portfolio-scope the holding-delete cascade
 
-**Status:** DRAFT for review. Nothing here has been applied to any database.
+**Status:** CODE IMPLEMENTED on branch `fix/financial-audit-2026-07-13` — schema (Step 1),
+write-site `portfolioId` threading (Step 4), and the scoped `deleteHolding` (Step 5), with
+tests. Verified: `prisma generate` clean, `tsc` 0 errors, full suite green. **REMAINING = the
+DATABASE steps 2 (add columns) and 3 (backfill), to be run by an operator against a backup**
+(the code is safe before they run: unscoped delete for single-portfolio tickers, and the
+multi-portfolio scoped delete simply matches nothing until portfolioId is populated). No
+database has been modified.
 **Author:** audit 2026-07-12. **Severity:** data loss (High).
 
 ## Problem
