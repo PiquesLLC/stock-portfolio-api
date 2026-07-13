@@ -37,6 +37,13 @@ vi.mock('../services/snapshot.service', async () => {
   };
 });
 
+// Mock market service — import fetches live prices for the compensating cash-flow (F-CRIT-1)
+const { fetchPricesMock } = vi.hoisted(() => ({ fetchPricesMock: vi.fn() }));
+vi.mock('../services/market.service', async (importOriginal) => ({
+  ...(await importOriginal() as object),
+  fetchPrices: fetchPricesMock,
+}));
+
 // Mock Sentry
 vi.mock('@sentry/node', () => ({
   init: vi.fn(),
@@ -66,6 +73,7 @@ describe('Cross-broker normalization', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchPricesMock.mockResolvedValue({ quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: [], provider: 'polygon' });
 
     (prismaMock as any).user.findUnique.mockResolvedValue({
       id: testUser.userId,
