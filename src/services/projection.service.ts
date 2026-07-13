@@ -16,7 +16,7 @@ import { getSnapshotsAfter, getAllSnapshots, reconstructPortfolioHistory } from 
 import { getTotalDividendsBetween } from './dividend.service';
 
 import { config } from '../config';
-import { sharpeRatio } from '../utils/finance-math';
+import { sharpeRatio, TRADING_DAYS } from '../utils/finance-math';
 
 // Horizon periods in years
 const HORIZONS: { key: keyof ProjectionHorizons; years: number }[] = [
@@ -135,7 +135,17 @@ export function calculateRealizedMetrics(
     };
   }
 
-  const values = snapshots.map((s) => s.netEquity ?? s.totalValue);
+  // Dedupe to one value per calendar day (last snapshot of each day) so volatility and
+  // drawdown are computed on DAILY returns. The snapshots are intraday; annualizing
+  // intraday returns by data frequency made this screen's vol/Sharpe inconsistent with
+  // every other screen. Matches the benchmark service's daily dedup + canonical √252. F-M-16.
+  const dailyValueMap = new Map<string, number>();
+  for (const s of snapshots) {
+    dailyValueMap.set(new Date(s.timestamp).toISOString().slice(0, 10), s.netEquity ?? s.totalValue);
+  }
+  const values = Array.from(dailyValueMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, v]) => v);
   const startValue = values[0];
   const endValue = values[values.length - 1];
 
@@ -182,8 +192,8 @@ export function calculateRealizedMetrics(
     }
   }
 
-  // Volatility: stddev of returns * sqrt(periods per year)
-  // Assume snapshots are roughly daily (or at interval seconds)
+  // Volatility: stddev of DAILY returns annualized by √252 (canonical) — consistent with
+  // the benchmark service and finance-math.annualizedVolatility. F-M-16.
   let volatility: number | null = null;
   if (periodReturns.length >= 2) {
     const meanReturn = periodReturns.reduce((a, b) => a + b, 0) / periodReturns.length;
@@ -191,9 +201,7 @@ export function calculateRealizedMetrics(
     const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (periodReturns.length - 1);
     const stddev = Math.sqrt(variance);
 
-    // Annualize: assume periods per year based on actual data frequency
-    const periodsPerYear = periodReturns.length / yearsDiff;
-    volatility = stddev * Math.sqrt(periodsPerYear);
+    volatility = stddev * Math.sqrt(TRADING_DAYS);
 
     // Cap volatility at reasonable max
     if (volatility > 5) {

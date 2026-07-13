@@ -149,12 +149,13 @@ function buildUserMessage(question: string, persona: StrategyPersona | null): st
       `Investment Research Question: "${question}"\n\n` +
       `Strategy: ${persona.name}\n` +
       `Philosophy: ${persona.philosophy}\n` +
-      `Screening Criteria: ${metricsDesc}\n` +
+      `Strategy traits (guidance, not a strict quantitative filter): ${metricsDesc}\n` +
       `Risk Level: ${persona.riskLevel}\n\n` +
-      `Find ${persona.stockCount} stocks that best match this strategy using current financial data.\n` +
+      `Suggest ${persona.stockCount} well-known stocks whose profile is broadly consistent with this strategy.\n` +
       (persona.sectorPreferences ? `Focus on sectors: ${persona.sectorPreferences.join(', ')}\n` : '') +
       (persona.excludeETFs ? 'Exclude ETFs, only individual stocks.\n' : '') +
-      `Rank by how well they match ALL the screening criteria. For each stock, cite the specific metric values.`
+      `Rank by how well each fits the strategy's spirit and explain the qualitative rationale. ` +
+      `Do NOT invent precise figures — Nala fills in the current price and fundamentals from market data.`
     );
   }
 
@@ -303,31 +304,42 @@ async function enrichWithLocalData(stocks: NalaStockResult[], userId: string): P
     } catch {}
   }
 
+  // Real prices (F-A-20): the model picks tickers and writes rationale, not authoritative
+  // numbers. Fetch live quotes and override the displayed price below (best-effort; falls
+  // back to whatever the model returned only when no real quote is available).
+  const priceMap = new Map<string, number>();
+  try {
+    const { fetchPrices } = await import('./market.service');
+    const { quotes } = await fetchPrices(tickers, { preferPolygon: true });
+    for (const [tk, q] of quotes) {
+      const px = (q as any)?.currentPrice;
+      if (typeof px === 'number' && px > 0) priceMap.set(String(tk).toUpperCase(), px);
+    }
+  } catch { /* price fetch best-effort */ }
+
   return stocks.map((stock): NalaStockResult => {
     const ov = cacheMap.get(stock.ticker);
     const isHeld = heldTickers.has(stock.ticker);
 
-    if (!ov && !isHeld) return stock;
+    // Prefer REAL market data over the model's self-reported numbers (F-A-20): live price,
+    // and the fundamentals we have cached locally. The model's figure is a last resort.
+    const realPrice = priceMap.get(stock.ticker);
+    const currentPrice = (typeof realPrice === 'number' && realPrice > 0) ? realPrice : stock.currentPrice;
+    const metrics = ov ? {
+      ...stock.metrics,
+      peRatio: ov.peRatio ?? stock.metrics.peRatio,
+      roe: ov.returnOnEquity ?? stock.metrics.roe,
+      dividendYield: ov.dividendYield != null ? ov.dividendYield * 100 : stock.metrics.dividendYield,
+      profitMargin: ov.profitMargin != null ? ov.profitMargin * 100 : stock.metrics.profitMargin,
+      beta: ov.beta ?? stock.metrics.beta,
+    } : stock.metrics;
 
-    const deviations: string[] = [];
-
-    if (ov && stock.metrics.peRatio != null && ov.peRatio != null && ov.peRatio > 0) {
-      const pctDiff = Math.abs(stock.metrics.peRatio - ov.peRatio) / ov.peRatio;
-      if (pctDiff > 0.15) {
-        deviations.push(`P/E: Perplexity ${stock.metrics.peRatio.toFixed(1)} vs local ${ov.peRatio.toFixed(1)}`);
-      }
-    }
-
-    if (ov && stock.metrics.dividendYield != null && ov.dividendYield != null && ov.dividendYield > 0) {
-      const localYield = ov.dividendYield * 100;
-      const pctDiff = Math.abs(stock.metrics.dividendYield - localYield) / localYield;
-      if (pctDiff > 0.15) {
-        deviations.push(`Div Yield: Perplexity ${stock.metrics.dividendYield.toFixed(2)}% vs local ${localYield.toFixed(2)}%`);
-      }
-    }
+    if (!ov && !isHeld) return { ...stock, currentPrice, metrics };
 
     return {
       ...stock,
+      currentPrice,
+      metrics,
       localData: {
         ticker: stock.ticker,
         isHeld,
@@ -342,7 +354,7 @@ async function enrichWithLocalData(stocks: NalaStockResult[], userId: string): P
           peRatio: null, roe: null, dividendYield: null,
           profitMargin: null, marketCap: null, beta: null,
         },
-        deviations,
+        deviations: [],
       },
     };
   });
