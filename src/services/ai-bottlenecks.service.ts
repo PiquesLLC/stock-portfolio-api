@@ -61,11 +61,12 @@ const LAYER_ORDER = [
   // AI layers — ranked by current market relevance. 2026 has shifted the binding
   // constraint toward power (grid interconnect, transformer/switchgear/gas-turbine
   // lead times) with HBM/DRAM in acute shortage, so the power complex and memory
-  // sit near the top while Compute remains the foundational anchor. Reviewed 2026-07-08:
-  // ranking reaffirmed — grid-interconnect queues now exceed 2,100 GW (est. 30-50% of
+  // sit near the top while Compute remains the foundational anchor. Reviewed 2026-07-13:
+  // ranking reaffirmed — grid-interconnect queues still exceed 2,100 GW (est. 30-50% of
   // 2026 AI capacity slipping to 2028; power still the binding build constraint), and
-  // HBM now consumes ~23% of DRAM wafers with 2026 capacity fully pre-allocated (memory
-  // intensifying but downstream of the power gate). No structural shift → order unchanged.
+  // HBM demand is running ~70% YoY with 2026 capacity fully pre-allocated and memory now
+  // ~30% of hyperscaler AI spend (memory intensifying but downstream of the power gate).
+  // No structural shift → order unchanged.
   'Compute',
   'Power & Cooling',
   'Memory',
