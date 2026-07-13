@@ -121,7 +121,7 @@ export async function getSP500Projections(userId: string, portfolioId?: string):
 /**
  * Calculate realized metrics from snapshot history
  */
-function calculateRealizedMetrics(
+export function calculateRealizedMetrics(
   snapshots: PortfolioSnapshot[],
   totalDividends: number
 ): { metrics: RealizedMetrics; notes: string[] } {
@@ -146,10 +146,16 @@ function calculateRealizedMetrics(
   const yearsDiff = daysDiff / 365;
 
   // CAGR calculation: (endValue / startValue)^(1/years) - 1
-  // Include dividends in the total return
   let cagr: number | null = null;
   if (startValue > 0 && yearsDiff > 0) {
-    const totalReturn = (endValue + totalDividends) / startValue;
+    // Dividends are ALREADY reflected in endValue: dividend posting credits cash
+    // (dividend-post.service) which folds into snapshot totalValue/netEquity, and
+    // DRIP adds shares. Adding totalDividends again double-counted them and
+    // inflated CAGR (and every projection derived from it). See F-CRIT-2.
+    if (totalDividends > 0) {
+      notes.push('Dividends are included in portfolio value (not added separately to CAGR)');
+    }
+    const totalReturn = endValue / startValue;
     if (totalReturn > 0) {
       cagr = Math.pow(totalReturn, 1 / yearsDiff) - 1;
 
@@ -202,7 +208,7 @@ function calculateRealizedMetrics(
 
   // Max Drawdown: largest peak-to-trough decline
   let maxDrawdown: number | null = null;
-  if (values.length >= 2) {
+  if (values.length >= 2 && values[0] > 0) {
     let peak = values[0];
     let maxDD = 0;
 
@@ -210,9 +216,13 @@ function calculateRealizedMetrics(
       if (value > peak) {
         peak = value;
       }
-      const drawdown = (peak - value) / peak;
-      if (drawdown > maxDD) {
-        maxDD = drawdown;
+      // Guard peak > 0: netEquity can go non-positive under margin, and dividing by a
+      // non-positive peak produced out-of-range drawdowns (e.g. −150%). F-M-16.
+      if (peak > 0) {
+        const drawdown = (peak - value) / peak;
+        if (drawdown > maxDD) {
+          maxDD = drawdown;
+        }
       }
     }
 

@@ -511,6 +511,9 @@ export interface Attribution {
   }[];
   winnersCount: number;
   losersCount: number;
+  totalGains: number;
+  totalLosses: number;
+  netPnL: number;
   partial: boolean;
 }
 

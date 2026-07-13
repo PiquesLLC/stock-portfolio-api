@@ -34,6 +34,8 @@ import {
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
 import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
+import { fetchPrice } from '../services/market.service';
+import { computeCompensatingCashflow } from '../utils/compensating-cashflow';
 import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 import { getAccountHistory, HistoryCategory } from '../services/account-history.service';
@@ -159,6 +161,12 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     const existingHoldings = await getHoldings(req.user!.userId, portfolioId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
+    // Market price for the compensating TWR cash-flow (see computeCompensatingCashflow).
+    // Fetched OUTSIDE the transaction so a slow/failed quote can't hold the DB tx open;
+    // null on failure makes the helper fall back to the prior cost-basis behavior.
+    const addPriceQuote = await fetchPrice(ticker.toUpperCase()).catch(() => null);
+    const addCurrentPrice = addPriceQuote?.currentPrice ?? null;
+
     // Atomic: the holding write and its compensating TWR transaction commit
     // together — a position change without the offsetting cash-flow row would
     // silently inflate returns. (getHoldings above already ensured the default
@@ -169,15 +177,19 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       // Auto-create transaction for TWR tracking (unless skipTransaction is set)
       // This ensures adding/removing stocks doesn't artificially inflate returns
       if (!skipTransaction) {
-        const newCostBasis = shares * averageCost;
-        const oldCostBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
-        const costBasisDiff = newCostBasis - oldCostBasis;
-
-        if (Math.abs(costBasisDiff) >= 0.01) {
-          const transactionType = costBasisDiff > 0 ? 'deposit' : 'withdrawal';
+        // Offset the MARKET-value jump the snapshot series will take, not the
+        // cost-basis delta (which leaked unrealized P/L into TWR). See F-CRIT-1.
+        const cashflow = computeCompensatingCashflow({
+          oldShares: existingHolding ? existingHolding.shares : 0,
+          newShares: shares,
+          currentPrice: addCurrentPrice,
+          oldCostBasis: existingHolding ? existingHolding.shares * existingHolding.averageCost : 0,
+          newCostBasis: shares * averageCost,
+        });
+        if (cashflow) {
           await addTransaction({
-            type: transactionType,
-            amount: Math.abs(costBasisDiff),
+            type: cashflow.type,
+            amount: cashflow.amount,
             date: new Date().toISOString(),
             userId: req.user!.userId,
           }, tx);
@@ -257,6 +269,10 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
+    // Market price for the compensating TWR cash-flow — see addHolding / computeCompensatingCashflow.
+    const removePriceQuote = await fetchPrice(ticker).catch(() => null);
+    const removeCurrentPrice = removePriceQuote?.currentPrice ?? null;
+
     // Atomic: the cascade delete and its compensating TWR withdrawal commit
     // together (see addHolding above). getHoldings already ensured the default
     // portfolio exists, so deleteHolding does no writes outside this tx.
@@ -264,14 +280,26 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       await deleteHolding(ticker, req.user!.userId, portfolioId, tx);
 
       // Auto-create withdrawal transaction for TWR tracking
-      if (!skipTransaction && costBasis >= 0.01) {
-        await addTransaction({
-          type: 'withdrawal',
-          amount: costBasis,
-          date: new Date().toISOString(),
-          userId: req.user!.userId,
-        }, tx);
-        console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
+      if (!skipTransaction) {
+        // Withdraw the position's MARKET value (what the snapshot series drops
+        // by), not its cost basis — cost basis fabricated a loss equal to the
+        // position's unrealized gain on every removal. See F-CRIT-1.
+        const cashflow = computeCompensatingCashflow({
+          oldShares: existingHolding ? existingHolding.shares : 0,
+          newShares: 0,
+          currentPrice: removeCurrentPrice,
+          oldCostBasis: costBasis,
+          newCostBasis: 0,
+        });
+        if (cashflow) {
+          await addTransaction({
+            type: cashflow.type,
+            amount: cashflow.amount,
+            date: new Date().toISOString(),
+            userId: req.user!.userId,
+          }, tx);
+          console.log(`[Holding] Auto-created ${cashflow.type} for removing ${ticker}`);
+        }
       }
     });
 
@@ -967,8 +995,12 @@ function parseSchwabTransactionCsv(
       }
       pos.totalCost += qty * price;
       pos.shares += qty;
-      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
       if (actionLower === 'reinvest shares') {
+        // DRIP: emit ONLY the DIV_REINVEST ledger event, NOT also a 'buy' trade.
+        // Emitting both made replayDailyLedger add the shares AND cost twice (the
+        // 'buy' posting + the DIV_REINVEST posting), inflating the ledger-replay
+        // history chart on every reinvestment and double-listing it in account
+        // history. The generic importer already emits DIV_REINVEST only. F-H-6.
         ledgerEvents.push({
           eventType: 'DIV_REINVEST',
           effectiveDate: dateStr,
@@ -982,6 +1014,8 @@ function parseSchwabTransactionCsv(
           sourceBroker: 'schwab',
           rawAction: action,
         });
+      } else {
+        trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
       }
     } else if (actionLower === 'sell') {
       if (!Number.isFinite(qty) || qty <= 0) {

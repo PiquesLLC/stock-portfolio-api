@@ -212,33 +212,16 @@ export async function getIncomeInsights(userId: string, window: IncomeWindow = '
     }
   }
 
-  // Cash Flow calculations
-  // Compute YTD from DividendEvent payDates × shares held (not DividendCredit records)
-  const holdingSharesMap = new Map<string, number>();
-  for (const h of holdings) {
-    holdingSharesMap.set((h as any).ticker.toUpperCase(), (h as any).shares);
-  }
-  const [ytdEvents, dismissedRows] = await Promise.all([
-    prisma.dividendEvent.findMany({
-      where: {
-        ticker: { in: allHoldingTickers },
-        payDate: { gte: ytdStart, lt: now },
-      },
-      select: { id: true, ticker: true, amountPerShare: true, payDate: true },
-    }),
-    prisma.dismissedDividend.findMany({
-      where: { userId },
-      select: { dividendEventId: true },
-    }),
-  ]);
-  const dismissedYtdSet = new Set(dismissedRows.map(d => d.dividendEventId));
-  let totalYTD = 0;
-  for (const ev of ytdEvents) {
-    if (dismissedYtdSet.has(ev.id)) continue; // User dismissed this dividend
-    const shares = holdingSharesMap.get(ev.ticker.toUpperCase()) ?? 0;
-    totalYTD += ev.amountPerShare * shares;
-  }
-  totalYTD = Math.round(totalYTD * 100) / 100;
+  // Calendar-YTD dividends RECEIVED = posted DividendCredits since Jan 1 (money actually
+  // credited while holding). The old computation used DividendEvent × CURRENT shares,
+  // which counted dividends paid before the user held the position and retroactively
+  // re-priced earlier ones as the stake grew (e.g. buy 1,000 KO in July → "received"
+  // showed the whole year's KO dividends). F-M-12.
+  const totalYTD = Math.round(
+    credits
+      .filter((c) => new Date(c.creditedAt) >= ytdStart)
+      .reduce((sum, c) => sum + c.amountGross, 0) * 100,
+  ) / 100;
 
   const totalThisYear = creditsThisYear.reduce((sum, c) => sum + c.amountGross, 0);
   const totalLastYear = creditsLastYear.reduce((sum, c) => sum + c.amountGross, 0);

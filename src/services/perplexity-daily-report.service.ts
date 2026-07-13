@@ -586,7 +586,7 @@ async function getDailyReportInternal(userId: string, options: DailyReportOption
       resp = await callAI([
         { role: 'system', content: buildSystemPrompt(marketState) },
         { role: 'user', content: userMessage },
-      ], { timeout: perplexityTimeout, feature: 'daily-report', userId });
+      ], { timeout: perplexityTimeout, feature: 'daily-report', userId, useSearch: true });
     } catch (perplexityError: unknown) {
       const msg = perplexityError instanceof Error ? perplexityError.message : String(perplexityError);
       if (strictFailures) {

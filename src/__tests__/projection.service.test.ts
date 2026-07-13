@@ -94,10 +94,13 @@ describe('projection.service', () => {
       expect(r.metrics.cagr).toBeCloseTo(0.21, 3);
     });
 
-    it('folds dividends into the CAGR total return', async () => {
-      mockGetPortfolio.mockResolvedValue(portfolio(10000));
-      // flat price (10000 -> 10000) but $1000 of dividends over 1y => total return 1.10 => CAGR 10%
-      mockGetAllSnapshots.mockResolvedValue([snapAt('2025-01-01', 10000), snapAt('2026-01-01', 10000)]);
+    it('does NOT double-count dividends already reflected in the snapshot value (F-CRIT-2)', async () => {
+      mockGetPortfolio.mockResolvedValue(portfolio(11000));
+      // Production reality: dividend posting credits cash atomically with the
+      // DividendCredit row, so the $1000 of dividends is ALREADY inside the ending
+      // 11000 snapshot. Total return must be 11000/10000 = 10%, NOT the old
+      // (11000 + 1000)/10000 = 20% double-count.
+      mockGetAllSnapshots.mockResolvedValue([snapAt('2025-01-01', 10000), snapAt('2026-01-01', 11000)]);
       mockGetDividends.mockResolvedValue(1000);
       const r = await getMetrics('u1', 'max');
       expect(r.metrics.cagr).toBeCloseTo(0.10, 3);

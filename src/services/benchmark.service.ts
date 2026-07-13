@@ -19,6 +19,34 @@ import { reconstructPortfolioHistory } from './snapshot.service';
 import { fetchPrice } from './market.service';
 import { getPortfolio } from './portfolio.service';
 
+/**
+ * Build the cashflow series for a money-weighted return (XIRR) computation.
+ *
+ * XIRR sign convention (finance-math.ts calculateXIRR): negative = money
+ * invested, positive = money returned. The `cashflows` array is TWR-signed
+ * (deposit = +amount, because calculateTWR adds it to the new-period base), so
+ * the intermediate flows must be NEGATED for XIRR — a deposit is additional
+ * money invested (negative), a withdrawal is money returned (positive). Reusing
+ * the TWR-signed array verbatim inverted MWR: a deposit-only account reported a
+ * large positive money-weighted return instead of ~0% (audit finding C1).
+ *
+ * Exported so the sign convention is regression-tested directly on this
+ * construction (see mwr-xirr-sign.test.ts).
+ */
+export function buildXirrFlows(
+  snapshotPoints: SnapshotPoint[],
+  cashflows: CashflowEvent[],
+): CashflowEvent[] {
+  return [
+    // Initial portfolio value = money already invested → negative
+    { date: snapshotPoints[0].date, amount: -snapshotPoints[0].value },
+    // Intermediate cashflows — negate TWR signs for the XIRR convention
+    ...cashflows.map(cf => ({ date: cf.date, amount: -cf.amount })),
+    // Final portfolio value = money returned → positive
+    { date: snapshotPoints[snapshotPoints.length - 1].date, amount: snapshotPoints[snapshotPoints.length - 1].value },
+  ];
+}
+
 export type PerformanceWindow = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL';
 
 export interface PerformanceData {
@@ -283,22 +311,32 @@ export async function getPerformanceComparison(
     amount: t.type === 'deposit' ? t.amount : -t.amount,
   }));
 
+  // The candle-reconstruction series (seriesFromSnapshots === false) holds cash
+  // CONSTANT and contains no deposit/withdrawal step, so feeding it cashflows makes
+  // calculateTWR/XIRR split the series at flows that aren't present in its values
+  // and fabricate a return (a stable-composition manual deposit read as a large
+  // negative TWR). Only the raw-snapshot series has flows baked into its values.
+  // Mirrors the risk-loop's own `if (seriesFromSnapshots)` guard below. See F-HIGH-5.
+  const effectiveCashflows: CashflowEvent[] = seriesFromSnapshots ? cashflows : [];
+
+  // The reconstructed candle series spans windowDays+15 (buffer for statistically
+  // meaningful vol/beta). The RETURN numbers (TWR/MWR/simpleReturn) must be measured
+  // over the WINDOW only — otherwise a "1M" TWR reflects ~45 days and alpha subtracts a
+  // 45-day portfolio return from a 30-day benchmark. The raw-snapshot series already
+  // carries an intentional pre-window baseline anchor, so only the candle series is
+  // sliced here; the risk loop below keeps the full buffered series. F-M-10.
+  const windowPoints: SnapshotPoint[] = seriesFromSnapshots
+    ? snapshotPoints
+    : snapshotPoints.filter(p => p.date.getTime() >= windowStart.getTime());
+
   // Calculate TWR
-  const twrRaw = calculateTWR(snapshotPoints, cashflows);
+  const twrRaw = calculateTWR(windowPoints, effectiveCashflows);
   const twrPct = twrRaw !== null ? Math.round(twrRaw * 10000) / 100 : null;
 
   // Calculate MWR (XIRR) â€” needs initial investment + final value
   let mwrPct: number | null = null;
-  if (snapshotPoints.length >= 2) {
-    const xirrFlows: CashflowEvent[] = [
-      // Initial: negative (investment)
-      { date: snapshotPoints[0].date, amount: -snapshotPoints[0].value },
-      // Intermediate cashflows
-      ...cashflows,
-      // Final: positive (current value)
-      { date: snapshotPoints[snapshotPoints.length - 1].date, amount: snapshotPoints[snapshotPoints.length - 1].value },
-    ];
-    const xirr = calculateXIRR(xirrFlows);
+  if (windowPoints.length >= 2) {
+    const xirr = calculateXIRR(buildXirrFlows(windowPoints, effectiveCashflows));
     mwrPct = xirr !== null ? Math.round(xirr * 10000) / 100 : null;
   }
 
@@ -334,8 +372,8 @@ export async function getPerformanceComparison(
   }
 
   // Simple return from snapshot data (API-side approximation; UI overrides with chart data)
-  const simpleReturnPct = snapshotPoints.length >= 2
-    ? Math.round(((snapshotPoints[snapshotPoints.length - 1].value - snapshotPoints[0].value) / snapshotPoints[0].value) * 10000) / 100
+  const simpleReturnPct = windowPoints.length >= 2
+    ? Math.round(((windowPoints[windowPoints.length - 1].value - windowPoints[0].value) / windowPoints[0].value) * 10000) / 100
     : null;
 
   // Alpha â€” computed from simpleReturnPct; UI may override with chart-derived values
@@ -385,8 +423,14 @@ export async function getPerformanceComparison(
     equityIndex.push(equityIndex[equityIndex.length - 1] * (1 + r));
 
     const retPct = Math.round(r * 10000) / 100;
-    if (!bestDay || retPct > bestDay.returnPct) bestDay = { date: dateKey, returnPct: retPct };
-    if (!worstDay || retPct < worstDay.returnPct) worstDay = { date: dateKey, returnPct: retPct };
+    // Best/worst DAY are user-facing "this period" extremes, so scope them to the
+    // window even though vol/beta/drawdown keep the full buffered series for
+    // statistical significance. Without this, the candle path could report a best
+    // day dated up to ~15 days before windowStart. F-M-10 (extremes).
+    if (snapshotPoints[i].date.getTime() >= windowStart.getTime()) {
+      if (!bestDay || retPct > bestDay.returnPct) bestDay = { date: dateKey, returnPct: retPct };
+      if (!worstDay || retPct < worstDay.returnPct) worstDay = { date: dateKey, returnPct: retPct };
+    }
 
     const bmClose = bmCloseMap.get(dateKey);
     const bmPrevClose = bmCloseMap.get(snapshotPoints[i - 1].date.toISOString().slice(0, 10));

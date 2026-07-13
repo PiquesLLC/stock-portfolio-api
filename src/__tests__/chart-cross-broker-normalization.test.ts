@@ -326,7 +326,7 @@ describe('Cross-broker normalization', () => {
       expect(trades[0].shares).toBe(15);
     });
 
-    it('handles reinvest shares as buy', async () => {
+    it('handles reinvest shares as a DIV_REINVEST ledger event, not a double-counted buy', async () => {
       const app = (await import('../app')).default;
 
       const csv = [
@@ -344,11 +344,14 @@ describe('Cross-broker normalization', () => {
       expect(res.status).toBe(200);
       const trades = res.body.trades;
 
-      // After reversal: Buy 10@275, Reinvest 0.5@280 (treated as buy)
-      expect(trades).toHaveLength(2);
+      // Reinvest emits a DIV_REINVEST ledger event, NOT a 'buy' trade — emitting both
+      // made the ledger replay add the reinvested shares twice (buy posting +
+      // DIV_REINVEST posting). Only the real Buy is a trade. F-H-6.
+      expect(trades).toHaveLength(1);
       expect(trades[0].type).toBe('buy');
-      expect(trades[1].type).toBe('buy'); // reinvest = buy
+      expect(trades[0].shares).toBe(10);
 
+      // The holding still reflects the reinvested shares once (via position aggregation).
       const vti = res.body.parsed.find((p: any) => p.ticker === 'VTI');
       expect(vti.shares).toBeCloseTo(10.5, 4);
     });
