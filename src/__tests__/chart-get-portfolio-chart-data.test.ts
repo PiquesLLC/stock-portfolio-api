@@ -143,7 +143,7 @@ describe('getPortfolioChartData — real 1D path', () => {
     // 30 candles (>=5 → no snapshot fallback), last bar 5 min before NOW so the
     // live value appends (gap 5min..4h). basePrice 4500 → last candle value =
     // 5000 + 10*(4500 + 29*0.5) = 5000 + 10*4514.5 = 50145. liveValue = 51000.
-    // offset = 51000 - 50145 = 855 (>1) → applied to every candle.
+    // Multiplicative anchor: scale = 51000/50145 → every candle scaled (last → liveValue). F-M-13.
     fetchPolygonAggsMock.mockResolvedValue(
       makePolygonResult(30, NOW - FIVE_MIN_MS, 4500),
     );
@@ -163,20 +163,19 @@ describe('getPortfolioChartData — real 1D path', () => {
     // 30 candles + 1 appended live point.
     expect(points.length).toBe(31);
 
-    // Offset normalization pins the last point to liveValue. The final point is
-    // the appended live value; the candle immediately before it was offset so
-    // the whole series ends at liveValue.
+    // Multiplicative anchor scales the series so its last point equals liveValue while
+    // preserving the % return between points. The final point is the appended live value;
+    // the candle immediately before it scales to liveValue.
     const last = points[points.length - 1];
     expect(last.time).toBe(NOW);
     expect(last.value).toBeCloseTo(liveValue, 6);
 
-    // The candle just before the live append was shifted by `offset` to land on
-    // liveValue as well (last candle 50145 + 855 offset = 51000).
+    // The candle just before the live append (50145) scales to liveValue.
     expect(points[points.length - 2].value).toBeCloseTo(liveValue, 6);
 
-    // First candle was 50145 - (29*5) ... value-wise: 5000 + 10*4500 = 50000,
-    // after +855 offset → 50855. Assert it moved by exactly the offset.
-    expect(points[0].value).toBeCloseTo(50000 + 855, 6);
+    // First candle 50000 scales by 51000/50145 → the candle-to-candle % return is preserved
+    // (an additive shift distorted it). F-M-13.
+    expect(points[0].value).toBeCloseTo(50000 * (51000 / 50145), 6);
 
     // periodStartValue uses the previousClose anchor: liveValue - dayChange.
     expect(periodStartValue).toBeCloseTo(liveValue - dayChange, 6); // 50750
