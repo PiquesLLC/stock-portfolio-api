@@ -528,6 +528,25 @@ const server = app.listen(config.port, async () => {
     console.error('[Init] Social table/migration fix failed:', err.message);
   }
 
+  // M-17: add nullable portfolioId to the holding-history tables so deleteHolding can
+  // scope its cascade per-portfolio and the write paths can populate it. Idempotent
+  // ALTERs run at boot so a create can't hit a missing column after deploy. Backfilling
+  // EXISTING rows is a separate operator step (see docs/M17-migration-draft.md).
+  // SQLite ALTER ADD COLUMN is a fast metadata-only change.
+  try {
+    for (const table of ['Lot', 'PortfolioTrade', 'DividendCredit', 'DividendReinvestment']) {
+      try {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ADD COLUMN "portfolioId" TEXT`);
+      } catch { /* column already exists */ }
+      await prisma.$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "${table}_portfolioId_ticker_idx" ON "${table}"("portfolioId", "ticker")`
+      );
+    }
+    console.log('[Init] M-17 portfolioId columns verified');
+  } catch (err: any) {
+    console.error('[Init] M-17 portfolioId column add failed:', err.message);
+  }
+
   try {
     await assertBillingDeploySafety();
     if (config.billingEnabled) {
