@@ -530,7 +530,19 @@ async function refreshFundamentals(ticker: string): Promise<void> {
         await prisma.fundamentalsCache.create({
           data: { ticker: upper, overviewJson: nullOverview, lastFetchedAt: new Date() },
         });
-      } catch { /* row appeared concurrently with real data — preserve it */ }
+      } catch {
+        // Row exists with a REAL overview (e.g. legacy Alpha Vantage data) but a
+        // stale lastFetchedAt. Without bumping the timestamp the prefetch picker
+        // re-selects this ticker as 'holding-stale' FOREVER — prod hot-looped on
+        // BABA every ~30s (a Polygon call + several DB writes per lap, thousands
+        // per day). Touch ONLY lastFetchedAt: the overview/statement columns stay
+        // exactly as the data-preservation comment above requires, and the >7d
+        // staleness retry still happens naturally.
+        await prisma.fundamentalsCache.updateMany({
+          where: { ticker: upper },
+          data: { lastFetchedAt: new Date() },
+        }).catch(() => undefined);
+      }
     }
     return;
   }

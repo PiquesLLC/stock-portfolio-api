@@ -35,6 +35,64 @@ export function alertOnCorruption(source: string, errorMsg: string): void {
   }
 }
 
+// --- DB write-timeout brownout breaker (2026-07-14 outage) -----------------
+// During the 12:15–17:00 UTC storm, every runJob tick spent 4–7 doomed
+// 5s-timeout writes on telemetry alone (idempotency claim, run-record create,
+// run-record update, dead-letter create, idempotency status) while the actual
+// job never ran — the tracking system DoS'd the write queue it was tracking,
+// and user writes (auth rotation, snapshots) queued behind it. When DB writes
+// are timing out, telemetry writes must stand down: jobs still run, failures
+// still log to console, and ONE throttled Sentry event fires per storm.
+// Sentry previously only knew SQLITE_CORRUPT; timeout storms were invisible.
+let dbBrownoutUntil = 0;
+let lastBrownoutLogAt = 0;
+let lastBrownoutSentryAt = 0;
+const BROWNOUT_HOLD_MS = 60 * 1000; // each observed timeout extends the stand-down window
+const BROWNOUT_LOG_INTERVAL_MS = 60 * 1000;
+const BROWNOUT_SENTRY_INTERVAL_MS = 30 * 60 * 1000;
+
+export function isDbTimeoutError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as { code?: unknown; message?: unknown };
+  const msg = typeof e.message === 'string' ? e.message : String(err);
+  return e.code === 'P1008'
+    || msg.includes('Operation has timed out')
+    || msg.includes('SocketTimeout')
+    || msg.includes('SQLITE_BUSY');
+}
+
+export function noteDbTimeout(source: string, errorMsg: string): void {
+  const now = Date.now();
+  dbBrownoutUntil = now + BROWNOUT_HOLD_MS;
+  if (now - lastBrownoutLogAt >= BROWNOUT_LOG_INTERVAL_MS) {
+    lastBrownoutLogAt = now;
+    console.error(`[DB] BROWNOUT: write timeouts detected via ${source} — job telemetry writes suspended for ${BROWNOUT_HOLD_MS / 1000}s (sliding). ${errorMsg.slice(0, 160)}`);
+  }
+  if (now - lastBrownoutSentryAt >= BROWNOUT_SENTRY_INTERVAL_MS) {
+    lastBrownoutSentryAt = now;
+    try {
+      Sentry.captureMessage(`[DB] Write-timeout brownout detected via ${source}`, {
+        level: 'error',
+        tags: { component: 'db-brownout' },
+        extra: { errorMsg },
+      });
+    } catch {
+      // Sentry not initialised (tests / dev without DSN)
+    }
+  }
+}
+
+export function isDbBrownout(): boolean {
+  return Date.now() < dbBrownoutUntil;
+}
+
+/** Test-only: reset breaker state between cases. */
+export function __resetDbBrownoutForTests(): void {
+  dbBrownoutUntil = 0;
+  lastBrownoutLogAt = 0;
+  lastBrownoutSentryAt = 0;
+}
+
 export type JobFailureCategory = 'TRANSIENT' | 'PERMANENT' | 'RATE_LIMITED' | 'DATA_QUALITY' | 'UNKNOWN';
 export type JobAlertSeverity = 'none' | 'warning' | 'critical';
 
@@ -309,6 +367,9 @@ async function claimIdempotencyKey(
 ): Promise<boolean> {
   const store = prismaClient.jobIdempotencyKey;
   if (typeof store?.create !== 'function') return true;
+  // Brownout: don't spend a 5s write timeout on dedup bookkeeping. Running a
+  // job twice in a window is recoverable; starving the write queue is not.
+  if (isDbBrownout()) return true;
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlMs);
@@ -323,6 +384,10 @@ async function claimIdempotencyKey(
     });
     return true;
   } catch (err) {
+    if (isDbTimeoutError(err)) {
+      noteDbTimeout(`idempotency:${jobName}`, err instanceof Error ? err.message : String(err));
+      return true;
+    }
     if (!isUniqueConstraintError(err)) return true;
   }
 
@@ -358,6 +423,7 @@ async function updateIdempotencyStatus(
   error: string | null = null,
 ): Promise<void> {
   if (!key) return;
+  if (isDbBrownout()) return; // status bookkeeping — never worth a timeout slot
   const store = prismaClient.jobIdempotencyKey;
   if (typeof store?.update !== 'function') return;
   await store.update({
@@ -424,39 +490,54 @@ export async function runJob(options: JobOptions): Promise<void> {
       const startMs = Date.now();
       let runId: string | null = null;
 
-      try {
-        // Record job start
-        const run = await prisma.backgroundJobRun.create({
-          data: {
-            jobName: name,
-            status: 'running',
-            attempt,
-            maxAttempts,
-          },
-        });
-        runId = run.id;
+      // Record job start — telemetry only. Never gates the job: in the
+      // 2026-07-14 brownout this create's 5s timeout consumed the attempt
+      // and the job body never ran at all. During a brownout, skip it.
+      if (!isDbBrownout()) {
+        try {
+          const run = await prisma.backgroundJobRun.create({
+            data: {
+              jobName: name,
+              status: 'running',
+              attempt,
+              maxAttempts,
+            },
+          });
+          runId = run.id;
+        } catch (recErr) {
+          const recMsg = recErr instanceof Error ? recErr.message : String(recErr);
+          if (isDbTimeoutError(recErr)) noteDbTimeout(`jobrun:${name}`, recMsg);
+          console.warn(`[JobRunner] ${name} run-record create failed (running job without telemetry): ${recMsg.slice(0, 140)}`);
+        }
+      }
 
+      try {
         // Execute the job
         await fn();
 
         // Record success (telemetry — failure here should NOT retry the job)
         const durationMs = Date.now() - startMs;
-        await prisma.backgroundJobRun.update({
-          where: { id: runId },
-          data: {
-            status: 'success',
-            durationMs,
-            completedAt: new Date(),
-          },
-        }).catch((telErr) => {
-          console.error(`[JobRunner] ${name} succeeded but telemetry update failed:`, telErr instanceof Error ? telErr.message : telErr);
-        });
+        if (runId && !isDbBrownout()) {
+          await prisma.backgroundJobRun.update({
+            where: { id: runId },
+            data: {
+              status: 'success',
+              durationMs,
+              completedAt: new Date(),
+            },
+          }).catch((telErr) => {
+            console.error(`[JobRunner] ${name} succeeded but telemetry update failed:`, telErr instanceof Error ? telErr.message : telErr);
+          });
+        }
         await updateIdempotencyStatus(prismaClient, idempotencyKey, 'success');
 
         return; // Success — done (even if telemetry write failed)
       } catch (err) {
         const durationMs = Date.now() - startMs;
         const errorMsg = err instanceof Error ? err.message : String(err);
+        // A job body failing on DB write timeouts is the breaker's primary
+        // detector — trip it before spending more writes on failure telemetry.
+        if (isDbTimeoutError(err)) noteDbTimeout(`job:${name}`, errorMsg);
         const classified = classifyJobFailure(err);
         const errorWithCategory = `[${classified.category}] ${errorMsg}`;
         const effectiveMaxAttempts = classified.maxAttempts
@@ -465,7 +546,7 @@ export async function runJob(options: JobOptions): Promise<void> {
         const canRetry = classified.retryable && attempt < effectiveMaxAttempts;
 
         // Update run record with failure
-        if (runId) {
+        if (runId && !isDbBrownout()) {
           const isLastAttempt = !canRetry;
           await prisma.backgroundJobRun.update({
             where: { id: runId },
@@ -482,7 +563,12 @@ export async function runJob(options: JobOptions): Promise<void> {
           // Retries exhausted OR classified as non-retryable
           console.error(`[JobRunner] ${name} DEAD LETTERED after ${attempt} attempts (${classified.category}): ${errorMsg}`);
           alertOnCorruption(`job:${name}`, errorMsg);
-          if (typeof prismaClient.deadLetterEntry?.create === 'function') {
+          if (isDbBrownout()) {
+            // The dead-letter WRITE is itself a doomed 5s timeout during a
+            // brownout (2026-07-14: "Failed to write dead letter" × every job
+            // × every tick for hours). The console line above + the brownout
+            // Sentry event carry the signal; skip the write.
+          } else if (typeof prismaClient.deadLetterEntry?.create === 'function') {
             await prismaClient.deadLetterEntry.create({
               data: {
                 jobName: name,
@@ -494,6 +580,7 @@ export async function runJob(options: JobOptions): Promise<void> {
                 }),
               },
             }).catch((dlErr) => {
+              if (isDbTimeoutError(dlErr)) noteDbTimeout(`deadletter:${name}`, dlErr instanceof Error ? dlErr.message : String(dlErr));
               console.error(`[JobRunner] Failed to write dead letter for ${name}:`, dlErr);
             });
           } else {

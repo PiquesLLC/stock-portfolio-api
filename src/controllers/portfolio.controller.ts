@@ -102,7 +102,12 @@ export async function getPortfolioHandler(req: AuthRequest, res: Response): Prom
       }
       const portfolioId = req.query.portfolioId as string | undefined;
       await validatePortfolioOwnership(portfolioId, req.user.userId);
-      await createSnapshotIfNeeded(req.user.userId);
+      // Fire-and-forget (matches the userId branch above): this is a DB
+      // WRITE on the hottest read path. During the 2026-07-14 write
+      // brownout, awaiting it made every portfolio load hang/fail — the
+      // user-visible "Connection Error" — while pure reads were fine. The
+      // 60s background snapshot scheduler is the primary writer anyway.
+      createSnapshotIfNeeded(req.user.userId).catch(() => console.error('Snapshot-on-read error'));
       portfolio = await getPortfolio(req.user.userId, { portfolioId });
 
       if (portfolioId) {

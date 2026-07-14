@@ -198,6 +198,30 @@ function pruneOldBackups(): void {
   }
 }
 
+/**
+ * Produce an engine-consistent snapshot of the live DB at destPath via
+ * `VACUUM INTO` on a DEDICATED libsql connection.
+ *
+ * Replaces the previous `fs.copyFileSync`, which was the trigger of the
+ * 2026-07-14 outage: a synchronous 1.2GB copy froze the Node event loop for
+ * the whole transfer, and the post-freeze thundering herd of stalled timers
+ * + requests overwhelmed the serialized SQLite write queue (mass P1008).
+ * VACUUM INTO is async (no event-loop freeze), transactionally consistent
+ * (a raw file copy can be torn by a concurrent auto-checkpoint), does not
+ * block writers (WAL), and compacts free pages on the way out. It must NOT
+ * run on the shared Prisma connection — its multi-minute runtime would queue
+ * every app query behind it.
+ */
+async function snapshotDatabaseTo(destPath: string): Promise<void> {
+  let client: ReturnType<typeof createClient> | null = null;
+  try {
+    client = createClient({ url: `file:${path.resolve(DB_PATH)}` });
+    await client.execute(`VACUUM INTO '${destPath.replace(/'/g, "''")}'`);
+  } finally {
+    try { client?.close(); } catch { /* ignore */ }
+  }
+}
+
 export async function backupDatabase(): Promise<void> {
   try {
     if (!fs.existsSync(DB_PATH)) {
@@ -219,18 +243,38 @@ export async function backupDatabase(): Promise<void> {
       return;
     }
 
-    const freeBytes = getDataVolumeFreeBytes();
-    if (freeBytes !== null && freeBytes < MIN_FREE_SPACE_BYTES) {
-      const freeMB = (freeBytes / 1024 / 1024).toFixed(1);
-      console.warn(`[Backup] Skipped due to low disk space on /data: ${freeMB}MB free`);
+    // Disk guard: the snapshot needs ~DB-size free (plus margin). The old
+    // fixed 500MB floor let 2026-07-14's run start with only ~70MB of real
+    // headroom — it survived because the pre-copy WAL truncate freed 247MB.
+    // Check the actual requirement; try a WAL truncate as reclaim if short.
+    const dbSizeBytes = fs.statSync(DB_PATH).size;
+    const requiredBytes = Math.round(dbSizeBytes * 1.05) + 64 * 1024 * 1024;
+    let freeBytes = getDataVolumeFreeBytes();
+    let ckpt: Awaited<ReturnType<typeof checkpointWal>> = null;
+    if (freeBytes !== null && freeBytes < requiredBytes) {
+      ckpt = await checkpointWal();
+      freeBytes = getDataVolumeFreeBytes();
+    }
+    if (freeBytes !== null && (freeBytes < requiredBytes || freeBytes < MIN_FREE_SPACE_BYTES)) {
+      reportCritical(
+        `Skipped: snapshot needs ~${Math.round(requiredBytes / 1024 / 1024)}MB free on /data, ` +
+          `have ${Math.round(freeBytes / 1024 / 1024)}MB. Grow the volume or clear space — daily backups are NOT running.`,
+        { freeBytes, requiredBytes, dbSizeBytes },
+      );
       return;
     }
 
-    // Drain WAL into the main DB file so the copy is self-contained.
-    const ckpt = await checkpointWal();
-
-    // Copy database file
-    fs.copyFileSync(DB_PATH, backupPath);
+    // Snapshot via VACUUM INTO (see snapshotDatabaseTo). On failure, remove
+    // the partial file so today's same-day guard doesn't turn tomorrow's run
+    // into a no-op against a truncated artifact.
+    try {
+      await snapshotDatabaseTo(backupPath);
+    } catch (copyErr) {
+      try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch { /* best effort */ }
+      unlinkSidecars(backupPath);
+      reportCritical(`snapshot failed: ${(copyErr as Error).message}`, { path: backupPath });
+      return;
+    }
     const backupSizeMB = (fs.statSync(backupPath).size / 1024 / 1024).toFixed(1);
     const freeMB = freeBytes !== null ? (freeBytes / 1024 / 1024).toFixed(1) : 'n/a';
 
@@ -248,15 +292,28 @@ export async function backupDatabase(): Promise<void> {
       }
       return;
     }
-    const ckptTag = ckpt?.ok ? 'full' : ckpt ? `partial(busy=${ckpt.busy})` : 'unknown';
+    const ckptTag = ckpt?.ok ? 'full' : ckpt ? `partial(busy=${ckpt.busy})` : 'n/a';
     console.log(
-      `[Backup] Created + verified: ${backupPath} (${backupSizeMB}MB, free space: ${freeMB}MB, ckpt=${ckptTag})`,
+      `[Backup] Created + verified: ${backupPath} (${backupSizeMB}MB, free space: ${freeMB}MB, reclaim-ckpt=${ckptTag})`,
     );
 
     // Prune AFTER verification succeeds — never trade a known-good old backup
     // for a not-yet-verified new one. (The same-day guard above already
     // protects against re-running prune on a day where backup is already done.)
     pruneOldBackups();
+
+    // The snapshot's read transaction pinned the WAL for its whole runtime,
+    // so frames accumulated behind it. Drain passively now (non-blocking;
+    // whatever is still pinned gets picked up by the WAL watchdog later).
+    try {
+      const drained = await prisma.$queryRawUnsafe<Array<{ busy: number; log: number; checkpointed: number }>>(
+        'PRAGMA wal_checkpoint(PASSIVE)',
+      );
+      const row = drained?.[0];
+      if (row) console.log(`[Backup] post-snapshot WAL drain: busy=${row.busy} log=${row.log} checkpointed=${row.checkpointed}`);
+    } catch (e) {
+      console.warn(`[Backup] post-snapshot WAL drain skipped: ${(e as Error).message}`);
+    }
   } catch (err) {
     reportCritical(`Backup failed: ${(err as Error).message}`, { stack: (err as Error).stack });
   }

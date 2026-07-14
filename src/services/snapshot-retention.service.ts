@@ -1,5 +1,6 @@
 import prisma from '../utils/prisma';
 import { alertOnCorruption } from './job-runner.service';
+import { scheduleDailyAtUTC } from '../utils/daily-schedule';
 
 // Nightly snapshot retention — the permanent fix for the unbounded growth
 // behind the 2026-07 disk incident (60s snapshots accumulated for months,
@@ -117,7 +118,9 @@ export function scheduleSnapshotRetention(): void {
     console.log('[Retention] Disabled (set SNAPSHOT_RETENTION_ENABLED=true after the DB rebuild)');
     return;
   }
-  console.log('[Retention] Scheduled daily');
-  setTimeout(() => { void runSnapshotRetention(); }, 2 * 60 * 1000);
-  setInterval(() => { void runSnapshotRetention(); }, 24 * 60 * 60 * 1000);
+  // Fixed off-peak hour (02:40 ET), 30min before the 07:10 UTC backup so the
+  // two never overlap. Was boot-anchored (2min after start + every 24h),
+  // which put its mass DELETEs + TRUNCATE checkpoint in the same minute as
+  // the backup copy and the daily job fleet — the 2026-07-14 outage stack.
+  scheduleDailyAtUTC(6, 40, () => { void runSnapshotRetention(); }, 'snapshot-retention');
 }
