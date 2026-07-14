@@ -124,7 +124,16 @@ class AlphaVantageQueue {
 
       try {
         const result = await this.executeRequest(req);
-        await incrementDailyUsage(req.ticker);
+        // Best-effort: budget bookkeeping must never gate the response. In
+        // the 2026-07-14 write brownout this await threw AFTER the AV call
+        // succeeded — the fetched data was discarded, the request errored,
+        // and the retry re-spent the 25/day budget. Undercounting during a
+        // rare brownout is the cheaper failure (AV's own 429 still backstops).
+        try {
+          await incrementDailyUsage(req.ticker);
+        } catch (usageErr) {
+          console.warn(`[AlphaVantage] usage-tracking write failed (continuing): ${usageErr instanceof Error ? usageErr.message.slice(0, 120) : usageErr}`);
+        }
         req.resolve(result);
         this.queue.shift();
       } catch (error) {
