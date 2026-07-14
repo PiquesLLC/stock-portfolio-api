@@ -26,6 +26,64 @@ const SIDECAR_EXTS = ['-wal', '-shm', '-journal'] as const;
 // rollback targets created by scripts/pre-cutover-snapshot.ts.
 const DAILY_BACKUP_REGEX = /^nala-\d{4}-\d{2}-\d{2}\.db$/;
 
+// ── Last-run status (exposed via GET /health/deep) ──────────────────────
+// Backup success used to be observable only through Railway logs. After the
+// 2026-07-14 outage, /health/deep reports it so freshness can be verified
+// (and alerted on) from anywhere. Persisted to a sidecar so it survives
+// restarts; the sidecar name never matches DAILY_BACKUP_REGEX, so pruning
+// ignores it.
+export interface LastBackupStatus {
+  at: string;
+  ok: boolean;
+  sizeMB: number | null;
+  note: string;
+}
+
+let lastBackupStatus: LastBackupStatus | null = null;
+
+function statusSidecarPath(): string {
+  return path.join(BACKUP_DIR, '.last-backup.json');
+}
+
+function recordBackupStatus(ok: boolean, sizeMB: number | null, note: string): void {
+  lastBackupStatus = { at: new Date().toISOString(), ok, sizeMB, note };
+  try {
+    fs.writeFileSync(statusSidecarPath(), JSON.stringify(lastBackupStatus));
+  } catch { /* best effort — in-memory copy still serves /health/deep */ }
+}
+
+export function getLastBackupStatus(): LastBackupStatus | null {
+  if (lastBackupStatus) return lastBackupStatus;
+  try {
+    if (fs.existsSync(statusSidecarPath())) {
+      lastBackupStatus = JSON.parse(fs.readFileSync(statusSidecarPath(), 'utf8')) as LastBackupStatus;
+      return lastBackupStatus;
+    }
+  } catch { /* fall through to derivation */ }
+  // No sidecar yet (first boot after this feature shipped): derive from the
+  // newest date-stamped backup file so freshness is visible immediately.
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return null;
+    const newest = fs.readdirSync(BACKUP_DIR).filter(f => DAILY_BACKUP_REGEX.test(f)).sort().reverse()[0];
+    if (!newest) return null;
+    const st = fs.statSync(path.join(BACKUP_DIR, newest));
+    lastBackupStatus = {
+      at: st.mtime.toISOString(),
+      ok: true,
+      sizeMB: +(st.size / 1024 / 1024).toFixed(1),
+      note: `derived from ${newest} (pre-status-tracking)`,
+    };
+    return lastBackupStatus;
+  } catch {
+    return null;
+  }
+}
+
+/** Test-only: reset cached status between cases. */
+export function __resetLastBackupStatusForTests(): void {
+  lastBackupStatus = null;
+}
+
 function reportCritical(message: string, extra?: Record<string, unknown>): void {
   console.error(`[Backup] CRITICAL: ${message}`);
   try {
@@ -261,6 +319,7 @@ export async function backupDatabase(): Promise<void> {
           `have ${Math.round(freeBytes / 1024 / 1024)}MB. Grow the volume or clear space — daily backups are NOT running.`,
         { freeBytes, requiredBytes, dbSizeBytes },
       );
+      recordBackupStatus(false, null, `skipped: low disk (${Math.round(freeBytes / 1024 / 1024)}MB free, need ~${Math.round(requiredBytes / 1024 / 1024)}MB)`);
       return;
     }
 
@@ -273,6 +332,7 @@ export async function backupDatabase(): Promise<void> {
       try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch { /* best effort */ }
       unlinkSidecars(backupPath);
       reportCritical(`snapshot failed: ${(copyErr as Error).message}`, { path: backupPath });
+      recordBackupStatus(false, null, `snapshot failed: ${(copyErr as Error).message.slice(0, 120)}`);
       return;
     }
     const backupSizeMB = (fs.statSync(backupPath).size / 1024 / 1024).toFixed(1);
@@ -290,12 +350,14 @@ export async function backupDatabase(): Promise<void> {
       } catch (e) {
         reportCritical(`also failed to delete corrupt backup: ${(e as Error).message}`, { path: backupPath });
       }
+      recordBackupStatus(false, null, 'quick_check failed on the snapshot');
       return;
     }
     const ckptTag = ckpt?.ok ? 'full' : ckpt ? `partial(busy=${ckpt.busy})` : 'n/a';
     console.log(
       `[Backup] Created + verified: ${backupPath} (${backupSizeMB}MB, free space: ${freeMB}MB, reclaim-ckpt=${ckptTag})`,
     );
+    recordBackupStatus(true, parseFloat(backupSizeMB), 'created + verified');
 
     // Prune AFTER verification succeeds — never trade a known-good old backup
     // for a not-yet-verified new one. (The same-day guard above already
@@ -316,5 +378,6 @@ export async function backupDatabase(): Promise<void> {
     }
   } catch (err) {
     reportCritical(`Backup failed: ${(err as Error).message}`, { stack: (err as Error).stack });
+    recordBackupStatus(false, null, `failed: ${(err as Error).message.slice(0, 120)}`);
   }
 }

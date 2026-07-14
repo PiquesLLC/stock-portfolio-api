@@ -19,6 +19,8 @@ const mkdirSyncMock = vi.hoisted(() => vi.fn());
 const unlinkSyncMock = vi.hoisted(() => vi.fn());
 const readdirSyncMock = vi.hoisted(() => vi.fn());
 const copyFileSyncMock = vi.hoisted(() => vi.fn());
+const writeFileSyncMock = vi.hoisted(() => vi.fn());
+const readFileSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../utils/prisma', () => ({
   default: { $queryRawUnsafe: queryRawUnsafeMock },
@@ -36,10 +38,12 @@ vi.mock('fs', async (importOriginal) => {
     unlinkSync: unlinkSyncMock,
     readdirSync: readdirSyncMock,
     copyFileSync: copyFileSyncMock,
+    writeFileSync: writeFileSyncMock,
+    readFileSync: readFileSyncMock,
   };
 });
 
-import { backupDatabase, DB_PATH } from '../backup.service';
+import { backupDatabase, getLastBackupStatus, __resetLastBackupStatusForTests, DB_PATH } from '../backup.service';
 
 const GB = 1024 * 1024 * 1024;
 
@@ -69,6 +73,10 @@ describe('backupDatabase snapshot path', () => {
     unlinkSyncMock.mockReset();
     readdirSyncMock.mockReset();
     copyFileSyncMock.mockReset();
+    writeFileSyncMock.mockReset();
+    readFileSyncMock.mockReset();
+    readFileSyncMock.mockImplementation(() => { throw new Error('no sidecar'); });
+    __resetLastBackupStatusForTests();
     vacuumAttempted = false;
 
     // Default world: live DB exists (1.2GB), /data exists, backup dir exists,
@@ -81,7 +89,7 @@ describe('backupDatabase snapshot path', () => {
       if (s.includes('backups')) return true; // BACKUP_DIR
       return false;
     });
-    statSyncMock.mockReturnValue({ size: 1.2 * GB });
+    statSyncMock.mockReturnValue({ size: 1.2 * GB, mtime: new Date('2026-07-14T12:14:00.000Z') });
     statfsSyncMock.mockReturnValue({ bsize: 4096, bavail: 1000000, blocks: 1170000 });
     readdirSyncMock.mockReturnValue([]);
     // quick_check on the copy (verifyBackup) + post-snapshot PASSIVE drain
@@ -157,5 +165,36 @@ describe('backupDatabase snapshot path', () => {
     expect(unlinkSyncMock).toHaveBeenCalled(); // partial artifact removed
     expect(sentryCaptureMock).toHaveBeenCalled();
     expect(String(sentryCaptureMock.mock.calls[0][0])).toMatch(/snapshot failed/);
+  });
+
+  it('records ok:true status after a verified backup (for /health/deep)', async () => {
+    setFreeBytes(3 * GB);
+
+    await backupDatabase();
+
+    const status = getLastBackupStatus();
+    expect(status?.ok).toBe(true);
+    expect(status?.note).toBe('created + verified');
+    expect(status?.sizeMB).toBeGreaterThan(1000);
+  });
+
+  it('records ok:false status when the disk guard skips', async () => {
+    setFreeBytes(0.5 * GB);
+
+    await backupDatabase();
+
+    const status = getLastBackupStatus();
+    expect(status?.ok).toBe(false);
+    expect(status?.note).toMatch(/skipped: low disk/);
+  });
+
+  it('derives status from the newest backup file when no sidecar exists', async () => {
+    readdirSyncMock.mockReturnValue(['nala-2026-07-13.db', 'nala-2026-07-14.db']);
+
+    const status = getLastBackupStatus();
+
+    expect(status?.ok).toBe(true);
+    expect(status?.at).toBe('2026-07-14T12:14:00.000Z');
+    expect(status?.note).toMatch(/derived from nala-2026-07-14\.db/);
   });
 });

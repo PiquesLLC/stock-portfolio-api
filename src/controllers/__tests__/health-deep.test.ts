@@ -14,6 +14,9 @@ vi.mock('../../utils/prisma', () => ({
 vi.mock('../../services/db-watchdog.service', () => ({
   getWalWatchdogState: () => ({ enabled: true, walBytes: 1024, lastCheckAt: null, lastCheckpoint: null, consecutiveLargeWal: 0 }),
 }));
+vi.mock('../../services/backup.service', () => ({
+  getLastBackupStatus: () => ({ at: '2026-07-15T07:12:00.000Z', ok: true, sizeMB: 1184.2, note: 'created + verified' }),
+}));
 
 import { healthDeep } from '../health.controller';
 
@@ -23,7 +26,7 @@ function makeRes() {
     status(code: number) { this.statusCode = code; return this as Response; },
     json(payload: unknown) { this.body = payload; return this as Response; },
   };
-  return res as Response & { statusCode: number; body?: { status?: string; db?: { readOk: boolean; writeOk: boolean } } };
+  return res as Response & { statusCode: number; body?: { status?: string; db?: { readOk: boolean; writeOk: boolean }; lastBackup?: { ok: boolean; at: string } } };
 }
 
 describe('GET /health/deep', () => {
@@ -46,6 +49,7 @@ describe('GET /health/deep', () => {
     expect(res.body?.status).toBe('ok');
     expect(res.body?.db?.readOk).toBe(true);
     expect(res.body?.db?.writeOk).toBe(true);
+    expect(res.body?.lastBackup).toEqual({ at: '2026-07-15T07:12:00.000Z', ok: true, sizeMB: 1184.2, note: 'created + verified' });
   });
 
   it('REGRESSION: returns 503 degraded when the DB write times out (2026-07-14 state)', async () => {

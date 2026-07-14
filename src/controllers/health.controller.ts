@@ -10,6 +10,7 @@ import { getProviderMetrics } from '../utils/provider-metrics';
 import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount, isDbBrownout } from '../services/job-runner.service';
 import { getWalWatchdogState } from '../services/db-watchdog.service';
+import { getLastBackupStatus } from '../services/backup.service';
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
   const response: {
@@ -93,6 +94,7 @@ export async function healthDeep(_req: Request, res: Response): Promise<void> {
     status: healthy ? 'ok' : 'degraded',
     db: { readOk, readMs, writeOk, writeMs, brownout: isDbBrownout() },
     wal: { bytes: wal.walBytes, lastCheckAt: wal.lastCheckAt, lastCheckpoint: wal.lastCheckpoint },
+    lastBackup: getLastBackupStatus(),
     uptimeSec: Math.round(process.uptime()),
     commit: (process.env.RAILWAY_GIT_COMMIT_SHA || 'local').slice(0, 7),
     totalMs: Date.now() - startedAt,
