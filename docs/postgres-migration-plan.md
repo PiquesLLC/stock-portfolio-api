@@ -25,8 +25,10 @@ starvation, no VACUUM-needs-1×-disk games.
 
 - **v1 (this migration):** Prisma + `@prisma/adapter-libsql`, `DATABASE_URL=file:/data/nala.db`
   (~1.16 GB, 86 models, 29 users). All DateTimes stored by libsql; JSON stored
-  as TEXT strings; IDs are `String @default(uuid())`; no autoincrement/Decimal/
-  Bytes/Json Prisma types anywhere (clean type surface for a port).
+  as TEXT strings; every PK is a String (mostly `@default(uuid())`, four
+  natural keys: `Settings.id`, `ScreenerUniverse.ticker`,
+  `ValueRadarTierSnapshot.ticker`, `Politician.bioguideId`); no autoincrement/
+  Decimal/Bytes/Json Prisma types anywhere (clean type surface for a port).
 - **v2 ledger (already Postgres, already live):** `prisma-v2/` +
   `src/v2/` — `PrismaPg` client, `V2_DATABASE_URL` →
   `postgres-xf5d.railway.internal`, **shadow-writes enabled in prod**
@@ -97,14 +99,18 @@ the daily-values query verdict.
    baseline migration against an empty pg (keep the SQLite history in git; the
    file DB never runs `migrate deploy` again).
 3. Recreate the Prisma-inexpressible constraints from raw SQL (pattern:
-   `prisma-v2/migrations/*`): `creator_payout_pending_unique` partial unique
-   index (payout race protection — on SQLite this index is the ONLY guarantee;
-   see `creator-billing.service.ts:1559-1587`), the ledger idempotency partial
-   index, `pgcrypto` extension.
-4. Fold the boot-time migration-repair DDL (`src/index.ts:463-548` — SQLite
-   dialect: `RAISE(ABORT)` triggers, `randomblob`, `DATETIME` defaults, M-17
-   `ALTER TABLE` patches) into the baseline, then delete those boot blocks.
-   Same for `scripts/start.sh`'s libsql `PRAGMA table_info` gating.
+   `prisma-v2/migrations/*`). Audit finding: the only one in v1 is the
+   `creator_payout_pending_unique` PARTIAL unique index (payout race
+   protection — on SQLite this index is the ONLY guarantee; see
+   `creator-billing.service.ts:1559-1587`). The wallet-ledger idempotency
+   index is a plain `@@unique` already in the schema (Prisma emits it), and
+   v1 needs no `pgcrypto` (IDs are generated application-side).
+4. Fold the boot-time migration-repair DDL (`src/index.ts:457-548` — the
+   `HealthProbe` bootstrap table at 457 plus the SQLite-dialect blocks:
+   `RAISE(ABORT)` triggers, `randomblob`, `DATETIME` defaults, the
+   social-platform `kycVerified`/`kycVerifiedAt` `ALTER TABLE` patches) into
+   the baseline, then delete those boot blocks. Same for `scripts/start.sh`'s
+   libsql `PRAGMA table_info` gating.
 5. **Deliberately deferred (do NOT bundle):** Float→numeric for money columns,
    TEXT-JSON→jsonb, citext for usernames. Like-for-like first; type upgrades
    are separate post-migration changes with their own tests.
@@ -122,11 +128,11 @@ re-locate on master where this week's fixes moved things):
 | 1 | Client + pragmas | `src/utils/prisma.ts`: `PrismaPg`, pool sizing; delete `initSqlitePragmas` (WAL/busy_timeout/auto_vacuum). |
 | 2 | Retention job | `snapshot-retention.service.ts` (master = keeper-table version from `2ff37e2`): becomes SIMPLER — keeper set as a CTE/temp table, `DELETE ... USING`, `ctid` batches or plain indexed deletes (MVCC: no write-lock storms), `now() - interval '30 days'` instead of frozen ISO strings, drop wal_checkpoint/incremental_vacuum. Keep the yield/cap structure. |
 | 3 | Cleanup + disk-guard | `cleanup.service.ts` rowid/datetime chunks → portable deletes. `disk-guard.service.ts`: **retire** (its reason to exist is the SQLite file); replace with a pg bloat/size monitor in `/health/deep`. |
-| 4 | Backup/offsite | `backup.service.ts` (checkpoint+copyFileSync+quick_check) → `pg_dump` (the offsite job's v2 half already does exactly this — extend to the v1 database). `/health/deep.lastBackup` keeps its contract. Railway pg volume snapshots as second layer. |
-| 5 | Health + brownout | `/health/deep` (master): WAL fields → pg equivalents (`pg_stat_activity` waits, connection saturation); write-probe unchanged. Brownout breaker: keep, add pg transient codes (40001, 40P01, 57014, P2024) alongside P1008. Sentry corruption matcher: SQLITE_CORRUPT → pg fatal classes. |
+| 4 | Backup/offsite | `backup.service.ts` (current machinery: WAL checkpoint + `VACUUM INTO` on a dedicated libsql connection + quick_check — the old copyFileSync is already gone) → `pg_dump` (the offsite job's v2 half already does exactly this — extend to the v1 database). `/health/deep.lastBackup` keeps its contract. Railway pg volume snapshots as second layer. |
+| 5 | Health + brownout | `/health/deep` (master): WAL fields → pg equivalents (`pg_stat_activity` waits, connection saturation); write-probe unchanged (its `HealthProbe` table + upsert are pg-portable). **Retire `db-watchdog.service.ts` entirely** — it stats the `-wal` file and runs `PRAGMA wal_checkpoint(PASSIVE)`; post-cutover it would report misleading zeros. Brownout breaker: keep, add pg transient codes (40001, 40P01, 57014, P2024) alongside P1008. Sentry corruption matcher: SQLITE_CORRUPT → pg fatal classes. |
 | 6 | Bare-MAX chart queries | `snapshot.service.ts:446-488` → `DISTINCT ON (user, day) ... ORDER BY day, timestamp DESC` (or window functions). **Parity harness required** (below) — these feed EOD/TWR. |
-| 7 | Raw-SQL sweep | `analytics.service.ts` DATE() groupings → `date_trunc`; `post.service.ts` `deleted = 0` → boolean; `app.ts` `COLLATE NOCASE` → `LOWER()`/citext-later; `activity.service.ts` `JSON_EXTRACT` → `payload::jsonb->>`; `users/auth` LOWER() lookups fine; admin routes' PRAGMA panels → pg stats or delete. |
-| 8 | Transactions | Import flow (`portfolio.controller.ts` ~2031-2290): shorten the interactive tx (precompute outside, write inside), set explicit isolation, add 40001/40P01 retry wrapper (small util). Review the ~25 other `$transaction` sites; payout path can now genuinely use Serializable (keep the partial index too). |
+| 7 | Raw-SQL sweep | **Placeholder syntax first:** every `$queryRawUnsafe`/`$executeRawUnsafe` using SQLite `?` positional params (5 sites in `analytics.service.ts` alone) must become `$1/$2` — on pg these THROW at runtime, they don't degrade. Then the semantic swaps: `analytics.service.ts` DATE() groupings → `date_trunc`; `post.service.ts` `deleted = 0` → boolean; `app.ts` `COLLATE NOCASE` → `LOWER()`/citext-later; `activity.service.ts` `JSON_EXTRACT` → `payload::jsonb->>`; `users/auth` LOWER() lookups fine; admin routes' PRAGMA panels → pg stats or delete. |
+| 8 | Transactions | Import flow (`portfolio.controller.ts` ~2031-2290): shorten the interactive tx (precompute outside, write inside), set explicit isolation, add 40001/40P01 retry wrapper (small util). Review the other `$transaction` sites — **~42 occurrences across 20 v1 files** (audited count); payout path can now genuinely use Serializable (keep the partial index too). |
 | 9 | Scheduled jobs wiring | `scheduleDailyAtUTC` stays; backup/retention/cleanup keep their 06:40/07:10/08:10 slots; disk-guard schedule removed with the service. |
 
 **Gate P2:** full vitest suite green against a pg test database (integration
