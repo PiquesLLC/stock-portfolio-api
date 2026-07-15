@@ -9,7 +9,10 @@ import { cleanupStaleData } from './cleanup.service';
  * Disk self-healing guard.
  *
  * The prod DB is SQLite on a fixed Railway volume (/data). Two failure modes:
- *  - unbounded table growth (now bounded by cleanupStaleData retention), and
+ *  - unbounded table growth (HoldingSnapshot/logs bounded by cleanupStaleData;
+ *    PortfolioSnapshot bounded by snapshot-retention.service, which is gated
+ *    on SNAPSHOT_RETENTION_ENABLED — with the flag off, PortfolioSnapshot has
+ *    NO automated bound), and
  *  - the file never shrinking after deletes (auto_vacuum was NONE; now INCREMENTAL
  *    via initSqlitePragmas, which takes effect after the first VACUUM below).
  *

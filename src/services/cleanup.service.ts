@@ -64,7 +64,9 @@ export async function cleanupStaleData(): Promise<void> {
     }).catch(() => ({ count: 0 }));
     totalDeleted += expiredTokens.count;
 
-    // 9. Holding snapshots older than 90 days — parity with PortfolioSnapshot (step 1).
+    // 9. Holding snapshots older than 90 days (belt-and-suspenders behind the
+    // nightly retention job's 30d policy; PortfolioSnapshot is NOT pruned here
+    // — see the step-1 note).
     // This table is the dominant disk-growth driver (one row per holding every
     // snapshot cycle) and previously had NO scheduled retention, so it grew
     // unbounded — the slow-fill behind the 91%-full volume. Chunked deletes keep
