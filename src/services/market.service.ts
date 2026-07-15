@@ -989,10 +989,12 @@ async function fetchLastKnownQuote(ticker: string): Promise<Quote | null> {
   // Bounded: this path also runs for genuinely-unknown symbols (typos), and
   // fetchStockDetails' no-quote disambiguation must not hang behind a stalled
   // aggs call — 1s is generous for one Polygon daily-aggs roundtrip.
-  const candles = await Promise.race([
+  const candles = await withSoftTimeout(
     fetchDailyCandles(upper, 370),
-    new Promise<IntradayCandle[]>((resolve) => setTimeout(() => resolve([]), 1000)),
-  ]);
+    1000,
+    [] as IntradayCandle[],
+    `${upper} last-known candles`,
+  );
   if (candles.length === 0) return null;
   const last = candles[candles.length - 1];
   const prev = candles.length > 1 ? candles[candles.length - 2] : last;
@@ -1045,14 +1047,25 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
       if (yahooQuote) {
         quote = yahooQuote;
       } else {
-        // No live feed anywhere → almost certainly delisted/halted. Serve the
-        // final traded bar (frozen, isStale) and negative-cache the symbol.
+        // No live feed anywhere. Serve the final traded bar (frozen, isStale)
+        // if we have one. Sticky-mark the symbol dead ONLY when that bar is
+        // itself old — a live ticker caught in a momentary all-provider
+        // outage has a fresh bar and must keep retrying the live chain, and
+        // a symbol with no bar at all (typo, Yahoo-only symbology) must never
+        // be sticky-marked off a single failure.
         const lastKnown = await fetchLastKnownQuote(upperTicker);
-        deadSymbolCache.set(`dead:${upperTicker}`, true);
         if (!lastKnown) throw new Error(`No quote available for ${ticker}`);
-        console.warn(
-          `[Quote] ${upperTicker} has no live feed on any provider — serving last known close (${lastKnown.currentPrice}) and pausing live fetches for 1h`,
-        );
+        const lastBarAgeMs = Date.now() - (lastKnown.updatedAt || 0);
+        if (lastBarAgeMs > 7 * 86400000) {
+          deadSymbolCache.set(`dead:${upperTicker}`, true);
+          console.warn(
+            `[Quote] ${upperTicker} has no live feed and its last bar is ${Math.round(lastBarAgeMs / 86400000)}d old — serving frozen close (${lastKnown.currentPrice}), pausing live fetches for 1h`,
+          );
+        } else {
+          console.warn(
+            `[Quote] ${upperTicker}: all live providers failed — serving last known close (${lastKnown.currentPrice}) without pausing live fetches`,
+          );
+        }
         return lastKnown;
       }
     }
