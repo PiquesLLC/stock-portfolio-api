@@ -601,10 +601,6 @@ export interface YahooBatchQuote {
   previousClose: number;
   regularMarketPrice: number;
   marketState: string;
-  // Last after-hours trade. Unlike `price` (which reverts to the regular
-  // close once marketState is CLOSED), this stays the frozen 8PM ET price —
-  // the stock header's at-close/after-hours split reads it evenings/weekends.
-  postMarketPrice?: number;
   dayHigh?: number;
   dayLow?: number;
   volume?: number;
@@ -711,14 +707,7 @@ export async function fetchYahooBatchQuotes(
           ? rawRegularPrice
           : previousClose;
 
-        const rawPostMarket = Number(item?.postMarketPrice);
-        const parsed: YahooBatchQuote = {
-          price: numericPrice,
-          previousClose,
-          regularMarketPrice,
-          marketState,
-          postMarketPrice: Number.isFinite(rawPostMarket) && rawPostMarket > 0 ? rawPostMarket : undefined,
-        };
+        const parsed: YahooBatchQuote = { price: numericPrice, previousClose, regularMarketPrice, marketState };
         results.set(symbol, parsed);
         yahooQuoteCache.set(`yahoo-quote:${symbol}`, parsed, getQuoteCacheTTL());
       }
@@ -776,23 +765,17 @@ export async function fetchYahooV8BatchQuotes(
         // The actual live price is the last candle in the chart data.
         const marketState = getYahooV8MarketState(meta);
         let livePrice = regularMarketPrice;
-        let lastExtendedClose: number | undefined;
 
-        if (marketState === 'PRE' || marketState === 'POST' || marketState === 'CLOSED') {
+        if (marketState === 'PRE' || marketState === 'POST') {
           const closes = chartResult?.indicators?.quote?.[0]?.close as number[] | undefined;
           if (closes && closes.length > 0) {
             // Walk backwards to find last non-null close
             for (let ci = closes.length - 1; ci >= 0; ci--) {
               if (Number.isFinite(closes[ci]) && closes[ci] > 0) {
-                lastExtendedClose = closes[ci];
+                livePrice = closes[ci];
                 break;
               }
             }
-          }
-          // `price` keeps its existing semantics: live extended price during
-          // PRE/POST, regular close when CLOSED (consumers rely on that).
-          if (lastExtendedClose !== undefined && (marketState === 'PRE' || marketState === 'POST')) {
-            livePrice = lastExtendedClose;
           }
         }
 
@@ -801,9 +784,6 @@ export async function fetchYahooV8BatchQuotes(
           previousClose,
           regularMarketPrice,
           marketState,
-          // With includePrePost the last candle under POST/CLOSED is the most
-          // recent after-hours trade (frozen 8PM price once closed).
-          postMarketPrice: (marketState === 'POST' || marketState === 'CLOSED') ? lastExtendedClose : undefined,
           dayHigh: Number.isFinite(Number(meta?.regularMarketDayHigh)) ? Number(meta.regularMarketDayHigh) : undefined,
           dayLow: Number.isFinite(Number(meta?.regularMarketDayLow)) ? Number(meta.regularMarketDayLow) : undefined,
           volume: Number.isFinite(Number(meta?.regularMarketVolume)) ? Number(meta.regularMarketVolume) : undefined,
@@ -1009,52 +989,32 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
 
   // During extended hours, Polygon/Finnhub often return stale regular-session prices.
   // Yahoo's quote endpoint has real-time extended-hours data.
-  //
-  // CLOSED is included for the regular/after-hours SPLIT FIELDS ONLY: after
-  // 8 PM ET the split used to vanish (fields unset), collapsing the stock
-  // header to one blended day change. In CLOSED we never touch currentPrice/
-  // previousClose/change/changePercent — every other consumer (heatmap,
-  // portfolio, sectors) keeps the exact quote it gets today; a Yahoo failure
-  // just leaves the split fields unset (UI falls back to the blended line).
-  if (session === 'PRE' || session === 'POST' || session === 'CLOSED') {
+  if (session === 'PRE' || session === 'POST') {
     const polygonPrice = quote.currentPrice; // Capture Polygon's price before overlay
-    let yahooExtended = await fetchYahooExtendedPrice(ticker);
-    if (session === 'CLOSED' && (!yahooExtended || !yahooExtended.postMarketPrice)) {
-      // v7 sometimes misses (or lacks postMarketPrice once CLOSED); the v8
-      // chart endpoint carries the frozen after-hours candles reliably.
-      yahooExtended = (await fetchYahooV8BatchQuotes([ticker])).get(ticker.toUpperCase()) || yahooExtended;
-    }
+    const yahooExtended = await fetchYahooExtendedPrice(ticker);
     if (yahooExtended && yahooExtended.price > 0) {
-      if (session !== 'CLOSED') {
-        quote.currentPrice = yahooExtended.price;
-        quote.previousClose = yahooExtended.previousClose || quote.previousClose;
-        quote.change = quote.currentPrice - quote.previousClose;
-        quote.changePercent = quote.previousClose !== 0
-          ? (quote.change / quote.previousClose) * 100
-          : 0;
-        quote.updatedAt = Date.now();
-        quote.timestamp = Math.floor(quote.updatedAt / 1000);
-        quote.isStale = false;
-        quote.quoteAgeSeconds = 0;
-      }
+      quote.currentPrice = yahooExtended.price;
+      quote.previousClose = yahooExtended.previousClose || quote.previousClose;
+      quote.change = quote.currentPrice - quote.previousClose;
+      quote.changePercent = quote.previousClose !== 0
+        ? (quote.change / quote.previousClose) * 100
+        : 0;
+      quote.updatedAt = Date.now();
+      quote.timestamp = Math.floor(quote.updatedAt / 1000);
+      quote.isStale = false;
+      quote.quoteAgeSeconds = 0;
 
       // Set extended hours fields for consistent portfolio regular/extended split.
       // regularClose = most recent completed regular-session close.
-      // During POST/CLOSED: regularMarketPrice = today's 4 PM close.
+      // During POST: regularMarketPrice = today's 4 PM close.
       // During PRE: regularMarketPrice = yesterday's 4 PM close.
       // previousClose = regularMarketPreviousClose from Yahoo = the day BEFORE regularMarketPrice.
-      // In CLOSED, `yahooExtended.price` is the regular close, so the
-      // extended price must come from postMarketPrice — no AH data → leave
-      // the split fields unset and the UI falls back to the blended line.
-      const extPrice = session === 'CLOSED' ? yahooExtended.postMarketPrice : yahooExtended.price;
-      if (extPrice && extPrice > 0) {
-        quote.regularClose = yahooExtended.regularMarketPrice || polygonPrice || quote.previousClose;
-        quote.extendedPrice = extPrice;
-        quote.extendedChange = quote.extendedPrice - (quote.regularClose || quote.previousClose);
-        quote.extendedChangePercent = (quote.regularClose || quote.previousClose) > 0
-          ? (quote.extendedChange / (quote.regularClose || quote.previousClose)) * 100
-          : 0;
-      }
+      quote.regularClose = yahooExtended.regularMarketPrice || polygonPrice || quote.previousClose;
+      quote.extendedPrice = yahooExtended.price;
+      quote.extendedChange = quote.extendedPrice - (quote.regularClose || quote.previousClose);
+      quote.extendedChangePercent = (quote.regularClose || quote.previousClose) > 0
+        ? (quote.extendedChange / (quote.regularClose || quote.previousClose)) * 100
+        : 0;
     }
   }
 
@@ -1063,14 +1023,8 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
 
 /**
  * Fetch a basic quote from Yahoo Finance as fallback when Finnhub has no data.
- *
- * `includeExtendedSplit` (OFF by default) additionally populates
- * regularClose/extendedPrice/extendedChange for the stock-header's
- * at-close/after-hours split. It exists for the fast-quote path only (stock
- * detail first paint) — the plain fallback path must NOT set these fields
- * (see the warning above `return quote` about the portfolio split).
  */
-async function fetchYahooQuote(ticker: string, options?: { includeExtendedSplit?: boolean }): Promise<Quote | null> {
+async function fetchYahooQuote(ticker: string): Promise<Quote | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
     const resp = await yahooGet(url);
@@ -1116,25 +1070,9 @@ async function fetchYahooQuote(ticker: string, options?: { includeExtendedSplit?
     };
 
     // Yahoo is a last-resort fallback behind Polygon. Don't set regularClose
-    // here by default — it causes a bogus afterHoursChange split in the
-    // portfolio. Polygon handles extended hours natively via lastTrade.p
-    // without needing a regularClose/extendedPrice split.
-    //
-    // The stock detail page's first paint (fetchFastQuote) opts in: outside
-    // regular hours meta.regularMarketPrice is the frozen official close and
-    // lastPrice is the newest extended-hours candle, which is exactly the
-    // at-close/after-hours split the header renders.
-    if (
-      options?.includeExtendedSplit
-      && session !== 'REG'
-      && meta.regularMarketPrice > 0
-      && lastPrice !== meta.regularMarketPrice
-    ) {
-      quote.regularClose = meta.regularMarketPrice;
-      quote.extendedPrice = lastPrice;
-      quote.extendedChange = lastPrice - meta.regularMarketPrice;
-      quote.extendedChangePercent = (quote.extendedChange / meta.regularMarketPrice) * 100;
-    }
+    // here — it causes a bogus afterHoursChange split in the portfolio.
+    // Polygon handles extended hours natively via lastTrade.p without needing
+    // a regularClose/extendedPrice split.
 
     return quote;
   } catch {
@@ -1147,11 +1085,9 @@ async function fetchYahooQuote(ticker: string, options?: { includeExtendedSplit?
  * Used for progressive loading to show price immediately.
  */
 export async function fetchFastQuote(ticker: string): Promise<Quote | null> {
-  // Yahoo first — more accurate real-time pricing during market hours.
-  // includeExtendedSplit: the stock header needs regularClose/extendedPrice
-  // on FIRST paint (this quote), not just after the first /market/quote poll.
+  // Yahoo first — more accurate real-time pricing during market hours
   try {
-    const yahoo = await fetchYahooQuote(ticker, { includeExtendedSplit: true });
+    const yahoo = await fetchYahooQuote(ticker);
     if (yahoo && yahoo.currentPrice > 0) return yahoo;
   } catch { /* fall through */ }
   // Polygon/Finnhub fallback
