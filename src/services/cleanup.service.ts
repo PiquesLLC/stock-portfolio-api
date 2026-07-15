@@ -9,12 +9,12 @@ export async function cleanupStaleData(): Promise<void> {
   let totalDeleted = 0;
 
   try {
-    // 1. Portfolio snapshots older than 90 days
-    const snapshotCutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    const snapshots = await prisma.portfolioSnapshot.deleteMany({
-      where: { timestamp: { lt: snapshotCutoff } },
-    });
-    totalDeleted += snapshots.count;
+    // 1. PortfolioSnapshot pruning is owned by snapshot-retention.service
+    // (30d of intraday + one EOD keeper per (user, day) kept INDEFINITELY —
+    // the long-window chart/TWR/risk engines read those keepers). The
+    // wholesale >90d deleteMany that used to live here would have wiped the
+    // keepers (and held the write lock unchunked while doing it) — removed
+    // 2026-07-15.
 
     // 2. Analytics events older than 30 days
     const analyticsCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -89,7 +89,7 @@ export async function cleanupStaleData(): Promise<void> {
     await prisma.$executeRawUnsafe('PRAGMA wal_checkpoint(TRUNCATE)').catch(() => {});
     await prisma.$executeRawUnsafe('PRAGMA incremental_vacuum').catch(() => {});
 
-    console.log(`[Cleanup] Removed ${totalDeleted} stale records (snapshots: ${snapshots.count}, holdingSnaps: ${holdingSnaps}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count}, deadLetters: ${deadLetters.count}, expiredTokens: ${expiredTokens.count})`);
+    console.log(`[Cleanup] Removed ${totalDeleted} stale records (holdingSnaps: ${holdingSnaps}, analytics: ${analytics.count}, apiLogs: ${apiLogs.count}, jobs: ${jobs.count}, audits: ${audits.count}, social: ${social.count}, deadLetters: ${deadLetters.count}, expiredTokens: ${expiredTokens.count})`);
   } catch (err) {
     console.error('[Cleanup] Failed:', (err as Error).message);
   }

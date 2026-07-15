@@ -124,21 +124,33 @@ async function chunkedDelete(
   deadline: number,
 ): Promise<number> {
   let total = 0;
+  let capNote = '';
   for (let i = 0; i < MAX_CHUNKS; i++) {
     const deleted = await exec(sql);
     total += deleted;
     if (deleted < CHUNK) break;
+    if (i === MAX_CHUNKS - 1) {
+      capNote = ' (chunk-capped, resumes next run)';
+      break;
+    }
     if (Date.now() > deadline) {
-      log.push(`${label}: time-capped mid-backlog (resumes next run)`);
+      capNote = ' (time-capped, resumes next run)';
       break;
     }
     // Release the write lock between chunks so user/job writes interleave
     // instead of stacking up into P1008 timeouts.
     await sleep(CHUNK_YIELD_MS);
   }
-  log.push(`${label}: deleted ${total}`);
+  log.push(`${label}: deleted ${total}${capNote}`);
   return total;
 }
+
+// The keeper table has a fixed name and the run pre-drops it, so two
+// overlapping runs would corrupt each other's anti-join (run B's pre-drop
+// empties run A's keeper set → run A would delete EOD keepers). Only the
+// once-daily scheduler calls this today; the guard protects any future
+// manual/admin trigger.
+let retentionRunning = false;
 
 // `exec` is injectable so the integration test can run the real statements
 // against a scratch libsql database instead of the prisma mock.
@@ -147,7 +159,20 @@ export async function runSnapshotRetention(exec: Exec = prismaExec): Promise<{ s
   if (!snapshotRetentionEnabled()) {
     return { skipped: true, log };
   }
+  if (retentionRunning) {
+    log.push('another retention run is in progress — skipped');
+    console.warn('[Retention] Skipped: another run is in progress');
+    return { skipped: true, log };
+  }
+  retentionRunning = true;
+  try {
+    return await runSnapshotRetentionLocked(exec, log);
+  } finally {
+    retentionRunning = false;
+  }
+}
 
+async function runSnapshotRetentionLocked(exec: Exec, log: string[]): Promise<{ skipped: boolean; log: string[] }> {
   const startedAt = Date.now();
   const deadline = startedAt + MAX_RUN_MS;
   const sql = buildRetentionSql(new Date(startedAt));
@@ -173,8 +198,14 @@ export async function runSnapshotRetention(exec: Exec = prismaExec): Promise<{ s
     log.push(`AnalyticsEvent (>90d): deleted ${await exec(sql.analyticsEvent)}`);
     log.push(`ApiUsageLog (>90d): deleted ${await exec(sql.apiUsageLog)}`);
 
-    await exec(`PRAGMA wal_checkpoint(TRUNCATE)`);
-    log.push('WAL checkpoint: done');
+    try {
+      await exec(`PRAGMA wal_checkpoint(TRUNCATE)`);
+      log.push('WAL checkpoint: done');
+    } catch (e) {
+      // Deletes are already committed at this point — a hard checkpoint error
+      // must not turn the whole run into a misleading [Retention] FAILED.
+      log.push(`WAL checkpoint: skipped (${e instanceof Error ? e.message.slice(0, 80) : String(e)})`);
+    }
 
     try {
       await exec(`PRAGMA incremental_vacuum`);
