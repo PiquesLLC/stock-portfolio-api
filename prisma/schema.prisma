@@ -783,7 +783,7 @@ model MilestoneEvent {
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker        String
-  eventType     String   // '52w_high' | '52w_low' | 'ath' | 'atl'
+  eventType     String   // intraday: '52w_high' | '52w_low' | 'ath' | 'atl' — EOD: '52w_high_close' | '52w_low_close' | 'ath_close' | 'atl_close'
   message       String
   currentPrice  Float
   thresholdPrice Float   // The 52w high/low or ATH/ATL price

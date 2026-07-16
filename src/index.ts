@@ -9,7 +9,8 @@ import { syncAllHeldTickers } from './services/dividend-fetch.service';
 import { postDividendsForDate } from './services/dividend-post.service';
 import { evaluatePriceAlerts } from './services/priceAlert.service';
 import { checkAnalystUpdates } from './services/analyst.service';
-import { checkMilestoneAlerts } from './services/milestone.service';
+import { checkMilestoneAlerts, checkMilestoneCloseAlerts } from './services/milestone.service';
+import { etDate } from './utils/date';
 import { detectAnomalies, detectDividendChanges } from './services/anomaly-detection.service';
 import { getMarketSession } from './utils/market-hours';
 import prisma, { initSqlitePragmas } from './utils/prisma';
@@ -350,6 +351,7 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('value_radar_digest', sendValueRadarDigest);
   registerJobHandler('earnings_alerts', sendEarningsAlerts);
   registerJobHandler('milestone_check', checkMilestoneAlerts);
+  registerJobHandler('milestone_close_check', checkMilestoneCloseAlerts);
   registerJobHandler('anomaly_detection', runAnomalyDetectionForAllUsers);
   registerJobHandler('dividend_change_detection', runDividendChangeDetectionForAllUsers);
   registerJobHandler('creator_reconciliation', runCreatorLedgerReconciliation);
@@ -839,6 +841,28 @@ const server = app.listen(config.port, async () => {
   setInterval(() => {
     runJob({ name: 'milestone_check', fn: checkMilestoneAlerts });
   }, 30 * 60 * 1000);
+
+  // EOD close milestones — "AAPL closed at an all-time high of $334.00" etc.
+  // One shot per trading day: the 4:10–8:00 PM ET window is gated HERE (before
+  // runJob) so the ET-dated idempotency key is never claimed by an early tick,
+  // and the per-day event dedup inside the job makes any re-run harmless.
+  console.log('[Milestone Close Scheduler] Watching for the 4 PM ET close (checks every 5 min)');
+  const maybeRunMilestoneClose = () => {
+    if (isWeekendET()) return;
+    const [h, m] = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date()).split(':').map(Number);
+    const minsET = h * 60 + m;
+    if (minsET < 16 * 60 + 10 || minsET >= 20 * 60) return;
+    runJob({
+      name: 'milestone_close_check',
+      fn: checkMilestoneCloseAlerts,
+      idempotencyKey: `milestone_close:${etDate()}`,
+      idempotencyTtlMs: 20 * 60 * 60 * 1000,
+    });
+  };
+  setTimeout(maybeRunMilestoneClose, 75000);
+  setInterval(maybeRunMilestoneClose, 5 * 60 * 1000);
 
   // AI Anomaly Detection — check every 30 minutes during market hours (all users)
   console.log('[Anomaly Detection] Running every 30 minutes (market hours only)');

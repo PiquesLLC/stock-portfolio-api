@@ -172,6 +172,7 @@ const JOB_ALERT_THRESHOLDS: Record<string, JobAlertThreshold> = {
   deep_research_poller: { warning: 0.15, critical: 0.30 },
   anomaly_detection: { warning: 0.10, critical: 0.20 },
   milestone_check: { warning: 0.10, critical: 0.20 },
+  milestone_close_check: { warning: 0.10, critical: 0.20 },
 };
 
 function getAlertThresholdForJob(jobName?: string): JobAlertThreshold {
