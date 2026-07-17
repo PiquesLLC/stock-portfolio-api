@@ -390,7 +390,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
         let changePercent: number;
         let useExtendedForRow = false;
         if (period === '1D') {
-          const hasExtended = quote?.extendedChangePercent != null && quote?.extendedPrice != null;
+          // extendedChangePercent is optional: the fetchPrices Yahoo overlay writes
+          // only extendedPrice + regularClose, and regularClose alone is enough to
+          // split the sessions. Either signal qualifies the row as extended.
+          const hasExtended = quote?.extendedPrice != null && quote.extendedPrice > 0
+            && (quote.extendedChangePercent != null || (quote.regularClose ?? 0) > 0);
           if (hasExtended && (quote?.previousClose ?? 0) > 0) {
             // Total change from previous close, NOT just the after-hours delta.
             changePercent = ((quote!.extendedPrice! - quote!.previousClose) / quote!.previousClose) * 100;
@@ -413,10 +417,11 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           : 0; // dayChange only meaningful for 1D
 
         // Compute P/E and dividend yield from ScreenerCache + live price.
-        // currentPrice keeps the regular-session price so fundamentals math stays
-        // anchored to the regular close. displayPrice is what we show on the tile —
-        // it tracks extendedPrice during extended hours so the tooltip is consistent
-        // with the displayed change.
+        // currentPrice is quote.currentPrice — during extended hours every provider
+        // writes the extended print there (the 4 PM close travels in regularClose,
+        // see regularAnchor below), so fundamentals math tracks the latest print.
+        // displayPrice is what we show on the tile — it tracks extendedPrice during
+        // extended hours so the tooltip is consistent with the displayed change.
         const screener = screenerMap.get(upper);
         const currentPrice = livePrice;
         const displayPrice = useExtendedForRow ? (quote?.extendedPrice ?? currentPrice) : currentPrice;
@@ -443,13 +448,17 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
 
         // Regular-session 1D % for the heatmap's After-hours toggle: when this row
         // shows the extended-hours move, also expose the regular close % (regular
-        // price vs previous close), computed symmetrically with the extended % above
-        // (both anchored on previousClose). Using quote.changePercent here would be
-        // unsafe — it can already carry the after-hours overlay, collapsing the toggle.
-        // useExtendedForRow guarantees quote + previousClose > 0. Non-1D / non-extended
-        // rows have no separate regular value, so it equals changePercent.
+        // close vs previous close), computed symmetrically with the extended % above
+        // (both anchored on previousClose). The anchor must be quote.regularClose —
+        // every provider that sets extendedPrice ALSO writes the extended print into
+        // currentPrice, and quote.changePercent carries the same overlay, so deriving
+        // from either collapses the toggle into a no-op. Quotes without regularClose
+        // fall back to currentPrice (blended — pre-existing behavior). useExtendedForRow
+        // guarantees quote + previousClose > 0. Non-1D / non-extended rows have no
+        // separate regular value, so it equals changePercent.
+        const regularAnchor = (quote?.regularClose ?? 0) > 0 ? quote.regularClose : currentPrice;
         const regularChangePercent = (period === '1D' && useExtendedForRow && (quote?.previousClose ?? 0) > 0)
-          ? ((currentPrice - quote.previousClose) / quote.previousClose) * 100
+          ? ((regularAnchor - quote.previousClose) / quote.previousClose) * 100
           : changePercent;
 
         // No real data ⇒ render a dimmed "–", never a fabricated "+0.00%". 1D needs a
@@ -464,7 +473,7 @@ export async function getHeatmapData(period: HeatmapPeriod = '1D', index?: Marke
           ticker: upper,
           name: resolveName(overview, upper),
           price: displayPrice,
-          regularPrice: currentPrice,
+          regularPrice: useExtendedForRow ? regularAnchor : currentPrice,
           changePercent,
           regularChangePercent,
           noTradeData,
