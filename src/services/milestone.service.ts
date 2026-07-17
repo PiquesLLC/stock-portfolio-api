@@ -21,6 +21,10 @@ import NodeCache from 'node-cache';
 // (an all-time high IS a 52-week high). Records are measured against
 // thresholds that EXCLUDE today's bar, so "new" is strict — merely touching
 // yesterday's high does not qualify.
+//
+// Alert Settings toggles are honored: an explicit OFF on the 52-Week / All-
+// Time High/Low switch silences BOTH the intraday and the close alert for
+// that type. No Alert row (user never opened settings) = on, the default.
 // ============================================================================
 
 // Day-scoped in-memory guard (ticker-userId-type-etDay). hasEventTodayET() is
@@ -76,6 +80,37 @@ function isWeekendET(now: Date): boolean {
   return etDay === 'Sat' || etDay === 'Sun';
 }
 
+// Alert-Settings switch each milestone type answers to — the close variants
+// share their intraday counterpart's toggle ("All-Time High" governs both
+// "hit a new" and "closed at").
+const TOGGLE_TYPE: Record<string, string> = {
+  'ath': 'ath',
+  'atl': 'atl',
+  '52w_high': '52w_high',
+  '52w_low': '52w_low',
+  'ath_close': 'ath',
+  'atl_close': 'atl',
+  '52w_high_close': '52w_high',
+  '52w_low_close': '52w_low',
+};
+
+/**
+ * Users who explicitly turned a milestone switch OFF in Alert Settings, as
+ * `${userId}:${toggleType}` keys. Rows are created lazily when a user first
+ * opens settings, so a missing row means the default: enabled.
+ */
+async function getDisabledMilestoneToggles(): Promise<Set<string>> {
+  const disabled = await prisma.alert.findMany({
+    where: {
+      type: { in: ['ath', 'atl', '52w_high', '52w_low'] },
+      enabled: false,
+      userId: { not: null },
+    },
+    select: { userId: true, type: true },
+  });
+  return new Set(disabled.map(a => `${a.userId}:${a.type}`));
+}
+
 /** All held tickers with the users who hold them */
 async function getTickerHolders(): Promise<TickerHolders[]> {
   const holdings = await prisma.holding.findMany({
@@ -128,8 +163,10 @@ async function evaluateMilestonesForTicker(opts: {
   thresholds: PriorThresholds;
   defs: MilestoneDef[];
   now: Date;
+  /** `${userId}:${toggleType}` keys from getDisabledMilestoneToggles() */
+  disabledToggles: Set<string>;
 }): Promise<void> {
-  const { ticker, userIds, price, thresholds, defs, now } = opts;
+  const { ticker, userIds, price, thresholds, defs, now, disabledToggles } = opts;
   const today = etDate(now);
   // Types that fired for a user in THIS evaluation, so 52W can be suppressed
   // without waiting for the DB write to become visible
@@ -143,6 +180,11 @@ async function evaluateMilestonesForTicker(opts: {
     if (!crossed) continue;
 
     for (const userId of userIds) {
+      // Respect the user's Alert Settings switch for this milestone family
+      // (fall back to the raw type so a future def missing from TOGGLE_TYPE
+      // still produces a well-formed key instead of "userId:undefined")
+      if (disabledToggles.has(`${userId}:${TOGGLE_TYPE[def.type] ?? def.type}`)) continue;
+
       const dayKey = `${ticker}-${userId}-${def.type}-${today}`;
       if (recentNotifications.get(dayKey)) continue;
 
@@ -223,6 +265,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
 
     const allTickers = tickerHolders.map(t => t.ticker);
     const { quotes } = await fetchPrices(allTickers);
+    const disabledToggles = await getDisabledMilestoneToggles();
 
     for (const { ticker, userIds } of tickerHolders) {
       // Only regular-session prints count as official highs/lows — thin
@@ -243,6 +286,7 @@ export async function checkMilestoneAlerts(): Promise<void> {
         thresholds,
         defs: INTRADAY_MILESTONES,
         now,
+        disabledToggles,
       });
 
       // Small delay to avoid rate limiting
@@ -283,6 +327,7 @@ export async function checkMilestoneCloseAlerts(): Promise<void> {
     }
 
     const today = etDate(now);
+    const disabledToggles = await getDisabledMilestoneToggles();
 
     for (const { ticker, userIds } of tickerHolders) {
       // Assets that never close (crypto, futures) have no closing print
@@ -302,6 +347,7 @@ export async function checkMilestoneCloseAlerts(): Promise<void> {
         thresholds,
         defs: CLOSE_MILESTONES,
         now,
+        disabledToggles,
       });
 
       // Small delay to avoid rate limiting
