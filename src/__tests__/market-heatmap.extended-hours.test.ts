@@ -93,6 +93,37 @@ describe('getHeatmapData — extended-hours overlay (1D)', () => {
     expect(googl?.price).toBe(106.84);
   });
 
+  it('splits regular vs after-hours from regularClose when currentPrice carries the extended print (real provider shape)', async () => {
+    // Every live provider (Polygon batch, quote-refresh merge, fetchPrices Yahoo overlay)
+    // writes the extended print into BOTH currentPrice and extendedPrice, with the true
+    // 4 PM close in regularClose. The After-hours→Regular toggle collapsed to a no-op when
+    // regularChangePercent was derived from currentPrice. The overlay shape also lacks
+    // extendedChangePercent — regularClose alone must qualify the row as extended.
+    mocks.getMarketSession.mockReturnValue('POST');
+    mocks.fetchPrices.mockResolvedValue({
+      quotes: new Map([
+        ['GOOGL', {
+          currentPrice: 106.84,      // extended print (as the batch overlay writes it)
+          previousClose: 100,
+          change: 6.84,
+          changePercent: 6.84,       // blended — already carries the AH move
+          extendedPrice: 106.84,
+          regularClose: 99.84,       // today's 4 PM close
+          // no extendedChangePercent — fetchPrices overlay doesn't set it
+        }],
+      ]),
+    });
+
+    const { getHeatmapData } = await import('../services/market-heatmap.service');
+    const resp = await getHeatmapData('1D');
+
+    const googl = resp.sectors[0]?.stocks[0];
+    expect(googl?.changePercent).toBeCloseTo(6.84, 1);          // After-hours view
+    expect(googl?.regularChangePercent).toBeCloseTo(-0.16, 2);  // Regular view — NOT 6.84
+    expect(googl?.price).toBe(106.84);
+    expect(googl?.regularPrice).toBe(99.84);
+  });
+
   it('falls back to regular-session changePercent when no extended-hours fields are present', async () => {
     mocks.getMarketSession.mockReturnValue('REG');
     mocks.fetchPrices.mockResolvedValue({

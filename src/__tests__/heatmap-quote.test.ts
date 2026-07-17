@@ -22,6 +22,25 @@ describe('deriveHeatmapQuoteFields', () => {
     expect(f.regularPrice).toBe(99.84);
   });
 
+  it('real provider shape: currentPrice carries the extended print, regularClose splits the sessions', () => {
+    // Polygon batch / quote-refresh / fetchPrices overlay all write the extended print
+    // into BOTH currentPrice and extendedPrice; the 4 PM close travels in regularClose.
+    // The overlay shape also lacks extendedChangePercent — regularClose alone qualifies.
+    const f = deriveHeatmapQuoteFields({
+      currentPrice: 106.84,
+      previousClose: 100,
+      change: 6.84,
+      changePercent: 6.84,
+      extendedPrice: 106.84,
+      regularClose: 99.84,
+    });
+    expect(f.source).toBe('extended');
+    expect(f.changePercent).toBeCloseTo(6.84, 2);
+    expect(f.price).toBe(106.84);
+    expect(f.regularChangePercent).toBeCloseTo(-0.16, 2);
+    expect(f.regularPrice).toBe(99.84);
+  });
+
   it('no extended print: regular equals the change and price is the regular price', () => {
     const f = deriveHeatmapQuoteFields({
       currentPrice: 101.5,
