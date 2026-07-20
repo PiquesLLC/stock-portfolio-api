@@ -29,8 +29,18 @@ interface QuoteSnapshotEntry {
 let rateLimitBackoffUntil: number = 0;
 const RATE_LIMIT_BACKOFF_MS = 60000; // 1 minute backoff on 429
 
-// Track if we have access to premium endpoints
+// Track if we have access to premium endpoints. A 403 (payment lapse, plan
+// downgrade) records "no access" only until premiumRecheckAt — after that the
+// snapshot endpoint is probed again, so restored billing heals a running
+// process. A permanent false here kept every process in free-tier crawl mode
+// after the 2026-07 payment lapse until it was manually restarted.
 let hasPremiumAccess: boolean | null = null;
+let premiumRecheckAt = 0;
+const PREMIUM_RECHECK_MS = 10 * 60 * 1000; // re-probe snapshot access every 10 min while unauthorized
+
+// Free-tier sequential crawl ceiling: at 1.2s/ticker a large batch (the
+// 500-ticker heatmap) would stall the request for minutes and trip 429s.
+const FREE_TIER_MAX_FETCHES = 8;
 
 // Track last successful Polygon response (ms since epoch)
 let lastPolygonSuccessMs = 0;
@@ -635,9 +645,14 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
     };
   }
 
-  // Try snapshot endpoint first if we haven't determined access level
-  // or if we know we have premium access
-  if (hasPremiumAccess === null || hasPremiumAccess === true) {
+  // Try snapshot endpoint if we haven't determined access level, know we have
+  // premium access, or the earlier "no access" verdict is due a re-probe.
+  if (hasPremiumAccess !== false || now >= premiumRecheckAt) {
+    // Arm the throttle up front: if this is a re-probe while unauthorized, a
+    // transient failure below must not leave the gate re-firing every request.
+    if (hasPremiumAccess === false) {
+      premiumRecheckAt = now + PREMIUM_RECHECK_MS;
+    }
     try {
       const tickerList = uncachedTickers.join(',');
       const response = await axios.get<PolygonSnapshotResponse>(
@@ -778,6 +793,7 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
       if (axiosError.response?.status === 403 || responseData?.status === 'NOT_AUTHORIZED') {
         console.log('[Polygon] Snapshot endpoint not authorized, falling back to free tier');
         hasPremiumAccess = false;
+        premiumRecheckAt = Date.now() + PREMIUM_RECHECK_MS;
       } else if (axiosError.response?.status === 429) {
         console.warn('[Polygon] Rate limited, entering backoff mode');
         rateLimitBackoffUntil = now + RATE_LIMIT_BACKOFF_MS;
@@ -790,7 +806,27 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
 
   // Fall back to free tier: individual previous day requests
   // Free tier is limited to 5 requests/minute, so we need to be careful
-  if (hasPremiumAccess === false) {
+  if (hasPremiumAccess === false && uncachedTickers.length > FREE_TIER_MAX_FETCHES) {
+    // Batch too large to crawl sequentially — serve backup cache and report the
+    // rest failed so callers' fallback providers (Finnhub/Yahoo/candles) take over.
+    console.log(`[Polygon] Free tier: batch of ${uncachedTickers.length} exceeds crawl cap (${FREE_TIER_MAX_FETCHES}), serving cache only`);
+    for (const ticker of uncachedTickers) {
+      const backup = backupCache.get<Quote>(`polygon:${ticker}`);
+      if (backup && backup.currentPrice > 0) {
+        const quoteAge = Math.floor((Date.now() - (backup.updatedAt || backup.timestamp * 1000)) / 1000);
+        quotes.set(ticker, {
+          ...backup,
+          isRepricing: true,
+          isStale: true,
+          quoteAgeSeconds: quoteAge,
+        });
+        repricingCount++;
+        staleCount++;
+      } else {
+        failedTickers.push(ticker);
+      }
+    }
+  } else if (hasPremiumAccess === false) {
     console.log(`[Polygon] Using free tier for ${uncachedTickers.length} tickers`);
 
     // Fetch sequentially with delay to avoid rate limits
@@ -850,6 +886,12 @@ export async function getPolygonQuotes(tickers: string[]): Promise<PolygonQuotes
         await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS_MS));
       }
     }
+  } else {
+    // hasPremiumAccess is null/true yet the snapshot attempt above didn't
+    // return — it failed transiently (timeout/5xx/non-OK). Report the uncached
+    // tickers as failed so callers' fallback providers (Finnhub/Yahoo/candles)
+    // still cover them this request instead of silently dropping them.
+    failedTickers.push(...uncachedTickers);
   }
 
   return {
@@ -954,6 +996,8 @@ export function clearPolygonCache(): void {
 export function clearAllPolygonCaches(): void {
   cache.flushAll();
   backupCache.flushAll();
+  hasPremiumAccess = null;
+  premiumRecheckAt = 0;
 }
 
 /**
