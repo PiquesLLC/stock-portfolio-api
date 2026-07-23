@@ -1,6 +1,7 @@
 import axios from 'axios';
 import appleSignin from 'apple-signin-auth';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { generateAccessToken, generateRefreshToken, CURRENT_POLICY_VERSION } from './auth.service';
@@ -392,6 +393,17 @@ export async function issueTokens(user: OAuthUser): Promise<{
 
 const OAUTH_SIGNUP_TOKEN_TTL_SECONDS = 10 * 60;
 
+// Dedicated signing key for the signup token, DERIVED from jwtSecret (no new env
+// var). It is deliberately DIFFERENT from config.jwtSecret so a signup token can
+// NEVER satisfy the access-token verifier (verifyTokenDetailed trusts jwtSecret +
+// HS256 and does no DB lookup — a jwtSecret-signed token with no userId would
+// otherwise authenticate as userId:undefined and collapse Prisma tenant scoping
+// to `where: {}`). Rotates automatically with jwtSecret.
+const OAUTH_SIGNUP_SECRET = crypto
+  .createHmac('sha256', config.jwtSecret)
+  .update('oauth-signup-token-v1')
+  .digest('hex');
+
 export interface OAuthSignupTokenPayload {
   purpose: 'oauth_signup';
   provider: 'google' | 'apple';
@@ -410,17 +422,17 @@ export function signOAuthSignupToken(
     profile,
     ...(appleName ? { appleName } : {}),
   };
-  return jwt.sign(payload, config.jwtSecret, { expiresIn: OAUTH_SIGNUP_TOKEN_TTL_SECONDS });
+  return jwt.sign(payload, OAUTH_SIGNUP_SECRET, { algorithm: 'HS256', expiresIn: OAUTH_SIGNUP_TOKEN_TTL_SECONDS });
 }
 
 /**
- * Returns null for any invalid, expired, or wrong-purpose token. An access
- * token can never pass here (no `purpose` claim), and a signup token can never
- * act as an access token (no `userId`, so auth middleware's user lookup fails).
+ * Returns null for any invalid, expired, or wrong-purpose token. The dedicated
+ * key means an access token can never verify here and this token can never
+ * verify as an access token; the `purpose`/shape checks below are belt-and-braces.
  */
 export function verifyOAuthSignupToken(token: string): OAuthSignupTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, config.jwtSecret);
+    const decoded = jwt.verify(token, OAUTH_SIGNUP_SECRET, { algorithms: ['HS256'] });
     if (typeof decoded !== 'object' || decoded === null) return null;
     const payload = decoded as Partial<OAuthSignupTokenPayload>;
     if (payload.purpose !== 'oauth_signup') return null;

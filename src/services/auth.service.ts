@@ -630,10 +630,24 @@ export async function revokeAllRefreshTokens(userId: string): Promise<void> {
  */
 export function verifyToken(token: string): JwtPayload | null {
   try {
-    return jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
+    return isAccessTokenPayload(payload) ? payload : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * A genuine access token ALWAYS carries a non-empty string `userId` and never a
+ * `purpose` claim. Reject anything else so a cryptographically-valid but
+ * non-access token (e.g. a purpose-scoped signup token that happened to be
+ * signed with the same key) can never be replayed as a session — which would
+ * authenticate as userId:undefined and collapse Prisma tenant scoping to `where:{}`.
+ */
+function isAccessTokenPayload(payload: unknown): payload is JwtPayload {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const p = payload as Record<string, unknown>;
+  return typeof p.userId === 'string' && p.userId.length > 0 && p.purpose === undefined;
 }
 
 /**
@@ -643,11 +657,17 @@ export function verifyToken(token: string): JwtPayload | null {
 export function verifyTokenDetailed(token: string): { payload: JwtPayload | null; expired: boolean } {
   try {
     const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
+    // Reject valid-signature tokens that are not access tokens (e.g. a signup
+    // token). Without this, requireAuth/optionalAuth would set req.user to a
+    // userId-less payload and every `where: { userId }` query would go unscoped.
+    if (!isAccessTokenPayload(payload)) return { payload: null, expired: false };
     return { payload, expired: false };
   } catch (err) {
     if (err instanceof TokenExpiredError) {
       // Decode without verifying expiry to get the payload
       const decoded = jwt.decode(token) as JwtPayload | null;
+      // Same guard on the expiry path — never surface a non-access payload.
+      if (!isAccessTokenPayload(decoded)) return { payload: null, expired: false };
       return { payload: decoded, expired: true };
     }
     return { payload: null, expired: false };

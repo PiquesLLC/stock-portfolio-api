@@ -37,9 +37,12 @@ import {
 } from '../services/auth.service';
 
 import { requireAuth, optionalAuth, requireOwnership } from '../middleware/auth.middleware';
+import { signOAuthSignupToken } from '../services/oauth.service';
 
 // Import Express app for integration tests
 import app from '../app';
+
+const TEST_JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-key-for-testing-only';
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH SERVICE UNIT TESTS
@@ -137,6 +140,25 @@ describe('Auth Service', () => {
       const payload = verifyToken('not-a-real-token');
       expect(payload).toBeNull();
     });
+
+    // ── Regression: a purpose-scoped OAuth signup token must NEVER verify as an
+    // access token. It carries no userId; if accepted, requireAuth would set
+    // req.user = { userId: undefined } and every `where: { userId }` query would
+    // run unscoped (Prisma drops undefined filters) → cross-tenant read/write.
+    it('should return null for an OAuth signup token (dedicated key)', () => {
+      const token = signOAuthSignupToken('google', { providerId: 'sub-1', email: 'x@example.com', emailVerified: true });
+      expect(verifyToken(token)).toBeNull();
+    });
+
+    it('should return null for a jwtSecret-signed token that lacks userId', () => {
+      const token = jwt.sign({ purpose: 'oauth_signup', provider: 'google', profile: { providerId: 'sub-1' } }, TEST_JWT_SECRET, { expiresIn: 600 });
+      expect(verifyToken(token)).toBeNull();
+    });
+
+    it('should return null for a jwtSecret-signed token that carries a purpose claim', () => {
+      const token = jwt.sign({ userId: 'attacker', purpose: 'oauth_signup' }, TEST_JWT_SECRET, { expiresIn: 600 });
+      expect(verifyToken(token)).toBeNull();
+    });
   });
 
   // â”€â”€ Detailed Token Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -168,6 +190,39 @@ describe('Auth Service', () => {
       const result = verifyTokenDetailed(token);
       expect(result.expired).toBe(false);
       expect(result.payload).toBeNull();
+    });
+
+    it('should reject an OAuth signup token (not an access token)', () => {
+      const token = signOAuthSignupToken('apple', { providerId: 'sub-2' });
+      const result = verifyTokenDetailed(token);
+      expect(result.payload).toBeNull();
+    });
+
+    it('should reject a jwtSecret-signed userId-less token (defense-in-depth)', () => {
+      const token = jwt.sign({ purpose: 'oauth_signup', provider: 'google', profile: { providerId: 'sub-3' } }, TEST_JWT_SECRET, { expiresIn: 600 });
+      const result = verifyTokenDetailed(token);
+      expect(result.payload).toBeNull();
+    });
+  });
+
+  // ── Regression: signup token cannot be replayed against a requireAuth route ──
+  // Proves the fix end-to-end through the real middleware + a real requireAuth-only
+  // endpoint. Before the fix this returned 200 with an all-tenant result set.
+  describe('OAuth signup token cannot authenticate a requireAuth route', () => {
+    it('rejects a signup token as a Bearer access token on GET /insights/anomalies', async () => {
+      const signupToken = signOAuthSignupToken('google', { providerId: 'sub-9', email: 'attacker@example.com', emailVerified: true });
+      const res = await request(app)
+        .get('/insights/anomalies')
+        .set('Authorization', `Bearer ${signupToken}`);
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a userId-less jwtSecret token on the mark-all-read write route', async () => {
+      const forged = jwt.sign({ purpose: 'oauth_signup', profile: { providerId: 'sub-9' } }, TEST_JWT_SECRET, { expiresIn: 600 });
+      const res = await request(app)
+        .post('/insights/anomalies/mark-all-read')
+        .set('Authorization', `Bearer ${forged}`);
+      expect(res.status).toBe(401);
     });
   });
 
