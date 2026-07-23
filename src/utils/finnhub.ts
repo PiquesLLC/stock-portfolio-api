@@ -135,6 +135,14 @@ async function fetchAndCacheQuote(
         }
       }
 
+      // All-zeros (c=0, pc=0) is Finnhub's deterministic "not covered" answer
+      // (delisted symbols, closed acquisitions). Retrying it burns the shared
+      // 60/min budget and rate-limit-poisons healthy tickers for 60s windows.
+      if (lastError.message.startsWith('No data found for ticker')) {
+        console.warn(`Finnhub has no data for ${upperTicker} (not retrying)`);
+        break;
+      }
+
       console.warn(`Attempt ${attempt + 1} failed for ${upperTicker}:`, lastError.message);
     }
   }

@@ -41,6 +41,8 @@ import { refreshPoliticianRoster } from './services/politician.service';
 import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
+import { startWalWatchdog } from './services/db-watchdog.service';
+import { scheduleDailyAtUTC } from './utils/daily-schedule';
 import { scheduleSnapshotRetention } from './services/snapshot-retention.service';
 import { cleanupStaleData } from './services/cleanup.service';
 import { runDiskGuard } from './services/disk-guard.service';
@@ -450,6 +452,14 @@ const server = app.listen(config.port, async () => {
 
   // Must run before any DB operations — enables concurrent reads + write queuing
   await initSqlitePragmas();
+
+  // Single-row table backing GET /health/deep's write probe. Raw SQL (not a
+  // Prisma model) so it needs no migration and can't collide with one.
+  try {
+    await prisma.$executeRawUnsafe('CREATE TABLE IF NOT EXISTS "HealthProbe" ("id" INTEGER PRIMARY KEY, "ts" TEXT NOT NULL)');
+  } catch (e) {
+    console.error('[Init] HealthProbe bootstrap failed (deep health write probe will report degraded):', e instanceof Error ? e.message : e);
+  }
 
   // Restore candle cache from disk so intelligence 5D/1M works immediately after deploy
   restoreCandleCache();
@@ -1097,10 +1107,16 @@ const server = app.listen(config.port, async () => {
   // pre-fetching fundamentals + earnings so data is ready before users search
   startFundamentalsPrefetch();
 
-  // Database backup — daily automated backup of SQLite database
-  console.log('[Backup] Scheduled daily');
-  setTimeout(() => backupDatabase(), 30000);
-  setInterval(() => backupDatabase(), 24 * 60 * 60 * 1000);
+  // Database backup — daily at a FIXED off-peak hour (03:10 ET). Was
+  // boot-anchored (setTimeout 30s + setInterval 24h), which let the weekly
+  // Monday-morning content deploy pin it to 12:12 UTC pre-market, where the
+  // 1.2GB snapshot collided with retention + the daily fleet + market load
+  // and triggered the 2026-07-14 write-timeout outage.
+  scheduleDailyAtUTC(7, 10, () => void backupDatabase(), 'db-backup');
+
+  // WAL watchdog — passive checkpoints + Sentry alert on checkpoint
+  // starvation (the 2026-07-14 sustainer: WAL pinned at 258MB for hours).
+  startWalWatchdog();
 
   // Snapshot retention — nightly prune so 60s snapshots can't refill the
   // volume (2026-07 incident). No-op until SNAPSHOT_RETENTION_ENABLED=true

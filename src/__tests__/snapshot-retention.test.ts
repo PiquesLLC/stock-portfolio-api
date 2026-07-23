@@ -28,7 +28,9 @@ describe('snapshot-retention.service', () => {
 
     expect(res.skipped).toBe(false);
     const sqls = raw().mock.calls.map(c => String(c[0]));
-    expect(sqls.some(s => s.includes('DELETE FROM "PortfolioSnapshot"') && s.includes('MAX(p2."timestamp")'))).toBe(true);
+    expect(sqls.some(s => s.includes('CREATE TABLE "_retention_ps_keeper"') && s.includes('MAX(ps."timestamp")'))).toBe(true);
+    expect(sqls.some(s => s.includes('DELETE FROM "PortfolioSnapshot"') && s.includes('NOT EXISTS'))).toBe(true);
+    expect(sqls.some(s => s.includes('DROP TABLE IF EXISTS "_retention_ps_keeper"'))).toBe(true);
     expect(sqls.some(s => s.includes('DELETE FROM "HoldingSnapshot"'))).toBe(true);
     expect(sqls.some(s => s.includes('DELETE FROM "RefreshToken"'))).toBe(true);
     expect(sqls.some(s => s.includes('DELETE FROM "BackgroundJobRun"'))).toBe(true);
@@ -39,8 +41,12 @@ describe('snapshot-retention.service', () => {
 
   it('keeps deleting chunks until a partial chunk returns', async () => {
     process.env.SNAPSHOT_RETENTION_ENABLED = 'true';
-    // First delete statement (PortfolioSnapshot) returns two full chunks then a partial
+    // Keeper drop/create/index run first, then the PortfolioSnapshot chunks
+    // return two full chunks and a partial
     raw()
+      .mockResolvedValueOnce(0)    // keeper drop
+      .mockResolvedValueOnce(0)    // keeper create
+      .mockResolvedValueOnce(0)    // keeper index
       .mockResolvedValueOnce(5000)
       .mockResolvedValueOnce(5000)
       .mockResolvedValueOnce(123)
@@ -53,6 +59,9 @@ describe('snapshot-retention.service', () => {
   it('survives a mid-sequence failure and reports partial progress', async () => {
     process.env.SNAPSHOT_RETENTION_ENABLED = 'true';
     raw()
+      .mockResolvedValueOnce(0)    // keeper drop
+      .mockResolvedValueOnce(0)    // keeper create
+      .mockResolvedValueOnce(0)    // keeper index
       .mockResolvedValueOnce(10)   // PortfolioSnapshot chunk (partial -> stop)
       .mockRejectedValueOnce(new Error('SQLITE_CORRUPT: database disk image is malformed'));
 

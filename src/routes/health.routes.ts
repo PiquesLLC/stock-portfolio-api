@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { healthCheck, healthStatus, authMetrics, apiUsage, webhookMetrics, jobMetrics, providerMetrics } from '../controllers/health.controller';
+import { healthCheck, healthDeep, healthStatus, authMetrics, apiUsage, webhookMetrics, jobMetrics, providerMetrics } from '../controllers/health.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { config } from '../config';
 import { AuthRequest } from '../types/auth';
@@ -17,8 +17,13 @@ function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
 
 const router = Router();
 
-// Basic health check — public (BetterStack uptime monitoring needs it)
+// Basic health check — public (Railway's deploy healthcheck gates on this;
+// it must stay pure liveness so a DB brownout can't block deploying a fix)
 router.get('/', healthCheck);
+// Deep health — public, probes an actual DB write with a short timeout and
+// returns 503 when writes are failing. Point BetterStack at THIS path: during
+// the 2026-07-14 write outage the shallow check stayed green for 4¾ hours.
+router.get('/deep', healthDeep);
 // Status endpoint — any authenticated user (UI uses this for health indicator)
 router.get('/status', requireAuth, healthStatus);
 // Detailed metrics — admin only (exposes internal data)

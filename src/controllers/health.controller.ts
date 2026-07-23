@@ -8,7 +8,9 @@ import { getAuthMetrics } from '../utils/auth-metrics';
 import { getWebhookMetrics } from '../utils/webhook-metrics';
 import { getProviderMetrics } from '../utils/provider-metrics';
 import prisma from '../utils/prisma';
-import { getJobRunnerMetrics, getActiveBackgroundJobCount } from '../services/job-runner.service';
+import { getJobRunnerMetrics, getActiveBackgroundJobCount, isDbBrownout } from '../services/job-runner.service';
+import { getWalWatchdogState } from '../services/db-watchdog.service';
+import { getLastBackupStatus } from '../services/backup.service';
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
   const response: {
@@ -29,6 +31,84 @@ export async function healthCheck(_req: Request, res: Response): Promise<void> {
   }
 
   res.json(response);
+}
+
+// Race a promise against a deadline. The loser keeps running (a stuck DB
+// write can't be cancelled) but the health response must return promptly.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      const t = setTimeout(() => reject(new Error(`probe timeout after ${ms}ms`)), ms);
+      t.unref();
+    }),
+  ]);
+}
+
+const PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * Deep health: exercises a real DB read AND a real DB write (single-row
+ * upsert into HealthProbe, bootstrapped at startup) with a short deadline.
+ * 503 when the write path is down — that is exactly the state of the
+ * 2026-07-14 outage, which the shallow /health could not see. Also surfaces
+ * WAL-watchdog and job-runner brownout state for one-glance diagnosis.
+ */
+export async function healthDeep(_req: Request, res: Response): Promise<void> {
+  const startedAt = Date.now();
+  let readOk = false;
+  let readMs = -1;
+  let writeOk = false;
+  let writeMs = -1;
+  let error: string | undefined;
+
+  try {
+    const t0 = Date.now();
+    await withTimeout(prisma.$queryRawUnsafe('SELECT 1'), PROBE_TIMEOUT_MS);
+    readMs = Date.now() - t0;
+    readOk = true;
+  } catch (e) {
+    error = `read: ${(e as Error).message}`;
+  }
+
+  if (readOk) {
+    try {
+      const t0 = Date.now();
+      await withTimeout(
+        prisma.$executeRawUnsafe(
+          `INSERT INTO "HealthProbe" ("id", "ts") VALUES (1, '${new Date().toISOString()}')
+           ON CONFLICT("id") DO UPDATE SET "ts" = excluded."ts"`,
+        ),
+        PROBE_TIMEOUT_MS,
+      );
+      writeMs = Date.now() - t0;
+      writeOk = true;
+    } catch (e) {
+      error = `write: ${(e as Error).message}`;
+    }
+  }
+
+  const wal = getWalWatchdogState();
+  const healthy = readOk && writeOk;
+  const body: Record<string, unknown> = {
+    status: healthy ? 'ok' : 'degraded',
+    db: { readOk, readMs, writeOk, writeMs, brownout: isDbBrownout() },
+    wal: { bytes: wal.walBytes, lastCheckAt: wal.lastCheckAt, lastCheckpoint: wal.lastCheckpoint },
+    lastBackup: getLastBackupStatus(),
+    uptimeSec: Math.round(process.uptime()),
+    commit: (process.env.RAILWAY_GIT_COMMIT_SHA || 'local').slice(0, 7),
+    totalMs: Date.now() - startedAt,
+  };
+  if (error) body.error = error;
+
+  if (fs.existsSync('/data')) {
+    const stats = fs.statfsSync('/data');
+    const totalMB = Math.round((stats.bsize * stats.blocks) / 1024 / 1024);
+    const freeMB = Math.round((stats.bsize * stats.bavail) / 1024 / 1024);
+    body.disk = { totalMB, freeMB, usedPercent: Math.round(((totalMB - freeMB) / totalMB) * 100) };
+  }
+
+  res.status(healthy ? 200 : 503).json(body);
 }
 
 export async function authMetrics(req: Request, res: Response): Promise<void> {

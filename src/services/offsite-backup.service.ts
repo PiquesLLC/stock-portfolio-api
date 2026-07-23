@@ -32,13 +32,12 @@ import {
 } from '@aws-sdk/client-s3';
 import * as Sentry from '@sentry/node';
 import { BACKUP_DIR } from './backup.service';
+import { scheduleDailyAtUTC } from '../utils/daily-schedule';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const INITIAL_DELAY_MS = 60 * 60 * 1000; // 1h after local backup window
 const KEEP_DAYS = 30; // Retention; older objects pruned on each successful run.
 
-let timer: ReturnType<typeof setTimeout> | null = null;
-let interval: ReturnType<typeof setInterval> | null = null;
+let scheduled: { cancel: () => void } | null = null;
 let running = false;
 
 function reportCritical(message: string, extra?: Record<string, unknown>): void {
@@ -340,21 +339,17 @@ async function runOnce(): Promise<void> {
  * boot normally.
  */
 export function scheduleOffsiteBackups(): void {
-  if (timer) clearTimeout(timer);
-  if (interval) clearInterval(interval);
+  if (scheduled) scheduled.cancel();
+  scheduled = null;
 
   if (!readConfig()) {
     console.log('[Offsite] R2_* env vars not set — daily off-site ship NOT scheduled.');
     return;
   }
 
-  console.log('[Offsite] Scheduled daily (first run in 1h, then every 24h).');
-  timer = setTimeout(() => {
-    void runOnce();
-    interval = setInterval(() => void runOnce(), DAY_MS);
-    interval.unref();
-  }, INITIAL_DELAY_MS);
-  timer.unref();
+  // Fixed hour, 1h after the 07:10 UTC local backup so the file it ships is
+  // already written + verified. (Was boot-anchored — see daily-schedule.ts.)
+  scheduled = scheduleDailyAtUTC(8, 10, () => void runOnce(), 'offsite-backup');
 }
 
 // Exported for testing + ad-hoc invocations.

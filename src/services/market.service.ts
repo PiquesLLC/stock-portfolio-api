@@ -985,8 +985,74 @@ export async function fetchPrices(tickers: string[], _options?: { preferPolygon?
   return result;
 }
 
+// Symbols with no live feed on ANY provider (delistings, closed acquisitions —
+// e.g. K→Mars, KLG→Ferrero, EXAS). Users still hold/watch them. Serving the
+// final traded bar keeps portfolios and detail pages rendering instead of
+// 500ing, and the negative cache stops dead symbols from burning the shared
+// Finnhub 60/min budget on every request (their collateral 429s were knocking
+// out quotes for healthy tickers). 1h TTLs so a transient all-provider outage
+// misclassifying a live ticker self-heals within the hour.
+const lastKnownQuoteCache = new NodeCache({ stdTTL: 3600 });
+const deadSymbolCache = new NodeCache({ stdTTL: 3600 });
+
+async function fetchLastKnownQuote(ticker: string): Promise<Quote | null> {
+  const upper = ticker.toUpperCase();
+  const cached = lastKnownQuoteCache.get<Quote>(`last:${upper}`);
+  if (cached) {
+    return {
+      ...cached,
+      quoteAgeSeconds: Math.floor((Date.now() - (cached.updatedAt || 0)) / 1000),
+    };
+  }
+
+  // Wide window: a symbol delisted months ago still returns its final bars.
+  // Bounded: this path also runs for genuinely-unknown symbols (typos), and
+  // fetchStockDetails' no-quote disambiguation must not hang behind a stalled
+  // aggs call — 1s is generous for one Polygon daily-aggs roundtrip.
+  const candles = await withSoftTimeout(
+    fetchDailyCandles(upper, 370),
+    1000,
+    [] as IntradayCandle[],
+    `${upper} last-known candles`,
+  );
+  if (candles.length === 0) return null;
+  const last = candles[candles.length - 1];
+  const prev = candles.length > 1 ? candles[candles.length - 2] : last;
+  if (last.close <= 0) return null;
+
+  const change = last.close - prev.close;
+  const updatedAt = new Date(last.time).getTime();
+  const quote: Quote = {
+    ticker: upper,
+    currentPrice: last.close,
+    change,
+    changePercent: prev.close > 0 ? (change / prev.close) * 100 : 0,
+    high: last.high,
+    low: last.low,
+    open: last.open,
+    previousClose: prev.close,
+    timestamp: Math.floor(updatedAt / 1000),
+    updatedAt,
+    isStale: true,
+    isRepricing: false,
+    quoteAgeSeconds: Math.floor((Date.now() - updatedAt) / 1000),
+    session: getMarketSessionForTicker(upper),
+  };
+  lastKnownQuoteCache.set(`last:${upper}`, quote);
+  return quote;
+}
+
 export async function fetchQuote(ticker: string): Promise<Quote> {
   let quote: Quote;
+
+  const upperTicker = ticker.toUpperCase();
+  // Known-dead symbol: skip the live-provider gauntlet entirely — each pass
+  // costs Finnhub retries plus 60s of rate-limit poisoning for other tickers.
+  if (deadSymbolCache.has(`dead:${upperTicker}`)) {
+    const lastKnown = await fetchLastKnownQuote(upperTicker);
+    if (lastKnown) return lastKnown;
+    throw new Error(`No quote available for ${upperTicker}`);
+  }
 
   // Polygon primary — paid plan, handles extended hours natively via lastTrade
   try {
@@ -998,8 +1064,30 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
     } catch {
       // Both failed — try Yahoo as last resort
       const yahooQuote = await fetchYahooQuote(ticker);
-      if (!yahooQuote) throw new Error(`No quote available for ${ticker}`);
-      quote = yahooQuote;
+      if (yahooQuote) {
+        quote = yahooQuote;
+      } else {
+        // No live feed anywhere. Serve the final traded bar (frozen, isStale)
+        // if we have one. Sticky-mark the symbol dead ONLY when that bar is
+        // itself old — a live ticker caught in a momentary all-provider
+        // outage has a fresh bar and must keep retrying the live chain, and
+        // a symbol with no bar at all (typo, Yahoo-only symbology) must never
+        // be sticky-marked off a single failure.
+        const lastKnown = await fetchLastKnownQuote(upperTicker);
+        if (!lastKnown) throw new Error(`No quote available for ${ticker}`);
+        const lastBarAgeMs = Date.now() - (lastKnown.updatedAt || 0);
+        if (lastBarAgeMs > 7 * 86400000) {
+          deadSymbolCache.set(`dead:${upperTicker}`, true);
+          console.warn(
+            `[Quote] ${upperTicker} has no live feed and its last bar is ${Math.round(lastBarAgeMs / 86400000)}d old — serving frozen close (${lastKnown.currentPrice}), pausing live fetches for 1h`,
+          );
+        } else {
+          console.warn(
+            `[Quote] ${upperTicker}: all live providers failed — serving last known close (${lastKnown.currentPrice}) without pausing live fetches`,
+          );
+        }
+        return lastKnown;
+      }
     }
   }
 
