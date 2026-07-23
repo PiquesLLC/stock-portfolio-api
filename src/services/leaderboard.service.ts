@@ -150,6 +150,24 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   }
   const settingsMap = new Map(allSettings.map(s => [s.userId, s]));
 
+  // Users whose composition changed during the window. The per-user return below applies
+  // CURRENT shares to the window-start price, so buying an already-appreciated stock
+  // mid-window would credit that user with its PAST run-up (a gaming vector). For these
+  // users we fall back to their recorded snapshot return and flag the entry. F-M-15.
+  const compChangedUserIds = new Set<string>();
+  try {
+    const compGroups = await prisma.activityEvent.groupBy({
+      by: ['userId'],
+      where: {
+        userId: { in: userIds },
+        type: { in: ['holding_added', 'holding_removed', 'holding_updated'] },
+        createdAt: { gte: windowStart },
+      },
+      _count: { _all: true },
+    });
+    for (const g of compGroups) if (g.userId) compChangedUserIds.add(g.userId);
+  } catch { /* activity events are best-effort; absence just skips the guard */ }
+
   for (const user of users) {
     if (!user.trackingStartAt) continue;
 
@@ -236,6 +254,8 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     // ---- Compute returns from REAL price data, not snapshots ----
     let returnPct: number | null = null;
     let returnDollar: number = 0;
+    let flagged = false;
+    let flagReason: string | null = null;
 
     if (window === '1D' && prevCloseValue != null) {
       // 1D: use previousClose for accurate intraday return
@@ -247,14 +267,33 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       returnPct = (returnDollar / historicalValue) * 100;
     }
 
-    // TWR = simple return when there are no cashflows (deposits/withdrawals).
-    // Using candle-based computation, this is always accurate.
+    // Composition guard (F-M-15): if the user's composition changed during the window, the
+    // current-shares reconstruction above is biased — replace it with the actual recorded
+    // snapshot return and flag the entry; if too few snapshots exist to measure it, drop
+    // them from the ranking (null return) rather than rank an inflated number.
+    if (compChangedUserIds.has(user.id) && returnPct != null) {
+      const windowSnaps = await prisma.portfolioSnapshot.findMany({
+        where: { userId: user.id, timestamp: { gte: windowStart } },
+        orderBy: { timestamp: 'asc' },
+        select: { totalValue: true, netEquity: true },
+      });
+      const firstVal = windowSnaps.length > 0 ? (windowSnaps[0].netEquity ?? windowSnaps[0].totalValue) : null;
+      const lastVal = windowSnaps.length > 0 ? (windowSnaps[windowSnaps.length - 1].netEquity ?? windowSnaps[windowSnaps.length - 1].totalValue) : null;
+      if (windowSnaps.length >= 2 && firstVal != null && firstVal > 0 && lastVal != null) {
+        returnDollar = lastVal - firstVal;
+        returnPct = (returnDollar / firstVal) * 100;
+        flagReason = 'Composition changed during window — return from recorded snapshots';
+      } else {
+        returnPct = null;
+        returnDollar = 0;
+        flagReason = 'Composition changed during window — insufficient history to rank fairly';
+      }
+      flagged = true;
+    }
+
     const twrPct = returnPct != null ? Math.round(returnPct * 100) / 100 : null;
 
     // Anti-cheat: build daily return series from candle data for this user's portfolio
-    let flagged = false;
-    let flagReason: string | null = null;
-
     if (historicalValue != null && liveValue != null) {
       // Reconstruct daily portfolio values from candles for anti-cheat
       const dailyValues: number[] = [];

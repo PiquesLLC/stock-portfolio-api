@@ -5,6 +5,7 @@
 
 import prisma from '../utils/prisma';
 import { yahooGet } from '../utils/yahoo-http';
+import { fetchDailyCandles } from './market.service';
 
 /**
  * Check if DRIP is enabled for a user.
@@ -49,6 +50,32 @@ async function fetchCurrentPrice(ticker: string): Promise<number> {
 }
 
 /**
+ * Historical close for a ticker on (or the last trading day before) a given date.
+ * Used to price DRIP reinvestments of BACK-DATED dividends at the pay-date price
+ * instead of today's price. Returns null if no candle on/before the date exists. F-H-7.
+ */
+async function fetchCloseOnOrBefore(ticker: string, date: Date): Promise<number | null> {
+  try {
+    const daysBack = Math.ceil((Date.now() - date.getTime()) / 86400000) + 7;
+    if (daysBack <= 0) return null;
+    const candles = await fetchDailyCandles(ticker, daysBack);
+    if (!candles || candles.length === 0) return null;
+    const targetMs = date.getTime();
+    const usable = candles
+      .filter((c) => Number.isFinite(c.close) && c.close > 0)
+      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    let close: number | null = null;
+    for (const c of usable) {
+      if (new Date(c.time).getTime() <= targetMs) close = c.close;
+      else break;
+    }
+    return close;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reinvest a dividend credit into additional shares.
  * Creates a DividendReinvestment record, updates Holding shares and averageCost,
  * creates a Lot with source='drip', and deducts from cash balance.
@@ -69,7 +96,7 @@ export async function reinvestDividend(
   const targetUserId = userId;
   const credit = await prisma.dividendCredit.findFirst({
     where: { id: creditId, userId: targetUserId },
-    include: { reinvestment: true },
+    include: { reinvestment: true, dividendEvent: true },
   });
 
   if (!credit) {
@@ -83,8 +110,19 @@ export async function reinvestDividend(
   const ticker = credit.ticker;
   const amountToReinvest = credit.amountGross;
 
-  // Fetch current stock price
-  const pricePerShare = await fetchCurrentPrice(ticker);
+  // Price + date the reinvestment at the dividend's PAY DATE, not "now". This path
+  // is also invoked for back-dated dividends via backfillMissedDividends; pricing
+  // those at today's quote gave the wrong share count, cost basis, and lot date. F-H-7.
+  const payDate: Date | null = credit.dividendEvent?.payDate ?? null;
+  const isBackdated = payDate != null && Date.now() - payDate.getTime() > 2 * 86400000;
+  let pricePerShare: number | null = null;
+  if (isBackdated && payDate) {
+    pricePerShare = await fetchCloseOnOrBefore(ticker, payDate);
+  }
+  if (pricePerShare == null || !(pricePerShare > 0)) {
+    // Live dividend (pay date ≈ today) or no historical candle → current price.
+    pricePerShare = await fetchCurrentPrice(ticker);
+  }
 
   // Calculate shares to purchase (fractional shares allowed)
   const sharesPurchased = amountToReinvest / pricePerShare;
@@ -101,7 +139,9 @@ export async function reinvestDividend(
     throw new Error(`No holding found for ${ticker}`);
   }
 
-  const now = new Date();
+  // Date the DRIP lot to the pay date for back-dated dividends so the reinvested
+  // lot lands on the correct day; live dividends use the current time. F-H-7.
+  const now = isBackdated && payDate ? payDate : new Date();
 
   // Perform the reinvestment in a transaction
   const reinvestment = await prisma.$transaction(async (tx) => {
@@ -127,6 +167,7 @@ export async function reinvestDividend(
         totalAmount: amountToReinvest,
         fillDate: now,
         status: 'completed',
+        portfolioId: current.portfolioId ?? null,
       },
     });
 
@@ -156,6 +197,7 @@ export async function reinvestDividend(
         acquiredAt: now,
         source: 'drip',
         notes: `DRIP from dividend credit ${creditId}`,
+        portfolioId: current.portfolioId ?? null,
       },
     });
 

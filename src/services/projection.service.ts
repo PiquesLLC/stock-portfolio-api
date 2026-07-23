@@ -16,7 +16,7 @@ import { getSnapshotsAfter, getAllSnapshots, reconstructPortfolioHistory } from 
 import { getTotalDividendsBetween } from './dividend.service';
 
 import { config } from '../config';
-import { sharpeRatio } from '../utils/finance-math';
+import { sharpeRatio, TRADING_DAYS } from '../utils/finance-math';
 
 // Horizon periods in years
 const HORIZONS: { key: keyof ProjectionHorizons; years: number }[] = [
@@ -121,7 +121,7 @@ export async function getSP500Projections(userId: string, portfolioId?: string):
 /**
  * Calculate realized metrics from snapshot history
  */
-function calculateRealizedMetrics(
+export function calculateRealizedMetrics(
   snapshots: PortfolioSnapshot[],
   totalDividends: number
 ): { metrics: RealizedMetrics; notes: string[] } {
@@ -135,7 +135,17 @@ function calculateRealizedMetrics(
     };
   }
 
-  const values = snapshots.map((s) => s.netEquity ?? s.totalValue);
+  // Dedupe to one value per calendar day (last snapshot of each day) so volatility and
+  // drawdown are computed on DAILY returns. The snapshots are intraday; annualizing
+  // intraday returns by data frequency made this screen's vol/Sharpe inconsistent with
+  // every other screen. Matches the benchmark service's daily dedup + canonical √252. F-M-16.
+  const dailyValueMap = new Map<string, number>();
+  for (const s of snapshots) {
+    dailyValueMap.set(new Date(s.timestamp).toISOString().slice(0, 10), s.netEquity ?? s.totalValue);
+  }
+  const values = Array.from(dailyValueMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, v]) => v);
   const startValue = values[0];
   const endValue = values[values.length - 1];
 
@@ -146,10 +156,16 @@ function calculateRealizedMetrics(
   const yearsDiff = daysDiff / 365;
 
   // CAGR calculation: (endValue / startValue)^(1/years) - 1
-  // Include dividends in the total return
   let cagr: number | null = null;
   if (startValue > 0 && yearsDiff > 0) {
-    const totalReturn = (endValue + totalDividends) / startValue;
+    // Dividends are ALREADY reflected in endValue: dividend posting credits cash
+    // (dividend-post.service) which folds into snapshot totalValue/netEquity, and
+    // DRIP adds shares. Adding totalDividends again double-counted them and
+    // inflated CAGR (and every projection derived from it). See F-CRIT-2.
+    if (totalDividends > 0) {
+      notes.push('Dividends are included in portfolio value (not added separately to CAGR)');
+    }
+    const totalReturn = endValue / startValue;
     if (totalReturn > 0) {
       cagr = Math.pow(totalReturn, 1 / yearsDiff) - 1;
 
@@ -176,8 +192,8 @@ function calculateRealizedMetrics(
     }
   }
 
-  // Volatility: stddev of returns * sqrt(periods per year)
-  // Assume snapshots are roughly daily (or at interval seconds)
+  // Volatility: stddev of DAILY returns annualized by √252 (canonical) — consistent with
+  // the benchmark service and finance-math.annualizedVolatility. F-M-16.
   let volatility: number | null = null;
   if (periodReturns.length >= 2) {
     const meanReturn = periodReturns.reduce((a, b) => a + b, 0) / periodReturns.length;
@@ -185,9 +201,7 @@ function calculateRealizedMetrics(
     const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (periodReturns.length - 1);
     const stddev = Math.sqrt(variance);
 
-    // Annualize: assume periods per year based on actual data frequency
-    const periodsPerYear = periodReturns.length / yearsDiff;
-    volatility = stddev * Math.sqrt(periodsPerYear);
+    volatility = stddev * Math.sqrt(TRADING_DAYS);
 
     // Cap volatility at reasonable max
     if (volatility > 5) {
@@ -202,7 +216,7 @@ function calculateRealizedMetrics(
 
   // Max Drawdown: largest peak-to-trough decline
   let maxDrawdown: number | null = null;
-  if (values.length >= 2) {
+  if (values.length >= 2 && values[0] > 0) {
     let peak = values[0];
     let maxDD = 0;
 
@@ -210,9 +224,13 @@ function calculateRealizedMetrics(
       if (value > peak) {
         peak = value;
       }
-      const drawdown = (peak - value) / peak;
-      if (drawdown > maxDD) {
-        maxDD = drawdown;
+      // Guard peak > 0: netEquity can go non-positive under margin, and dividing by a
+      // non-positive peak produced out-of-range drawdowns (e.g. −150%). F-M-16.
+      if (peak > 0) {
+        const drawdown = (peak - value) / peak;
+        if (drawdown > maxDD) {
+          maxDD = drawdown;
+        }
       }
     }
 

@@ -59,6 +59,7 @@ export async function postDividendsForDate(date: Date = new Date(), userId?: str
               amountGross,
               creditedAt: event.payDate,
               status: 'posted',
+              portfolioId: holding.portfolioId ?? null,
             },
           });
 

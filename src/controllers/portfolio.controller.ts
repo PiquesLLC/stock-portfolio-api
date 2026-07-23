@@ -34,6 +34,8 @@ import {
 } from '../validators/portfolio.validators';
 import { PlanLimitError } from '../utils/plan-limit.error';
 import { validatePortfolioOwnership } from '../utils/validatePortfolioOwnership';
+import { fetchPrice, fetchPrices } from '../services/market.service';
+import { computeCompensatingCashflow } from '../utils/compensating-cashflow';
 import { isValidLedgerEventType, normalizeSourceBroker } from '../services/ledger/settlement-policy';
 import { parseNumber } from '../utils/parse-number';
 import { getAccountHistory, HistoryCategory } from '../services/account-history.service';
@@ -164,6 +166,12 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
     const existingHoldings = await getHoldings(req.user!.userId, portfolioId);
     const existingHolding = existingHoldings.find(h => h.ticker === ticker.toUpperCase());
 
+    // Market price for the compensating TWR cash-flow (see computeCompensatingCashflow).
+    // Fetched OUTSIDE the transaction so a slow/failed quote can't hold the DB tx open;
+    // null on failure makes the helper fall back to the prior cost-basis behavior.
+    const addPriceQuote = await fetchPrice(ticker.toUpperCase()).catch(() => null);
+    const addCurrentPrice = addPriceQuote?.currentPrice ?? null;
+
     // Atomic: the holding write and its compensating TWR transaction commit
     // together — a position change without the offsetting cash-flow row would
     // silently inflate returns. (getHoldings above already ensured the default
@@ -174,15 +182,19 @@ export async function addHolding(req: AuthRequest, res: Response): Promise<void>
       // Auto-create transaction for TWR tracking (unless skipTransaction is set)
       // This ensures adding/removing stocks doesn't artificially inflate returns
       if (!skipTransaction) {
-        const newCostBasis = shares * averageCost;
-        const oldCostBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
-        const costBasisDiff = newCostBasis - oldCostBasis;
-
-        if (Math.abs(costBasisDiff) >= 0.01) {
-          const transactionType = costBasisDiff > 0 ? 'deposit' : 'withdrawal';
+        // Offset the MARKET-value jump the snapshot series will take, not the
+        // cost-basis delta (which leaked unrealized P/L into TWR). See F-CRIT-1.
+        const cashflow = computeCompensatingCashflow({
+          oldShares: existingHolding ? existingHolding.shares : 0,
+          newShares: shares,
+          currentPrice: addCurrentPrice,
+          oldCostBasis: existingHolding ? existingHolding.shares * existingHolding.averageCost : 0,
+          newCostBasis: shares * averageCost,
+        });
+        if (cashflow) {
           await addTransaction({
-            type: transactionType,
-            amount: Math.abs(costBasisDiff),
+            type: cashflow.type,
+            amount: cashflow.amount,
             date: new Date().toISOString(),
             userId: req.user!.userId,
           }, tx);
@@ -262,6 +274,10 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
     const existingHolding = existingHoldings.find(h => h.ticker === ticker);
     const costBasis = existingHolding ? existingHolding.shares * existingHolding.averageCost : 0;
 
+    // Market price for the compensating TWR cash-flow — see addHolding / computeCompensatingCashflow.
+    const removePriceQuote = await fetchPrice(ticker).catch(() => null);
+    const removeCurrentPrice = removePriceQuote?.currentPrice ?? null;
+
     // Atomic: the cascade delete and its compensating TWR withdrawal commit
     // together (see addHolding above). getHoldings already ensured the default
     // portfolio exists, so deleteHolding does no writes outside this tx.
@@ -269,14 +285,26 @@ export async function removeHolding(req: AuthRequest, res: Response): Promise<vo
       await deleteHolding(ticker, req.user!.userId, portfolioId, tx);
 
       // Auto-create withdrawal transaction for TWR tracking
-      if (!skipTransaction && costBasis >= 0.01) {
-        await addTransaction({
-          type: 'withdrawal',
-          amount: costBasis,
-          date: new Date().toISOString(),
-          userId: req.user!.userId,
-        }, tx);
-        console.log(`[Holding] Auto-created withdrawal for removing ${ticker}`);
+      if (!skipTransaction) {
+        // Withdraw the position's MARKET value (what the snapshot series drops
+        // by), not its cost basis — cost basis fabricated a loss equal to the
+        // position's unrealized gain on every removal. See F-CRIT-1.
+        const cashflow = computeCompensatingCashflow({
+          oldShares: existingHolding ? existingHolding.shares : 0,
+          newShares: 0,
+          currentPrice: removeCurrentPrice,
+          oldCostBasis: costBasis,
+          newCostBasis: 0,
+        });
+        if (cashflow) {
+          await addTransaction({
+            type: cashflow.type,
+            amount: cashflow.amount,
+            date: new Date().toISOString(),
+            userId: req.user!.userId,
+          }, tx);
+          console.log(`[Holding] Auto-created ${cashflow.type} for removing ${ticker}`);
+        }
       }
     });
 
@@ -972,8 +1000,12 @@ function parseSchwabTransactionCsv(
       }
       pos.totalCost += qty * price;
       pos.shares += qty;
-      trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
       if (actionLower === 'reinvest shares') {
+        // DRIP: emit ONLY the DIV_REINVEST ledger event, NOT also a 'buy' trade.
+        // Emitting both made replayDailyLedger add the shares AND cost twice (the
+        // 'buy' posting + the DIV_REINVEST posting), inflating the ledger-replay
+        // history chart on every reinvestment and double-listing it in account
+        // history. The generic importer already emits DIV_REINVEST only. F-H-6.
         ledgerEvents.push({
           eventType: 'DIV_REINVEST',
           effectiveDate: dateStr,
@@ -987,6 +1019,8 @@ function parseSchwabTransactionCsv(
           sourceBroker: 'schwab',
           rawAction: action,
         });
+      } else {
+        trades.push({ date: dateStr, ticker, type: 'buy', shares: qty, price, rowIndex: tradeRowIndex++, sourceBroker: 'schwab', rawAction: action });
       }
     } else if (actionLower === 'sell') {
       if (!Number.isFinite(qty) || qty <= 0) {
@@ -1819,6 +1853,7 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         sourceFileId,
         sourceBroker: normalizeSourceBroker(t.sourceBroker),
         rawAction: typeof t.rawAction === 'string' ? t.rawAction : null,
+        portfolioId: importPortfolioId,
       }))
       .filter(t =>
         !isNaN(t.date.getTime()) && isValidTicker(t.ticker) &&
@@ -2040,16 +2075,44 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
       tradeRecords.splice(0, tradeRecords.length, ...dedupedTrades);
     }
 
+    // F-CRIT-1 (import): the compensating cash-flow must offset the MARKET-value change
+    // the snapshot series takes (holdings are valued at market, not cost). Fetch market
+    // prices OUTSIDE the transaction (so a slow/failed quote can't hold the DB tx open)
+    // for every ticker that could be in the portfolio before/after the import. Reuses
+    // the already-fetched existingHoldings + normalized + tradeRecords — no extra query.
+    const compTickers = new Set<string>();
+    for (const h of existingHoldings) { const t = (h as any)?.ticker; if (t) compTickers.add(String(t).toUpperCase()); }
+    for (const n of normalized) { const t = (n as any)?.ticker; if (t) compTickers.add(String(t).toUpperCase()); }
+    for (const tr of tradeRecords) { const t = (tr as any)?.ticker; if (t) compTickers.add(String(t).toUpperCase()); }
+    const compPriceMap = new Map<string, number>();
+    if (compTickers.size > 0) {
+      try {
+        const { quotes } = await fetchPrices([...compTickers], { preferPolygon: true });
+        for (const [tk, q] of quotes) {
+          const px = (q as any)?.currentPrice;
+          if (typeof px === 'number' && px > 0) compPriceMap.set(String(tk).toUpperCase(), px);
+        }
+      } catch (err) {
+        console.warn('[Import] Compensating-cashflow price fetch failed; falling back to cost basis:', err instanceof Error ? err.message : String(err));
+      }
+    }
+    // Value a holding set at MARKET; fall back to cost basis for any ticker with no live price.
+    const compValue = (rows: Array<{ ticker: string; shares: number; averageCost: number }>) =>
+      rows.reduce((sum, h) => {
+        const px = compPriceMap.get(String(h.ticker).toUpperCase());
+        return sum + (px && px > 0 ? h.shares * px : h.shares * h.averageCost);
+      }, 0);
+
     await prisma.$transaction(async (tx) => {
-      // Aggregate cost basis BEFORE any mutation — the delta vs. after-import
-      // is recorded as a compensating deposit/withdrawal Transaction below
-      // (the same invariant addHolding enforces), so the TWR/risk engine
-      // reads an import as a cash flow, not a market gain.
+      // Aggregate portfolio MARKET value BEFORE any mutation — the delta vs. after-import
+      // is recorded as a compensating deposit/withdrawal Transaction below (the same
+      // invariant addHolding enforces), so the TWR/risk engine reads an import as a cash
+      // flow, not a market gain. F-CRIT-1.
       const beforeRows = await tx.holding.findMany({
         where: { portfolioId: importPortfolioId },
-        select: { shares: true, averageCost: true },
+        select: { ticker: true, shares: true, averageCost: true },
       });
-      const costBasisBefore = beforeRows.reduce((sum, h) => sum + h.shares * h.averageCost, 0);
+      const compValueBefore = compValue(beforeRows);
 
       if (mode === 'replace') {
         // Delete all holdings in this portfolio — will be re-created below
@@ -2222,20 +2285,20 @@ export async function confirmPortfolioImportHandler(req: AuthRequest, res: Respo
         });
       }
 
-      // Compensating cash-flow row (mirrors addHolding lines above): the net
-      // cost basis this import injected/removed is a deposit/withdrawal, not
-      // performance. Without it, importing a $500k export over a $50k account
-      // reads as a +900% return and corrupts vol/drawdown/beta/TWR.
+      // Compensating cash-flow row (mirrors addHolding): the MARKET value this import
+      // injected/removed is a deposit/withdrawal, not performance. Using cost basis
+      // fabricated an instant gain when importing already-appreciated positions (the
+      // snapshot series values holdings at market). Falls back to cost basis when a live
+      // price is unavailable — no worse than the prior behavior on that path. F-CRIT-1.
       const afterRows = await tx.holding.findMany({
         where: { portfolioId: importPortfolioId },
-        select: { shares: true, averageCost: true },
+        select: { ticker: true, shares: true, averageCost: true },
       });
-      const costBasisAfter = afterRows.reduce((sum, h) => sum + h.shares * h.averageCost, 0);
-      const costBasisDiff = costBasisAfter - costBasisBefore;
-      if (Math.abs(costBasisDiff) >= 0.01) {
+      const compFlowDiff = compValue(afterRows) - compValueBefore;
+      if (Math.abs(compFlowDiff) >= 0.01) {
         await addTransaction({
-          type: costBasisDiff > 0 ? 'deposit' : 'withdrawal',
-          amount: Math.abs(costBasisDiff),
+          type: compFlowDiff > 0 ? 'deposit' : 'withdrawal',
+          amount: Math.abs(compFlowDiff),
           date: new Date().toISOString(),
           userId: req.user!.userId,
         }, tx);

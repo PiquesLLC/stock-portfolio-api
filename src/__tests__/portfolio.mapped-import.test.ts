@@ -26,6 +26,13 @@ vi.mock('../services/snapshot.service', async () => {
   return { ...actual, recordCompositionChange: vi.fn().mockResolvedValue({}), resetSnapshotsForCompositionChange: vi.fn().mockResolvedValue(undefined) };
 });
 
+// Mock market service — import fetches live prices for the compensating cash-flow (F-CRIT-1)
+const { fetchPricesMock } = vi.hoisted(() => ({ fetchPricesMock: vi.fn() }));
+vi.mock('../services/market.service', async (importOriginal) => ({
+  ...(await importOriginal() as object),
+  fetchPrices: fetchPricesMock,
+}));
+
 vi.mock('@sentry/node', () => ({
   init: vi.fn(),
   Handlers: { requestHandler: () => (_req: any, _res: any, next: any) => next(), errorHandler: () => (_err: any, _req: any, _res: any, next: any) => next() },
@@ -39,6 +46,7 @@ describe('POST /portfolio/import/csv/mapped', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchPricesMock.mockResolvedValue({ quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: [], provider: 'polygon' });
     (prismaMock as any).user.findUnique.mockResolvedValue({
       id: testUser.userId, username: testUser.username, plan: 'free', profilePublic: true,
     });

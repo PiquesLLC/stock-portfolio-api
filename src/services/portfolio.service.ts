@@ -148,11 +148,22 @@ export async function deleteHolding(ticker: string, userId: string, portfolioId?
 
   if (existing) {
     const cascade = async (tx: Prisma.TransactionClient) => {
-      // Cascade cleanup: lots, trades, and dividend records tied to this ticker
-      await tx.lot.deleteMany({ where: { ticker: normalizedTicker, userId } });
-      await tx.portfolioTrade.deleteMany({ where: { ticker: normalizedTicker, userId } });
-      await tx.dividendCredit.deleteMany({ where: { ticker: normalizedTicker, userId } });
-      await tx.dividendReinvestment.deleteMany({ where: { ticker: normalizedTicker, userId } });
+      // Cascade cleanup: lots, trades, and dividend records tied to this ticker.
+      // These tables now carry portfolioId (M-17). If this is the user's ONLY holding
+      // of the ticker, delete all its rows by (ticker,userId) — that also cleans up
+      // legacy rows whose portfolioId is still NULL, which can only belong to this
+      // portfolio. If the ticker is in MORE THAN ONE portfolio, scope the delete to
+      // THIS portfolio so the other portfolios' history is preserved (legacy
+      // NULL-portfolioId rows are left intact until the backfill resolves them —
+      // see docs/M17-migration-draft.md).
+      const holdingCount = await tx.holding.count({ where: { userId, ticker: normalizedTicker } });
+      const scope = holdingCount <= 1
+        ? { ticker: normalizedTicker, userId }
+        : { ticker: normalizedTicker, userId, portfolioId: existing.portfolioId };
+      await tx.lot.deleteMany({ where: scope });
+      await tx.portfolioTrade.deleteMany({ where: scope });
+      await tx.dividendCredit.deleteMany({ where: scope });
+      await tx.dividendReinvestment.deleteMany({ where: scope });
       await tx.holding.delete({ where: { id: existing.id } });
     };
     // Interactive transactions do not nest — reuse the caller's when given.

@@ -48,6 +48,34 @@ export interface TaxHarvestResponse {
   cached: boolean;
 }
 
+/**
+ * Determine a holding's tax holding period from its lots (or createdAt fallback).
+ * Shared by the gain-liability bucketing and the loss-candidate rate. F-M-11.
+ */
+function determineHoldingPeriod(
+  tickerLots: { acquiredAt: Date }[],
+  holdingCreatedAt: Date,
+  nowMs: number,
+): { holdingPeriod: 'short-term' | 'long-term' | 'mixed'; oldestDaysHeld: number | null } {
+  if (tickerLots.length > 0) {
+    let hasShort = false;
+    let hasLong = false;
+    let oldestDaysHeld: number | null = null;
+    for (const lot of tickerLots) {
+      const days = Math.floor((nowMs - lot.acquiredAt.getTime()) / (1000 * 60 * 60 * 24));
+      if (oldestDaysHeld == null || days > oldestDaysHeld) oldestDaysHeld = days;
+      if (days < 365) hasShort = true;
+      else hasLong = true;
+    }
+    return {
+      holdingPeriod: hasShort && hasLong ? 'mixed' : hasShort ? 'short-term' : 'long-term',
+      oldestDaysHeld,
+    };
+  }
+  const days = Math.floor((nowMs - holdingCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
+  return { holdingPeriod: days < 365 ? 'short-term' : 'long-term', oldestDaysHeld: days };
+}
+
 export async function getTaxHarvestSuggestions(userId: string, portfolioId?: string): Promise<TaxHarvestResponse> {
   const cacheKey = `tax-harvest:${userId}${portfolioId ? `:${portfolioId}` : ''}`;
   const cached_result = cache.get<TaxHarvestResponse>(cacheKey);
@@ -76,6 +104,10 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
 
   let totalUnrealizedGain = 0;
   let totalUnrealizedLoss = 0;
+  // Gains bucketed by holding period so the liability estimate uses the right rate. F-M-11.
+  let shortTermGain = 0;
+  let longTermGain = 0;
+  let mixedGain = 0;
   const candidates: HarvestCandidate[] = [];
 
   for (const holding of holdings) {
@@ -92,6 +124,12 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
 
     if (unrealized >= 0) {
       totalUnrealizedGain += unrealized;
+      const { holdingPeriod: gainPeriod } = determineHoldingPeriod(
+        lotsByTicker.get(holding.ticker) ?? [], holding.createdAt, Date.now(),
+      );
+      if (gainPeriod === 'short-term') shortTermGain += unrealized;
+      else if (gainPeriod === 'long-term') longTermGain += unrealized;
+      else mixedGain += unrealized;
     } else {
       totalUnrealizedLoss += Math.abs(unrealized);
 
@@ -158,7 +196,12 @@ export async function getTaxHarvestSuggestions(userId: string, portfolioId?: str
   ).map(t => `${t} was sold in the last 30 days. Repurchasing within 30 days may trigger wash sale rules.`);
 
   const potentialTotalSavings = candidates.reduce((s, c) => s + c.potentialTaxSavings, 0);
-  const estimatedTaxLiability = round(totalUnrealizedGain * SHORT_TERM_TAX_RATE);
+  // Bucket the liability by holding period instead of a flat short-term rate. F-M-11.
+  const estimatedTaxLiability = round(
+    shortTermGain * SHORT_TERM_TAX_RATE +
+    longTermGain * LONG_TERM_TAX_RATE +
+    mixedGain * ((SHORT_TERM_TAX_RATE + LONG_TERM_TAX_RATE) / 2),
+  );
 
   // AI analysis via Perplexity
   let aiAnalysis: string | null = null;

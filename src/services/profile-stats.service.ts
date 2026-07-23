@@ -7,13 +7,13 @@ const computeLocks = new Map<string, Promise<void>>();
  * Compute win rate from PortfolioTrade sell events.
  * Uses aggregate cost per ticker (not lot-matched).
  */
-export async function computeWinRate(userId: string): Promise<{ winRate: number | null; totalTrades: number; soldTickers: string[]; tickerBuyCost: Map<string, number>; tickerSellProceeds: Map<string, number> }> {
+export async function computeWinRate(userId: string): Promise<{ winRate: number | null; totalTrades: number; soldTickers: string[]; tickerMatchedCost: Map<string, number>; tickerSellProceeds: Map<string, number> }> {
   const sells = await prisma.portfolioTrade.findMany({
     where: { userId, type: 'sell' },
     orderBy: { date: 'asc' },
   });
 
-  if (sells.length === 0) return { winRate: null, totalTrades: 0, soldTickers: [], tickerBuyCost: new Map(), tickerSellProceeds: new Map() };
+  if (sells.length === 0) return { winRate: null, totalTrades: 0, soldTickers: [], tickerMatchedCost: new Map(), tickerSellProceeds: new Map() };
 
   const soldTickers = [...new Set(sells.map(s => s.ticker))];
   const buys = await prisma.portfolioTrade.findMany({
@@ -21,32 +21,46 @@ export async function computeWinRate(userId: string): Promise<{ winRate: number 
     orderBy: { date: 'asc' },
   });
 
-  const tickerBuyCost = new Map<string, number>();
+  // Aggregate buy cost AND shares per ticker so we can derive an average cost per
+  // share and match it to the shares actually SOLD (realized cost basis).
+  const buyCost = new Map<string, number>();
+  const buyShares = new Map<string, number>();
   for (const b of buys) {
-    tickerBuyCost.set(b.ticker, (tickerBuyCost.get(b.ticker) || 0) + b.shares * b.price);
+    buyCost.set(b.ticker, (buyCost.get(b.ticker) || 0) + b.shares * b.price);
+    buyShares.set(b.ticker, (buyShares.get(b.ticker) || 0) + b.shares);
   }
 
   const tickerSellProceeds = new Map<string, number>();
+  const sellShares = new Map<string, number>();
   for (const s of sells) {
     tickerSellProceeds.set(s.ticker, (tickerSellProceeds.get(s.ticker) || 0) + s.shares * s.price);
+    sellShares.set(s.ticker, (sellShares.get(s.ticker) || 0) + s.shares);
   }
 
+  // Realized cost of the SOLD shares = min(soldShares, boughtShares) * avgBuyCost.
+  // Comparing FULL buy cost (including still-held shares) against only-sold proceeds
+  // made every profitable trim book as a loss (win rate 0%, profit factor 0). F-H-4.
+  const tickerMatchedCost = new Map<string, number>();
   let wins = 0;
   let total = 0;
   for (const ticker of soldTickers) {
-    const cost = tickerBuyCost.get(ticker) || 0;
+    const totalBuyShares = buyShares.get(ticker) || 0;
+    const totalBuyCost = buyCost.get(ticker) || 0;
+    if (totalBuyShares <= 0 || totalBuyCost <= 0) continue; // no cost basis (transfer/short)
+    const avgCost = totalBuyCost / totalBuyShares;
+    const sold = Math.min(sellShares.get(ticker) || 0, totalBuyShares);
+    const matchedCost = sold * avgCost;
+    tickerMatchedCost.set(ticker, matchedCost);
     const proceeds = tickerSellProceeds.get(ticker) || 0;
-    if (cost > 0) {
-      total++;
-      if (proceeds > cost) wins++;
-    }
+    total++;
+    if (proceeds > matchedCost) wins++;
   }
 
   return {
     winRate: total > 0 ? (wins / total) * 100 : null,
     totalTrades: sells.length,
     soldTickers,
-    tickerBuyCost,
+    tickerMatchedCost,
     tickerSellProceeds,
   };
 }
@@ -153,14 +167,16 @@ export async function computePerformanceBadges(userId: string): Promise<void> {
  * Reuses buy/sell data from computeWinRate to avoid redundant queries.
  */
 export async function refreshProfileStats(userId: string): Promise<void> {
-  const { winRate, totalTrades, tickerBuyCost, tickerSellProceeds } = await computeWinRate(userId);
+  const { winRate, totalTrades, tickerMatchedCost, tickerSellProceeds } = await computeWinRate(userId);
   const avgHoldDays = await computeAvgHoldPeriod(userId);
 
-  // Compute profit factor from already-fetched data (no extra queries)
+  // Compute profit factor from already-fetched data (no extra queries).
+  // Uses the SOLD-share matched cost (not full buy cost) so a partial profitable
+  // trim isn't scored as a loss — same root cause as the win-rate fix. F-H-4.
   let grossProfit = 0;
   let grossLoss = 0;
   for (const [ticker, proceeds] of tickerSellProceeds) {
-    const cost = tickerBuyCost.get(ticker) || 0;
+    const cost = tickerMatchedCost.get(ticker) || 0;
     if (cost <= 0) continue; // Skip tickers with no buy cost (transferred/short)
     const pnl = proceeds - cost;
     if (pnl > 0) grossProfit += pnl;

@@ -124,7 +124,10 @@ export async function syncHoldingsHandler(req: AuthRequest, res: Response) {
 export async function webhookHandler(req: Request, res: Response) {
   try {
     // Plaid signs webhooks with a JWT in the Plaid-Verification header.
-    if (config.plaidEnv !== 'sandbox') {
+    // Fail closed in production even if PLAID_ENV is misconfigured to 'sandbox':
+    // a prod deploy must NEVER accept unverified webhooks (guessed item_id → forged
+    // ITEM-status webhook). Sandbox skip is limited to non-production. See F-C-MED.
+    if (config.plaidEnv !== 'sandbox' || config.nodeEnv === 'production') {
       const plaidVerification = req.headers['plaid-verification'] as string;
       if (!plaidVerification) {
         return res.status(401).json({ error: 'Missing webhook verification' });

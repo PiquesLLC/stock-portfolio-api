@@ -4,6 +4,13 @@ import app from '../app';
 import { generateTestToken, testUser } from './helpers';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 
+// Import now fetches live prices for the MARKET-value compensating cash-flow (F-CRIT-1).
+const { fetchPricesMock } = vi.hoisted(() => ({ fetchPricesMock: vi.fn() }));
+vi.mock('../services/market.service', async (importOriginal) => ({
+  ...(await importOriginal() as object),
+  fetchPrices: fetchPricesMock,
+}));
+
 function authHeader() {
   return { Authorization: `Bearer ${generateTestToken(testUser)}` };
 }
@@ -13,6 +20,9 @@ const MOCK_PORTFOLIO_ID = 'test-portfolio-id';
 describe('Portfolio import', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no live prices → the compensating cash-flow falls back to cost basis
+    // (matches the pre-F-CRIT-1 behavior the cost-basis assertions below rely on).
+    fetchPricesMock.mockResolvedValue({ quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: [], provider: 'polygon' });
     prismaMock.holding.findMany.mockResolvedValue([]);
     prismaMock.portfolioTrade.findMany.mockResolvedValue([]);
     prismaMock.ledgerEvent.findMany.mockResolvedValue([]);
@@ -444,6 +454,52 @@ GOOG,3,0,ok`;
 
       expect(res.status).toBe(200);
       expect((prismaMock as any).transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('records the compensating deposit at MARKET value, not cost basis (F-CRIT-1)', async () => {
+      (prismaMock as any).transaction.create.mockClear();
+      // AMZN currently $300/sh, imported at $200 cost. The snapshot series values the
+      // position at market ($30,000), so the compensating deposit must be $30,000 — the
+      // old cost-basis amount ($20,000) leaked the $10k unrealized gain into TWR.
+      fetchPricesMock.mockResolvedValue({ quotes: new Map([['AMZN', { currentPrice: 300 }]]), staleCount: 0, repricingCount: 0, failedTickers: [], provider: 'polygon' });
+      prismaMock.holding.findMany
+        .mockResolvedValueOnce([])   // orphan scan
+        .mockResolvedValueOnce([])   // existingHoldings (pre-tx)
+        .mockResolvedValueOnce([])   // beforeRows (in-tx)
+        .mockResolvedValueOnce([{ ticker: 'AMZN', shares: 100, averageCost: 200 }]); // afterRows
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: [{ ticker: 'AMZN', shares: 100, averageCost: 200 }] });
+
+      expect(res.status).toBe(200);
+      expect((prismaMock as any).transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ type: 'deposit', amount: 30000 }) }),
+      );
+    });
+
+    it('falls back to cost basis for the compensating flow when no live price is available', async () => {
+      (prismaMock as any).transaction.create.mockClear();
+      fetchPricesMock.mockResolvedValue({ quotes: new Map(), staleCount: 0, repricingCount: 0, failedTickers: ['AMZN'], provider: 'polygon' });
+      prismaMock.holding.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ticker: 'AMZN', shares: 100, averageCost: 200 }]);
+      (prismaMock.holding as any).findFirst = vi.fn().mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/portfolio/import/confirm')
+        .set(authHeader())
+        .send({ mode: 'replace', holdings: [{ ticker: 'AMZN', shares: 100, averageCost: 200 }] });
+
+      expect(res.status).toBe(200);
+      // No live price → cost basis (100 * 200 = 20000), never worse than before.
+      expect((prismaMock as any).transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ type: 'deposit', amount: 20000 }) }),
+      );
     });
 
     it('rejects non-finite shares', async () => {

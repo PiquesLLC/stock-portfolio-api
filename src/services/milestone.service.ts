@@ -1,246 +1,293 @@
-﻿import prisma from '../utils/prisma';
-import { get52WeekRange, getAllTimeRange } from '../utils/yahoo-finance';
-import { getMarketSession } from '../utils/market-hours';
+import prisma from '../utils/prisma';
+import { getPriorThresholds, getRegularMarketClose, PriorThresholds } from '../utils/milestone-ranges';
+import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
+import { etDate, etMidnightUtc } from '../utils/date';
 import { sendPushToUser, sendNativePushToUser } from './push.service';
 import { fetchPrices } from './market.service';
 import NodeCache from 'node-cache';
 
-// Track which milestones we've already notified (ticker-userId-type -> timestamp)
-// This prevents spam if a stock hovers near a milestone
-// Auto-evicts entries after 24h to prevent memory leaks
-const recentNotifications = new NodeCache({ stdTTL: 24 * 60 * 60, checkperiod: 600 });
+// ============================================================================
+// NOTIFICATION RULE for 52-week / all-time highs and lows (Jon, 2026-07-16):
+// a user gets AT MOST two notifications per ticker per trading day —
+//
+//   1. Intraday, the FIRST time the live price beats yesterday's record:
+//        "AAPL hit a new all-time high of $332.57"
+//   2. After the 4 PM ET close, only if the CLOSING price beat the record:
+//        "AAPL closed at an all-time high of $334.00"
+//
+// Never re-notify because the price kept climbing intraday (no high-water-mark
+// re-fires), never send "is at its high" proximity alerts, and suppress the
+// redundant 52W notification when the ATH/ATL counterpart fires the same day
+// (an all-time high IS a 52-week high). Records are measured against
+// thresholds that EXCLUDE today's bar, so "new" is strict — merely touching
+// yesterday's high does not qualify.
+//
+// Alert Settings toggles are honored: an explicit OFF on the 52-Week / All-
+// Time High/Low switch silences BOTH the intraday and the close alert for
+// that type. No Alert row (user never opened settings) = on, the default.
+// ============================================================================
 
-// Cooldowns: 24 hours to avoid spamming users when a stock hovers near a milestone.
-// Only re-notify if the price actually exceeds the previous notification price (high water mark).
-const COOLDOWN_MS: Record<string, number> = {
-  'ath': 24 * 60 * 60 * 1000,       // 24 hours
-  'atl': 24 * 60 * 60 * 1000,       // 24 hours
-  '52w_high': 24 * 60 * 60 * 1000,  // 24 hours
-  '52w_low': 24 * 60 * 60 * 1000,   // 24 hours
-};
-const DEFAULT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours fallback
+// Day-scoped in-memory guard (ticker-userId-type-etDay). hasEventTodayET() is
+// the source of truth (survives restarts); this cache only avoids re-querying
+// on every 30-min cycle. Auto-evicts entries after 24h.
+const recentNotifications = new NodeCache({ stdTTL: 24 * 60 * 60, checkperiod: 600 });
 
 interface TickerHolders {
   ticker: string;
   userIds: string[];
 }
 
+interface MilestoneDef {
+  type: string;
+  kind: 'high' | 'low';
+  threshold: (t: PriorThresholds) => number | null;
+  /** eventType that makes this one redundant when it already fired today */
+  suppressedBy?: string;
+  /**
+   * Reverse guard for ATH/ATL: if the 52W counterpart already fired today AND
+   * the two records coincide (the 52-week high IS the all-time high), that
+   * alert already announced this exact cross — it only went out as "52-week"
+   * because a transient weekly-fetch failure hid the all-time threshold that
+   * cycle. Don't announce the same cross a second time.
+   */
+  redundantAfter?: { type: string; recordsCoincide: (t: PriorThresholds) => boolean };
+  message: (ticker: string, price: string) => string;
+}
+
+const highsCoincide = (t: PriorThresholds) =>
+  t.week52High !== null && t.allTimeHigh !== null && t.week52High >= t.allTimeHigh;
+const lowsCoincide = (t: PriorThresholds) =>
+  t.week52Low !== null && t.allTimeLow !== null && t.week52Low <= t.allTimeLow;
+
+// Order matters: ATH/ATL are evaluated first so they can suppress the
+// redundant 52W counterpart in the same cycle.
+const INTRADAY_MILESTONES: MilestoneDef[] = [
+  { type: 'ath', kind: 'high', threshold: t => t.allTimeHigh, redundantAfter: { type: '52w_high', recordsCoincide: highsCoincide }, message: (tk, p) => `${tk} hit a new all-time high of $${p}` },
+  { type: 'atl', kind: 'low', threshold: t => t.allTimeLow, redundantAfter: { type: '52w_low', recordsCoincide: lowsCoincide }, message: (tk, p) => `${tk} hit a new all-time low of $${p}` },
+  { type: '52w_high', kind: 'high', threshold: t => t.week52High, suppressedBy: 'ath', message: (tk, p) => `${tk} hit a new 52-week high of $${p}` },
+  { type: '52w_low', kind: 'low', threshold: t => t.week52Low, suppressedBy: 'atl', message: (tk, p) => `${tk} hit a new 52-week low of $${p}` },
+];
+
+const CLOSE_MILESTONES: MilestoneDef[] = [
+  { type: 'ath_close', kind: 'high', threshold: t => t.allTimeHigh, redundantAfter: { type: '52w_high_close', recordsCoincide: highsCoincide }, message: (tk, p) => `${tk} closed at an all-time high of $${p}` },
+  { type: 'atl_close', kind: 'low', threshold: t => t.allTimeLow, redundantAfter: { type: '52w_low_close', recordsCoincide: lowsCoincide }, message: (tk, p) => `${tk} closed at an all-time low of $${p}` },
+  { type: '52w_high_close', kind: 'high', threshold: t => t.week52High, suppressedBy: 'ath_close', message: (tk, p) => `${tk} closed at a 52-week high of $${p}` },
+  { type: '52w_low_close', kind: 'low', threshold: t => t.week52Low, suppressedBy: 'atl_close', message: (tk, p) => `${tk} closed at a 52-week low of $${p}` },
+];
+
+function isWeekendET(now: Date): boolean {
+  const etDay = now.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+  return etDay === 'Sat' || etDay === 'Sun';
+}
+
+// Alert-Settings switch each milestone type answers to — the close variants
+// share their intraday counterpart's toggle ("All-Time High" governs both
+// "hit a new" and "closed at").
+const TOGGLE_TYPE: Record<string, string> = {
+  'ath': 'ath',
+  'atl': 'atl',
+  '52w_high': '52w_high',
+  '52w_low': '52w_low',
+  'ath_close': 'ath',
+  'atl_close': 'atl',
+  '52w_high_close': '52w_high',
+  '52w_low_close': '52w_low',
+};
+
 /**
- * Check all portfolio holdings for 52-week and all-time high/low milestones.
- * Automatically checks every holding across all users - no manual alert setup required.
+ * Users who explicitly turned a milestone switch OFF in Alert Settings, as
+ * `${userId}:${toggleType}` keys. Rows are created lazily when a user first
+ * opens settings, so a missing row means the default: enabled.
+ */
+async function getDisabledMilestoneToggles(): Promise<Set<string>> {
+  const disabled = await prisma.alert.findMany({
+    where: {
+      type: { in: ['ath', 'atl', '52w_high', '52w_low'] },
+      enabled: false,
+      userId: { not: null },
+    },
+    select: { userId: true, type: true },
+  });
+  return new Set(disabled.map(a => `${a.userId}:${a.type}`));
+}
+
+/** All held tickers with the users who hold them */
+async function getTickerHolders(): Promise<TickerHolders[]> {
+  const holdings = await prisma.holding.findMany({
+    where: {
+      shares: { gt: 0 },
+    },
+    select: {
+      ticker: true,
+      userId: true,
+    },
+  });
+
+  const tickerHoldersMap = new Map<string, Set<string>>();
+  for (const holding of holdings) {
+    if (!holding.userId) continue;
+    const ticker = holding.ticker.toUpperCase();
+    if (!tickerHoldersMap.has(ticker)) {
+      tickerHoldersMap.set(ticker, new Set());
+    }
+    tickerHoldersMap.get(ticker)!.add(holding.userId);
+  }
+
+  return Array.from(tickerHoldersMap.entries()).map(
+    ([ticker, userIds]) => ({ ticker, userIds: Array.from(userIds) })
+  );
+}
+
+/** True if this user already got this milestone type for this ticker today (ET) */
+async function hasEventTodayET(userId: string, ticker: string, eventType: string, now: Date): Promise<boolean> {
+  const existing = await prisma.milestoneEvent.findFirst({
+    where: {
+      userId,
+      ticker,
+      eventType,
+      createdAt: { gte: etMidnightUtc(now) },
+    },
+    select: { id: true },
+  });
+  return existing !== null;
+}
+
+/**
+ * Run the milestone definitions for one ticker at one price, creating at most
+ * one event per user+type per ET day.
+ */
+async function evaluateMilestonesForTicker(opts: {
+  ticker: string;
+  userIds: string[];
+  price: number;
+  thresholds: PriorThresholds;
+  defs: MilestoneDef[];
+  now: Date;
+  /** `${userId}:${toggleType}` keys from getDisabledMilestoneToggles() */
+  disabledToggles: Set<string>;
+}): Promise<void> {
+  const { ticker, userIds, price, thresholds, defs, now, disabledToggles } = opts;
+  const today = etDate(now);
+  // Types that fired for a user in THIS evaluation, so 52W can be suppressed
+  // without waiting for the DB write to become visible
+  const firedThisCycle = new Set<string>();
+
+  for (const def of defs) {
+    const threshold = def.threshold(thresholds);
+    if (threshold === null || threshold <= 0) continue;
+
+    const crossed = def.kind === 'high' ? price > threshold : price < threshold;
+    if (!crossed) continue;
+
+    for (const userId of userIds) {
+      // Respect the user's Alert Settings switch for this milestone family
+      // (fall back to the raw type so a future def missing from TOGGLE_TYPE
+      // still produces a well-formed key instead of "userId:undefined")
+      if (disabledToggles.has(`${userId}:${TOGGLE_TYPE[def.type] ?? def.type}`)) continue;
+
+      const dayKey = `${ticker}-${userId}-${def.type}-${today}`;
+      if (recentNotifications.get(dayKey)) continue;
+
+      // ATH/ATL implies the 52W counterpart — one notification is enough
+      if (def.suppressedBy) {
+        if (firedThisCycle.has(`${userId}:${def.suppressedBy}`)) continue;
+        if (await hasEventTodayET(userId, ticker, def.suppressedBy, now)) continue;
+      }
+
+      // ...and when the records coincide, a 52W alert that already went out
+      // today covers this same cross — don't re-announce it as ATH/ATL
+      if (def.redundantAfter && def.redundantAfter.recordsCoincide(thresholds)) {
+        if (await hasEventTodayET(userId, ticker, def.redundantAfter.type, now)) continue;
+      }
+
+      // Once per ET day (source of truth — survives restarts)
+      if (await hasEventTodayET(userId, ticker, def.type, now)) {
+        recentNotifications.set(dayKey, true);
+        continue;
+      }
+
+      const message = def.message(ticker, price.toFixed(2));
+
+      await prisma.milestoneEvent.create({
+        data: {
+          userId,
+          ticker,
+          eventType: def.type,
+          message,
+          currentPrice: price,
+          thresholdPrice: threshold,
+          isNewRecord: true,
+        },
+      });
+
+      // Fire-and-forget push notification (web + native)
+      const milestonePushPayload = {
+        title: `Milestone: ${ticker}`,
+        body: message,
+        tag: `milestone-${ticker}-${def.type}`,
+        data: { type: 'milestone', url: '/' },
+      };
+      sendPushToUser(userId, milestonePushPayload).catch(() => {});
+      sendNativePushToUser(userId, milestonePushPayload).catch(() => {});
+
+      recentNotifications.set(dayKey, true);
+      firedThisCycle.add(`${userId}:${def.type}`);
+
+      console.log(`[Milestone] ${message}`);
+    }
+  }
+}
+
+/**
+ * Intraday check across all holdings: fires the "hit a new ..." notification
+ * the first time a ticker's live regular-session price beats yesterday's
+ * record. At most one per ticker+user+type per ET day.
  */
 export async function checkMilestoneAlerts(): Promise<void> {
-  // Skip on weekends — prices are stale Friday closes, not real milestones
-  const session = getMarketSession();
-  if (session === 'CLOSED') {
-    const etDay = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
-    if (etDay === 'Sat' || etDay === 'Sun') {
-      console.log('[Milestone] Skipping — market closed (weekend)');
-      return;
-    }
+  const now = new Date();
+
+  // Weekend prices are stale Friday closes, not real milestones
+  if (isWeekendET(now)) {
+    console.log('[Milestone] Skipping — market closed (weekend)');
+    return;
   }
 
   console.log('[Milestone] Starting automatic check for all holdings...');
 
   try {
-    // Get all holdings grouped by ticker, with their user IDs
-    const holdings = await prisma.holding.findMany({
-      where: {
-        shares: { gt: 0 }, // Only holdings with positive shares
-      },
-      select: {
-        ticker: true,
-        userId: true,
-      },
-    });
-
-    if (holdings.length === 0) {
+    const tickerHolders = await getTickerHolders();
+    if (tickerHolders.length === 0) {
       console.log('[Milestone] No holdings found');
       return;
     }
 
-    // Build map of ticker -> userIds who hold it
-    const tickerHoldersMap = new Map<string, Set<string>>();
-    for (const holding of holdings) {
-      if (!holding.userId) continue;
-      const ticker = holding.ticker.toUpperCase();
-      if (!tickerHoldersMap.has(ticker)) {
-        tickerHoldersMap.set(ticker, new Set());
-      }
-      tickerHoldersMap.get(ticker)!.add(holding.userId);
-    }
+    console.log(`[Milestone] Checking ${tickerHolders.length} tickers`);
 
-    const tickerHolders: TickerHolders[] = Array.from(tickerHoldersMap.entries()).map(
-      ([ticker, userIds]) => ({ ticker, userIds: Array.from(userIds) })
-    );
-
-    console.log(`[Milestone] Checking ${tickerHolders.length} tickers across ${holdings.length} holdings`);
-
-    // Fetch quotes for all tickers (uses Yahoo real-time during market hours)
     const allTickers = tickerHolders.map(t => t.ticker);
     const { quotes } = await fetchPrices(allTickers);
+    const disabledToggles = await getDisabledMilestoneToggles();
 
-    // Process each ticker
     for (const { ticker, userIds } of tickerHolders) {
+      // Only regular-session prints count as official highs/lows — thin
+      // pre/post-market spikes never enter the daily bars these records are
+      // measured against. (24/7 assets like crypto are always REG.)
+      if (getMarketSessionForTicker(ticker, now) !== 'REG') continue;
+
       const quote = quotes.get(ticker);
       if (!quote || quote.currentPrice <= 0) continue;
 
-      const currentPrice = quote.currentPrice;
+      const thresholds = await getPriorThresholds(ticker, now);
+      if (!thresholds) continue;
 
-      // Get 52-week data from Yahoo Finance (accurate data)
-      let week52High: number | null = null;
-      let week52Low: number | null = null;
-
-      try {
-        const range = await get52WeekRange(ticker);
-        if (range) {
-          week52High = range.week52High;
-          week52Low = range.week52Low;
-        }
-      } catch (_err) {
-        console.error(`[Milestone] Failed to get 52-week range for ${ticker}`);
-      }
-
-      // Get all-time data from Yahoo Finance (max range)
-      let allTimeHigh: number | null = null;
-      let allTimeLow: number | null = null;
-
-      try {
-        const allTimeData = await getAllTimeRange(ticker);
-        if (allTimeData) {
-          allTimeHigh = allTimeData.allTimeHigh;
-          allTimeLow = allTimeData.allTimeLow;
-        }
-      } catch (_err) {
-        console.error(`[Milestone] Failed to get all-time range for ${ticker}`);
-      }
-
-      // Check milestones and create events for each user who holds this ticker.
-      // ATH/ATL are checked FIRST so we can suppress redundant 52W notifications:
-      //   - ATH firing suppresses 52W_HIGH (ATH implies 52-week high)
-      //   - ATL firing suppresses 52W_LOW  (ATL implies 52-week low)
-      const milestones = [
-        { type: 'ath', threshold: allTimeHigh, check: (p: number, t: number) => p >= t, isHigh: true },
-        { type: 'atl', threshold: allTimeLow, check: (p: number, t: number) => t > 0 && p <= t, isHigh: false },
-        { type: '52w_high', threshold: week52High, check: (p: number, t: number) => p >= t * 0.998, isHigh: true },
-        { type: '52w_low', threshold: week52Low, check: (p: number, t: number) => p <= t * 1.002, isHigh: false },
-      ];
-
-      // Track which users got ATH/ATL for this ticker in this cycle,
-      // so we can suppress the redundant 52W counterpart
-      const athFiredForUser = new Set<string>();
-      const atlFiredForUser = new Set<string>();
-
-      const typeLabels: Record<string, string> = {
-        '52w_high': '52-week high',
-        '52w_low': '52-week low',
-        'ath': 'all-time high',
-        'atl': 'all-time low',
-      };
-
-      for (const { type, threshold, check, isHigh } of milestones) {
-        if (!threshold || !check(currentPrice, threshold)) continue;
-
-        const isNewRecord = isHigh ? currentPrice > threshold : currentPrice < threshold;
-
-        for (const userId of userIds) {
-          // Suppress 52W_HIGH if ATH already fired for this ticker+user
-          if (type === '52w_high' && athFiredForUser.has(userId)) {
-            continue;
-          }
-          // Suppress 52W_LOW if ATL already fired for this ticker+user
-          if (type === '52w_low' && atlFiredForUser.has(userId)) {
-            continue;
-          }
-
-          const notificationKey = `${ticker}-${userId}-${type}`;
-          const lastNotified = recentNotifications.get<number>(notificationKey) || 0;
-          const now = Date.now();
-          const cooldown = COOLDOWN_MS[type] ?? DEFAULT_COOLDOWN_MS;
-
-          // Skip if we've notified recently (in-memory cooldown)
-          if (now - lastNotified < cooldown) continue;
-
-          // Check if we already have a recent event in the database
-          const recentEvent = await prisma.milestoneEvent.findFirst({
-            where: {
-              userId,
-              ticker,
-              eventType: type,
-              createdAt: { gte: new Date(now - cooldown) },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-
-          if (recentEvent) {
-            // High water mark: only re-notify if the price actually beat the
-            // previous notification price. This prevents alerting at $268 after
-            // we already alerted at $271 for the same milestone.
-            if (isHigh && currentPrice <= recentEvent.currentPrice) continue;
-            if (!isHigh && currentPrice >= recentEvent.currentPrice) continue;
-            // Price beat the previous notification — allow it through
-          }
-
-          // For 52W_HIGH suppression: also check if an ATH was recently created
-          // in the DB (covers cases where ATH fired in a previous cycle within cooldown)
-          if (type === '52w_high') {
-            const recentAth = await prisma.milestoneEvent.findFirst({
-              where: {
-                userId,
-                ticker,
-                eventType: 'ath',
-                createdAt: { gte: new Date(now - cooldown) },
-              },
-            });
-            if (recentAth) continue;
-          }
-          if (type === '52w_low') {
-            const recentAtl = await prisma.milestoneEvent.findFirst({
-              where: {
-                userId,
-                ticker,
-                eventType: 'atl',
-                createdAt: { gte: new Date(now - cooldown) },
-              },
-            });
-            if (recentAtl) continue;
-          }
-
-          const message = isNewRecord
-            ? `${ticker} hit a new ${typeLabels[type]} of $${currentPrice.toFixed(2)}`
-            : `${ticker} is at its ${typeLabels[type]} of $${currentPrice.toFixed(2)}`;
-
-          await prisma.milestoneEvent.create({
-            data: {
-              userId,
-              ticker,
-              eventType: type,
-              message,
-              currentPrice,
-              thresholdPrice: threshold,
-              isNewRecord,
-            },
-          });
-
-          // Fire-and-forget push notification (web + native)
-          const milestonePushPayload = {
-            title: `Milestone: ${ticker}`,
-            body: message,
-            tag: `milestone-${ticker}-${type}`,
-            data: { type: 'milestone', url: '/' },
-          };
-          sendPushToUser(userId, milestonePushPayload).catch(() => {});
-          sendNativePushToUser(userId, milestonePushPayload).catch(() => {});
-
-          recentNotifications.set(notificationKey, now);
-
-          // Record that ATH/ATL fired for this user so 52W counterpart is suppressed
-          if (type === 'ath') athFiredForUser.add(userId);
-          if (type === 'atl') atlFiredForUser.add(userId);
-
-          console.log(`[Milestone] ${message}`);
-        }
-      }
+      await evaluateMilestonesForTicker({
+        ticker,
+        userIds,
+        price: quote.currentPrice,
+        thresholds,
+        defs: INTRADAY_MILESTONES,
+        now,
+        disabledToggles,
+      });
 
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -249,6 +296,67 @@ export async function checkMilestoneAlerts(): Promise<void> {
     console.log('[Milestone] Check complete');
   } catch (err) {
     console.error('[Milestone] Error:', err);
+    throw err;
+  }
+}
+
+/**
+ * End-of-day check: fires "closed at ..." when the official regular-session
+ * closing price itself beat yesterday's record. Runs once per trading day
+ * shortly after the 4 PM ET close (scheduled + idempotency-keyed in index.ts;
+ * the per-day event dedup here makes re-runs harmless).
+ */
+export async function checkMilestoneCloseAlerts(): Promise<void> {
+  const now = new Date();
+
+  if (isWeekendET(now)) return;
+
+  const session = getMarketSession(now);
+  if (session === 'PRE' || session === 'REG') {
+    console.log('[Milestone Close] Skipping — market has not closed yet');
+    return;
+  }
+
+  console.log('[Milestone Close] Starting end-of-day check for all holdings...');
+
+  try {
+    const tickerHolders = await getTickerHolders();
+    if (tickerHolders.length === 0) {
+      console.log('[Milestone Close] No holdings found');
+      return;
+    }
+
+    const today = etDate(now);
+    const disabledToggles = await getDisabledMilestoneToggles();
+
+    for (const { ticker, userIds } of tickerHolders) {
+      // Assets that never close (crypto, futures) have no closing print
+      if (getMarketSessionForTicker(ticker, now) === 'REG') continue;
+
+      const regularClose = await getRegularMarketClose(ticker, now);
+      // closedOnEtDate mismatch = holiday or stale data — not today's close
+      if (!regularClose || regularClose.closedOnEtDate !== today) continue;
+
+      const thresholds = await getPriorThresholds(ticker, now);
+      if (!thresholds) continue;
+
+      await evaluateMilestonesForTicker({
+        ticker,
+        userIds,
+        price: regularClose.close,
+        thresholds,
+        defs: CLOSE_MILESTONES,
+        now,
+        disabledToggles,
+      });
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    console.log('[Milestone Close] Check complete');
+  } catch (err) {
+    console.error('[Milestone Close] Error:', err);
     throw err;
   }
 }
@@ -297,4 +405,3 @@ export async function markAllMilestoneEventsRead(userId: string): Promise<void> 
     data: { read: true },
   });
 }
-

@@ -2448,9 +2448,14 @@ export async function getPortfolioChartData(
 
     if (points.length > 0 && liveValue > 0) {
       const lastCandleVal = points[points.length - 1].value;
-      const offset = liveValue - lastCandleVal;
-      if (Math.abs(offset) > 1) {
-        for (const p of points) p.value += offset;
+      // Multiplicative anchor (F-M-13): scale the series so its last point equals liveValue
+      // while PRESERVING the % return between points. An additive shift moved the baseline
+      // and distorted the displayed return.
+      if (lastCandleVal > 0) {
+        const scale = liveValue / lastCandleVal;
+        if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.0001) {
+          for (const p of points) p.value *= scale;
+        }
       }
     }
 
@@ -2480,7 +2485,8 @@ export async function getPortfolioChartData(
         const curr = points[i].value;
         const next = points[i + 1].value;
         const neighborAvg = (prev + next) / 2;
-        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+        // Only clamp genuine bad-quote OUTLIERS (>25% off neighbors), not real moves. F-M-14.
+        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.25) {
           points[i].value = neighborAvg;
         }
       }
@@ -2534,9 +2540,14 @@ export async function getPortfolioChartData(
 
     if (points.length > 0 && liveValue > 0) {
       const lastCandleVal = points[points.length - 1].value;
-      const offset = liveValue - lastCandleVal;
-      if (Math.abs(offset) > 1) {
-        for (const p of points) p.value += offset;
+      // Multiplicative anchor (F-M-13): scale the series so its last point equals liveValue
+      // while PRESERVING the % return between points. An additive shift moved the baseline
+      // and distorted the displayed return.
+      if (lastCandleVal > 0) {
+        const scale = liveValue / lastCandleVal;
+        if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.0001) {
+          for (const p of points) p.value *= scale;
+        }
       }
     }
 
@@ -2551,7 +2562,8 @@ export async function getPortfolioChartData(
         const curr = points[i].value;
         const next = points[i + 1].value;
         const neighborAvg = (prev + next) / 2;
-        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+        // Only clamp genuine bad-quote OUTLIERS (>25% off neighbors), not real moves. F-M-14.
+        if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.25) {
           points[i].value = neighborAvg;
         }
       }
@@ -2612,9 +2624,12 @@ export async function getPortfolioChartData(
     const lastCandleVal = points[points.length - 1].value;
     const divergence = Math.abs(liveValue - lastCandleVal) / lastCandleVal;
     if (divergence < 0.10) {
-      const offset = liveValue - lastCandleVal;
-      if (Math.abs(offset) > 1) {
-        for (const p of points) p.value += offset;
+      // Multiplicative anchor (F-M-13): preserve the % return between points.
+      if (lastCandleVal > 0) {
+        const scale = liveValue / lastCandleVal;
+        if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.0001) {
+          for (const p of points) p.value *= scale;
+        }
       }
     } else {
       console.log(`[ChartData] ${period}: skipping offset normalization — liveValue=$${liveValue.toFixed(0)} vs candle=$${lastCandleVal.toFixed(0)} (${(divergence * 100).toFixed(1)}% divergence)`);
@@ -2628,7 +2643,8 @@ export async function getPortfolioChartData(
       const curr = points[i].value;
       const next = points[i + 1].value;
       const neighborAvg = (prev + next) / 2;
-      if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.03) {
+      // Only clamp genuine bad-quote OUTLIERS (>25% off neighbors), not real moves. F-M-14.
+      if (neighborAvg > 0 && Math.abs(curr - neighborAvg) / neighborAvg > 0.25) {
         points[i].value = neighborAvg;
       }
     }

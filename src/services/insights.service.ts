@@ -717,6 +717,9 @@ export async function getAttribution(userId: string, window: AttributionWindow =
       topDetractors: [],
       winnersCount: 0,
       losersCount: 0,
+      totalGains: 0,
+      totalLosses: 0,
+      netPnL: 0,
       partial: true,
     };
   }
@@ -793,12 +796,20 @@ export async function getAttribution(userId: string, window: AttributionWindow =
   const winnersCount = contributions.filter(c => c.contributionDollar > 0).length;
   const losersCount = contributions.filter(c => c.contributionDollar < 0).length;
 
+  // FULL-portfolio totals (all contributions, not just the shown top-N) so the
+  // Net P&L / Gains / Losses the card labels as totals ARE actually totals. F-H-9.
+  const totalGains = contributions.reduce((s, c) => s + (c.contributionDollar > 0 ? c.contributionDollar : 0), 0);
+  const totalLosses = contributions.reduce((s, c) => s + (c.contributionDollar < 0 ? -c.contributionDollar : 0), 0);
+
   const result: Attribution = {
     window,
     topContributors,
     topDetractors,
     winnersCount,
     losersCount,
+    totalGains,
+    totalLosses,
+    netPnL: totalGains - totalLosses,
     partial: false,
   };
 
