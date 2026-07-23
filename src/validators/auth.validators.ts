@@ -67,6 +67,25 @@ export const loginSchema = z.object({
   password: z.string({ error: 'Password is required' }).min(1, 'Password is required'),
 });
 
+// A5 — signup age gate. 13 matches the Terms of Service minimum; raise this one
+// constant to 18 if the product decision is to gate at the age of majority.
+// (The DOB is validated to enforce the gate; persisting it for an audit record
+// is a follow-up that needs a schema migration.)
+export const MIN_AGE_YEARS = 13;
+
+export function ageFromDob(dobIso: string): number | null {
+  const dob = new Date(dobIso);
+  if (Number.isNaN(dob.getTime())) return null;
+  // Compare in UTC on both sides — a 'YYYY-MM-DD' string parses to UTC midnight,
+  // so using UTC getters avoids a one-day disagreement when the server's local
+  // timezone differs from UTC (keeps the COPPA/ToS age boundary deterministic).
+  const now = new Date();
+  let age = now.getUTCFullYear() - dob.getUTCFullYear();
+  const m = now.getUTCMonth() - dob.getUTCMonth();
+  if (m < 0 || (m === 0 && now.getUTCDate() < dob.getUTCDate())) age--;
+  return age;
+}
+
 export const signupSchema = z.object({
   username: usernameSchema,
   email: z.string({ error: 'Email is required' }).email('Please enter a valid email address').max(255),
@@ -75,6 +94,16 @@ export const signupSchema = z.object({
     .min(1, 'Display name is required')
     .max(50, 'Display name must be at most 50 characters'),
   password: passwordSchema,
+  dateOfBirth: z
+    .string({ error: 'Date of birth is required' })
+    .refine((v) => {
+      const d = new Date(v);
+      return !Number.isNaN(d.getTime()) && d.getTime() < Date.now();
+    }, 'Enter a valid date of birth')
+    .refine((v) => {
+      const age = ageFromDob(v);
+      return age !== null && age >= MIN_AGE_YEARS;
+    }, `You must be at least ${MIN_AGE_YEARS} years old to use Nala`),
   acceptedPrivacyPolicy: z.literal(true, {
     error: 'You must accept the Privacy Policy',
   }),

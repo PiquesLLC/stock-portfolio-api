@@ -1285,6 +1285,7 @@ describe('Auth Routes (Integration)', () => {
           email: 'newuser@example.com',
           displayName: 'New User',
           password: 'StrongPass1',
+          dateOfBirth: '2000-01-01',
           acceptedPrivacyPolicy: true,
           acceptedTerms: true,
         });
@@ -1301,7 +1302,7 @@ describe('Auth Routes (Integration)', () => {
       const res = await request(app)
         .post('/auth/signup')
         .set('Origin', 'http://localhost:5173')
-        .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
+        .send({ username: 'ab', email: 'valid@example.com', displayName: 'Name', password: 'StrongPass1', dateOfBirth: '2000-01-01', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -1310,7 +1311,7 @@ describe('Auth Routes (Integration)', () => {
       const res = await request(app)
         .post('/auth/signup')
         .set('Origin', 'http://localhost:5173')
-        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'weakpass1', dateOfBirth: '2000-01-01', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -1319,7 +1320,7 @@ describe('Auth Routes (Integration)', () => {
       const res = await request(app)
         .post('/auth/signup')
         .set('Origin', 'http://localhost:5173')
-        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1', acceptedPrivacyPolicy: true, acceptedTerms: true });
+        .send({ username: 'validuser', email: 'valid@example.com', displayName: 'Name', password: 'Sh1', dateOfBirth: '2000-01-01', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });
@@ -1331,7 +1332,7 @@ describe('Auth Routes (Integration)', () => {
       const res = await request(app)
         .post('/auth/signup')
         .set('Origin', 'http://localhost:5173')
-        .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
+        .send({ username: 'taken_user', email: 'taken@example.com', displayName: 'Name', password: 'StrongPass1', dateOfBirth: '2000-01-01', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already taken');
@@ -1341,7 +1342,7 @@ describe('Auth Routes (Integration)', () => {
       const res = await request(app)
         .post('/auth/signup')
         .set('Origin', 'http://localhost:5173')
-        .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1', acceptedPrivacyPolicy: true, acceptedTerms: true });
+        .send({ username: 'validuser', email: 'valid@example.com', password: 'StrongPass1', dateOfBirth: '2000-01-01', acceptedPrivacyPolicy: true, acceptedTerms: true });
 
       expect(res.status).toBe(400);
     });

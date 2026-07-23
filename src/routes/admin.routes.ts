@@ -597,4 +597,88 @@ router.get('/reports/latest', requireAuth, requireAdmin, async (req: AuthRequest
   }
 });
 
+// ─── Creator moderation (A3) ────────────────────────────────────────────────
+// Before this, creatorReport rows were written by /creator/:id/report but never
+// read, and nothing could set Creator.status='suspended'. These routes give the
+// enforcement path: review the queue, suspend/reinstate, resolve reports.
+
+// GET /admin/creator-reports?status=open|reviewed|resolved|all — review queue
+router.get('/creator-reports', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : 'open';
+    const reports = await prisma.creatorReport.findMany({
+      where: status === 'all' ? {} : { status },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    // Enrich with the reported creator's identity + current creator status.
+    const creatorIds = [...new Set(reports.map((r) => r.creatorUserId))];
+    const creators = creatorIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: creatorIds } },
+          select: { id: true, username: true, displayName: true, suspended: true, creator: { select: { status: true } } },
+        })
+      : [];
+    const cmap = new Map(creators.map((c) => [c.id, c]));
+    res.json({ reports: reports.map((r) => ({ ...r, creator: cmap.get(r.creatorUserId) ?? null })) });
+  } catch (e: unknown) {
+    console.error('[Admin] creator-reports error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'creator-reports' } });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/creator/:userId/suspend — suspend a creator and mark their open
+// reports reviewed. Suspension removes them from Discover (creator.service) and
+// blocks payouts (creator-billing) and self-reactivation (creator.service).
+router.post('/creator/:userId/suspend', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const creator = await prisma.creator.findUnique({ where: { userId } });
+    if (!creator) { res.status(404).json({ error: 'Creator not found' }); return; }
+    await prisma.$transaction([
+      prisma.creator.update({ where: { userId }, data: { status: 'suspended' } }),
+      prisma.creatorReport.updateMany({ where: { creatorUserId: userId, status: 'open' }, data: { status: 'reviewed' } }),
+    ]);
+    console.log(`[Admin] ${req.user!.userId} suspended creator ${userId} (reason: ${String(req.body?.reason ?? 'n/a').slice(0, 200)})`);
+    res.json({ success: true, status: 'suspended' });
+  } catch (e: unknown) {
+    console.error('[Admin] creator suspend error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'creator-suspend' } });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/creator/:userId/reinstate — return a suspended creator to active
+router.post('/creator/:userId/reinstate', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const creator = await prisma.creator.findUnique({ where: { userId } });
+    if (!creator) { res.status(404).json({ error: 'Creator not found' }); return; }
+    await prisma.creator.update({ where: { userId }, data: { status: 'active' } });
+    console.log(`[Admin] ${req.user!.userId} reinstated creator ${userId}`);
+    res.json({ success: true, status: 'active' });
+  } catch (e: unknown) {
+    console.error('[Admin] creator reinstate error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'creator-reinstate' } });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/creator-report/:id/resolve { status: 'reviewed'|'resolved' }
+router.post('/creator-report/:id/resolve', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const status = req.body?.status === 'resolved' ? 'resolved' : 'reviewed';
+    const existing = await prisma.creatorReport.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Report not found' }); return; }
+    await prisma.creatorReport.update({ where: { id }, data: { status } });
+    res.json({ success: true, status });
+  } catch (e: unknown) {
+    console.error('[Admin] creator-report resolve error:', e instanceof Error ? e.message : String(e));
+    Sentry.captureException(e, { tags: { component: 'admin', endpoint: 'creator-report-resolve' } });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

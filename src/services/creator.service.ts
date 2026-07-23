@@ -780,6 +780,10 @@ export async function discoverCreators(params: {
     profilePublic: true,
     leaderboardEligible: true,
     id: { not: '515d3ef4-2b46-4133-8c08-84327b420eba' }, // system seed user
+    // A3: never surface a suspended creator in discovery. (Non-creators have no
+    // creator record and are unaffected; the price-filter path additionally
+    // requires status:'active'.)
+    NOT: { creator: { status: 'suspended' } },
   };
 
   // Price filters only apply when a creator profile exists

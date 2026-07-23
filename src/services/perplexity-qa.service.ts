@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
 import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { ensureEmailVerifiedForAi } from './email-verification-guard.service';
+import { enforceAiText } from '../eval/financial-safety/enforce';
 
 export interface StockQAResponse {
   ticker: string;
@@ -45,7 +46,10 @@ export async function askStockQuestion(
       { role: 'user', content: `Stock: ${upperTicker}\n\nQuestion: ${question}` },
     ], { timeout: 30000, feature: 'stock-qa', userId, ticker: upperTicker });
 
-    if (!resp || !resp.content) {
+    // Treat a null OR whitespace-only generation as "no answer" (don't cache an
+    // empty string under the shared key).
+    const cleaned = resp?.content ? sanitizeContent(resp.content.trim()) : '';
+    if (!cleaned) {
       return {
         ticker: upperTicker,
         question,
@@ -55,16 +59,32 @@ export async function askStockQuestion(
       };
     }
 
+    // Deterministic safety backstop: the system prompt has no advice guard, so
+    // scan the generation and fail closed (serve an educational fallback) if it
+    // contains a guarantee, buy/sell imperative, leverage, all-in coaching, a
+    // model-asserted price target, or personalized directive advice. Q&A is the
+    // free-form "should I buy X?" surface, so it uses the stricter 'high' gate.
+    const { text: answer, blocked } = enforceAiText(cleaned, {
+      feature: 'stock-qa',
+      gate: 'high',
+      fallback:
+        `I can't give a direct recommendation on ${upperTicker}. I can share general, educational information — ` +
+        `its fundamentals, business, recent news, or risks. This is not financial advice; consider your own situation ` +
+        `and a qualified advisor before making any decision.`,
+    });
+
     const result: StockQAResponse = {
       ticker: upperTicker,
       question,
-      answer: sanitizeContent(resp.content.trim()),
-      citations: (resp.citations || []).filter(validateCitationUrl),
+      answer,
+      // Drop citations on a block — they were sources for the withheld answer.
+      citations: blocked ? [] : (resp?.citations || []).filter(validateCitationUrl),
       answeredAt: new Date().toISOString(),
     };
 
-    // Only cache successful answers
-    qaCache.set(cacheKey, result);
+    // Cache only clean answers — never persist a blocked fallback under the
+    // shared key (a later request may regenerate a serviceable answer).
+    if (!blocked) qaCache.set(cacheKey, result);
     return result;
   } catch (_error) {
     console.error(`[Perplexity Q&A] Error for ${upperTicker}`, _error instanceof Error ? _error.message : String(_error));

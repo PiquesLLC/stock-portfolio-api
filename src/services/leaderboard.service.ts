@@ -168,6 +168,28 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     for (const g of compGroups) if (g.userId) compChangedUserIds.add(g.userId);
   } catch { /* activity events are best-effort; absence just skips the guard */ }
 
+  // Robust composition signal the client CANNOT suppress: a holding whose
+  // server-set createdAt falls inside the window means a position was ADDED
+  // mid-window — via CSV/screenshot import, Plaid sync, or a manual add that
+  // passed skipActivity=true to dodge the activity-event guard above. Crediting
+  // a just-added position's PAST run-up is the primary leaderboard gaming vector
+  // (import an already-appreciated portfolio → bank the run-up), so treat these
+  // users identically to F-M-15: fall back to the recorded snapshot return, or
+  // drop them from the ranking when they lack enough history to measure fairly.
+  //
+  // Skip 1D: the 1D path already anchors a position opened today at its OWN cost
+  // basis (isOpenedTodayET below), so it credits only the user's gain since
+  // purchase — there is no pre-ownership run-up to bank in a single day. The
+  // vector this guards is the multi-day/week reconstruction from a window-start
+  // price that predates ownership.
+  if (window !== '1D') {
+    for (const [uid, holdings] of holdingsByUser) {
+      if (holdings.some(h => h.createdAt != null && new Date(h.createdAt).getTime() >= windowStartMs)) {
+        compChangedUserIds.add(uid);
+      }
+    }
+  }
+
   for (const user of users) {
     if (!user.trackingStartAt) continue;
 
@@ -192,7 +214,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         region: user.region ?? null, window,
         returnPct: null, returnDollar: null, twrPct: null,
         verified: true, basis: 'none', sinceStart, isNew,
-        flagged: false, flagReason: null,
+        flagged: false, suspicious: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
         startDateUsed: null, endDateUsed: null,
       });
@@ -244,7 +266,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         region: user.region ?? null, window,
         returnPct: null, returnDollar: null, twrPct: null,
         verified: true, basis: 'none', sinceStart, isNew,
-        flagged: false, flagReason: null,
+        flagged: false, suspicious: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
         startDateUsed: null, endDateUsed: null,
       });
@@ -255,6 +277,11 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     let returnPct: number | null = null;
     let returnDollar: number = 0;
     let flagged = false;
+    // `suspicious` marks ONLY anti-cheat detections (>300%/day, Sharpe>5) — the
+    // subset of `flagged` that must be excluded from public ranking. Benign
+    // composition-change flags (F-M-15) keep `suspicious=false` and stay ranked
+    // with a snapshot-recomputed return.
+    let suspicious = false;
     let flagReason: string | null = null;
 
     if (window === '1D' && prevCloseValue != null) {
@@ -325,15 +352,20 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         const dailyReturns = dailyReturnsFromValues(dailyValues);
         if (dailyReturns.some(r => isSuspiciousReturn(r, 1))) {
           flagged = true;
+          suspicious = true;
           flagReason = 'Suspicious single-day return detected (>300%)';
         }
-        if (!flagged && dailyReturns.length >= 5) {
+        // Gate on `!suspicious` (not `!flagged`) so a benign composition-flagged
+        // entry is still Sharpe-checked and can't smuggle an absurd risk-adjusted
+        // return past the anti-cheat.
+        if (!suspicious && dailyReturns.length >= 5) {
           const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
           const annualizedMean = mean * 252;
           const variance = dailyReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / dailyReturns.length;
           const annualizedVol = Math.sqrt(variance) * Math.sqrt(252);
           if (isSuspiciousSharpe(annualizedMean, annualizedVol)) {
             flagged = true;
+            suspicious = true;
             flagReason = 'Abnormally high risk-adjusted return (Sharpe > 5)';
           }
         }
@@ -356,6 +388,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       sinceStart,
       isNew,
       flagged,
+      suspicious,
       flagReason,
       trackingStartAt: user.trackingStartAt.toISOString(),
       snapshotCount,

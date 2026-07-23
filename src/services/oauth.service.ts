@@ -1,5 +1,6 @@
 import axios from 'axios';
 import appleSignin from 'apple-signin-auth';
+import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { generateAccessToken, generateRefreshToken, CURRENT_POLICY_VERSION } from './auth.service';
@@ -122,14 +123,19 @@ export async function generateUsername(name?: string, email?: string): Promise<s
   return candidate;
 }
 
-// ─── Find or Create OAuth User ───────────────────────────────────────────────
+// ─── Find Existing OAuth User (lookup only — never creates) ─────────────────
 
-export async function findOrCreateOAuthUser(
+/**
+ * Resolves an OAuth profile to an EXISTING account: by provider id, or by
+ * verified email (as a pending link committed after the MFA check). Returns
+ * null when no account matches — i.e. this sign-in would create a brand-new
+ * user. The controllers use that null to gate new signups behind the
+ * date-of-birth step BEFORE anything is persisted.
+ */
+export async function findExistingOAuthUser(
   provider: 'google' | 'apple',
   profile: OAuthProfile,
-  appleName?: { firstName?: string; lastName?: string },
-  consentMeta?: { ipAddress?: string; userAgent?: string },
-): Promise<OAuthResult> {
+): Promise<OAuthResult | null> {
   const providerIdField = provider === 'google' ? 'googleId' : 'appleId';
 
   // 1. Look up by provider ID
@@ -178,7 +184,23 @@ export async function findOrCreateOAuthUser(
     }
   }
 
-  // 3. Create new user
+  return null;
+}
+
+// ─── Find or Create OAuth User ───────────────────────────────────────────────
+
+export async function findOrCreateOAuthUser(
+  provider: 'google' | 'apple',
+  profile: OAuthProfile,
+  appleName?: { firstName?: string; lastName?: string },
+  consentMeta?: { ipAddress?: string; userAgent?: string },
+): Promise<OAuthResult> {
+  const providerIdField = provider === 'google' ? 'googleId' : 'appleId';
+
+  const existing = await findExistingOAuthUser(provider, profile);
+  if (existing) return existing;
+
+  // Create new user
   const displayName = profile.name
     || (appleName ? [appleName.firstName, appleName.lastName].filter(Boolean).join(' ') : '')
     || profile.givenName
@@ -359,4 +381,53 @@ export async function issueTokens(user: OAuthUser): Promise<{
       planExpiresAt: user.planExpiresAt,
     },
   };
+}
+
+// ─── OAuth Signup Token (pre-creation age gate) ─────────────────────────────
+// A brand-new OAuth sign-in persists NOTHING until the date-of-birth step at
+// /auth/oauth/complete passes. The verified provider profile travels in this
+// short-lived purpose-scoped JWT instead of a half-provisioned account, so an
+// abandoned or failed age check leaves no record, and restarting OAuth simply
+// mints a fresh token.
+
+const OAUTH_SIGNUP_TOKEN_TTL_SECONDS = 10 * 60;
+
+export interface OAuthSignupTokenPayload {
+  purpose: 'oauth_signup';
+  provider: 'google' | 'apple';
+  profile: OAuthProfile;
+  appleName?: { firstName?: string; lastName?: string };
+}
+
+export function signOAuthSignupToken(
+  provider: 'google' | 'apple',
+  profile: OAuthProfile,
+  appleName?: { firstName?: string; lastName?: string },
+): string {
+  const payload: OAuthSignupTokenPayload = {
+    purpose: 'oauth_signup',
+    provider,
+    profile,
+    ...(appleName ? { appleName } : {}),
+  };
+  return jwt.sign(payload, config.jwtSecret, { expiresIn: OAUTH_SIGNUP_TOKEN_TTL_SECONDS });
+}
+
+/**
+ * Returns null for any invalid, expired, or wrong-purpose token. An access
+ * token can never pass here (no `purpose` claim), and a signup token can never
+ * act as an access token (no `userId`, so auth middleware's user lookup fails).
+ */
+export function verifyOAuthSignupToken(token: string): OAuthSignupTokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret);
+    if (typeof decoded !== 'object' || decoded === null) return null;
+    const payload = decoded as Partial<OAuthSignupTokenPayload>;
+    if (payload.purpose !== 'oauth_signup') return null;
+    if (payload.provider !== 'google' && payload.provider !== 'apple') return null;
+    if (!payload.profile || typeof payload.profile.providerId !== 'string' || !payload.profile.providerId) return null;
+    return payload as OAuthSignupTokenPayload;
+  } catch {
+    return null;
+  }
 }

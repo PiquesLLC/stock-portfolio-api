@@ -13,3 +13,10 @@ export const appleCallbackSchema = z.object({
     lastName: z.string().max(100).optional(),
   }).strict().optional(),
 }).strict();
+
+// Step 2 of a brand-new OAuth signup (age gate). Date semantics are enforced
+// in the handler via ageFromDob/MIN_AGE_YEARS — this only bounds the shape.
+export const oauthCompleteSchema = z.object({
+  signupToken: z.string().min(10).max(4096),
+  dateOfBirth: z.string().min(4).max(32),
+}).strict();

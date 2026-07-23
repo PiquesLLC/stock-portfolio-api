@@ -5,6 +5,7 @@ import { extractJson } from '../utils/perplexity';
 import { sanitizeContent, validateCitationUrl } from '../utils/content-filter';
 import { matchPersona, StrategyPersona } from '../data/strategy-personas';
 import { getPortfolio } from './portfolio.service';
+import { enforceAiText } from '../eval/financial-safety/enforce';
 
 
 
@@ -192,8 +193,17 @@ function parseStockResults(raw: any): NalaStockResult[] {
         pegRatio: toNumberOrNull(s.metrics?.pegRatio),
       },
       confidenceScore: clamp(Number(s.confidenceScore) || 70, 60, 95),
-      explanation: sanitizeContent(stripMarkdown(String(s.explanation || '')).slice(0, 500)),
-      risks: sanitizeContent(stripMarkdown(String(s.risks || '')).slice(0, 1000)),
+      // Deterministic safety backstop over model-authored rationale — fail
+      // closed (drop the sentence) if it slips a guarantee / buy-sell / leverage
+      // / all-in past the prompt rules.
+      explanation: enforceAiText(sanitizeContent(stripMarkdown(String(s.explanation || '')).slice(0, 500)), {
+        feature: 'nala-explanation',
+        fallback: 'Rationale withheld by the safety filter — review the metrics above and do your own research.',
+      }).text,
+      risks: enforceAiText(sanitizeContent(stripMarkdown(String(s.risks || '')).slice(0, 1000)), {
+        feature: 'nala-risks',
+        fallback: 'All investments carry risk of loss. Review the fundamentals and your own situation before acting.',
+      }).text,
       localData: null,
     }));
 }
@@ -421,7 +431,10 @@ export async function askNala(question: string, userId: string): Promise<NalaRes
       question,
       strategy: strategyInfo,
       stocks,
-      strategyExplanation: sanitizeContent(stripMarkdown(String(parsed.strategyExplanation || '')).slice(0, 500)),
+      strategyExplanation: enforceAiText(
+        sanitizeContent(stripMarkdown(String(parsed.strategyExplanation || '')).slice(0, 500)),
+        { feature: 'nala-strategy', fallback: 'Strategy summary withheld by the safety filter. This is educational information, not advice.' },
+      ).text,
       citations: (resp.citations || []).filter(validateCitationUrl),
       generatedAt: new Date().toISOString(),
       cached: false,

@@ -280,3 +280,57 @@ describe('getLeaderboard empty result', () => {
     expect((prismaMock as any).leaderboardCache.upsert).not.toHaveBeenCalled();
   });
 });
+
+// --------------------------------------------------------------------------
+// 6. Composition guard (anti-gaming): a position ADDED mid-window — via import,
+//    Plaid sync, or a manual add with skipActivity=true — must not bank its
+//    pre-ownership run-up on a non-1D window. Detected from the holding's
+//    server-set createdAt (which the client cannot suppress).
+// --------------------------------------------------------------------------
+describe('getLeaderboard composition guard (anti-gaming)', () => {
+  it('does not credit a mid-window-added position its pre-ownership run-up (drops it when snapshots are insufficient)', async () => {
+    setupPrisma({
+      users: [userRow()],
+      // Created TODAY but viewed on a 1M window: the current-shares
+      // reconstruction would value the position at the 1-month-ago price (50),
+      // crediting a +300% run-up the user never actually held.
+      holdings: [holdingRow({ ticker: 'GROW', createdAt: new Date(), averageCost: 100, shares: 10 })],
+      settings: [{ userId: 'u1', cashBalance: 0, marginDebt: 0 }],
+    });
+    (prismaMock as any).portfolioSnapshot.findMany = vi.fn().mockResolvedValue([]); // insufficient history
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['GROW', quote(200, 190)]])));
+    const now = Date.now();
+    fetchPolygonAggsMock.mockResolvedValue({
+      timestamps: [Math.floor((now - 35 * 86400000) / 1000), Math.floor(now / 1000)],
+      closes: [50, 200], // window-start price 50 → +300% reconstruction if uncaught
+    });
+
+    const res = await getLeaderboard('1M', 'world');
+
+    expect(res.entries).toHaveLength(1);
+    const e = res.entries[0];
+    expect(e.flagged).toBe(true); // composition-changed
+    expect(e.suspicious).toBe(false); // benign, not anti-cheat — stays eligible, just not credited the run-up
+    expect(e.returnPct).toBeNull(); // dropped, NOT +300%
+  });
+
+  it('does NOT flag an established position (createdAt before the window)', async () => {
+    setupPrisma({
+      users: [userRow()],
+      holdings: [holdingRow({ ticker: 'HELD', createdAt: new Date(Date.now() - 200 * 86400000), averageCost: 100, shares: 10 })],
+      settings: [{ userId: 'u1', cashBalance: 0, marginDebt: 0 }],
+    });
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['HELD', quote(120, 118)]])));
+    const now = Date.now();
+    fetchPolygonAggsMock.mockResolvedValue({
+      timestamps: [Math.floor((now - 35 * 86400000) / 1000), Math.floor(now / 1000)],
+      closes: [100, 120],
+    });
+
+    const res = await getLeaderboard('1M', 'world');
+
+    const e = res.entries[0];
+    expect(e.flagged).toBe(false); // established holding — fair reconstruction
+    expect(e.returnPct).toBeCloseTo(20, 4); // (120-100)/100
+  });
+});

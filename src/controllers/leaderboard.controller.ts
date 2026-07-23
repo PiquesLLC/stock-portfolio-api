@@ -21,12 +21,17 @@ export async function getLeaderboardHandler(req: Request, res: Response): Promis
     }
 
     const result = await getLeaderboard(window as LeaderboardWindow, region as LeaderboardRegion);
-    // Strip sensitive fields from public response
-    const sanitizedEntries = result.entries.map(({ flagReason: _flagReason, ...entry }) => ({
-      ...entry,
-      flagReason: entry.flagged ? 'Under review' : null,
-    }));
-    res.json({ ...result, entries: sanitizedEntries });
+    // B2: exclude ONLY anti-cheat detections (>300%/day, Sharpe>5) from the public
+    // ranking — a manipulated return must not sit at #1 with a soft label. We
+    // filter on `suspicious`, NOT `flagged`: benign composition-change flags
+    // (F-M-15) belong to honest users who traded during the window and whose
+    // return was accurately recomputed from snapshots — they stay ranked. Both
+    // remain in LeaderboardCache for admin review, and the internal flagReason
+    // is stripped from the public payload.
+    const publicEntries = result.entries
+      .filter((entry) => !entry.suspicious)
+      .map(({ flagReason: _flagReason, ...entry }) => entry);
+    res.json({ ...result, entries: publicEntries });
   } catch (error: unknown) {
     console.error('Error fetching leaderboard:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch leaderboard' });

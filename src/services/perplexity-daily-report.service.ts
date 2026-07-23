@@ -2,6 +2,14 @@ import NodeCache from 'node-cache';
 import { callAI } from '../utils/ai-provider';
 import { extractJson, parsePerplexityJson } from '../utils/perplexity';
 import { sanitizeContent } from '../utils/content-filter';
+import { enforceAiText } from '../eval/financial-safety/enforce';
+
+// Deterministic safety backstop for model-authored brief prose: fail closed on
+// blocker-level content (guarantees, buy/sell imperatives, leverage, all-in)
+// that the system prompt cannot enforce. Returns the given fallback if tripped.
+function safeBrief(text: string, feature: string, fallback: string): string {
+  return enforceAiText(text, { feature, fallback }).text;
+}
 import { getPortfolio } from './portfolio.service';
 import { fetchMarketNews } from './news.service';
 import { fetchPortfolioNews } from './portfolio-news.service';
@@ -322,7 +330,7 @@ function buildDailyReportFromPayload(
   const topStories = Array.isArray(payload?.topStories)
     ? payload.topStories.slice(0, 5).map((s: any) => ({
       headline: sanitizeContent(stripLeakedTags(String(s?.headline || '').slice(0, 120))),
-      body: truncateCleanly(sanitizeContent(stripLeakedTags(String(s?.body || ''))), 600),
+      body: safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(s?.body || ''))), 600), 'daily-story', 'See the linked source for details.'),
       sentiment: ['positive', 'negative', 'neutral'].includes(s?.sentiment) ? s.sentiment : 'neutral',
       relatedTickers: Array.isArray(s?.relatedTickers)
         ? s.relatedTickers
@@ -334,29 +342,29 @@ function buildDailyReportFromPayload(
     : fallback.topStories;
 
   const watchToday = Array.isArray(payload?.watchToday)
-    ? payload.watchToday.slice(0, 5).map((w: any) => truncateCleanly(sanitizeContent(stripLeakedTags(String(w || ''))), 400))
+    ? payload.watchToday.slice(0, 5).map((w: any) => safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(w || ''))), 400), 'daily-watch', 'Review your holdings and do your own research.'))
     : fallback.watchToday;
 
   const positionMoves = Array.isArray(payload?.positionMoves)
     ? payload.positionMoves.slice(0, 5).map((m: any) => ({
       ticker: String(m?.ticker || '').toUpperCase(),
       changePercent: typeof m?.changePercent === 'number' ? m.changePercent : 0,
-      reason: truncateCleanly(sanitizeContent(stripLeakedTags(String(m?.reason || ''))), 300),
+      reason: safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(m?.reason || ''))), 300), 'daily-move', 'Moved with the broader session; see the chart for detail.'),
     })).filter((m: any) => m.ticker && m.reason)
     : undefined;
 
   const questionsOfTheDay = Array.isArray(payload?.questionsOfTheDay)
     ? payload.questionsOfTheDay.slice(0, 2).map((q: any) => ({
       question: sanitizeContent(stripLeakedTags(String(q?.question || ''))).slice(0, 200),
-      answer: truncateCleanly(sanitizeContent(stripLeakedTags(String(q?.answer || ''))), 500),
+      answer: safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(q?.answer || ''))), 500), 'daily-qa', 'This is educational information only, not financial advice.'),
     })).filter((q: any) => q.question && q.answer)
     : undefined;
 
   return {
     generatedAt: new Date().toISOString(),
     greeting: sanitizeContent(stripLeakedTags(String(payload?.greeting || fallback.greeting).slice(0, 250))),
-    marketOverview: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview))), 1000),
-    portfolioSummary: truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary))), 1000),
+    marketOverview: safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.marketOverview || fallback.marketOverview))), 1000), 'daily-market', 'Market commentary is unavailable right now.'),
+    portfolioSummary: safeBrief(truncateCleanly(sanitizeContent(stripLeakedTags(String(payload?.portfolioSummary || fallback.portfolioSummary))), 1000), 'daily-portfolio', 'Portfolio commentary is unavailable right now.'),
     positionMoves: positionMoves && positionMoves.length > 0 ? positionMoves : fallback.positionMoves,
     topStories: topStories.length > 0 ? topStories : fallback.topStories,
     questionsOfTheDay: questionsOfTheDay && questionsOfTheDay.length > 0 ? questionsOfTheDay : undefined,

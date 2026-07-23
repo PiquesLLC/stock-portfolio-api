@@ -19,6 +19,10 @@ const DEMO_USERS = [
   { username: 'nina_bull', displayName: 'Nina Patel', region: 'APAC' },
 ];
 
+// The demo allowlist — the ONLY usernames the snapshot backfill may fabricate
+// history for (B6). Passed explicitly so snapshot.service never wildcards.
+export const DEMO_USERNAMES = DEMO_USERS.map((u) => u.username);
+
 /**
  * Ensure all 10 demo leaderboard users exist. Idempotent — skips users
  * that are already in the DB (matched by username).
@@ -292,7 +296,7 @@ export async function seedLeaderboardFollows(
 export async function backfillLeaderboardDemoData(): Promise<void> {
   await ensureDemoLeaderboardUsers();
   await ensureLeaderboardUsersHaveHoldings();
-  await backfillDemoUserSnapshots();
+  await backfillDemoUserSnapshots(DEMO_USERNAMES);
   await seedLeaderboardActivityEvents();
   await seedLeaderboardFollows();
 }

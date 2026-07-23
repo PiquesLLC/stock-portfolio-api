@@ -27,12 +27,36 @@ describe('Auth Validators', () => {
       email: TEST_EMAIL,
       displayName: 'Test',
       password: 'TestPass1',
+      dateOfBirth: '2000-01-01',
       acceptedPrivacyPolicy: true,
       acceptedTerms: true,
     };
 
     it('accepts valid signup', () => {
       expect(signupSchema.safeParse(valid).success).toBe(true);
+    });
+
+    it('rejects a missing or invalid date of birth (A5 age gate)', () => {
+      const { dateOfBirth: _omit, ...noDob } = valid;
+      expect(signupSchema.safeParse(noDob).success).toBe(false);
+      expect(signupSchema.safeParse({ ...valid, dateOfBirth: 'not-a-date' }).success).toBe(false);
+    });
+
+    it('rejects an under-age signup (A5 age gate)', () => {
+      const now = new Date();
+      const tenYearsAgo = new Date(now.getFullYear() - 10, now.getMonth(), now.getDate())
+        .toISOString()
+        .slice(0, 10);
+      expect(signupSchema.safeParse({ ...valid, dateOfBirth: tenYearsAgo }).success).toBe(false);
+    });
+
+    it('accepts a signup at exactly the minimum age (A5 age gate)', () => {
+      const now = new Date();
+      // Born 13 years ago yesterday → already 13 today.
+      const justOldEnough = new Date(now.getFullYear() - 13, now.getMonth(), now.getDate() - 1)
+        .toISOString()
+        .slice(0, 10);
+      expect(signupSchema.safeParse({ ...valid, dateOfBirth: justOldEnough }).success).toBe(true);
     });
 
     it('rejects short username', () => {

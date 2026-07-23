@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
-import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, issueTokens, commitOAuthLink, OAuthProfile } from '../services/oauth.service';
+import { verifyGoogleToken, verifyAppleToken, findOrCreateOAuthUser, findExistingOAuthUser, issueTokens, commitOAuthLink, signOAuthSignupToken, verifyOAuthSignupToken, OAuthProfile, OAuthUser } from '../services/oauth.service';
 import { config } from '../config';
 import { getCookieOptions, isCapacitorRequest } from './auth.controller';
 import { hasMfaEnabled, createMfaChallenge, getEnabledMethods, getMaskedEmail } from '../services/mfa.service';
-import { googleCallbackSchema, appleCallbackSchema } from '../validators/oauth.validators';
+import { googleCallbackSchema, appleCallbackSchema, oauthCompleteSchema } from '../validators/oauth.validators';
+import { ageFromDob, MIN_AGE_YEARS } from '../validators/auth.validators';
 import { trackOAuthSuccess, trackOAuthFail, trackOAuthMfa } from '../utils/auth-metrics';
 import prisma from '../utils/prisma';
 
@@ -55,6 +56,34 @@ function markWaitlistConverted(email: string | undefined): void {
 }
 
 /**
+ * Issue the session (cookies for web, tokens in body for native) and send the
+ * standard OAuth login response. Shared by both provider callbacks and the
+ * signup-completion handler so the response contract can't drift.
+ */
+async function sendOAuthSession(
+  req: Request,
+  res: Response,
+  user: OAuthUser,
+  provider: 'google' | 'apple',
+  isNewUser: boolean,
+): Promise<void> {
+  const loginResponse = await issueTokens(user);
+  const { accessOptions, refreshOptions } = getCookieOptions(req);
+  res.cookie('authToken', loginResponse.token, accessOptions);
+  res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
+  trackOAuthSuccess(provider);
+  console.log(`[OAuth] ${provider} login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
+  const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
+    (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
+  const isNative = isCapacitorRequest(req);
+  res.json({
+    user: { ...loginResponse.user, isWaitlistAdmin: isAdmin },
+    isNewUser,
+    ...(isNative ? { accessToken: loginResponse.token, refreshToken: loginResponse.refreshToken, token: loginResponse.token } : {}),
+  });
+}
+
+/**
  * POST /auth/oauth/google/callback
  * Body: { access_token: string }  — Google access token from useGoogleLogin()
  */
@@ -81,32 +110,34 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
     // Waitlist gate: check BEFORE creating any user record
     if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
 
-    const { user, isNewUser, pendingLink } = await findOrCreateOAuthUser(
-      'google',
-      profile,
-      undefined,
-      { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
-    );
+    const existing = await findExistingOAuthUser('google', profile);
 
-    if (isNewUser) markWaitlistConverted(profile.email);
+    if (!existing) {
+      // Brand-new signup: persist nothing until the date-of-birth step at
+      // /auth/oauth/complete passes (age gate).
+      const signupToken = signOAuthSignupToken('google', profile);
+      console.log(`[OAuth] google signup pending DOB, ip=${req.ip}`);
+      res.json({ requiresDateOfBirth: true, signupToken });
+      return;
+    }
+
+    const { user, pendingLink } = existing;
 
     // Check if existing user has MFA enabled — before issuing tokens or linking
-    if (!isNewUser) {
-      const mfaEnabled = await hasMfaEnabled(user.id);
-      if (mfaEnabled) {
-        // Pass pendingLink to challenge — will be committed after MFA verification
-        const challengeToken = await createMfaChallenge(user.id, pendingLink);
-        const methods = await getEnabledMethods(user.id);
-        const maskedEmail = await getMaskedEmail(user.id);
-        trackOAuthMfa('google');
-        res.json({
-          mfaRequired: true,
-          challengeToken,
-          methods,
-          maskedEmail,
-        });
-        return;
-      }
+    const mfaEnabled = await hasMfaEnabled(user.id);
+    if (mfaEnabled) {
+      // Pass pendingLink to challenge — will be committed after MFA verification
+      const challengeToken = await createMfaChallenge(user.id, pendingLink);
+      const methods = await getEnabledMethods(user.id);
+      const maskedEmail = await getMaskedEmail(user.id);
+      trackOAuthMfa('google');
+      res.json({
+        mfaRequired: true,
+        challengeToken,
+        methods,
+        maskedEmail,
+      });
+      return;
     }
 
     // MFA not enabled — safe to commit the provider link
@@ -114,21 +145,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       await commitOAuthLink(user.id, pendingLink);
     }
 
-    const loginResponse = await issueTokens(user);
-    const { accessOptions, refreshOptions } = getCookieOptions(req);
-    res.cookie('authToken', loginResponse.token, accessOptions);
-    res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
-    trackOAuthSuccess('google');
-    console.log(`[OAuth] google login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
-    const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
-      (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    const isNative = isCapacitorRequest(req);
-    const googleBody: any = {
-      user: { ...loginResponse.user, isWaitlistAdmin: isAdmin },
-      isNewUser,
-      ...(isNative ? { accessToken: loginResponse.token, refreshToken: loginResponse.refreshToken, token: loginResponse.token } : {}),
-    };
-    res.json(googleBody);
+    await sendOAuthSession(req, res, user, 'google', false);
   } catch (error: unknown) {
     trackOAuthFail('google');
     console.error('Google OAuth error:', error instanceof Error ? error.message : error);
@@ -160,32 +177,35 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
     // Waitlist gate: check BEFORE creating any user record
     if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
 
-    const { user, isNewUser, pendingLink } = await findOrCreateOAuthUser(
-      'apple',
-      profile,
-      appleUser, // { firstName, lastName } — only on first auth
-      { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
-    );
+    const existing = await findExistingOAuthUser('apple', profile);
 
-    if (isNewUser) markWaitlistConverted(profile.email);
+    if (!existing) {
+      // Brand-new signup: persist nothing until the date-of-birth step at
+      // /auth/oauth/complete passes (age gate). Apple only sends the user's
+      // name on this first authorization — carry it in the signup token.
+      const signupToken = signOAuthSignupToken('apple', profile, appleUser);
+      console.log(`[OAuth] apple signup pending DOB, ip=${req.ip}`);
+      res.json({ requiresDateOfBirth: true, signupToken });
+      return;
+    }
+
+    const { user, pendingLink } = existing;
 
     // Check if existing user has MFA enabled — before issuing tokens or linking
-    if (!isNewUser) {
-      const mfaEnabled = await hasMfaEnabled(user.id);
-      if (mfaEnabled) {
-        // Pass pendingLink to challenge — will be committed after MFA verification
-        const challengeToken = await createMfaChallenge(user.id, pendingLink);
-        const methods = await getEnabledMethods(user.id);
-        const maskedEmail = await getMaskedEmail(user.id);
-        trackOAuthMfa('apple');
-        res.json({
-          mfaRequired: true,
-          challengeToken,
-          methods,
-          maskedEmail,
-        });
-        return;
-      }
+    const mfaEnabled = await hasMfaEnabled(user.id);
+    if (mfaEnabled) {
+      // Pass pendingLink to challenge — will be committed after MFA verification
+      const challengeToken = await createMfaChallenge(user.id, pendingLink);
+      const methods = await getEnabledMethods(user.id);
+      const maskedEmail = await getMaskedEmail(user.id);
+      trackOAuthMfa('apple');
+      res.json({
+        mfaRequired: true,
+        challengeToken,
+        methods,
+        maskedEmail,
+      });
+      return;
     }
 
     // MFA not enabled — safe to commit the provider link
@@ -193,24 +213,71 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       await commitOAuthLink(user.id, pendingLink);
     }
 
-    const loginResponse = await issueTokens(user);
-    const { accessOptions, refreshOptions } = getCookieOptions(req);
-    res.cookie('authToken', loginResponse.token, accessOptions);
-    res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
-    trackOAuthSuccess('apple');
-    console.log(`[OAuth] apple login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
-    const isAppleAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
-      (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
-    const isNative = isCapacitorRequest(req);
-    const appleBody: any = {
-      user: { ...loginResponse.user, isWaitlistAdmin: isAppleAdmin },
-      isNewUser,
-      ...(isNative ? { accessToken: loginResponse.token, refreshToken: loginResponse.refreshToken, token: loginResponse.token } : {}),
-    };
-    res.json(appleBody);
+    await sendOAuthSession(req, res, user, 'apple', false);
   } catch (error: unknown) {
     trackOAuthFail('apple');
     console.error('Apple OAuth error:', error instanceof Error ? error.message : error);
+    res.status(401).json({ error: 'Authentication failed' });
+  }
+}
+
+/**
+ * POST /auth/oauth/complete
+ * Body: { signupToken: string, dateOfBirth: 'YYYY-MM-DD' }
+ * Step 2 of a brand-new OAuth signup — the age gate. The signed signupToken
+ * carries the verified provider profile from step 1; the account is only
+ * created here, after the date of birth passes the MIN_AGE_YEARS check.
+ */
+export async function oauthCompleteHandler(req: Request, res: Response): Promise<void> {
+  const parsed = oauthCompleteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request' });
+    return;
+  }
+
+  const payload = verifyOAuthSignupToken(parsed.data.signupToken);
+  if (!payload) {
+    res.status(401).json({ error: 'Your signup session expired — please sign in again' });
+    return;
+  }
+  const { provider, profile, appleName } = payload;
+
+  try {
+    const age = ageFromDob(parsed.data.dateOfBirth);
+    if (age === null) {
+      res.status(400).json({ error: 'Please enter a valid date of birth' });
+      return;
+    }
+    if (age < MIN_AGE_YEARS) {
+      // Reject BEFORE any account exists — nothing about the visitor is persisted.
+      res.status(403).json({ error: `You must be at least ${MIN_AGE_YEARS} years old to use Nala` });
+      return;
+    }
+
+    // Re-run the waitlist gate — approval may have changed since step 1
+    if (!(await checkWaitlistForNewOAuthUser(profile, res))) return;
+
+    const { user, isNewUser } = await findOrCreateOAuthUser(
+      provider,
+      profile,
+      appleName,
+      { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+    );
+
+    if (!isNewUser) {
+      // The account materialized between step 1 and step 2 (parallel signup or
+      // token replay after completion). Never convert a signup token into a
+      // session for an existing account — a fresh provider sign-in goes through
+      // the normal path, including its MFA challenge.
+      res.status(409).json({ error: 'ACCOUNT_ALREADY_EXISTS' });
+      return;
+    }
+
+    markWaitlistConverted(profile.email);
+    await sendOAuthSession(req, res, user, provider, true);
+  } catch (error: unknown) {
+    trackOAuthFail(provider);
+    console.error('OAuth complete error:', error instanceof Error ? error.message : error);
     res.status(401).json({ error: 'Authentication failed' });
   }
 }

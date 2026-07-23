@@ -50,6 +50,10 @@ const mfaServiceMock = vi.hoisted(() => ({
   hasMfaEnabled: vi.fn(),
   createMfaChallenge: vi.fn(),
   getMaskedEmail: vi.fn(),
+  // Per-account MFA lockout (F-AUTH2). Default to not-locked for the happy path.
+  checkMfaLockout: vi.fn(() => ({ locked: false, retryAfterSec: 0 })),
+  recordMfaFailure: vi.fn(),
+  clearMfaFailures: vi.fn(),
 }));
 
 vi.mock('../services/mfa.service', () => mfaServiceMock);
@@ -57,9 +61,12 @@ vi.mock('../services/mfa.service', () => mfaServiceMock);
 const oauthServiceMock = vi.hoisted(() => ({
   verifyGoogleToken: vi.fn(),
   verifyAppleToken: vi.fn(),
+  findExistingOAuthUser: vi.fn(),
   findOrCreateOAuthUser: vi.fn(),
   issueTokens: vi.fn(),
   commitOAuthLink: vi.fn(),
+  signOAuthSignupToken: vi.fn(),
+  verifyOAuthSignupToken: vi.fn(),
 }));
 
 vi.mock('../services/oauth.service', () => oauthServiceMock);
@@ -106,6 +113,19 @@ describe('Native Auth Contract Routes', () => {
       email: 'piques@example.com',
       emailVerified: true,
     });
+    oauthServiceMock.findExistingOAuthUser.mockResolvedValue({
+      user: {
+        id: 'user-1',
+        username: 'piques',
+        displayName: 'Piques',
+        email: 'piques@example.com',
+        emailVerified: true,
+        plan: 'free',
+        planExpiresAt: null,
+      },
+      isNewUser: false,
+      pendingLink: null,
+    });
     oauthServiceMock.findOrCreateOAuthUser.mockResolvedValue({
       user: {
         id: 'user-1',
@@ -119,6 +139,8 @@ describe('Native Auth Contract Routes', () => {
       isNewUser: false,
       pendingLink: null,
     });
+    oauthServiceMock.signOAuthSignupToken.mockReturnValue('signup-token-1');
+    oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(null);
     oauthServiceMock.issueTokens.mockResolvedValue({
       user: {
         id: 'user-1',
@@ -179,5 +201,120 @@ describe('Native Auth Contract Routes', () => {
     expect(typeof res.body.token).toBe('string');
     expect(res.body.token).toBe(res.body.accessToken);
 
+  });
+  describe('OAuth age gate (two-step new-user signup)', () => {
+    const ADULT_DOB = '1990-01-01';
+    // A DOB ~8 years ago stays under MIN_AGE_YEARS regardless of when the suite runs
+    const MINOR_DOB = new Date(Date.now() - 8 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+    const newSignupPayload = {
+      purpose: 'oauth_signup' as const,
+      provider: 'google' as const,
+      profile: { providerId: 'google-sub-new', email: 'newbie@example.com', emailVerified: true, name: 'Newbie' },
+    };
+
+    it('brand-new Google signup returns requiresDateOfBirth + signupToken and NO session', async () => {
+      oauthServiceMock.findExistingOAuthUser.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/auth/oauth/google/callback')
+        .set('Origin', 'capacitor://localhost')
+        .send({ access_token: 'google-access-token' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.requiresDateOfBirth).toBe(true);
+      expect(res.body.signupToken).toBe('signup-token-1');
+      expect(res.body.user).toBeUndefined();
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.headers['set-cookie']).toBeUndefined();
+      expect(oauthServiceMock.findOrCreateOAuthUser).not.toHaveBeenCalled();
+    });
+
+    it('POST /auth/oauth/complete with an adult DOB creates the user and returns native token fields', async () => {
+      oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(newSignupPayload);
+      oauthServiceMock.findOrCreateOAuthUser.mockResolvedValue({
+        user: {
+          id: 'user-2', username: 'newbie', displayName: 'Newbie',
+          email: 'newbie@example.com', emailVerified: true, plan: 'free', planExpiresAt: null,
+        },
+        isNewUser: true,
+      });
+
+      const res = await request(app)
+        .post('/auth/oauth/complete')
+        .set('Origin', 'capacitor://localhost')
+        .send({ signupToken: 'signup-token-1', dateOfBirth: ADULT_DOB });
+
+      expect(res.status).toBe(200);
+      expect(res.body.isNewUser).toBe(true);
+      expect(typeof res.body.accessToken).toBe('string');
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(res.body.token).toBe(res.body.accessToken);
+    });
+
+    it('web complete sets cookies and returns NO tokens in the body', async () => {
+      oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(newSignupPayload);
+      oauthServiceMock.findOrCreateOAuthUser.mockResolvedValue({
+        user: {
+          id: 'user-2', username: 'newbie', displayName: 'Newbie',
+          email: 'newbie@example.com', emailVerified: true, plan: 'free', planExpiresAt: null,
+        },
+        isNewUser: true,
+      });
+
+      const res = await request(app)
+        .post('/auth/oauth/complete')
+        .send({ signupToken: 'signup-token-1', dateOfBirth: ADULT_DOB });
+
+      expect(res.status).toBe(200);
+      expect(res.body.isNewUser).toBe(true);
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.headers['set-cookie']).toBeDefined();
+    });
+
+    it('rejects an under-age DOB with 403 and persists nothing', async () => {
+      oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(newSignupPayload);
+
+      const res = await request(app)
+        .post('/auth/oauth/complete')
+        .send({ signupToken: 'signup-token-1', dateOfBirth: MINOR_DOB });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/at least 13 years old/);
+      expect(oauthServiceMock.findOrCreateOAuthUser).not.toHaveBeenCalled();
+      expect(res.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('rejects an invalid or expired signup token with 401', async () => {
+      oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(null);
+
+      const res = await request(app)
+        .post('/auth/oauth/complete')
+        .send({ signupToken: 'signup-token-bogus', dateOfBirth: ADULT_DOB });
+
+      expect(res.status).toBe(401);
+      expect(oauthServiceMock.findOrCreateOAuthUser).not.toHaveBeenCalled();
+    });
+
+    it('refuses to convert a signup token into a session for an existing account (409)', async () => {
+      oauthServiceMock.verifyOAuthSignupToken.mockReturnValue(newSignupPayload);
+      oauthServiceMock.findOrCreateOAuthUser.mockResolvedValue({
+        user: {
+          id: 'user-1', username: 'piques', displayName: 'Piques',
+          email: 'piques@example.com', emailVerified: true, plan: 'free', planExpiresAt: null,
+        },
+        isNewUser: false,
+      });
+
+      const res = await request(app)
+        .post('/auth/oauth/complete')
+        .set('Origin', 'capacitor://localhost')
+        .send({ signupToken: 'signup-token-1', dateOfBirth: ADULT_DOB });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('ACCOUNT_ALREADY_EXISTS');
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.headers['set-cookie']).toBeUndefined();
+    });
   });
 });
