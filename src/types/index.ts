@@ -679,6 +679,8 @@ export interface LeaderboardEntry {
   sinceStart: boolean;
   isNew: boolean;
   flagged: boolean;
+  /** Anti-cheat subset of `flagged` (>300%/day, Sharpe>5) — excluded from public ranking. */
+  suspicious: boolean;
   flagReason: string | null;
   trackingStartAt: string;
   snapshotCount: number;

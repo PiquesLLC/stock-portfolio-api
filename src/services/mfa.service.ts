@@ -218,6 +218,52 @@ export async function verifyTotpSetup(userId: string, code: string): Promise<str
   return backupCodes;
 }
 
+// Per-account MFA verification attempt limiter.
+// The IP-keyed mfaVerifyLimiter is not a sufficient brute-force ceiling for the
+// second factor: it can be defeated by a spoofed CF-Connecting-IP (when the
+// origin secret is unset) or simply by an attacker rotating source IPs, and the
+// login challenge is freely mintable by anyone who already holds the password
+// (an MFA-required login returns 200 and the login limiter skips successful
+// requests). Without an account-bound counter, a known/breached password plus
+// unlimited 6-digit guesses = full MFA bypass. This binds the ceiling to the
+// USER, mirroring the account-lockout pattern. In-memory is consistent with the
+// single-process deployment and the replay guard below (a restart resets the
+// counter, which only ever shortens a lockout — never bypasses a live one).
+const MFA_MAX_FAILURES = 5;
+const MFA_LOCKOUT_MS = 15 * 60 * 1000;
+const mfaFailures = new Map<string, { count: number; lockedUntil: number }>();
+
+/** Returns lockout state for a user's MFA verification attempts. */
+export function checkMfaLockout(userId: string): { locked: boolean; retryAfterSec: number } {
+  const rec = mfaFailures.get(userId);
+  if (!rec) return { locked: false, retryAfterSec: 0 };
+  const now = Date.now();
+  if (rec.lockedUntil > now) {
+    return { locked: true, retryAfterSec: Math.ceil((rec.lockedUntil - now) / 1000) };
+  }
+  if (rec.lockedUntil !== 0) {
+    // A prior lock has expired — clear so the counter starts fresh.
+    mfaFailures.delete(userId);
+  }
+  return { locked: false, retryAfterSec: 0 };
+}
+
+/** Record a failed MFA verification; locks the account after MFA_MAX_FAILURES. */
+export function recordMfaFailure(userId: string): void {
+  const rec = mfaFailures.get(userId) ?? { count: 0, lockedUntil: 0 };
+  rec.count += 1;
+  if (rec.count >= MFA_MAX_FAILURES) {
+    rec.lockedUntil = Date.now() + MFA_LOCKOUT_MS;
+    rec.count = 0; // the lock now gates; reset the counter for after it expires
+  }
+  mfaFailures.set(userId, rec);
+}
+
+/** Clear a user's MFA failure state (call on any successful verification). */
+export function clearMfaFailures(userId: string): void {
+  mfaFailures.delete(userId);
+}
+
 // Replay guard: a TOTP code stays valid for the whole ±window (~90s), so without
 // tracking the last-accepted time step an intercepted code can be reused. Email
 // OTP and backup codes already enforce single-use; this closes the TOTP gap.

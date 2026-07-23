@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console */
 const BASE_URL = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:3001';
 const isLocalBaseUrl = /^(https?:\/\/)?(127\.0\.0\.1|localhost)(:\d+)?$/i.test(BASE_URL);
 const BILLING_ENABLED = String(process.env.BILLING_ENABLED ?? (isLocalBaseUrl ? 'false' : 'true')).toLowerCase() !== 'false';

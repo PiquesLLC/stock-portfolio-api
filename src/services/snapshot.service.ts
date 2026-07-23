@@ -1047,13 +1047,24 @@ function randomNormal(mean: number, stdDev: number): number {
   return mean + stdDev * z;
 }
 
-export async function backfillDemoUserSnapshots(days: number = 90, minSnapshots: number = 5): Promise<void> {
+export async function backfillDemoUserSnapshots(
+  demoUsernames: string[],
+  days: number = 90,
+  minSnapshots: number = 5,
+): Promise<void> {
   const DEFAULT_USER_ID = '515d3ef4-2b46-4133-8c08-84327b420eba';
+
+  // Safety (B6): only ever fabricate snapshots for the explicit demo-user
+  // allowlist. Without this scope the backfill would invent performance history
+  // for ANY leaderboard-eligible user with few snapshots — including real ones —
+  // and rank it publicly. An empty/missing list is a no-op, never a wildcard.
+  if (!demoUsernames || demoUsernames.length === 0) return;
 
   const users = await prisma.user.findMany({
     where: {
       leaderboardEligible: true,
       id: { not: DEFAULT_USER_ID },
+      username: { in: demoUsernames },
     },
     select: { id: true, displayName: true },
   });

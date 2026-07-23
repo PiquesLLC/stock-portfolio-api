@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console */
 const jwt = require('jsonwebtoken');
 
 const BASE_URL = process.env.SMOKE_BASE_URL || 'http://localhost:3001';

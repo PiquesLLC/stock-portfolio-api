@@ -6,6 +6,7 @@ import {
   disableTotp, updateEmail, verifyEmail, beginEmailOtpSetup,
   verifyEmailOtpSetup, sendEmailOtp, verifyEmailOtp, disableEmailOtp,
   generateBackupCodes, verifyBackupCode, peekMfaChallenge, consumeMfaChallenge,
+  checkMfaLockout, recordMfaFailure, clearMfaFailures,
 } from '../services/mfa.service';
 import { generateAccessToken, generateRefreshToken } from '../services/auth.service';
 import { getCookieOptions, isCapacitorRequest } from './auth.controller';
@@ -38,6 +39,16 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
       return;
     }
 
+    // Account-bound brute-force ceiling on the second factor (see mfa.service).
+    // Enforced here, before verification, so a password-known attacker cannot
+    // grind the 6-digit code by minting fresh challenges or rotating IPs.
+    const lockout = checkMfaLockout(userId);
+    if (lockout.locked) {
+      res.setHeader('Retry-After', String(lockout.retryAfterSec));
+      res.status(429).json({ error: 'Too many verification attempts. Please try again later.' });
+      return;
+    }
+
     // Validate the requested method is actually enabled for this user (prevent factor downgrade)
     if (method !== 'backup') {
       const enabledMethods = await getEnabledMethods(userId);
@@ -57,6 +68,7 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
     }
 
     if (!verified) {
+      recordMfaFailure(userId);
       res.status(401).json({ error: 'Invalid verification code' });
       return;
     }
@@ -68,6 +80,9 @@ export async function verifyMfaHandler(req: Request, res: Response): Promise<voi
       res.status(401).json({ error: 'Challenge already used. Please log in again.' });
       return;
     }
+
+    // MFA passed — clear the account's failed-attempt counter.
+    clearMfaFailures(userId);
 
     // MFA passed — commit any pending OAuth provider link
     if (consumeResult.pendingOAuthLink) {
