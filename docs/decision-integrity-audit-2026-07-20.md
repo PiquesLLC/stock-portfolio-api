@@ -16,7 +16,7 @@ But three narrower surfaces **do** turn unvalidated client input directly into d
 
 ---
 
-## Remediation status (updated 2026-07-21)
+## Remediation status (updated 2026-07-23 — ALL TRANCHES DEPLOYED)
 
 **Tranche 1** — shipped and verified (tsc clean, full suite green, blind-reviewed):
 - **A4 (partial) — AI output backstop wired inline.** A deterministic validator (`src/eval/financial-safety/enforce.ts` → `ai-output.validator.ts`) now fails closed on the two highest-risk surfaces: **Stock Q&A** (`perplexity-qa.service.ts`, strict `high` gate) and **Ask Nala** rationale/risks/strategy (`nala-research.service.ts`, `blocker` gate).
@@ -34,9 +34,13 @@ But three narrower surfaces **do** turn unvalidated client input directly into d
 **Tranche 4** — shipped and verified (tsc clean, full suite 1168 green, blind-reviewed):
 - **A3 (core) — creator enforcement path built.** New admin routes (`admin.routes.ts`): read the report queue (`GET /admin/creator-reports`), suspend/reinstate a creator, resolve a report — all gated by `requireAuth`+`requireAdmin`. Suspension has real teeth: suspended creators are excluded from Discover (`creator.service.ts`), blocked from payouts + self-reactivation. **Follow-ups:** creator-specific appeals + subscriber warnings + an admin UI (routes are API-only today). Keep creator monetization OFF until this is exercised end-to-end.
 - **A2 (bounds) — fat-finger cost-basis ceiling.** `addHoldingSchema` now bounds shares ≤1e9 / averageCost ≤1e7, matching the import path; cash balance similarly bounded. Ticker-relative plausibility remains unenforceable for self-reported data (real assurance = Plaid + labelling).
-- **A5 (email/password) — signup age gate.** `signupSchema` requires a date of birth and rejects under-13 (`MIN_AGE_YEARS`, raise to 18 in one line if desired); DOB is validated then discarded (no schema migration). Both signup forms collect it. **Gap:** the OAuth (Google/Apple) signup path does NOT go through `signupSchema`, so it is not yet age-gated — closing it needs a post-OAuth "confirm date of birth" step (follow-up, same shape as the OAuth-consent-UI gap).
+- **A5 (email/password) — signup age gate.** `signupSchema` requires a date of birth and rejects under-13 (`MIN_AGE_YEARS`, raise to 18 in one line if desired); DOB is validated then discarded (no schema migration). Both signup forms collect it. ~~**Gap:** the OAuth (Google/Apple) signup path does NOT go through `signupSchema`~~ **CLOSED 2026-07-23 by Tranche 5 (below).**
 
-**Still open:** OAuth-path age gate (above); label self-reported YTD/goal in-app figures (A6 — low-urgency, broker-lifetime already labeled); creator-enforcement follow-ups (appeals/subscriber-warnings/admin UI). **All UI changes across every tranche are local and unpushed — they need Jon's visual pass before shipping.**
+**Tranche 5 (2026-07-23)** — shipped and verified (both repos tsc clean, full suite 1197 green incl. 6 new contract tests, blind-reviewed):
+- **A5 (OAuth) — post-OAuth date-of-birth age gate.** Brand-new Google/Apple sign-ins persist NOTHING at the callback: when no account matches (`findExistingOAuthUser`), the verified provider profile is returned in a purpose-scoped 10-minute JWT (`signOAuthSignupToken`) and the client shows a DOB sheet (`OAuthDobModal`). `POST /auth/oauth/complete` re-validates age (`ageFromDob`/`MIN_AGE_YEARS`), re-runs the waitlist gate, and only then runs the original `findOrCreateOAuthUser` (user + `ConsentRecord` + settings + alerts). Under-age → 403 with nothing persisted (COPPA-clean); an account materializing between steps → 409, never a session (a signup token can never become a login token). Existing-user flow byte-identical and test-locked (`native-auth-contract.test.ts`).
+- **A6 — self-reported figures labeled.** "Self-reported" chip on True YTD Settings + "Self-reported basis" on the YTD Window Return (`Projections.tsx`); "· self-reported" on separately-tracked goal progress values (`GoalsPage.tsx`).
+
+**Still open:** creator-enforcement follow-ups (appeals/subscriber-warnings/admin UI — routes are API-only; **keep creator monetization OFF until exercised end-to-end**); cosmetic `isVerified` field rename; the "raise age floor to 18?" product call (still 13 = ToS floor). **Everything above is deployed to prod as of 2026-07-23** (merges: API `9dcaeab`, UI `e9da225`).
 
 ---
 
