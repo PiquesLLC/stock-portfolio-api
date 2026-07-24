@@ -10,7 +10,8 @@ function getCookieOptions(req: Request) {
   return {
     httpOnly: true,
     secure: isProduction || capacitor,
-    sameSite: isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const)),
+    // Web → lax (same-origin in prod; browser CSRF backstop). Native → none.
+    sameSite: capacitor ? ('none' as const) : ('lax' as const),
     path: '/',
   };
 }

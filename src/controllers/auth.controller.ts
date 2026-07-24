@@ -118,7 +118,11 @@ export function isCapacitorRequest(req: Request): boolean {
 export function getCookieOptions(req: Request) {
   const capacitor = isCapacitorRequest(req);
   const isProduction = process.env.NODE_ENV === 'production';
-  const sameSite = isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const));
+  // Web cookies get sameSite=lax (browser-enforced CSRF backstop): in prod the
+  // web app is served from the SAME origin as the API, so lax is sufficient and
+  // strictly safer than none. Only genuine native (Capacitor, cross-scheme) needs
+  // none — and native primarily authenticates via Bearer tokens anyway.
+  const sameSite = capacitor ? ('none' as const) : ('lax' as const);
   const accessOptions = {
     httpOnly: true,
     secure: isProduction || capacitor,
@@ -139,7 +143,8 @@ export function getCookieOptions(req: Request) {
 function clearAllAuthCookies(res: Response, req?: Request): void {
   const capacitor = req ? isCapacitorRequest(req) : false;
   const isProduction = process.env.NODE_ENV === 'production';
-  const sameSite = isProduction ? ('none' as const) : (capacitor ? ('none' as const) : ('lax' as const));
+  // Must mirror getCookieOptions' sameSite so the clear actually matches the set cookie.
+  const sameSite = capacitor ? ('none' as const) : ('lax' as const);
   const secure = isProduction || capacitor;
   res.clearCookie('authToken', { httpOnly: true, secure, sameSite, path: '/' });
   res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
@@ -937,11 +942,25 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
   try {
     const isNative = isCapacitorRequest(req);
 
-    // Fix 3: Only accept refreshToken from request body for native clients.
-    // Browser flows must use the httpOnly cookie exclusively.
+    // Only accept a body-supplied refreshToken for native clients; browser flows
+    // use the httpOnly cookie exclusively.
+    const bodyToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : null;
     const token = isNative
-      ? (req.body?.refreshToken || req.cookies?.refreshToken)
+      ? (bodyToken || req.cookies?.refreshToken)
       : req.cookies?.refreshToken;
+
+    // SECURITY: echo the rotated refresh token into the JSON body ONLY for GENUINE
+    // native — a request from a Capacitor-scheme Origin (browser-UNFORGEABLE, see
+    // NATIVE_ORIGINS) OR one that supplied its refresh token in the body (cookieless
+    // native). Gating on `isNative` alone was unsafe: `isCapacitorRequest` trusts the
+    // client-forgeable `x-nala-native` header, so a web XSS payload could set that
+    // header, ride the browser's httpOnly refresh cookie, and read the freshly-rotated
+    // refresh token back out of the JSON — defeating httpOnly (persistent takeover).
+    // A web/XSS request can forge neither a Capacitor Origin nor a body token (it
+    // can't read the httpOnly cookie to place it in the body) → no echo.
+    const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin : null;
+    const isNativeOrigin = !!originHeader && NATIVE_ORIGINS.includes(originHeader);
+    const echoTokensToBody = isNativeOrigin || (!!bodyToken && token === bodyToken);
 
     if (!token || typeof token !== 'string') {
       res.status(401).json({ error: 'Refresh token is required', code: 'NO_TOKEN' });
@@ -990,7 +1009,7 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
     res.cookie('refreshToken', result.refreshToken, refreshOptions);
     const refreshBody: any = {
       message: 'Token refreshed successfully',
-      ...(isNative ? { accessToken, refreshToken: result.refreshToken, token: accessToken } : {}),
+      ...(echoTokensToBody ? { accessToken, refreshToken: result.refreshToken, token: accessToken } : {}),
     };
     if (process.env.AUTH_DEBUG === '1') {
       console.error('[AuthRuntime] refresh response', {

@@ -20,7 +20,6 @@ import {
   hashPassword,
   verifyPassword,
   generateAccessToken,
-  generateToken,
   verifyToken,
   verifyTokenDetailed,
   loginWithPassword,
@@ -101,17 +100,6 @@ describe('Auth Service', () => {
       const decoded = jwt.decode(token) as any;
       expect(decoded.userId).toBe(testUser.userId);
       expect(decoded.username).toBe(testUser.username);
-    });
-  });
-
-  // â”€â”€ Legacy Token Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  describe('generateToken', () => {
-    it('should return a valid JWT with 7-day expiry', () => {
-      const token = generateToken(testUser);
-      const decoded = jwt.decode(token) as any;
-      expect(decoded.userId).toBe(testUser.userId);
-      // 7 days = 604800 seconds
-      expect(decoded.exp - decoded.iat).toBe(604800);
     });
   });
 
@@ -1645,6 +1633,61 @@ describe('Auth Routes (Integration)', () => {
       expect(cookies).toBeDefined();
       const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
       expect(cookieStr).toContain('authToken');
+    });
+
+    it('does NOT echo the rotated refresh token into the body when x-nala-native is forged on a web (non-native) origin (XSS-exfil guard)', async () => {
+      prismaMock.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-1',
+        token: 'valid-refresh',
+        userId: 'user-1',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
+      });
+      prismaMock.refreshToken.update.mockResolvedValue({});
+      prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
+
+      // Simulates a web XSS payload: it can forge the x-nala-native header and ride
+      // the httpOnly refresh cookie, but its Origin is the real web origin (a browser
+      // cannot set Origin to a capacitor:// scheme) and it cannot read the httpOnly
+      // cookie to supply a body token. The rotated token must NOT appear in the body.
+      const res = await request(app)
+        .post('/auth/refresh')
+        .set('Origin', 'http://localhost:5173')
+        .set('X-Nala-Native', '1')
+        .set('Cookie', 'refreshToken=valid-refresh');
+
+      expect(res.status).toBe(200);
+      expect(res.body.refreshToken).toBeUndefined();
+      expect(res.body.accessToken).toBeUndefined();
+      expect(res.body.token).toBeUndefined();
+      // ...but the rotated token IS delivered via the httpOnly cookie.
+      const cookies = res.headers['set-cookie'];
+      const cookieStr = Array.isArray(cookies) ? cookies.join('; ') : cookies;
+      expect(cookieStr).toContain('refreshToken');
+    });
+
+    it('echoes tokens into the body for header-only native that supplies the refresh token in the body (cookieless native)', async () => {
+      prismaMock.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-1',
+        token: 'valid-refresh',
+        userId: 'user-1',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86400000),
+        user: { id: 'user-1', username: 'alice', emailVerified: true },
+      });
+      prismaMock.refreshToken.update.mockResolvedValue({});
+      prismaMock.refreshToken.create.mockResolvedValue({ token: 'new-refresh' });
+
+      const res = await request(app)
+        .post('/auth/refresh')
+        .set('X-Nala-Native', '1')
+        .send({ refreshToken: 'valid-refresh' });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(typeof res.body.accessToken).toBe('string');
+      expect(res.body.token).toBe(res.body.accessToken);
     });
 
     it('should return 401 when no refresh token provided', async () => {

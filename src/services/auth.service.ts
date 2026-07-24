@@ -450,16 +450,6 @@ export function generateAccessToken(payload: JwtPayload): string {
 }
 
 /**
- * @deprecated Use generateAccessToken() for short-lived (15m) access tokens
- * paired with refresh tokens. This function exists only for test compatibility.
- */
-export function generateToken(payload: JwtPayload): string {
-  const secret: Secret = config.jwtSecret;
-  const options: SignOptions = { expiresIn: 60 * 60 * 24 * 7 };
-  return jwt.sign(payload, secret, options);
-}
-
-/**
  * Generate a cryptographically random refresh token and store it in the database
  */
 export async function generateRefreshToken(userId: string, family?: string): Promise<string> {
