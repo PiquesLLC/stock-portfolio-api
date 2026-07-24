@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
-import { DB_PATH } from './backup.service';
+import { DB_PATH, getLastBackupStatus, LastBackupStatus } from './backup.service';
 
 // WAL watchdog — detects SQLite checkpoint starvation.
 //
@@ -43,6 +43,47 @@ const state: WatchdogState = {
 let lastSentryAt = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 
+// Backup-staleness — rides the same 5-min tick. A failure-only alert can't see a
+// WEDGED backup cron that never fires (it leaves yesterday's `ok` sidecar), so we
+// check the AGE of the newest backup. Daily backup runs ~07:10 UTC; 26h = +2h grace.
+const BACKUP_STALE_MS = 26 * 60 * 60 * 1000;
+let lastBackupAlertAt = 0;
+
+/**
+ * Pure staleness check (unit-tested). Stale when there is no backup, the last one
+ * FAILED, or the newest is older than BACKUP_STALE_MS.
+ */
+export function isBackupStale(status: LastBackupStatus | null, nowMs: number): { stale: boolean; detail: string } {
+  if (!status) return { stale: true, detail: 'no backup status found — has a backup ever completed?' };
+  const ageMs = nowMs - new Date(status.at).getTime();
+  const ageH = Number.isFinite(ageMs) ? (ageMs / 3_600_000).toFixed(1) : 'unknown';
+  if (!status.ok) return { stale: true, detail: `last backup FAILED at ${status.at} (age ${ageH}h): ${status.note}` };
+  // An unparseable timestamp is suspicious — treat as stale rather than silently fresh.
+  if (!Number.isFinite(ageMs)) return { stale: true, detail: `unparseable backup timestamp "${status.at}"` };
+  if (ageMs > BACKUP_STALE_MS) return { stale: true, detail: `newest backup is ${ageH}h old (at ${status.at}) — daily backup may be wedged` };
+  return { stale: false, detail: `ok, ${ageH}h old` };
+}
+
+function checkBackupStaleness(): void {
+  let result: { stale: boolean; detail: string };
+  try {
+    result = isBackupStale(getLastBackupStatus(), Date.now());
+  } catch {
+    return; // never let the backup check break the WAL watchdog
+  }
+  if (result.stale && Date.now() - lastBackupAlertAt >= SENTRY_THROTTLE_MS) {
+    lastBackupAlertAt = Date.now();
+    console.warn(`[BackupWatchdog] STALE: ${result.detail}`);
+    try {
+      Sentry.captureMessage('[Backup] no fresh backup — daily backup may be wedged or failing', {
+        level: 'error',
+        tags: { component: 'backup' },
+        extra: { detail: result.detail },
+      });
+    } catch { /* Sentry not initialised */ }
+  }
+}
+
 function walPath(): string {
   return `${DB_PATH}-wal`;
 }
@@ -52,6 +93,10 @@ export function getWalWatchdogState(): Readonly<WatchdogState> {
 }
 
 export async function runWalWatchdogOnce(): Promise<void> {
+  // Backup-staleness rides this tick and must run regardless of WAL size (the
+  // WAL block below early-returns when the WAL is small).
+  checkBackupStaleness();
+
   state.lastCheckAt = new Date().toISOString();
   let walBytes: number | null = null;
   try {

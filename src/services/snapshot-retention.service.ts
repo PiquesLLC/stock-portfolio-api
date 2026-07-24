@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import { alertOnCorruption } from './job-runner.service';
 import { scheduleDailyAtUTC } from '../utils/daily-schedule';
@@ -216,11 +217,31 @@ async function runSnapshotRetentionLocked(exec: Exec, log: string[]): Promise<{ 
 
     log.push(`total ${Date.now() - startedAt}ms`);
     console.log(`[Retention] ${log.join(' | ')}`);
+    // A time/chunk cap means the run did NOT fully drain — surface it (warning)
+    // so a chronically-capped retention (unbounded growth creeping back) is seen.
+    if (log.some((l) => l.includes('capped'))) {
+      try {
+        Sentry.captureMessage('[Retention] run hit a time/chunk cap — did not fully drain', {
+          level: 'warning',
+          tags: { component: 'snapshot-retention' },
+          extra: { log },
+        });
+      } catch { /* Sentry not initialised */ }
+    }
     return { skipped: false, log };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[Retention] FAILED: ${msg} (completed: ${log.join(' | ') || 'nothing'})`);
+    // alertOnCorruption only escalates the SQLITE_CORRUPT sub-case; alert on ANY
+    // retention failure so a generic failure isn't silent (it was console-only).
     alertOnCorruption('snapshot-retention', msg);
+    try {
+      Sentry.captureMessage('[Retention] run FAILED', {
+        level: 'error',
+        tags: { component: 'snapshot-retention' },
+        extra: { error: msg, completed: log },
+      });
+    } catch { /* Sentry not initialised */ }
     try {
       await exec(sql.psKeeperDrop);
     } catch {

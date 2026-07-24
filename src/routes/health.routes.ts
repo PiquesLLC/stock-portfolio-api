@@ -31,8 +31,8 @@ router.get('/webhook-metrics', requireAuth, requireAdmin, webhookMetrics);
 router.get('/job-metrics', requireAuth, requireAdmin, jobMetrics);
 router.get('/provider-metrics', requireAuth, requireAdmin, providerMetrics);
 router.get('/api-usage', requireAuth, requireAdmin, apiUsage);
-if (process.env.NODE_ENV !== 'production') {
-  router.get('/auth-metrics', requireAuth, requireAdmin, authMetrics);
-}
+// Auth metrics (OAuth/login/signup/MFA/rate-limit counters). Admin-gated, so safe
+// to expose in production too — needed at launch to watch auth-abuse signals.
+router.get('/auth-metrics', requireAuth, requireAdmin, authMetrics);
 
 export default router;

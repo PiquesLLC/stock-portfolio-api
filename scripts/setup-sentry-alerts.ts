@@ -21,12 +21,29 @@ const SENTRY_API = 'https://sentry.io/api/0';
 
 interface Rule {
   name: string;
-  component: 'v2_reconciliation' | 'backup';
+  component:
+    | 'v2_reconciliation'
+    | 'backup'
+    | 'offsite_backup'
+    | 'db-brownout'
+    | 'db-corruption'
+    | 'wal-watchdog'
+    | 'disk_guard'
+    | 'snapshot-retention';
 }
 
+// Every component below already emits Sentry events from the code; these rules
+// route them to a notification. The five DB/disk/backup components are the exact
+// precursors to both 2026-07 outages, which previously fired events with NO rule.
 const RULES: Rule[] = [
   { name: 'v2 ledger drift', component: 'v2_reconciliation' },
-  { name: 'v1 SQLite backup unhealthy', component: 'backup' },
+  { name: 'v1 SQLite backup unhealthy / stale', component: 'backup' },
+  { name: 'Offsite backup failed', component: 'offsite_backup' },
+  { name: 'DB write brownout (P1008 storm)', component: 'db-brownout' },
+  { name: 'DB corruption (SQLITE_CORRUPT)', component: 'db-corruption' },
+  { name: 'WAL checkpoint starvation', component: 'wal-watchdog' },
+  { name: 'Disk guard critical', component: 'disk_guard' },
+  { name: 'Snapshot retention failed / capped', component: 'snapshot-retention' },
 ];
 
 async function sentry(token: string, path: string, init?: RequestInit): Promise<unknown> {
@@ -69,8 +86,10 @@ function ruleBody(name: string, component: string): unknown {
       },
       {
         id: 'sentry.rules.filters.level.LevelFilter',
-        match: 'eq',
-        level: '40', // error
+        match: 'gte',
+        level: '30', // warning AND ABOVE — so the retention time/chunk-cap (warning)
+                     // routes too, not just error. All other ruled components emit
+                     // only at error, so this adds no noise.
       },
     ],
     actions: [
