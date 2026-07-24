@@ -18,30 +18,65 @@ export interface DividendEventInput {
   source?: string;
 }
 
+/**
+ * Match an existing dividend by ex-date CALENDAR DAY, not exact timestamp.
+ *
+ * `@@unique([ticker, exDate, amountPerShare])` compares `exDate` exactly, but the
+ * Yahoo and Polygon feeds stamp different times (13:30Z vs 14:30Z) for the same
+ * dividend, so an exact-match upsert takes the `create` branch and duplicates the
+ * row. Measured on prod 2026-07-24: 2,631 excess rows across 96 tickers. The
+ * match runs in JS after Prisma decodes, because a SQL day-window predicate is
+ * unreliable while `exDate` still holds both TEXT ISO and INTEGER epoch-ms values
+ * (SQLite orders every INTEGER below every TEXT). Mirrors upsertByExDateDay in
+ * dividend-fetch.service.ts.
+ */
+async function findByExDateDay(ticker: string, exDate: Date, amountPerShare: number) {
+  const day = exDate.toISOString().slice(0, 10);
+  // N+1 by construction — every row for the ticker, per call. Acceptable only
+  // because the sole caller (dividend.controller.ts addDividendEvent) handles
+  // one event per HTTP request. Do NOT wire this into a bulk import loop; hoist
+  // the findMany out of the loop as dividend-fetch.service.ts does.
+  // orderBy: oldest wins, matching the dedupe migration's survivor rule.
+  const candidates = await prisma.dividendEvent.findMany({
+    where: { ticker },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, exDate: true, amountPerShare: true },
+  });
+  return candidates.find(
+    c => c.exDate.toISOString().slice(0, 10) === day
+      // 4dp = the feeds' own published precision. A 1e-9 epsilon would miss
+      // legacy unrounded rows (0.24499 vs 0.245) and leave duplicates behind.
+      && Math.round(c.amountPerShare * 10000) === Math.round(amountPerShare * 10000),
+  );
+}
+
 export async function createDividendEvent(input: DividendEventInput) {
   const normalizedType = input.dividendType ? input.dividendType.toLowerCase() : undefined;
-  return prisma.dividendEvent.upsert({
-    where: {
-      ticker_exDate_amountPerShare: {
-        ticker: input.ticker.toUpperCase(),
-        exDate: new Date(input.exDate),
-        amountPerShare: input.amountPerShare,
+  const ticker = input.ticker.toUpperCase();
+  const exDate = new Date(input.exDate);
+  const existing = await findByExDateDay(ticker, exDate, input.amountPerShare);
+
+  if (existing) {
+    return prisma.dividendEvent.update({
+      where: { id: existing.id },
+      data: {
+        payDate: new Date(input.payDate),
+        recordDate: input.recordDate ? new Date(input.recordDate) : undefined,
+        dividendType: normalizedType ?? undefined,
+        source: input.source ?? 'manual',
+        status: 'confirmed',
       },
-    },
-    create: {
-      ticker: input.ticker.toUpperCase(),
-      exDate: new Date(input.exDate),
+    });
+  }
+
+  return prisma.dividendEvent.create({
+    data: {
+      ticker,
+      exDate,
       payDate: new Date(input.payDate),
       amountPerShare: input.amountPerShare,
       recordDate: input.recordDate ? new Date(input.recordDate) : null,
       dividendType: normalizedType ?? 'regular',
-      source: input.source ?? 'manual',
-      status: 'confirmed',
-    },
-    update: {
-      payDate: new Date(input.payDate),
-      recordDate: input.recordDate ? new Date(input.recordDate) : undefined,
-      dividendType: normalizedType ?? undefined,
       source: input.source ?? 'manual',
       status: 'confirmed',
     },

@@ -235,33 +235,22 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
     if (!dup) events.push(d);
   }
 
+  // Existing rows for this ticker, matched in JS below. See upsertByExDateDay.
+  // orderBy is load-bearing: with duplicates still present, `find` below returns
+  // the FIRST match, so this decides which row receives the confirmed payDate.
+  // Unordered, SQLite's natural order is unstable across the pending storage
+  // normalisation (INTEGERs sort below TEXT), and the dedupe migration keeps the
+  // oldest row — so both must agree on "oldest wins".
+  const existing = await prisma.dividendEvent.findMany({
+    where: { ticker: upperTicker },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, exDate: true, amountPerShare: true },
+  });
+
   let upserted = 0;
   for (const div of events) {
     try {
-      await prisma.dividendEvent.upsert({
-        where: {
-          ticker_exDate_amountPerShare: {
-            ticker: div.ticker,
-            exDate: div.exDate,
-            amountPerShare: div.amountPerShare,
-          },
-        },
-        create: {
-          ticker: div.ticker,
-          exDate: div.exDate,
-          payDate: div.payDate,
-          amountPerShare: div.amountPerShare,
-          source: div.source,
-          status: div.payDateEstimated ? 'preliminary' : 'confirmed',
-          // Explicit so the change detector / growth math (which filter on
-          // dividendType: 'regular') keep matching even if the column default moves.
-          dividendType: 'regular',
-        },
-        update: {
-          // Only update pay date if we now have a confirmed one
-          ...(div.payDateEstimated ? {} : { payDate: div.payDate, status: 'confirmed' }),
-        },
-      });
+      await upsertByExDateDay(existing, div);
       upserted++;
     } catch (err) {
       // Skip duplicates or constraint violations
@@ -271,6 +260,89 @@ export async function syncDividendEventsForTicker(ticker: string): Promise<numbe
 
   syncCache.set(upperTicker, true);
   return upserted;
+}
+
+/** UTC calendar day of an ex-dividend date. An ex-date is a calendar date, not an instant. */
+function exDateDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Per-share amounts are equal to the cent-fraction the feeds actually publish.
+ *
+ * Both feeds round to 4dp before writing, but manual entries and legacy rows
+ * predate that rounding — a stored 0.24499 against a fed 0.245 differs by 1e-5,
+ * four orders of magnitude above a 1e-9 epsilon, so an exact-ish comparison
+ * would treat them as different dividends and leave the duplicate in place.
+ * 4dp is the feeds' own precision, so this cannot merge two genuinely distinct
+ * amounts (a special dividend never differs from a regular one by <0.00005).
+ */
+function sameAmount(a: number, b: number): boolean {
+  return Math.round(a * 10000) === Math.round(b * 10000);
+}
+
+/**
+ * Upsert keyed on the ex-dividend CALENDAR DAY rather than the exact timestamp.
+ *
+ * `@@unique([ticker, exDate, amountPerShare])` compares `exDate` exactly, but our
+ * two feeds disagree on its time component for the same dividend — Yahoo stamps
+ * 13:30Z, Polygon 14:30Z. The same event therefore hashed to two distinct keys,
+ * the upsert's `where` never matched, and it silently took the `create` branch.
+ * Measured on prod 2026-07-24: 471 duplicate groups from this alone (plus 386
+ * more within the legacy INTEGER rows), 2,631 excess rows across 96 tickers —
+ * over half the table. Those duplicates are then double-counted by the
+ * `payDate < now` growth query, inflating dividend growth and forward yield.
+ *
+ * Matching happens in JS, after Prisma has decoded the rows, for two reasons.
+ * A SQL day-window predicate on `exDate` would itself be unreliable while the
+ * column still holds both TEXT ISO-8601 and INTEGER epoch-ms values (SQLite
+ * orders every INTEGER below every TEXT, so a bound of either form silently
+ * skips the other). And it keeps this correct both before and after the pending
+ * storage normalisation, so the code and the data migration need not ship
+ * together. Per-ticker row counts are small (~50).
+ *
+ * We deliberately do NOT rewrite the time component on create: existing rows sit
+ * at 13:30/14:30Z, which render as 09:30 ET — the correct calendar day. Snapping
+ * to midnight UTC would render as the PREVIOUS day for any consumer formatting
+ * in ET. First writer wins the time; later feeds update that row in place.
+ */
+async function upsertByExDateDay(
+  existing: { id: string; exDate: Date; amountPerShare: number }[],
+  div: { ticker: string; exDate: Date; payDate: Date; amountPerShare: number; source: string; payDateEstimated?: boolean },
+): Promise<void> {
+  const day = exDateDay(div.exDate);
+  const match = existing.find(
+    e => exDateDay(e.exDate) === day && sameAmount(e.amountPerShare, div.amountPerShare),
+  );
+
+  if (match) {
+    // Only promote the pay date once we have a confirmed one — same rule as before.
+    if (!div.payDateEstimated) {
+      await prisma.dividendEvent.update({
+        where: { id: match.id },
+        data: { payDate: div.payDate, status: 'confirmed' },
+      });
+    }
+    return;
+  }
+
+  const created = await prisma.dividendEvent.create({
+    data: {
+      ticker: div.ticker,
+      exDate: div.exDate,
+      payDate: div.payDate,
+      amountPerShare: div.amountPerShare,
+      source: div.source,
+      status: div.payDateEstimated ? 'preliminary' : 'confirmed',
+      // Explicit so the change detector / growth math (which filter on
+      // dividendType: 'regular') keep matching even if the column default moves.
+      dividendType: 'regular',
+    },
+    select: { id: true, exDate: true, amountPerShare: true },
+  });
+  // Keep the in-memory index current so two events in the same batch that share
+  // a day+amount can't both create.
+  existing.push(created);
 }
 
 /**
