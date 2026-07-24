@@ -19,7 +19,7 @@ import {
   HoldingWithQuote,
 } from '../types';
 import { getSector } from '../utils/sectors';
-import { TRADING_DAYS, sharpeRatio, annualizedVolatility } from '../utils/finance-math';
+import { TRADING_DAYS, sharpeRatio, annualizedVolatility, calculateCorrelation } from '../utils/finance-math';
 
 
 
@@ -114,36 +114,8 @@ export function invalidateUserInsights(userId: string): void {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-/**
- * Calculate Pearson correlation coefficient between two return arrays
- */
-function calculateCorrelation(returns1: number[], returns2: number[]): number | null {
-  const len = Math.min(returns1.length, returns2.length);
-  if (len < 20) return null;
-
-  const r1 = returns1.slice(-len);
-  const r2 = returns2.slice(-len);
-
-  const mean1 = r1.reduce((a, b) => a + b, 0) / len;
-  const mean2 = r2.reduce((a, b) => a + b, 0) / len;
-
-  let numerator = 0;
-  let denom1 = 0;
-  let denom2 = 0;
-
-  for (let i = 0; i < len; i++) {
-    const diff1 = r1[i] - mean1;
-    const diff2 = r2[i] - mean2;
-    numerator += diff1 * diff2;
-    denom1 += diff1 * diff1;
-    denom2 += diff2 * diff2;
-  }
-
-  const denom = Math.sqrt(denom1 * denom2);
-  if (denom === 0) return null;
-
-  return numerator / denom;
-}
+// Pearson correlation now comes from the canonical finance-math library
+// (calculateCorrelation) — the former local copy here was byte-identical.
 
 /**
  * Calculate annualized volatility from daily returns

@@ -9,6 +9,7 @@ import { periodStartCloseFromDateStrings } from '../utils/candle-window';
 import { HoldingWithQuote, HeroStats } from '../types';
 import { getSector } from '../utils/sectors';
 import { yahooGet } from '../utils/yahoo-http';
+import { calculateBeta } from '../utils/finance-math';
 import NodeCache from 'node-cache';
 
 // Yahoo Finance candle cache for fallback
@@ -325,23 +326,17 @@ async function computeBeta(
     alignedSpyReturns.push(spyReturns[spyReturns.length - minLen + i]);
   }
 
-  // Linear regression: beta = Cov(port, spy) / Var(spy)
+  // Beta via the canonical library: Cov(port, spy) / Var(spy). minLen is >=
+  // MIN_BETA_DAYS (60) by the guard above, so calculateBeta's <10 gate can never
+  // change behavior, and the arrays are already equal-length (slice(-len) is a
+  // no-op) — this is a zero-delta consolidation of the former inline formula.
   const n = minLen;
   const meanPort = portfolioReturns.reduce((a, b) => a + b, 0) / n;
   const meanSpy = alignedSpyReturns.reduce((a, b) => a + b, 0) / n;
 
-  let cov = 0;
-  let varSpy = 0;
-  for (let i = 0; i < n; i++) {
-    const dp = portfolioReturns[i] - meanPort;
-    const ds = alignedSpyReturns[i] - meanSpy;
-    cov += dp * ds;
-    varSpy += ds * ds;
-  }
+  const beta = calculateBeta(portfolioReturns, alignedSpyReturns);
+  if (beta === null) return null;
 
-  if (varSpy === 0) return null;
-
-  const beta = cov / varSpy;
   const alpha = meanPort - beta * meanSpy;
 
   // Annualize alpha
