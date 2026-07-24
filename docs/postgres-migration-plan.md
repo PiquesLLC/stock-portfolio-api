@@ -69,6 +69,8 @@ The inventory found **two contradictory assumptions about the same column**:
   2026-07-11) and compares strings.
 - `snapshot.service.ts:446-453, 479-488` treats the same column as INTEGER
   epoch-milliseconds (`ps.timestamp / 1000, 'unixepoch'`, numeric cutoffs).
+  *(Resolved 2026-07-24 — the retention service was right, these two queries
+  were wrong. Now `:459-501` after the fix.)*
 
 Both cannot be right. Under SQLite affinity rules the wrong one **silently
 misbehaves** instead of erroring. Since these queries feed the daily-values /
@@ -90,6 +92,30 @@ Actions:
 
 **Gate P0:** a written matrix of actual storage type per DateTime column, and
 the daily-values query verdict.
+
+> **✅ P0 PASSED — 2026-07-24. Full result:
+> [`postgres-p0-ground-truth-2026-07-24.md`](./postgres-p0-ground-truth-2026-07-24.md)**
+>
+> - **Daily-values verdict: was genuinely broken.** The old query bucketed 91
+>   real calendar days into one `1970-01-01` row. Fixed and deployed (`4cc73d5`).
+> - **Hot path is clean.** `PortfolioSnapshot.timestamp` (366,573) and
+>   `HoldingSnapshot.timestamp` (3,385,768) are 100% uniform TEXT `ISO+00:00`.
+> - **But the assumption problem is far wider than these two files.** All 86
+>   tables were introspected rather than the four spot-checks listed above:
+>   **161 anomalies**, ~40 columns storing BOTH `text` and `integer` in the same
+>   column (incl. `Transaction.date`, `Holding.createdAt`, `User.createdAt`,
+>   `ConsentRecord.consentedAt`, `DividendEvent.exDate` at a near 50/50 split),
+>   plus two columns carrying a space-separated shape (`Portfolio.updatedAt`,
+>   `EmailOtpCode.usedAt` — which holds all three shapes at once).
+> - **New live finding (A):** a TEXT cutoff on `Transaction.date` matches **0 of
+>   16** integer-stored rows — 12 deposits + 4 withdrawals invisible to TWR flow
+>   adjustment. Latent today only because all 16 predate the retained snapshot
+>   window (prod snapshots now start 2026-04-16).
+>
+> **Impact on later phases:** the ETL must convert **per row, not per column**
+> (`typeof(col)` → integer = epoch-ms, text = ISO, possibly space-separated). A
+> pre-ETL normalisation pass on v1 is now recommended new scope, so P1/P2 map a
+> single known type.
 
 ### P1 — Schema port (1 day)
 
@@ -130,7 +156,7 @@ re-locate on master where this week's fixes moved things):
 | 3 | Cleanup + disk-guard | `cleanup.service.ts` rowid/datetime chunks → portable deletes. `disk-guard.service.ts`: **retire** (its reason to exist is the SQLite file); replace with a pg bloat/size monitor in `/health/deep`. |
 | 4 | Backup/offsite | `backup.service.ts` (current machinery: WAL checkpoint + `VACUUM INTO` on a dedicated libsql connection + quick_check — the old copyFileSync is already gone) → `pg_dump` (the offsite job's v2 half already does exactly this — extend to the v1 database). `/health/deep.lastBackup` keeps its contract. Railway pg volume snapshots as second layer. |
 | 5 | Health + brownout | `/health/deep` (master): WAL fields → pg equivalents (`pg_stat_activity` waits, connection saturation); write-probe unchanged (its `HealthProbe` table + upsert are pg-portable). **Retire `db-watchdog.service.ts` entirely** — it stats the `-wal` file and runs `PRAGMA wal_checkpoint(PASSIVE)`; post-cutover it would report misleading zeros. Brownout breaker: keep, add pg transient codes (40001, 40P01, 57014, P2024) alongside P1008. Sentry corruption matcher: SQLITE_CORRUPT → pg fatal classes. |
-| 6 | Bare-MAX chart queries | `snapshot.service.ts:446-488` → `DISTINCT ON (user, day) ... ORDER BY day, timestamp DESC` (or window functions). **Parity harness required** (below) — these feed EOD/TWR. |
+| 6 | Bare-MAX chart queries | `snapshot.service.ts:459-501` (was `:446-488`) → `DISTINCT ON (user, day) ... ORDER BY day, timestamp DESC` (or window functions). **Parity harness required** (below) — these feed EOD/TWR. |
 | 7 | Raw-SQL sweep | **Placeholder syntax first:** every `$queryRawUnsafe`/`$executeRawUnsafe` using SQLite `?` positional params (5 sites in `analytics.service.ts` alone) must become `$1/$2` — on pg these THROW at runtime, they don't degrade. Then the semantic swaps: `analytics.service.ts` DATE() groupings → `date_trunc`; `post.service.ts` `deleted = 0` → boolean; `app.ts` `COLLATE NOCASE` → `LOWER()`/citext-later; `activity.service.ts` `JSON_EXTRACT` → `payload::jsonb->>`; `users/auth` LOWER() lookups fine; admin routes' PRAGMA panels → pg stats or delete. |
 | 8 | Transactions | Import flow (`portfolio.controller.ts` ~2031-2290): shorten the interactive tx (precompute outside, write inside), set explicit isolation, add 40001/40P01 retry wrapper (small util). Review the other `$transaction` sites — **~42 occurrences across 20 v1 files** (audited count); payout path can now genuinely use Serializable (keep the partial index too). |
 | 9 | Scheduled jobs wiring | `scheduleDailyAtUTC` stays; backup/retention/cleanup keep their 06:40/07:10/08:10 slots; disk-guard schedule removed with the service. |
