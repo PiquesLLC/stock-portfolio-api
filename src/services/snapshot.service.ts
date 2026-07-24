@@ -424,6 +424,19 @@ export async function getOldestSnapshot(userId: string): Promise<PortfolioSnapsh
 }
 
 /**
+ * Prisma stores these DateTime columns in SQLite as TEXT ISO-8601 carrying a
+ * `+00:00` offset ('2026-05-26T22:00:53.912+00:00'), not epoch milliseconds.
+ * That matters for raw SQL two ways: `date()` parses the text directly (no
+ * '/1000, unixepoch' conversion), and a numeric cutoff silently matches every
+ * row, because SQLite orders every TEXT value above every INTEGER. Building the
+ * cutoff in the stored format keeps the comparison correct and still lets the
+ * range scan use @@index([userId, timestamp]).
+ */
+function isoCutoff(windowMs: number): string {
+  return new Date(Date.now() - windowMs).toISOString().replace('Z', '+00:00');
+}
+
+/**
  * Get per-holding snapshots for the last N distinct calendar days.
  * Returns rows ordered by timestamp ascending.
  */
@@ -442,12 +455,12 @@ export async function getRecentHoldingSnapshots(userId: string, days: number = 5
   // just those ~N snapshots. SQLite fills the bare `id` from the row holding MAX(timestamp)
   // (single-aggregate rule), so each id is that day's final snapshot — the end-of-day value the
   // streak logic wants. Two small, index-bounded queries instead of three heavy scans.
-  const cutoffMs = Date.now() - days * 3 * 24 * 60 * 60 * 1000;
+  const cutoff = isoCutoff(days * 3 * 24 * 60 * 60 * 1000);
   const dailySnapshots = await prisma.$queryRaw<{ id: string }[]>`
     SELECT ps.id AS id, MAX(ps.timestamp) AS ts
     FROM PortfolioSnapshot ps
-    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoffMs}
-    GROUP BY date(ps.timestamp / 1000, 'unixepoch')
+    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoff}
+    GROUP BY date(ps.timestamp)
     ORDER BY ts DESC
     LIMIT ${days}
   `;
@@ -475,15 +488,15 @@ export interface DailyPortfolioValue {
  * so intraday 60s snapshots collapse to one final value per day in the DB.
  */
 export async function getDailyPortfolioValues(userId: string, days: number): Promise<DailyPortfolioValue[]> {
-  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-  const rows = await prisma.$queryRaw<{ day: string; ts: number | bigint; totalValue: number; netEquity: number | null }[]>`
-    SELECT date(ps.timestamp / 1000, 'unixepoch') AS day,
+  const cutoff = isoCutoff(days * 24 * 60 * 60 * 1000);
+  const rows = await prisma.$queryRaw<{ day: string; ts: string; totalValue: number; netEquity: number | null }[]>`
+    SELECT date(ps.timestamp) AS day,
            MAX(ps.timestamp) AS ts,
            ps.totalValue AS totalValue,
            ps.netEquity AS netEquity
     FROM PortfolioSnapshot ps
-    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoffMs}
-    GROUP BY date(ps.timestamp / 1000, 'unixepoch')
+    WHERE ps.userId = ${userId} AND ps.timestamp >= ${cutoff}
+    GROUP BY date(ps.timestamp)
     ORDER BY ts ASC
   `;
   return rows.map(r => ({
