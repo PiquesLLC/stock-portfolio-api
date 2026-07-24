@@ -12,6 +12,7 @@ import {
   requestEmailChangeHandler,
   confirmEmailChangeHandler,
   deleteAccountHandler,
+  exportDataHandler,
   refreshHandler,
   verifyEmailHandler,
   resendVerificationHandler,
@@ -21,7 +22,7 @@ import {
   testGetVerificationCodeHandler,
 } from '../controllers/auth.controller';
 import { requireAuthAllowUnverified } from '../middleware/auth.middleware';
-import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter, mfaSendLimiterChangeEmail, mfaVerifyLimiterChangeEmail } from '../middleware/rateLimiter';
+import { loginLimiter, setPasswordLimiter, signupLimiter, mutationLimiter, apiLimiter, enumerationLimiter, mfaSendLimiter, mfaVerifyLimiter, mfaSendLimiterChangeEmail, mfaVerifyLimiterChangeEmail, heavyReadLimiter } from '../middleware/rateLimiter';
 import mfaRoutes from './mfa.routes';
 import oauthRoutes from './oauth.routes';
 
@@ -44,6 +45,9 @@ router.post('/refresh', apiLimiter, refreshHandler);
 
 // GET /auth/me - Get current authenticated user (allow unverified so UI can load user state)
 router.get('/me', requireAuthAllowUnverified, meHandler);
+
+// GET /auth/export-data - GDPR Art.15/20 full data export of the user's own data (heavy read, rate-limited)
+router.get('/export-data', heavyReadLimiter, requireAuthAllowUnverified, exportDataHandler);
 
 // POST /auth/set-password - Set password for existing passwordless user (allow unverified)
 router.post('/set-password', setPasswordLimiter, requireAuthAllowUnverified, setPasswordHandler);

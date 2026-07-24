@@ -76,7 +76,7 @@ vi.mock('../utils/prisma', () => {
     mfaChallenge: { deleteMany: vi.fn() },
     mfaBackupCode: { deleteMany: vi.fn(), create: vi.fn() },
     // Consent & email OTP
-    consentRecord: { create: vi.fn(), deleteMany: vi.fn() },
+    consentRecord: { create: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue({ id: 'consent-current' }), findMany: vi.fn().mockResolvedValue([]) },
     emailOtpCode: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
     // Plaid
     plaidItem: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },

@@ -26,7 +26,9 @@ import {
   generateRefreshToken,
   isReservedUsername,
   REFRESH_TOKEN_ROTATION_GRACE_WINDOW_MS,
+  CURRENT_POLICY_VERSION,
 } from '../services/auth.service';
+import { exportUserData } from '../services/data-export.service';
 import { AuthRequest } from '../types/auth';
 import { config } from '../config';
 import {
@@ -239,13 +241,54 @@ export async function meHandler(req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
+    // Re-consent signal: true when the user has no ConsentRecord for the CURRENT
+    // policy version (e.g. after a policy bump). Inert today — everyone consented
+    // to the current version — until CURRENT_POLICY_VERSION is bumped, at which
+    // point the UI can gate on this to re-prompt.
+    const currentConsent = await prisma.consentRecord
+      .findFirst({ where: { userId: user.id, policyVersion: CURRENT_POLICY_VERSION }, select: { id: true } })
+      .catch(() => null);
+
     res.json({
       ...user,
       isWaitlistAdmin: isWaitlistAdmin(user.id, user.email, user.emailVerified),
+      needsReconsent: !currentConsent,
+      currentPolicyVersion: CURRENT_POLICY_VERSION,
     });
   } catch (error: unknown) {
     console.error('Me error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to get user info' });
+  }
+}
+
+/**
+ * GET /auth/export-data — GDPR Art.15/20 machine-readable export of the user's
+ * own data (secrets excluded). Returned as a downloadable JSON attachment.
+ */
+export async function exportDataHandler(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const data = await exportUserData(req.user.userId);
+    if (!data) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const payload = {
+      exportFormat: 'nala-user-data-export/v1',
+      exportedAt: new Date().toISOString(),
+      policyVersion: CURRENT_POLICY_VERSION,
+      ...data,
+    };
+    const filename = `nala-data-export-${req.user.userId}.json`;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send(JSON.stringify(payload, null, 2));
+  } catch (error: unknown) {
+    console.error('Export data error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to export data' });
   }
 }
 
@@ -793,7 +836,7 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, passwordHash: true },
+      select: { id: true, passwordHash: true, email: true },
     });
 
     if (!user || !user.passwordHash) {
@@ -830,6 +873,14 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.mfaChallenge.deleteMany({ where: { userId: user.id } });
       await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
       await tx.emailOtpCode.deleteMany({ where: { userId: user.id } });
+      // GDPR erasure — identifiable rows the schema does NOT cascade: ApiUsageLog
+      // (userId String?, no relation) and the origin Waitlist row (keyed by email).
+      // In the guaranteed (fail-closed) section so a swallowed cleanup error can't
+      // leave them orphaned — otherwise erasure would be incomplete (policy §6).
+      await tx.apiUsageLog.deleteMany({ where: { userId: user.id } });
+      if (user.email) {
+        await tx.waitlist.deleteMany({ where: { email: user.email } });
+      }
       // Social — posts, comments, likes, notifications
       // Extended cleanup — optional chaining + try-catch for models that may not exist in all environments
       try {

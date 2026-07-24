@@ -1559,6 +1559,101 @@ describe('Auth Routes (Integration)', () => {
 
       expect(res.status).toBe(400);
     });
+
+    it('erases the non-cascading ApiUsageLog rows and the origin Waitlist row (GDPR completeness)', async () => {
+      const token = generateTestToken(testUser);
+      const hash = await bcrypt.hash('MyPass1', 10);
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: testUser.userId,
+        passwordHash: hash,
+        email: 'alice@example.com',
+      });
+
+      const res = await request(app)
+        .delete('/auth/delete-account')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', `authToken=${token}`)
+        .send({ password: 'MyPass1' });
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.apiUsageLog.deleteMany).toHaveBeenCalledWith({ where: { userId: testUser.userId } });
+      expect(prismaMock.waitlist.deleteMany).toHaveBeenCalledWith({ where: { email: 'alice@example.com' } });
+    });
+  });
+
+  // ── GET /auth/export-data (GDPR Art.15/20) ──────────────────────────────────
+  describe('GET /auth/export-data', () => {
+    it('returns a downloadable JSON export and requests a secret-free profile select', async () => {
+      const token = generateTestToken(testUser);
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: testUser.userId, username: 'alice', displayName: 'Alice',
+        email: 'a@example.com', emailVerified: true, plan: 'free', createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .get('/auth/export-data')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', `authToken=${token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-disposition']).toContain('attachment');
+      expect(res.headers['content-disposition']).toContain('.json');
+      expect(res.body.exportFormat).toBe('nala-user-data-export/v1');
+      expect(res.body.profile.username).toBe('alice');
+      // GDPR sections present (null when a table has no rows / is unavailable)
+      expect(res.body).toHaveProperty('holdings');
+      expect(res.body).toHaveProperty('portfolioSnapshots');
+      expect(res.body.social).toBeDefined();
+      expect(res.body.security).toBeDefined();
+      // The profile query must use a select that EXCLUDES the password hash.
+      const selCall = prismaMock.user.findUnique.mock.calls.find((c: any) => c[0]?.select);
+      expect(selCall?.[0].select.passwordHash).toBeUndefined();
+      expect(selCall?.[0].select.username).toBe(true);
+    });
+
+    it('requires authentication', async () => {
+      const res = await request(app)
+        .get('/auth/export-data')
+        .set('Origin', 'http://localhost:5173');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ── GET /auth/me re-consent flag ────────────────────────────────────────────
+  describe('GET /auth/me re-consent flag', () => {
+    beforeEach(() => {
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: testUser.userId, username: 'alice', displayName: 'Alice',
+        email: 'a@example.com', emailVerified: true, plan: 'free',
+      });
+    });
+
+    it('needsReconsent=true when there is no ConsentRecord for the current policy version', async () => {
+      const token = generateTestToken(testUser);
+      prismaMock.consentRecord.findFirst.mockResolvedValueOnce(null);
+
+      const res = await request(app)
+        .get('/auth/me')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', `authToken=${token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.needsReconsent).toBe(true);
+      expect(res.body.currentPolicyVersion).toBeDefined();
+    });
+
+    it('needsReconsent=false when current-version consent exists', async () => {
+      const token = generateTestToken(testUser);
+      prismaMock.consentRecord.findFirst.mockResolvedValueOnce({ id: 'c1' });
+
+      const res = await request(app)
+        .get('/auth/me')
+        .set('Origin', 'http://localhost:5173')
+        .set('Cookie', `authToken=${token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.needsReconsent).toBe(false);
+    });
   });
 
   // â”€â”€ GET /auth/check-username/:username â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
