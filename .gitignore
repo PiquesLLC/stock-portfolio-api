@@ -65,3 +65,7 @@ prisma/*-snapshot.json
 # internal audit artifacts - never commit (public repo)
 /nala_security_audit.md
 /test-output.txt
+
+# Boot-repair completion markers (written at runtime; prod keeps these on the /data volume)
+.boot-repair-*
+prisma/.boot-repair-*
