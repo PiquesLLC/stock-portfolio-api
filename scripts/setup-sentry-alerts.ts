@@ -75,12 +75,29 @@ function ruleBody(name: string, component: string): unknown {
     actionMatch: 'any',
     filterMatch: 'all',
     frequency: 30, // minutes — "notify at most once per N minutes per issue"
-    // Only first_seen + regression. event_frequency would spam (every issue
-    // that fires >1/min triggers); reappeared would page on revived old
-    // issues during a transient blip. Both pruned per reviewer.
+    // first_seen + regression ALONE is a silent-failure trap, and it bit us:
+    // every occurrence of a given alert folds into ONE issue (the messages are
+    // constant strings), so first_seen fires exactly once ever and regression
+    // only on a resolved -> unresolved transition. A SECOND occurrence of an
+    // already-unresolved issue would notify nobody unless a human had manually
+    // resolved it in the UI. For failures whose expected shape is recurrence —
+    // the 2026-07-25 write-lock wedge did not reproduce on redeploy and may well
+    // come back — that means the first event pages and every one after is
+    // silent.
+    //
+    // event_frequency was previously pruned for fear of spam. That fear does not
+    // apply here: the `filters` below scope every rule to ONE component at
+    // level >= warning, and `frequency: 30` caps notifications to one per issue
+    // per 30 minutes regardless. These components are silent in normal
+    // operation, so "seen at all in the last hour" is precisely the signal.
     conditions: [
       { id: 'sentry.rules.conditions.first_seen_event.FirstSeenEventCondition' },
       { id: 'sentry.rules.conditions.regression_event.RegressionEventCondition' },
+      {
+        id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition',
+        interval: '1h',
+        value: 0, // more than 0 events in the last hour
+      },
     ],
     filters: [
       {

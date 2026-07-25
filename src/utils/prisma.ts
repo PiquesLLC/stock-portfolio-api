@@ -13,8 +13,22 @@ function resolveDbUrl(url: string): string {
   return `file:${path.resolve(__dirname, '../../prisma', rel)}`;
 }
 
+/**
+ * The database URL/file Prisma ACTUALLY opens, exported so other components
+ * cannot drift onto a different file.
+ *
+ * backup.service's DB_PATH derives its own path by stripping `file:`, which in
+ * dev yields `<root>/dev.db` while Prisma opens `<root>/prisma/dev.db`. A
+ * stray empty `<root>/dev.db` already exists in this repo as evidence. Anything
+ * that must talk to the SAME database the app uses — notably the write-liveness
+ * probe, where hitting the wrong file means reporting healthy against a
+ * database nobody uses — should import this.
+ */
+export const RESOLVED_DB_URL = resolveDbUrl(rawUrl);
+export const RESOLVED_DB_FILE = RESOLVED_DB_URL.replace(/^file:/, '');
+
 const adapter = new PrismaLibSql({
-  url: resolveDbUrl(rawUrl),
+  url: RESOLVED_DB_URL,
 });
 
 const prisma = new PrismaClient({ adapter });

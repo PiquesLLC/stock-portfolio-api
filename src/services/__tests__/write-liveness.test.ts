@@ -15,10 +15,13 @@ const statSyncMock = vi.hoisted(() => vi.fn(() => ({ size: 0 })));
 
 vi.mock('@libsql/client', () => ({ createClient: createClientMock }));
 vi.mock('@sentry/node', () => ({ captureMessage: sentryCaptureMock }));
-vi.mock('../../utils/prisma', () => ({ default: { $queryRawUnsafe: vi.fn() } }));
 vi.mock('../backup.service', () => ({
   DB_PATH: '/data/nala.db',
   getLastBackupStatus: () => null,
+}));
+vi.mock('../../utils/prisma', async () => ({
+  default: { $queryRawUnsafe: vi.fn() },
+  RESOLVED_DB_FILE: '/data/nala.db',
 }));
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -41,6 +44,9 @@ function lockHeld() {
 describe('write-liveness probe', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks resets call history but NOT implementations, so a
+    // mockReturnValue set by one test leaks into the next. Re-assert defaults.
+    existsSyncMock.mockReturnValue(true);
     executeMock.mockResolvedValue({ rows: [] });
     statSyncMock.mockReturnValue({ size: 0 });
   });
@@ -124,5 +130,53 @@ describe('write-liveness probe', () => {
     await runWriteLivenessProbeOnce();
     expect(getWalWatchdogState().consecutiveWriteFailures).toBe(0);
     expect(getWalWatchdogState().writeLockOk).toBe(true);
+  });
+
+  it('sets busy_timeout BEFORE taking the lock', async () => {
+    // Load-bearing and easy to delete by accident: libsql's own connection
+    // default is 0.0, so without this PRAGMA the probe becomes a hair-trigger
+    // that fails on microseconds of ordinary contention. Ordering matters too —
+    // set after BEGIN IMMEDIATE it would not apply to the acquisition.
+    const { runWriteLivenessProbeOnce } = await load();
+    await runWriteLivenessProbeOnce();
+
+    const sql = executeMock.mock.calls.map((c) => String(c[0]));
+    const pragmaAt = sql.findIndex((s) => /busy_timeout\s*=\s*\d+/i.test(s));
+    const beginAt = sql.findIndex((s) => s.includes('BEGIN IMMEDIATE'));
+    expect(pragmaAt).toBeGreaterThanOrEqual(0);
+    expect(beginAt).toBeGreaterThanOrEqual(0);
+    expect(pragmaAt).toBeLessThan(beginAt);
+  });
+
+  it('probes the same database file Prisma opens', async () => {
+    // backup.service's DB_PATH and Prisma's resolved path diverge in dev
+    // (<root>/dev.db vs <root>/prisma/dev.db). Probing the wrong file would make
+    // the monitor structurally meaningless — healthy against a DB nobody uses.
+    const { runWriteLivenessProbeOnce } = await load();
+    await runWriteLivenessProbeOnce();
+    expect(createClientMock).toHaveBeenCalledWith({ url: 'file:/data/nala.db' });
+  });
+
+  it('reports FAILURE when the database file is missing, never success', async () => {
+    // createClient would CREATE an empty DB and trivially win the lock on it —
+    // reporting healthy forever if the volume failed to mount.
+    existsSyncMock.mockReturnValue(false);
+    const { runWriteLivenessProbeOnce, getWalWatchdogState } = await load();
+    await runWriteLivenessProbeOnce();
+
+    expect(getWalWatchdogState().writeLockOk).toBe(false);
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the in-flight guard so the probe keeps running', async () => {
+    // The dangerous failure of a re-entrancy guard is LATCHING: one slow run
+    // would silently disable the probe forever. Overlap itself is currently
+    // impossible (the libsql file driver is synchronous), so this asserts the
+    // release rather than trying to force a race that cannot happen.
+    const { runWriteLivenessProbeOnce } = await load();
+    await runWriteLivenessProbeOnce();
+    await runWriteLivenessProbeOnce();
+    await runWriteLivenessProbeOnce();
+    expect(createClientMock).toHaveBeenCalledTimes(3);
   });
 });

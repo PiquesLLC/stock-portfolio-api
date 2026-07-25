@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createClient } from '@libsql/client';
 import * as Sentry from '@sentry/node';
-import prisma from '../utils/prisma';
+import prisma, { RESOLVED_DB_FILE } from '../utils/prisma';
 import { DB_PATH, getLastBackupStatus, LastBackupStatus } from './backup.service';
 
 // WAL watchdog — detects SQLite checkpoint starvation.
@@ -38,7 +38,14 @@ const SENTRY_THROTTLE_MS = 60 * 60 * 1000;
 // caught in ~3 minutes instead of ~10. Alerts only after consecutive failures so
 // ordinary contention can't page.
 const WRITE_PROBE_INTERVAL_MS = 60 * 1000;
-const WRITE_PROBE_BUSY_MS = 5000;
+// 1s, not 5s. @libsql/client's file driver is SYNCHRONOUS, so a contended
+// BEGIN IMMEDIATE blocks the Node event loop for the whole busy_timeout — no
+// HTTP, no timers — every 60s for the duration of a wedge. (Prisma's adapter is
+// the same sync client, so this is additive rather than novel, but this repo has
+// already taken an outage from a main-thread freeze.) Detection loses nothing:
+// a >1s wait to take the lock is already pathological, and three consecutive
+// failures are required regardless.
+const WRITE_PROBE_BUSY_MS = 1000;
 const WRITE_PROBE_ALERT_AFTER = 3;
 
 interface CheckpointRow { busy: number; log: number; checkpointed: number }
@@ -146,7 +153,21 @@ export async function runWriteLivenessProbeOnce(): Promise<void> {
   let ok = false;
   let detail = '';
   try {
-    client = createClient({ url: `file:${path.resolve(DB_PATH)}` });
+    // A MISSING database is a failure, never a success. createClient would
+    // otherwise CREATE an empty file here, trivially win the lock on it, and
+    // report healthy forever — e.g. if the Railway volume failed to mount, the
+    // real database would be gone while this said everything was fine. That is
+    // the textbook way monitoring lies.
+    if (!fs.existsSync(RESOLVED_DB_FILE)) {
+      throw new Error(`database file does not exist at ${RESOLVED_DB_FILE} — volume not mounted?`);
+    }
+    // RESOLVED_DB_FILE, not backup.service's DB_PATH: the two diverge in dev
+    // (<root>/dev.db vs <root>/prisma/dev.db) and probing a different database
+    // than the app uses would make this monitor structurally meaningless.
+    client = createClient({ url: `file:${RESOLVED_DB_FILE}` });
+    // Load-bearing: libsql's own connection default is 0.0, so without this the
+    // probe becomes a hair-trigger that fails on microseconds of normal
+    // contention. Must precede BEGIN IMMEDIATE.
     await client.execute(`PRAGMA busy_timeout = ${WRITE_PROBE_BUSY_MS}`);
     await client.execute('BEGIN IMMEDIATE');
     await client.execute('ROLLBACK');
@@ -154,7 +175,11 @@ export async function runWriteLivenessProbeOnce(): Promise<void> {
   } catch (e) {
     detail = e instanceof Error ? e.message : String(e);
   } finally {
-    try { client?.close(); } catch { /* ignore */ }
+    // Log rather than swallow: this is the ONE path where the probe itself could
+    // retain the write lock it just took.
+    try { client?.close(); } catch (e) {
+      console.error(`[WriteWatchdog] failed to close probe connection: ${e instanceof Error ? e.message : e}`);
+    }
     writeProbeInFlight = false;
   }
 
@@ -273,6 +298,10 @@ export function startWalWatchdog(): void {
   // ~3min detection beats riding the 5-min WAL tick (~10min).
   writeTimer = setInterval(() => { void runWriteLivenessProbeOnce(); }, WRITE_PROBE_INTERVAL_MS);
   writeTimer.unref();
+  // Probe once immediately. Interval-only would leave a wedge that is ALREADY
+  // present at startup unreported for 3+ minutes — and boot is exactly when the
+  // 2026-07-25 incident began.
+  void runWriteLivenessProbeOnce();
   console.log(
     `[WalWatchdog] Started (every ${CHECK_INTERVAL_MS / 60000}min, warn at ${WAL_WARN_BYTES / 1024 / 1024}MB); ` +
       `write-liveness probe every ${WRITE_PROBE_INTERVAL_MS / 1000}s (alert after ${WRITE_PROBE_ALERT_AFTER} consecutive failures)`,
