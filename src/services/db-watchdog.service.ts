@@ -69,6 +69,7 @@ let lastSentryAt = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 let writeTimer: ReturnType<typeof setInterval> | null = null;
 let lastWriteAlertAt = 0;
+let writeProbeInFlight = false;
 
 // Backup-staleness — rides the same 5-min tick. A failure-only alert can't see a
 // WEDGED backup cron that never fires (it leaves yesterday's `ok` sidecar), so we
@@ -126,8 +127,20 @@ function walPath(): string {
  * app's pool is saturated the probe would queue behind application queries and
  * measure pool pressure instead of lock availability. Same reasoning as
  * backup.service's VACUUM INTO connection.
+ *
+ * KNOWN BLIND SPOT, accepted deliberately: because the connection is fresh, this
+ * cannot see Prisma POOL exhaustion — a state where the app can't write but a
+ * new connection can. It answers "is the write lock obtainable", which is the
+ * failure mode of the 2026-07-25 outage, not "can the app write". Pool
+ * saturation needs a separate signal.
  */
 export async function runWriteLivenessProbeOnce(): Promise<void> {
+  // setInterval does not await. If a probe ever outlives its tick (connection
+  // open has no timeout of its own), overlapping runs would each increment
+  // consecutiveWriteFailures and trip the alert threshold early.
+  if (writeProbeInFlight) return;
+  writeProbeInFlight = true;
+
   const startedAt = Date.now();
   let client: ReturnType<typeof createClient> | null = null;
   let ok = false;
@@ -142,6 +155,7 @@ export async function runWriteLivenessProbeOnce(): Promise<void> {
     detail = e instanceof Error ? e.message : String(e);
   } finally {
     try { client?.close(); } catch { /* ignore */ }
+    writeProbeInFlight = false;
   }
 
   const probeMs = Date.now() - startedAt;
@@ -151,6 +165,10 @@ export async function runWriteLivenessProbeOnce(): Promise<void> {
   if (ok) {
     if (state.consecutiveWriteFailures > 0) {
       console.warn(`[WriteWatchdog] write lock RECOVERED after ${state.consecutiveWriteFailures} failed probe(s) (${probeMs}ms)`);
+      // Clear the throttle on recovery. Otherwise a SECOND, distinct outage
+      // inside the same hour would be silently suppressed by the throttle that
+      // was meant only to stop one ongoing outage from spamming.
+      lastWriteAlertAt = 0;
     }
     state.consecutiveWriteFailures = 0;
     return;
