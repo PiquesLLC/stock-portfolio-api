@@ -1,5 +1,6 @@
-// Off-site backup shipper — uploads the most recent v1 SQLite backup and
-// a fresh v2 Postgres pg_dump to Cloudflare R2 (S3-compatible).
+// Off-site backup shipper — uploads the most recent v1 SQLite backup and a
+// fresh logical export of the v2 Postgres ledger to Cloudflare R2
+// (S3-compatible).
 //
 // Why off-site: Railway's volume backups (configured via
 // scripts/setup-railway-backups.ts) live on Railway infrastructure. For
@@ -23,8 +24,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { URL } from 'url';
-import { spawn } from 'child_process';
+import * as zlib from 'zlib';
+import { Client as PgClient } from 'pg';
 import {
   S3Client,
   PutObjectCommand,
@@ -43,13 +44,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // covers; the volume also holds a same-day local backup and Railway keeps its own.
 const KEEP_DAYS = 8;
 
-// Distinguishes "pg_dump isn't installed" (expected during a nixpacks rollout,
-// log-and-continue) from a real failure (Sentry CRITICAL). Not a user-facing string.
-const ENOENT_SENTINEL = '__PG_DUMP_ENOENT__';
-
-// A custom-format pg_dump of an EMPTY database is still ~1KB of valid archive.
-// Anything under this is not a real backup of the v2 ledger.
-const MIN_PLAUSIBLE_DUMP_BYTES = 4096;
+// Even an empty gzip stream is ~20 bytes, and our header line alone exceeds
+// this. Anything smaller is not a real export.
+const MIN_PLAUSIBLE_DUMP_BYTES = 128;
 
 let scheduled: { cancel: () => void } | null = null;
 let running = false;
@@ -147,41 +144,85 @@ async function shipV1ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
 }
 
 /**
- * Parse V2_DATABASE_URL into pg_dump-friendly env vars (so the password
- * never appears in argv / /proc/<pid>/cmdline). pg_dump reads PGPASSWORD
- * + PGHOST + PGPORT + PGUSER + PGDATABASE + PGSSLMODE.
+ * Logical export of every table in the v2 public schema to gzipped NDJSON.
+ *
+ * Tables are enumerated from pg_tables rather than hardcoded, so adding a model
+ * to prisma-v2 can't silently leave it unbacked-up.
  */
-function parsePgEnv(dbUrl: string): Record<string, string> {
-  const u = new URL(dbUrl);
-  const database = u.pathname.replace(/^\//, '');
-  // Refuse an empty database name rather than let libpq silently default it to
-  // the USERNAME. That path produces a well-formed, exit-0, ~1KB dump of the
-  // WRONG (usually nonexistent-but-implicit) database — a backup that looks
-  // successful and restores to nothing.
-  if (!database) {
-    throw new Error('V2_DATABASE_URL has no database name in its path');
+async function exportV2Logical(
+  dbUrl: string,
+  destPath: string,
+): Promise<{ tables: number; rows: number }> {
+  const pg = new PgClient({ connectionString: dbUrl });
+  await pg.connect();
+  try {
+    const { rows: tableRows } = await pg.query<{ tablename: string }>(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
+    );
+
+    const gz = zlib.createGzip();
+    const out = fs.createWriteStream(destPath);
+    const finished = new Promise<void>((resolve, reject) => {
+      out.on('finish', resolve);
+      out.on('error', reject);
+      gz.on('error', reject);
+    });
+    gz.pipe(out);
+
+    const write = (line: string): Promise<void> =>
+      new Promise((resolve, reject) => {
+        // Respect backpressure — a large table would otherwise buffer entirely
+        // in memory before gzip drains it.
+        if (gz.write(line)) return resolve();
+        gz.once('drain', resolve);
+        gz.once('error', reject);
+      });
+
+    await write(JSON.stringify({
+      __meta: {
+        format: 'v2-logical-ndjson',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        tables: tableRows.map((t) => t.tablename),
+      },
+    }) + '\n');
+
+    let rows = 0;
+    for (const { tablename } of tableRows) {
+      const res = await pg.query(`SELECT * FROM "${tablename}"`);
+      for (const r of res.rows) {
+        await write(JSON.stringify({ t: tablename, r }) + '\n');
+        rows++;
+      }
+    }
+
+    gz.end();
+    await finished;
+    return { tables: tableRows.length, rows };
+  } finally {
+    await pg.end().catch(() => { /* already closed */ });
   }
-  const env: Record<string, string> = {
-    PGHOST: u.hostname,
-    PGPORT: u.port || '5432',
-    PGUSER: decodeURIComponent(u.username),
-    PGDATABASE: database,
-  };
-  if (u.password) env.PGPASSWORD = decodeURIComponent(u.password);
-  const sslmode = u.searchParams.get('sslmode');
-  if (sslmode) env.PGSSLMODE = sslmode;
-  return env;
 }
 
 /**
- * Spawn pg_dump against V2_DATABASE_URL, spool it to a temp file, then upload
- * that file to R2 as a single PutObject. Credentials go via env vars (NEVER
- * argv) so they don't appear in `ps aux` / `/proc/<pid>/cmdline`.
+ * Export the v2 Postgres ledger and upload it to R2 as a single PutObject.
  *
- * Race semantics: we resolve only once pg_dump has exited AND the temp file has
- * flushed, so a truncated dump can never be uploaded as if it were good. On any
- * failure nothing is uploaded at all, which is why no abort/cleanup of a
- * partial object is needed (single PutObject commits atomically).
+ * Deliberately NOT pg_dump. The nixpacks archive pins postgresql 16.6 while the
+ * Railway v2 server is 18.4, and pg_dump REFUSES to dump a newer server
+ * ("aborting because of server version mismatch") — so v2 had never once
+ * shipped, first masked by an upload bug and then by this. Pinning
+ * `postgresql_18` was tried and the build failed (not in that archive), and
+ * bumping the archive itself also moves nodejs/npm/openssl, which this repo has
+ * been burned by before (see nixpacks.toml).
+ *
+ * node-postgres speaks the wire protocol and is version-agnostic, so the entire
+ * class of problem disappears. `pg` is already a direct dependency, so this
+ * needs no build change at all.
+ *
+ * Trade-off, stated plainly: the artifact is gzipped NDJSON, not a pg_dump
+ * archive, so restoring is a short script rather than `pg_restore`. That is
+ * acceptable for a two-model shadow ledger and should be revisited if v2
+ * becomes primary after the cutover.
  */
 async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
   const dbUrl = process.env.V2_DATABASE_URL;
@@ -191,127 +232,47 @@ async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
   }
 
   const ts = new Date().toISOString().slice(0, 10);
-  const key = `${cfg.prefix}v2/v2-${ts}.dump`;
+  const key = `${cfg.prefix}v2/v2-${ts}.ndjson.gz`;
 
-  let pgEnv: Record<string, string>;
-  try {
-    pgEnv = parsePgEnv(dbUrl);
-  } catch (e) {
-    reportCritical(`V2_DATABASE_URL is unparseable: ${(e as Error).message}`);
-    return false;
-  }
-
-  // Spool pg_dump to a temp file, then upload with an explicit ContentLength —
-  // do NOT pipe dump.stdout straight into PutObject.
-  //
-  // Precise mechanism, because the obvious reading is wrong: the SDK uses
-  // aws-chunked encoding for ANY Readable body regardless of ContentLength
-  // (middleware-flexible-checksums, requestChecksumCalculation defaults to
-  // WHEN_SUPPORTED). It then sets `x-amz-decoded-content-length` FROM the
-  // content-length header. With no ContentLength that header is literally
-  // `undefined`, which R2 rejects outright ("Invalid value \"undefined\" for
-  // header ..." — observed in prod 2026-07-24, v2 failing every run while v1
-  // succeeded). Supplying ContentLength does not avoid aws-chunked; it makes
-  // the header VALID. So do not "optimise" this back to a direct pipe.
-  // shipV1ToR2 uses this same file-stream + ContentLength shape, which is why
-  // it has always worked. The v2 ledger dump is small (two models in
-  // prisma-v2/schema.prisma), so buffering costs nothing.
-  const tmpPath = path.join(os.tmpdir(), `v2-${ts}-${process.pid}.dump`);
+  // The upload below passes an explicit ContentLength — do NOT change it to
+  // stream a body of unknown length. The SDK uses aws-chunked encoding for ANY
+  // Readable (middleware-flexible-checksums, requestChecksumCalculation defaults
+  // to WHEN_SUPPORTED) and sets `x-amz-decoded-content-length` FROM the
+  // content-length header; with no ContentLength that header is literally
+  // `undefined`, which R2 rejects outright (observed in prod 2026-07-24, v2
+  // failing every run while v1 succeeded). ContentLength doesn't avoid
+  // aws-chunked, it makes the header VALID.
+  const tmpPath = path.join(os.tmpdir(), `v2-${ts}-${process.pid}.ndjson.gz`);
 
   try {
-    const result = await new Promise<{ ok: boolean; reason: string }>((resolve) => {
-      const out = fs.createWriteStream(tmpPath);
-      const dump = spawn(
-        'pg_dump',
-        // --lock-wait-timeout: pg_dump takes ACCESS SHARE locks, so anything
-        // holding ACCESS EXCLUSIVE (a migration, ALTER TABLE, VACUUM FULL)
-        // blocks it INDEFINITELY. Without this it never exits, this promise
-        // never settles, and offsite backups stop permanently.
-        ['--format=custom', '--no-owner', '--no-privileges', '--lock-wait-timeout=60000'],
-        { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...pgEnv } },
+    const stats = await exportV2Logical(dbUrl, tmpPath);
+
+    // Zero rows means we connected to the wrong database, or the ledger is
+    // empty — either way it is not a backup worth keeping, and shipping it would
+    // quietly overwrite yesterday's good object under the same date-stamped key.
+    if (stats.rows === 0) {
+      reportCritical(
+        `v2 ship failed: export produced ZERO rows across ${stats.tables} table(s) — wrong database or empty ledger`,
+        { key, tables: stats.tables },
       );
-
-      let stderrBuf = '';
-      let settled = false;
-      const done = (ok: boolean, reason: string) => {
-        if (settled) return;
-        settled = true;
-        // Never leave the child or the stream behind. On a destination error
-        // Node unpipes WITHOUT destroying the source, so pg_dump would block
-        // forever on a full pipe buffer, holding a Postgres backend open.
-        try { dump.kill('SIGKILL'); } catch { /* already gone */ }
-        try { out.destroy(); } catch { /* already closed */ }
-        resolve({ ok, reason });
-      };
-
-      dump.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
-      dump.on('error', (err) => {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          console.warn('[Offsite] pg_dump not on PATH — install postgresql in nixpacks.toml. Skipping v2 ship.');
-          // Graceful degradation, deliberately NOT a CRITICAL.
-          done(false, ENOENT_SENTINEL);
-        } else {
-          done(false, `pg_dump spawn error: ${err.message}`);
-        }
-      });
-      out.on('error', (err) => done(false, `temp file write error: ${err.message}`));
-
-      dump.stdout.pipe(out);
-
-      // Only succeed once pg_dump has exited 0 AND the file is fully flushed —
-      // uploading a half-written dump would produce a silently corrupt backup.
-      //
-      // `exited` is tracked SEPARATELY from the exit code on purpose: a child
-      // killed by a signal reports `code === null`, so using null as the
-      // "hasn't exited yet" marker would make this promise never settle. That
-      // in turn latches `running = true` forever and silently stops BOTH v1 and
-      // v2 backups until the process restarts.
-      let exited = false;
-      let exitCode: number | null = null;
-      let exitSignal: NodeJS.Signals | null = null;
-      let flushed = false;
-      const maybeFinish = () => {
-        if (!exited || !flushed) return;
-        if (exitCode === 0) {
-          done(true, 'ok');
-        } else {
-          const how = exitSignal ? `killed by ${exitSignal}` : `exited code ${exitCode}`;
-          done(false, `pg_dump ${how}: ${stderrBuf.slice(0, 300)}`);
-        }
-      };
-      dump.on('exit', (code, signal) => {
-        exited = true;
-        exitCode = code;
-        exitSignal = signal;
-        maybeFinish();
-      });
-      out.on('finish', () => { flushed = true; maybeFinish(); });
-      out.on('close', () => { flushed = true; maybeFinish(); });
-    });
-
-    if (!result.ok) {
-      if (result.reason === ENOENT_SENTINEL) return false;
-      reportCritical(`v2 ship failed: ${result.reason}`, { key });
       return false;
     }
 
-    // Validate the artifact before trusting it. A size check alone is too weak:
-    // pg_dump exits 0 and emits a well-formed ~1KB archive containing zero
-    // tables if pointed at the wrong database, which uploads and alerts nothing
-    // until someone tries to restore it.
     const size = fs.statSync(tmpPath).size;
     if (size < MIN_PLAUSIBLE_DUMP_BYTES) {
       reportCritical(
-        `v2 ship failed: dump is implausibly small (${size} bytes) — probably an empty or wrong database`,
-        { key, size },
+        `v2 ship failed: export is implausibly small (${size} bytes)`,
+        { key, size, rows: stats.rows },
       );
       return false;
     }
-    const magic = Buffer.alloc(5);
+    // gzip magic (1f 8b) — proves the stream was finalised, not truncated
+    // mid-write, before we upload it as a backup.
+    const magic = Buffer.alloc(2);
     const fd = fs.openSync(tmpPath, 'r');
-    try { fs.readSync(fd, magic, 0, 5, 0); } finally { fs.closeSync(fd); }
-    if (magic.toString('latin1') !== 'PGDMP') {
-      reportCritical('v2 ship failed: dump is not a pg_dump custom-format archive (bad magic)', { key });
+    try { fs.readSync(fd, magic, 0, 2, 0); } finally { fs.closeSync(fd); }
+    if (magic[0] !== 0x1f || magic[1] !== 0x8b) {
+      reportCritical('v2 ship failed: export is not a valid gzip stream (bad magic)', { key });
       return false;
     }
 
@@ -321,11 +282,18 @@ async function shipV2ToR2(client: S3Client, cfg: R2Config): Promise<boolean> {
         Key: key,
         Body: fs.createReadStream(tmpPath),
         ContentLength: size,
-        Metadata: { source: 'v2-postgres-pg_dump', shipped_at: new Date().toISOString() },
+        Metadata: {
+          source: 'v2-postgres-logical-ndjson',
+          shipped_at: new Date().toISOString(),
+          tables: String(stats.tables),
+          rows: String(stats.rows),
+        },
       }),
     );
 
-    console.log(`[Offsite] v2 shipped: ${key} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+    console.log(
+      `[Offsite] v2 shipped: ${key} (${(size / 1024).toFixed(1)} KB, ${stats.tables} tables, ${stats.rows} rows)`,
+    );
     return true;
   } catch (err) {
     // Deliberately does NOT delete `key` on failure. The key is date-stamped, so
