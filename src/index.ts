@@ -1,4 +1,6 @@
 ﻿import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import app from './app';
 import { config } from './config';
 import { ensureBenchmarksCached, restoreCandleCache, persistCandleCache } from './utils/candle-cache';
@@ -105,6 +107,57 @@ async function ensureSeedUser(): Promise<void> {
       select: { id: true },
     });
     console.log('[Init] Created seed user (demo/leaderboard exclusion only)');
+  }
+}
+
+/**
+ * Run a one-time schema repair ONCE, not on every deploy.
+ *
+ * The repair blocks below issue DDL — CREATE TABLE / ALTER TABLE / CREATE
+ * TRIGGER / CREATE INDEX — and DDL takes an EXCLUSIVE lock in SQLite. After the
+ * first successful run every statement is either an `IF NOT EXISTS` no-op or
+ * throws by design ("duplicate column name", "trigger already exists"). That is
+ * ~33 exclusive-lock operations on every single boot that accomplish nothing.
+ *
+ * 2026-07-25: prod could not write for 23 minutes starting ~91s after a deploy.
+ * The write lock was held, the WAL stayed at 0 bytes (consistent with a holder
+ * whose statements write nothing), snapshots and refresh-token writes both timed
+ * out, and it did NOT reproduce when the same commit was redeployed — i.e. a
+ * race, not a deterministic fault. These blocks racing the scheduled jobs that
+ * start writing around the same time is the leading explanation. Gating them
+ * removes the race whether or not it was the cause; re-running a March
+ * migration repair forever is pure risk for no benefit.
+ *
+ * The marker lives on the persistent volume so it survives deploys. If the
+ * repair throws, no marker is written and it retries on the next boot.
+ */
+function bootRepairMarkerPath(name: string): string {
+  const base = process.env.RAILWAY_VOLUME_MOUNT_PATH
+    || (fs.existsSync('/data') ? '/data' : path.join(process.cwd(), 'prisma'));
+  return path.join(base, `.boot-repair-${name}`);
+}
+
+async function runBootRepairOnce(name: string, fn: () => Promise<void>): Promise<void> {
+  const marker = bootRepairMarkerPath(name);
+  try {
+    if (fs.existsSync(marker)) {
+      console.log(`[Init] boot repair "${name}" already applied — skipping its DDL`);
+      return;
+    }
+  } catch { /* marker unreadable — fall through and run the repair */ }
+
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`[Init] boot repair "${name}" FAILED (will retry next boot):`, err instanceof Error ? err.message : err);
+    return; // deliberately no marker — an incomplete repair must run again
+  }
+
+  try {
+    fs.writeFileSync(marker, `${new Date().toISOString()}\n`);
+    console.log(`[Init] boot repair "${name}" complete — marker written, will not re-run`);
+  } catch (err) {
+    console.warn(`[Init] boot repair "${name}" succeeded but marker write failed (will re-run next boot): ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -472,7 +525,7 @@ const server = app.listen(config.port, async () => {
   // conflicted with existing column, rolling back the CREATE TABLE statements.
   // This block creates the tables idempotently and marks the migration as finished
   // so prisma migrate deploy won't retry it.
-  try {
+  await runBootRepairOnce('social-platform', async () => {
     // 1. Ensure tables exist (idempotent)
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Post" ("id" TEXT NOT NULL PRIMARY KEY, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "ticker" TEXT, "type" TEXT NOT NULL DEFAULT 'thought', "attachmentType" TEXT, "attachmentData" TEXT, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Post_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Comment" ("id" TEXT NOT NULL PRIMARY KEY, "postId" TEXT NOT NULL, "userId" TEXT NOT NULL, "content" TEXT NOT NULL, "deleted" BOOLEAN NOT NULL DEFAULT false, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Comment_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post" ("id") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT "Comment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE)`);
@@ -536,16 +589,14 @@ const server = app.listen(config.port, async () => {
     }
 
     console.log('[Init] Social platform tables + migration state verified');
-  } catch (err: any) {
-    console.error('[Init] Social table/migration fix failed:', err.message);
-  }
+  });
 
   // M-17: add nullable portfolioId to the holding-history tables so deleteHolding can
   // scope its cascade per-portfolio and the write paths can populate it. Idempotent
   // ALTERs run at boot so a create can't hit a missing column after deploy. Backfilling
   // EXISTING rows is a separate operator step (see docs/M17-migration-draft.md).
   // SQLite ALTER ADD COLUMN is a fast metadata-only change.
-  try {
+  await runBootRepairOnce('m17-portfolio-id', async () => {
     for (const table of ['Lot', 'PortfolioTrade', 'DividendCredit', 'DividendReinvestment']) {
       try {
         await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ADD COLUMN "portfolioId" TEXT`);
@@ -555,9 +606,7 @@ const server = app.listen(config.port, async () => {
       );
     }
     console.log('[Init] M-17 portfolioId columns verified');
-  } catch (err: any) {
-    console.error('[Init] M-17 portfolioId column add failed:', err.message);
-  }
+  });
 
   try {
     await assertBillingDeploySafety();
