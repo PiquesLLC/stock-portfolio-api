@@ -2,7 +2,14 @@
 # postgresql gives us pg_dump on PATH for the off-site backup shipper
 # (src/services/offsite-backup.service.ts). The Postgres server itself
 # isn't started — we only need the client tools.
-nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf", "postgresql"]
+#
+# Pinned to _18 deliberately: bare `postgresql` on this archive resolves to
+# 16.6, and pg_dump REFUSES to dump a newer server — the v2 Railway Postgres is
+# 18.4, so every v2 ship died with "aborting because of server version
+# mismatch" (masked until 2026-07-25 by a separate upload bug). pg_dump must be
+# >= the server version. If the archive below is ever bumped, keep this explicit
+# so a default-version change can't silently re-break v2 backups.
+nixPkgs = ["nodejs_22", "npm-10_x", "openssl", "fontconfig", "freefont_ttf", "postgresql_18"]
 nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"
 
 # Override the install phase to use `npm install` rather than `npm ci`.
