@@ -28,6 +28,7 @@ interface Rule {
     | 'db-brownout'
     | 'db-corruption'
     | 'wal-watchdog'
+    | 'write-liveness'
     | 'disk_guard'
     | 'snapshot-retention';
 }
@@ -42,6 +43,10 @@ const RULES: Rule[] = [
   { name: 'DB write brownout (P1008 storm)', component: 'db-brownout' },
   { name: 'DB corruption (SQLITE_CORRUPT)', component: 'db-corruption' },
   { name: 'WAL checkpoint starvation', component: 'wal-watchdog' },
+  // 2026-07-25: prod was unwritable for 23 minutes and NOTHING alerted — the WAL
+  // watchdog early-returns on a small WAL and that outage had a 0-byte one. This
+  // rule covers the probe that asks directly whether the write lock is gettable.
+  { name: 'SQLite write lock stalled — writes are dead', component: 'write-liveness' },
   { name: 'Disk guard critical', component: 'disk_guard' },
   { name: 'Snapshot retention failed / capped', component: 'snapshot-retention' },
 ];

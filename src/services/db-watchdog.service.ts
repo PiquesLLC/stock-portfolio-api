@@ -1,4 +1,6 @@
 import * as fs from 'fs';
+import * as path from 'path';
+import { createClient } from '@libsql/client';
 import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import { DB_PATH, getLastBackupStatus, LastBackupStatus } from './backup.service';
@@ -22,6 +24,23 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const WAL_WARN_BYTES = 64 * 1024 * 1024;
 const SENTRY_THROTTLE_MS = 60 * 60 * 1000;
 
+// Write-liveness probe — detects "the write lock is held and nothing can write".
+//
+// The WAL watchdog above cannot see this state: it early-returns whenever the
+// WAL is SMALL, and the 2026-07-25 outage had a 0-byte WAL for its entire 23
+// minutes (the holder took the write lock and never wrote). So writes were dead,
+// snapshots recorded 0/16, refresh-token writes timed out, users could not renew
+// sessions — and nothing alerted, because every instrumented check was looking
+// at something else. This probe asks the only question that matters directly:
+// can anyone get the write lock right now?
+//
+// Runs on its own 60s timer rather than the 5-min WAL tick so an outage is
+// caught in ~3 minutes instead of ~10. Alerts only after consecutive failures so
+// ordinary contention can't page.
+const WRITE_PROBE_INTERVAL_MS = 60 * 1000;
+const WRITE_PROBE_BUSY_MS = 5000;
+const WRITE_PROBE_ALERT_AFTER = 3;
+
 interface CheckpointRow { busy: number; log: number; checkpointed: number }
 
 interface WatchdogState {
@@ -30,6 +49,9 @@ interface WatchdogState {
   lastCheckAt: string | null;
   lastCheckpoint: CheckpointRow | null;
   consecutiveLargeWal: number;
+  writeLockOk: boolean | null;
+  writeLockProbeMs: number | null;
+  consecutiveWriteFailures: number;
 }
 
 const state: WatchdogState = {
@@ -38,10 +60,15 @@ const state: WatchdogState = {
   lastCheckAt: null,
   lastCheckpoint: null,
   consecutiveLargeWal: 0,
+  writeLockOk: null,
+  writeLockProbeMs: null,
+  consecutiveWriteFailures: 0,
 };
 
 let lastSentryAt = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
+let writeTimer: ReturnType<typeof setInterval> | null = null;
+let lastWriteAlertAt = 0;
 
 // Backup-staleness — rides the same 5-min tick. A failure-only alert can't see a
 // WEDGED backup cron that never fires (it leaves yesterday's `ok` sidecar), so we
@@ -86,6 +113,79 @@ function checkBackupStaleness(): void {
 
 function walPath(): string {
   return `${DB_PATH}-wal`;
+}
+
+/**
+ * Can anything acquire the SQLite write lock right now?
+ *
+ * `BEGIN IMMEDIATE` takes the write lock without writing anything, and the
+ * immediate `ROLLBACK` releases it — so the probe answers the question without
+ * itself becoming a writer that could starve the app.
+ *
+ * Runs on a DEDICATED libsql connection, never the shared Prisma client: if the
+ * app's pool is saturated the probe would queue behind application queries and
+ * measure pool pressure instead of lock availability. Same reasoning as
+ * backup.service's VACUUM INTO connection.
+ */
+export async function runWriteLivenessProbeOnce(): Promise<void> {
+  const startedAt = Date.now();
+  let client: ReturnType<typeof createClient> | null = null;
+  let ok = false;
+  let detail = '';
+  try {
+    client = createClient({ url: `file:${path.resolve(DB_PATH)}` });
+    await client.execute(`PRAGMA busy_timeout = ${WRITE_PROBE_BUSY_MS}`);
+    await client.execute('BEGIN IMMEDIATE');
+    await client.execute('ROLLBACK');
+    ok = true;
+  } catch (e) {
+    detail = e instanceof Error ? e.message : String(e);
+  } finally {
+    try { client?.close(); } catch { /* ignore */ }
+  }
+
+  const probeMs = Date.now() - startedAt;
+  state.writeLockOk = ok;
+  state.writeLockProbeMs = probeMs;
+
+  if (ok) {
+    if (state.consecutiveWriteFailures > 0) {
+      console.warn(`[WriteWatchdog] write lock RECOVERED after ${state.consecutiveWriteFailures} failed probe(s) (${probeMs}ms)`);
+    }
+    state.consecutiveWriteFailures = 0;
+    return;
+  }
+
+  state.consecutiveWriteFailures += 1;
+  console.error(
+    `[WriteWatchdog] CANNOT acquire write lock after ${probeMs}ms: ${detail} ` +
+      `(consecutive=${state.consecutiveWriteFailures})`,
+  );
+
+  if (state.consecutiveWriteFailures < WRITE_PROBE_ALERT_AFTER) return;
+  if (Date.now() - lastWriteAlertAt < SENTRY_THROTTLE_MS) return;
+  lastWriteAlertAt = Date.now();
+
+  // These two extras are what actually identified the 2026-07-25 incident after
+  // the fact: a 0-byte WAL meant the holder wrote nothing, and an uptime of ~91s
+  // meant it started during boot. Capture them at alert time so the NEXT
+  // occurrence is diagnosable without archaeology.
+  let walBytes: number | null = null;
+  try { walBytes = fs.existsSync(walPath()) ? fs.statSync(walPath()).size : 0; } catch { /* ignore */ }
+
+  try {
+    Sentry.captureMessage('[DB] cannot acquire the SQLite write lock — writes are stalled', {
+      level: 'error',
+      tags: { component: 'write-liveness' },
+      extra: {
+        detail,
+        probeMs,
+        consecutiveFailures: state.consecutiveWriteFailures,
+        walBytes,
+        processUptimeSec: Math.round(process.uptime()),
+      },
+    });
+  } catch { /* Sentry not initialised */ }
 }
 
 export function getWalWatchdogState(): Readonly<WatchdogState> {
@@ -151,11 +251,20 @@ export function startWalWatchdog(): void {
   state.enabled = true;
   timer = setInterval(() => { void runWalWatchdogOnce(); }, CHECK_INTERVAL_MS);
   timer.unref();
-  console.log(`[WalWatchdog] Started (every ${CHECK_INTERVAL_MS / 60000}min, warn at ${WAL_WARN_BYTES / 1024 / 1024}MB)`);
+  // Separate, faster timer: a write-lock outage kills snapshots and logins, so
+  // ~3min detection beats riding the 5-min WAL tick (~10min).
+  writeTimer = setInterval(() => { void runWriteLivenessProbeOnce(); }, WRITE_PROBE_INTERVAL_MS);
+  writeTimer.unref();
+  console.log(
+    `[WalWatchdog] Started (every ${CHECK_INTERVAL_MS / 60000}min, warn at ${WAL_WARN_BYTES / 1024 / 1024}MB); ` +
+      `write-liveness probe every ${WRITE_PROBE_INTERVAL_MS / 1000}s (alert after ${WRITE_PROBE_ALERT_AFTER} consecutive failures)`,
+  );
 }
 
 export function stopWalWatchdog(): void {
   if (timer) clearInterval(timer);
   timer = null;
+  if (writeTimer) clearInterval(writeTimer);
+  writeTimer = null;
   state.enabled = false;
 }
