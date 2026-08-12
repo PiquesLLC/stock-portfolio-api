@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { etDate, etDateHour, etMidnightUtc } from '../utils/date';
+import { etDate, etDateHour, etMidnightUtc, etMinutesOfDay, isEtWeekend, previousEtDay } from '../utils/date';
 
 // These tests pin the ET market-calendar helpers against fixed instants so
 // they pass regardless of the machine's local timezone (CI runs UTC, dev
@@ -61,5 +61,49 @@ describe('etMidnightUtc', () => {
       expect(etDate(mid)).toBe(etDate(input));
       expect(etDateHour(mid).endsWith(' 00')).toBe(true);
     }
+  });
+});
+
+describe('etMinutesOfDay', () => {
+  it('counts from ET midnight, not UTC midnight', () => {
+    expect(etMinutesOfDay(new Date('2026-07-07T04:00:00Z'))).toBe(0);          // 00:00 EDT
+    expect(etMinutesOfDay(new Date('2026-07-07T13:30:00Z'))).toBe(9 * 60 + 30); // 09:30 EDT — the open
+    expect(etMinutesOfDay(new Date('2026-07-08T03:59:00Z'))).toBe(23 * 60 + 59); // 23:59 EDT
+  });
+
+  it('tracks the EST/EDT offset rather than a fixed one', () => {
+    expect(etMinutesOfDay(new Date('2026-01-15T14:30:00Z'))).toBe(9 * 60 + 30); // EST = UTC-5
+    expect(etMinutesOfDay(new Date('2026-07-15T13:30:00Z'))).toBe(9 * 60 + 30); // EDT = UTC-4
+  });
+
+  it('renders midnight as 0, never 1440', () => {
+    expect(etMinutesOfDay(new Date('2026-01-15T05:00:00Z'))).toBe(0); // 00:00 EST
+  });
+});
+
+describe('previousEtDay', () => {
+  it('steps back one calendar day', () => {
+    expect(previousEtDay('2026-08-12')).toBe('2026-08-11');
+  });
+
+  it('crosses month, year, and DST boundaries', () => {
+    expect(previousEtDay('2026-08-01')).toBe('2026-07-31');
+    expect(previousEtDay('2026-01-01')).toBe('2025-12-31');
+    expect(previousEtDay('2026-03-09')).toBe('2026-03-08'); // day after spring-forward
+    expect(previousEtDay('2026-11-02')).toBe('2026-11-01'); // day after fall-back
+    expect(previousEtDay('2028-03-01')).toBe('2028-02-29'); // leap day
+  });
+});
+
+describe('isEtWeekend', () => {
+  it('identifies Saturday and Sunday', () => {
+    expect(isEtWeekend('2026-08-15')).toBe(true);  // Saturday
+    expect(isEtWeekend('2026-08-16')).toBe(true);  // Sunday
+  });
+
+  it('rejects weekdays', () => {
+    expect(isEtWeekend('2026-08-14')).toBe(false); // Friday
+    expect(isEtWeekend('2026-08-17')).toBe(false); // Monday
+    expect(isEtWeekend('2026-08-12')).toBe(false); // Wednesday
   });
 });

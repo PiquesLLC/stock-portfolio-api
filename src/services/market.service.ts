@@ -1,10 +1,10 @@
 import { getQuote, getQuotes, QuotesResult, searchSymbols, getStockProfile, getStockMetrics } from '../utils/finnhub';
 import { getPolygonQuotes, getPolygonQuote } from '../utils/polygon';
 import { Quote, SymbolSearchResponse, StockProfile, StockMetrics, StockDetailsResponse } from '../types';
-import { getMarketSession, getMarketSessionForTicker } from '../utils/market-hours';
+import { getMarketSession, getMarketSessionForTicker, tradesOnWeekends, tradesWithinEtCalendarDay } from '../utils/market-hours';
 import NodeCache from 'node-cache';
 import { yahooGet, fetchPolygonAggs } from '../utils/yahoo-http';
-import { etDate } from '../utils/date';
+import { etDate, etMinutesOfDay, isEtWeekend, previousEtDay } from '../utils/date';
 
 const yahooCache = new NodeCache({ stdTTL: 86400 }); // 24h cache for daily candles
 const yahooIntradayCache = new NodeCache({ stdTTL: 10 }); // 10s cache for intraday
@@ -150,6 +150,178 @@ function filterRegularHoursIfNeeded(candles: IntradayCandle[], interval: CandleI
   if (period === '1D') return candles;
   // Multi-day periods: filter to regular hours only to avoid overnight gaps
   return candles.filter((candle) => isRegularHours(candle.time));
+}
+
+/** Newest bar time in a series (0 when empty). Scans instead of trusting the
+ *  last element — provider ordering is not ours to assume. */
+function newestCandleMs(candles: IntradayCandle[]): number {
+  let newest = 0;
+  for (const candle of candles) {
+    const ms = Date.parse(candle.time);
+    if (ms > newest) newest = ms;
+  }
+  return newest;
+}
+
+/** ET calendar day of the newest bar in a series ('' when empty). */
+function latestCandleDay(candles: IntradayCandle[]): string {
+  const newest = newestCandleMs(candles);
+  return newest === 0 ? '' : etDate(new Date(newest));
+}
+
+// Polygon's plan is 15-min delayed and providers publish a session's opening
+// bars late, so "nothing for today yet" stays normal past the 9:30 open. Only
+// after this point can today be the yardstick a provider is measured against.
+// Calibrated for US equities; a market trading earlier in ET terms just goes
+// unmonitored until then, which costs detections, never correctness.
+const FIRST_BARS_EXPECTED_ET = 9 * 60 + 50; // 9:50 AM ET
+
+/**
+ * The most recent ET day that should already have bars for `ticker`. Today
+ * counts once the session has run long enough to print; otherwise the yardstick
+ * is the previous day the market was open.
+ *
+ * Market holidays aren't modelled anywhere in this codebase, so a holiday reads
+ * as a session day. The chart stays correct (every source agrees on the prior
+ * session) at the cost of one redundant fallback fetch per cache miss.
+ */
+function lastExpectedSessionDay(ticker: string, now: Date): string {
+  const today = etDate(now);
+
+  // Markets that run through the weekend print around the clock, so today is
+  // always the yardstick. (Futures are shut Saturday, which this over-counts by
+  // one wasted fallback fetch — the same price a holiday costs.)
+  if (tradesOnWeekends(ticker)) return today;
+
+  let day = etMinutesOfDay(now) < FIRST_BARS_EXPECTED_ET ? previousEtDay(today) : today;
+  for (let guard = 0; guard < 3 && isEtWeekend(day); guard++) day = previousEtDay(day);
+  return day;
+}
+
+/** `lastExpectedSessionDay` without the ability to fail a request: the ET clock
+ *  helpers throw on unparseable output, and a chart must not 500 over that. */
+function lastExpectedSessionDayOrNull(ticker: string, now: Date): string | null {
+  try {
+    return lastExpectedSessionDay(ticker, now);
+  } catch (error) {
+    // Deduped: this failure mode would be persistent, not transient, so an
+    // undeduped warn would print on every candle request for the rest of the day.
+    if (firstTimeToday(`clock-failure:${ticker}`, new Date().toISOString().slice(0, 10))) {
+      console.warn(`[Market] session-day check failed for ${ticker}:`, error instanceof Error ? error.message : String(error));
+    }
+    return null;
+  }
+}
+
+/**
+ * True when a series stops short of the last session that should have produced
+ * bars. Providers occasionally lag a single ticker by an entire session
+ * (Polygon had no DE bars at all on 2026-08-12), and a stale series is
+ * indistinguishable from a fresh one by bar count alone.
+ */
+function isStaleForSession(ticker: string, latestDay: string, now: Date = new Date()): boolean {
+  if (!latestDay) return true;
+  const expected = lastExpectedSessionDayOrNull(ticker, now);
+  return expected !== null && latestDay < expected;
+}
+
+/**
+ * Narrow a series to the single ET day its newest bar falls on — but only where
+ * a session actually fits inside one: for crypto, futures and Asia-Pacific
+ * listings the straddle IS the session, and trimming would lop off its open.
+ */
+function singleSessionOnly(ticker: string, candles: IntradayCandle[], day: string): IntradayCandle[] {
+  if (candles.length === 0 || !day || !tradesWithinEtCalendarDay(ticker)) return candles;
+  return candles.filter(candle => etDate(new Date(candle.time)) === day);
+}
+
+/**
+ * Keep the primary series' history and graft on only the bars a fallback source
+ * reaches beyond it. A fresher fallback must never truncate the primary: a short
+ * Yahoo 6M response would otherwise replace a full Polygon one just to gain the
+ * current session.
+ */
+function appendFresherTail(primary: IntradayCandle[], fallback: IntradayCandle[]): IntradayCandle[] {
+  if (primary.length === 0) return fallback;
+  if (fallback.length === 0) return primary;
+  const newestPrimary = newestCandleMs(primary);
+  // Nothing parseable in the primary: it can't anchor a graft, so let the
+  // fallback stand alone rather than concatenating two unordered series.
+  if (newestPrimary === 0) return fallback;
+  const tail = fallback.filter(candle => Date.parse(candle.time) > newestPrimary);
+  return tail.length > 0 ? [...primary, ...tail] : primary;
+}
+
+const candleLogSeen = new Map<string, string>();
+
+/** True the first time `key` comes up on an ET day. Bounded by evicting from the
+ *  front of the Map's insertion order; above the cap the once-a-day guarantee
+ *  degrades to "occasionally repeats", which is the right way to fail. */
+function firstTimeToday(key: string, today: string): boolean {
+  if (candleLogSeen.get(key) === today) return false;
+  while (candleLogSeen.size >= 500) {
+    const oldest = candleLogSeen.keys().next().value;
+    if (oldest === undefined) break;
+    candleLogSeen.delete(oldest);
+  }
+  candleLogSeen.set(key, today);
+  return true;
+}
+
+// One stale ticker is noise — a delisted holding, or a foreign listing on its
+// own market's holiday. Several tickers stuck on the same expected session is a
+// stall worth waking up to. Track distinct tickers per expected day and log once
+// the count clears this bar; a single lagging symbol can then neither raise a
+// false alarm nor claim the day's one log line and mask a real one.
+const STALE_ALERT_MIN_TICKERS = 3;
+const staleTickersByDay = new Map<string, Set<string>>();
+
+/** One line per ET day, once enough distinct tickers are behind to mean it. */
+function warnIfStaleCandles(ticker: string, range: string, latestDay: string, now: Date = new Date()): void {
+  if (!latestDay) return;
+  // Weekend-trading markets are excluded: futures are shut on Saturdays, so
+  // "today should have bars" over-counts them, and three futures contracts would
+  // otherwise raise a guaranteed false alarm every weekend — and consume the
+  // day's single alert. Their per-ticker lag logging still applies.
+  if (tradesOnWeekends(ticker)) return;
+  const expected = lastExpectedSessionDayOrNull(ticker, now);
+  if (expected === null || latestDay >= expected) return;
+
+  let tickers = staleTickersByDay.get(expected);
+  if (!tickers) {
+    // Expected day varies per ticker (a weekday boundary, a weekend walk-back),
+    // so several can be live at once; clearing on every new key let two classes
+    // of ticker wipe each other's counts and never reach the threshold.
+    while (staleTickersByDay.size >= 4) {
+      const oldest = staleTickersByDay.keys().next().value;
+      if (oldest === undefined) break;
+      staleTickersByDay.delete(oldest);
+    }
+    tickers = new Set<string>();
+    staleTickersByDay.set(expected, tickers);
+  }
+  if (tickers.size >= STALE_ALERT_MIN_TICKERS) return; // already logged for this day
+  tickers.add(ticker);
+  if (tickers.size < STALE_ALERT_MIN_TICKERS) return;
+
+  console.warn(
+    `[Market] candles are stale for ${tickers.size}+ tickers (${[...tickers].join(', ')}) — ` +
+    `${ticker} ${range} newest bar is ${latestDay}, expected ${expected}`,
+  );
+}
+
+/**
+ * One line per ticker+range per ET day when one source fell a whole session
+ * behind a session it should have printed. This is the DE-on-2026-08-12
+ * signature: the chart is now correct, but a provider silently missing a single
+ * ticker is worth seeing.
+ */
+function logLaggingSource(ticker: string, range: string, source: string, laggedTo: string, servedTo: string): void {
+  // Not merely a day apart — Polygon's 15-min delay makes that routine right
+  // after the 4 AM ET pre-market open. Only a genuinely missed session counts.
+  if (!isStaleForSession(ticker, laggedTo)) return;
+  if (!firstTimeToday(`lag:${ticker}:${range}`, etDate())) return;
+  console.warn(`[Market] ${ticker} ${range}: ${source} lagged to ${laggedTo}, serving through ${servedTo}`);
 }
 
 function getPeriodDays(period: CandlePeriod): number {
@@ -349,9 +521,29 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
     }
   }
 
-  // Pick the source with more data points (better pre-market coverage)
-  const best = polygonCandles.length >= yahooCandles.length ? polygonCandles : yahooCandles;
+  // Prefer whichever source reaches the LATEST trading day; only when both sit on
+  // the same day does bar count decide (better pre-market coverage). Picking by
+  // count alone silently served a stale session: on 2026-08-12 Polygon carried no
+  // DE bars at all, so its complete Aug-11 session (86 bars) outvoted Yahoo's live
+  // 39-bar Aug-12 session and the 1D chart rendered yesterday under today's quote.
+  const polygonDay = latestCandleDay(polygonCandles);
+  const yahooDay = latestCandleDay(yahooCandles);
+  // Trim Yahoo to one session BEFORE comparing: Polygon is already filtered to
+  // its own last ET day above, and getIntraday anchors this chart on yesterday's
+  // close, so Yahoo's `range=1d` straddling two days would both win the count on
+  // bars it shouldn't be showing and then draw them against the wrong baseline.
+  const yahooSession = singleSessionOnly(upperTicker, yahooCandles, yahooDay);
+  const best = polygonDay && yahooDay && polygonDay !== yahooDay
+    ? (polygonDay > yahooDay ? polygonCandles : yahooSession) // ISO days sort lexicographically
+    : (polygonCandles.length >= yahooSession.length ? polygonCandles : yahooSession);
+
   if (best.length > 0) {
+    const bestDay = latestCandleDay(best);
+    if (polygonDay && yahooDay && polygonDay !== yahooDay) {
+      const laggingSource = polygonDay > yahooDay ? 'Yahoo' : 'Polygon';
+      logLaggingSource(upperTicker, '1D', laggingSource, polygonDay > yahooDay ? yahooDay : polygonDay, bestDay);
+    }
+    warnIfStaleCandles(upperTicker, '1D', bestDay);
     yahooIntradayCache.set(cacheKey, best);
     return best;
   }
@@ -359,7 +551,15 @@ export async function fetchIntradayCandles(ticker: string): Promise<IntradayCand
   return [];
 }
 
-const yahooHourlyCache = new NodeCache({ stdTTL: 300 }); // 5min cache for hourly candles
+const HOURLY_TTL_SECONDS = 300;
+// A series we know is a session behind gets a short lease, so the next request
+// retries the fallback instead of pinning the chart on it for five minutes.
+const HOURLY_STALE_TTL_SECONDS = 20;
+// Both sources came back empty: brief negative caching keeps a hard outage from
+// re-running the whole two-provider path on every single request.
+const HOURLY_EMPTY_TTL_SECONDS = 30;
+
+const yahooHourlyCache = new NodeCache({ stdTTL: HOURLY_TTL_SECONDS }); // 5min cache for hourly candles
 
 /**
  * Fetch hourly candles for 1W (15m bars, 5 days), 1M/6M/YTD (60m bars).
@@ -378,17 +578,25 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
   const [multiplier, timespan] = period === '1W' ? [15, 'minute'] : [1, 'hour'];
 
   const pg = await fetchPolygonAggs(upperTicker, multiplier, timespan, fromDate, today, 300);
-  if (pg && pg.closes.length > 0) {
-    const candles: IntradayCandle[] = pg.timestamps.map((t, i) => ({
+  const polygonCandles: IntradayCandle[] = pg && pg.closes.length > 0
+    ? pg.timestamps.map((t, i) => ({
       time: new Date(t * 1000).toISOString(),
       open: pg.opens[i],
       high: pg.highs[i],
       low: pg.lows[i],
       close: pg.closes[i],
       volume: pg.volumes[i],
-    }));
-    yahooHourlyCache.set(cacheKey, candles);
-    return candles;
+    }))
+    : [];
+
+  // Polygon stays primary, but it can lag a single ticker by an entire session
+  // (DE on 2026-08-12). A stale-but-non-empty response used to short-circuit the
+  // Yahoo fallback, leaving every multi-day chart missing the current session —
+  // so when Polygon's newest bar predates a session that should have printed,
+  // fall through and graft whatever the fallback reaches beyond it.
+  if (polygonCandles.length > 0 && !isStaleForSession(upperTicker, latestCandleDay(polygonCandles))) {
+    yahooHourlyCache.set(cacheKey, polygonCandles);
+    return polygonCandles;
   }
 
   // Yahoo Finance fallback
@@ -405,8 +613,21 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
       ? 'interval=60m&range=1y&includePrePost=true'
       : 'interval=60m&range=1mo&includePrePost=true';
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?${params}`;
-    const resp = await yahooGet(url);
-    const result = resp.data?.chart?.result?.[0];
+    // When Polygon is merely stale we already have a chart to serve, so a slow
+    // fallback must not stall the request — one request can fan out over a dozen
+    // tickers. When Polygon gave us nothing (its permanent state for crypto,
+    // futures and most foreign listings) Yahoo is the only source there is, so
+    // it gets the generous cap: yahooGet's own worst case runs to ~33s once a
+    // cold cookie handshake is included, which is too long to hold a request but
+    // too close to call at 2.5s.
+    const timeoutMs = polygonCandles.length === 0 ? 15_000 : 2_500;
+    const resp = await withSoftTimeout(
+      yahooGet(url).catch(() => null),
+      timeoutMs,
+      null,
+      `hourly Yahoo fallback for ${upperTicker}`,
+    );
+    const result = resp?.data?.chart?.result?.[0];
     if (result?.timestamp && result?.indicators?.quote?.[0]) {
       const timestamps: number[] = result.timestamp;
       const q = result.indicators.quote[0];
@@ -424,12 +645,31 @@ export async function fetchHourlyCandles(ticker: string, period: '1W' | '1M' | '
         }
       }
       if (candles.length > 0) {
-        yahooHourlyCache.set(cacheKey, candles);
-        return candles;
+        const best = appendFresherTail(polygonCandles, candles);
+        const bestDay = latestCandleDay(best);
+        const polygonDay = latestCandleDay(polygonCandles);
+        if (polygonDay && bestDay > polygonDay) {
+          logLaggingSource(upperTicker, period, 'Polygon', polygonDay, bestDay);
+        }
+        warnIfStaleCandles(upperTicker, period, bestDay);
+        // Even after the graft the series can still be a session behind; cache
+        // by how current it actually is, not by which branch produced it.
+        const ttl = isStaleForSession(upperTicker, bestDay) ? HOURLY_STALE_TTL_SECONDS : HOURLY_TTL_SECONDS;
+        yahooHourlyCache.set(cacheKey, best, ttl);
+        return best;
       }
     }
   } catch { /* Yahoo also failed */ }
 
+  if (polygonCandles.length > 0) {
+    // Reached only when Polygon was judged stale and the fallback couldn't cover
+    // for it. Serving that series is the least-bad option, on a short lease.
+    warnIfStaleCandles(upperTicker, period, latestCandleDay(polygonCandles));
+    yahooHourlyCache.set(cacheKey, polygonCandles, HOURLY_STALE_TTL_SECONDS);
+    return polygonCandles;
+  }
+
+  yahooHourlyCache.set(cacheKey, [] as IntradayCandle[], HOURLY_EMPTY_TTL_SECONDS);
   return [];
 }
 

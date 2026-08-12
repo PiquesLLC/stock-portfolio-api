@@ -107,6 +107,63 @@ function getTimeInMinutes(date: Date, timezone: string): { timeInMinutes: number
   };
 }
 
+// Sunday 19:00 ET — the weekly instant where every Mon–Fri market THIS FILE
+// MODELS is shut while crypto and commodity futures are open. A fixed instant
+// answers "does this ticker trade on weekends?" the same way whenever it is
+// asked; probing "now" gets it wrong every Monday morning.
+//
+// Margins, so a later edit doesn't silently break the classification: futures
+// reopened an hour earlier (18:00 ET), and Tokyo (08:00 JST), Hong Kong (07:00
+// HKT) and Sydney (09:00 AEST) are each an hour or more from Monday's open.
+// A settled past Sunday, so no future tzdata revision can move it.
+const WEEKEND_SESSION_PROBE = new Date('2025-08-17T23:00:00Z');
+
+/**
+ * True when the ticker's market runs through the weekend (crypto, commodity
+ * futures) rather than Monday–Friday. Such a market has no "previous session"
+ * to fall back on: the current day is always the one that should have data.
+ */
+export function tradesOnWeekends(ticker: string): boolean {
+  return getMarketSessionForTicker(ticker, WEEKEND_SESSION_PROBE) !== 'CLOSED';
+}
+
+/** Suffixes whose entire session fits inside one ET calendar day: Toronto and
+ *  TSX Venture share ET, London/Euronext/Xetra all close before noon ET, and the
+ *  US class-share / unit / warrant suffixes are US-session symbols that merely
+ *  happen to carry a dot (BRK.B). No Yahoo exchange suffix collides with those. */
+const ET_CALENDAR_DAY_SUFFIXES = [
+  '.TO', '.V',                                     // Toronto, TSX Venture
+  '.L', '.PA', '.AS', '.DE', '.MI', '.MC', '.BR',  // London, Euronext, Xetra
+  '.A', '.B', '.C', '.U', '.W', '.WS',             // US classes, units, warrants
+];
+
+/** Quote currencies that mark a 24/7 crypto pair — the same list
+ *  `getMarketSessionForTicker` uses, so the two agree on what a hyphen means. */
+const CRYPTO_QUOTE_SUFFIXES = ['-USD', '-CAD', '-EUR', '-GBP'];
+
+/**
+ * True when the ticker's entire trading day falls inside one ET calendar day —
+ * the assumption behind any "one session = one ET date" filter.
+ *
+ * An allowlist, deliberately: unrecognized suffixes answer `false`, so the
+ * filter fails safe. Leaving a US series untrimmed is harmless, while trimming
+ * a session that opens the previous evening in ET silently lops off its opening
+ * hours — Tokyo 09:00 JST is 20:00 ET the day before, and the same holds for
+ * Seoul, Taipei, Shanghai, Singapore and Auckland, none of which
+ * `getMarketSessionForTicker` models but all of which symbol search can return.
+ */
+export function tradesWithinEtCalendarDay(ticker: string): boolean {
+  const upper = ticker.toUpperCase();
+  // Commodity futures (GC=F) and crypto pairs (BTC-USD) run around the clock.
+  // Match crypto on the quote currency, not on any hyphen — BRK-B is a US
+  // class share, and calling it a 24/7 market costs it the ET-day filter.
+  if (upper.includes('=')) return false;
+  if (CRYPTO_QUOTE_SUFFIXES.some(suffix => upper.endsWith(suffix))) return false;
+  const suffixStart = upper.lastIndexOf('.');
+  if (suffixStart === -1) return true; // plain US symbol
+  return ET_CALENDAR_DAY_SUFFIXES.includes(upper.slice(suffixStart));
+}
+
 /**
  * Determines market session for a specific ticker, accounting for international markets and commodities.
  */
