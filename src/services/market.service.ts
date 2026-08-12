@@ -282,16 +282,17 @@ function warnIfStaleCandles(ticker: string, range: string, latestDay: string, no
   // Weekend-trading markets are excluded: futures are shut on Saturdays, so
   // "today should have bars" over-counts them, and three futures contracts would
   // otherwise raise a guaranteed false alarm every weekend — and consume the
-  // day's single alert. Their per-ticker lag logging still applies.
+  // day's single alert. They keep per-ticker lag logging, but only while the two
+  // sources disagree; both lagging together goes unreported for them.
   if (tradesOnWeekends(ticker)) return;
   const expected = lastExpectedSessionDayOrNull(ticker, now);
   if (expected === null || latestDay >= expected) return;
 
   let tickers = staleTickersByDay.get(expected);
   if (!tickers) {
-    // Expected day varies per ticker (a weekday boundary, a weekend walk-back),
-    // so several can be live at once; clearing on every new key let two classes
-    // of ticker wipe each other's counts and never reach the threshold.
+    // Two expected days are live whenever requests straddle the 9:50 ET or
+    // midnight boundary. Clearing on every new key let those wipe each other's
+    // counts, so neither ever reached the threshold; evict oldest-first instead.
     while (staleTickersByDay.size >= 4) {
       const oldest = staleTickersByDay.keys().next().value;
       if (oldest === undefined) break;

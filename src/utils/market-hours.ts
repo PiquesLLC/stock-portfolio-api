@@ -116,7 +116,7 @@ function getTimeInMinutes(date: Date, timezone: string): { timeInMinutes: number
 // reopened an hour earlier (18:00 ET), and Tokyo (08:00 JST), Hong Kong (07:00
 // HKT) and Sydney (09:00 AEST) are each an hour or more from Monday's open.
 // A settled past Sunday, so no future tzdata revision can move it.
-const WEEKEND_SESSION_PROBE = new Date('2025-08-17T23:00:00Z');
+export const WEEKEND_SESSION_PROBE = new Date('2025-08-17T23:00:00Z');
 
 /**
  * True when the ticker's market runs through the weekend (crypto, commodity
@@ -137,9 +137,15 @@ const ET_CALENDAR_DAY_SUFFIXES = [
   '.A', '.B', '.C', '.U', '.W', '.WS',             // US classes, units, warrants
 ];
 
-/** Quote currencies that mark a 24/7 crypto pair — the same list
- *  `getMarketSessionForTicker` uses, so the two agree on what a hyphen means. */
+/** Quote currencies that mark a 24/7 crypto pair. Shared with
+ *  `getMarketSessionForTicker` so the two cannot drift on what a hyphen means.
+ *  Not exhaustive — `BTC-JPY` and friends fall through to US equity hours in
+ *  both functions. Consistent, and no such symbol reaches this codebase today. */
 const CRYPTO_QUOTE_SUFFIXES = ['-USD', '-CAD', '-EUR', '-GBP'];
+
+function isCryptoPair(upperTicker: string): boolean {
+  return CRYPTO_QUOTE_SUFFIXES.some(suffix => upperTicker.endsWith(suffix));
+}
 
 /**
  * True when the ticker's entire trading day falls inside one ET calendar day —
@@ -158,7 +164,7 @@ export function tradesWithinEtCalendarDay(ticker: string): boolean {
   // Match crypto on the quote currency, not on any hyphen — BRK-B is a US
   // class share, and calling it a 24/7 market costs it the ET-day filter.
   if (upper.includes('=')) return false;
-  if (CRYPTO_QUOTE_SUFFIXES.some(suffix => upper.endsWith(suffix))) return false;
+  if (isCryptoPair(upper)) return false;
   const suffixStart = upper.lastIndexOf('.');
   if (suffixStart === -1) return true; // plain US symbol
   return ET_CALENDAR_DAY_SUFFIXES.includes(upper.slice(suffixStart));
@@ -171,7 +177,7 @@ export function getMarketSessionForTicker(ticker: string, date: Date = new Date(
   const upper = ticker.toUpperCase();
 
   // Crypto trades 24/7
-  if (upper.endsWith('-USD') || upper.endsWith('-CAD') || upper.endsWith('-EUR') || upper.endsWith('-GBP')) {
+  if (isCryptoPair(upper)) {
     return 'REG';
   }
 

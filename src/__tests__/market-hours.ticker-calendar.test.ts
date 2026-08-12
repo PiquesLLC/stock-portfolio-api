@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMarketSessionForTicker, tradesOnWeekends, tradesWithinEtCalendarDay } from '../utils/market-hours';
+import { WEEKEND_SESSION_PROBE, getMarketSessionForTicker, tradesOnWeekends, tradesWithinEtCalendarDay } from '../utils/market-hours';
 
 // These two predicates decide how the candle services detect a market-data
 // provider that has fallen a session behind (see fetchIntradayCandles /
@@ -21,19 +21,21 @@ describe('tradesOnWeekends', () => {
   });
 
   it('pins the probe instant: Asia-Pacific still pre-open while futures already trade', () => {
-    // The probe is Sunday 19:00 ET. Two hours later Tokyo has opened for Monday
-    // and would read as a weekend market; two hours earlier futures are still
-    // shut and would read as weekday-only. Both mistakes are silent, so assert
-    // the window the classification depends on.
-    const probe = new Date('2025-08-17T23:00:00Z');
+    // The probe is Sunday 19:00 ET. An hour later Tokyo opens for Monday and
+    // would read as a weekend market; an hour earlier futures are still shut and
+    // would read as weekday-only. Both mistakes are silent, so assert the window
+    // the classification depends on — against the real constant, so moving it
+    // fails here rather than in production.
+    const probe = WEEKEND_SESSION_PROBE;
+    expect(probe.toISOString()).toBe('2025-08-17T23:00:00.000Z');
     expect(getMarketSessionForTicker('GC=F', probe)).not.toBe('CLOSED');
     for (const ticker of ['7203.T', '0700.HK', 'BHP.AX', 'AAPL', 'BP.L', 'AIR.PA', 'SHOP.TO']) {
       expect(getMarketSessionForTicker(ticker, probe), ticker).toBe('CLOSED');
     }
 
-    // The margins themselves.
+    // The margins themselves — one hour of slack on each side.
     expect(getMarketSessionForTicker('GC=F', new Date('2025-08-17T21:00:00Z'))).toBe('CLOSED'); // 17:00 ET, pre-reopen
-    expect(getMarketSessionForTicker('7203.T', new Date('2025-08-18T01:00:00Z'))).not.toBe('CLOSED'); // Tokyo has opened
+    expect(getMarketSessionForTicker('7203.T', new Date('2025-08-18T00:00:00Z'))).not.toBe('CLOSED'); // 09:00 JST, Tokyo open
   });
 });
 

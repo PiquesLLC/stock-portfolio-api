@@ -341,6 +341,46 @@ describe('market.service candle sources — freshness beats bar count', () => {
     expect(warnSpy.mock.calls.length).toBe(before);
   });
 
+  it('stale alert survives two expected days being counted at once', async () => {
+    // Requests straddling the 9:50 ET boundary produce two expected-session days
+    // concurrently. Resetting the counter on every new day let them wipe each
+    // other, so a real stall never reached the threshold.
+    fetchPolygonAggsMock.mockResolvedValue(polygonBars('2026-08-20', 20, 100));
+    yahooGetMock.mockResolvedValue(yahooBars('2026-08-20', 5, 100));
+
+    setNow('2026-08-26T14:00:00.000Z'); // Wednesday 10:00 ET — expects 2026-08-26
+    await fetchIntradayCandles('SPLITA');
+    await fetchIntradayCandles('SPLITB');
+
+    setNow('2026-08-26T12:00:00.000Z'); // 08:00 ET — expects 2026-08-25 instead
+    await fetchIntradayCandles('SPLITC');
+    await fetchIntradayCandles('SPLITD');
+
+    setNow('2026-08-26T14:00:00.000Z'); // back to the first day, now its third
+    await fetchIntradayCandles('SPLITE');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('candles are stale for 3+ tickers (SPLITA, SPLITB, SPLITE)'),
+    );
+  });
+
+  it('weekend-trading tickers never raise the stale alert', async () => {
+    // Futures are shut on Saturdays, so "today should have bars" over-counts
+    // them and three contracts would trip a guaranteed false alarm every
+    // weekend — worse, consuming that day's one alert.
+    setNow('2026-08-22T16:00:00.000Z'); // Saturday noon ET
+    tradesOnWeekendsMock.mockReturnValue(true);
+    tradesWithinEtCalendarDayMock.mockReturnValue(false);
+    fetchPolygonAggsMock.mockResolvedValue(polygonBars('2026-08-21', 20, 100)); // Friday
+    yahooGetMock.mockResolvedValue(yahooBars('2026-08-21', 5, 100));
+
+    await fetchIntradayCandles('GC=F');
+    await fetchIntradayCandles('CL=F');
+    await fetchIntradayCandles('SI=F');
+
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('candles are stale'));
+  });
+
   it('hourly: grafts the live session onto Polygon history without truncating it', async () => {
     setNow(`${TODAY}T14:00:00.000Z`); // 10:00 AM ET — past the point today should have bars
     // The M3 shape: Yahoo is fresher but far shorter. Swapping wholesale would
