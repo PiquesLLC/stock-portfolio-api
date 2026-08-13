@@ -139,6 +139,33 @@ export async function getEconomicDashboard(): Promise<EconomicDashboard> {
 }
 
 /** Refresh all 5 economic indicators from Alpha Vantage. Uses 5 API calls. */
+/**
+ * Risk-free rate for discounting, as a decimal (0.042 = 4.2%): the latest 10Y
+ * Treasury yield. Returns null rather than a guess when the indicator is missing
+ * or implausible, so callers apply their own documented fallback instead of
+ * silently discounting at a made-up rate. Reads the cached dashboard.
+ */
+let riskFreeMemo: { value: number | null; at: number } | null = null;
+const RISK_FREE_MEMO_MS = 60 * 60 * 1000; // a 10Y yield does not move on a per-request basis
+
+export async function getRiskFreeRate(): Promise<number | null> {
+  if (riskFreeMemo && Date.now() - riskFreeMemo.at < RISK_FREE_MEMO_MS) return riskFreeMemo.value;
+  let value: number | null = null;
+  try {
+    const dashboard = await getEconomicDashboard();
+    const pct = dashboard.indicators.treasuryYield10Y?.latestValue;
+    // A months-old yield is not a live rate. Report nothing rather than let a
+    // starved refresh masquerade as current — callers have a documented fallback.
+    const fresh = dashboard.dataAge !== 'stale';
+    // Sanity bound: a 10Y outside 0-25% is bad data, not a market event.
+    if (fresh && pct != null && Number.isFinite(pct) && pct > 0 && pct < 25) value = pct / 100;
+  } catch {
+    value = null;
+  }
+  riskFreeMemo = { value, at: Date.now() };
+  return value;
+}
+
 export async function refreshEconomicIndicators(): Promise<void> {
   console.log('[AV Economic] Starting refresh of all indicators...');
 

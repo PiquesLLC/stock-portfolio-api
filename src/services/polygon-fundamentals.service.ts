@@ -49,6 +49,9 @@ export interface ParsedIncomeStatement {
   netIncome: number | null;
   ebitda: number | null;
   researchAndDevelopment: number | null;
+  // Optional, not `| null`: rows cached before this field existed deserialize
+  // without the property at all, so a `=== null` check would misfire.
+  interestExpense?: number | null;
 }
 
 export interface ParsedBalanceSheet {
@@ -80,6 +83,13 @@ export interface FundamentalsResponse {
   cashFlows: { annual: ParsedCashFlow[]; quarterly: ParsedCashFlow[] };
   lastUpdated: string;
   dataAge: 'fresh' | 'cached' | 'stale';
+  /**
+   * Annualised 10Y Treasury yield as a decimal, attached by the controller. The
+   * DCF's CAPM cost of equity anchors on it; it used to be a constant compiled
+   * into the UI bundle, which silently went stale. Null when the indicator is
+   * unavailable — consumers fall back to their own documented constant.
+   */
+  riskFreeRate?: number | null;
 }
 
 // ── Polygon data helpers ──────────────────────────────────────────────
@@ -179,6 +189,11 @@ function parseIncomeStatement(filing: PolygonFiling, period: 'annual' | 'quarter
     netIncome,
     ebitda,
     researchAndDevelopment: pVal(is, 'research_and_development'),
+    // Needed to unlever free cash flow (CFO - capex is already net of interest
+    // paid) and to derive a real cost of debt for the DCF. Polygon splits this
+    // across two tags depending on the filer; either is the interest burden.
+    // Absent from payloads cached before this field existed — tolerate null.
+    interestExpense: pVal(is, 'interest_expense_operating') ?? pVal(is, 'interest_and_debt_expense'),
   };
 }
 
@@ -206,12 +221,16 @@ function parseCashFlow(filing: PolygonFiling, period: 'annual' | 'quarterly'): P
   const opCF = pVal(cf, 'net_cash_flow_from_operating_activities') ??
     pVal(cf, 'net_cash_flow_from_operating_activities_continuing');
 
-  // Prefer explicit CapEx fields; fall back to total investing activities as proxy
-  const explicitCapex = pVal(cf, 'capital_expenditure') ??
+  // CapEx must come from an EXPLICIT capex tag. Total investing activities is NOT a
+  // proxy for it: it also carries purchases and maturities of marketable securities,
+  // acquisitions and intercompany moves. Using it produced free cash flow that was
+  // wrong by multiples on real filers — MSFT FY25 read $43B against an actual ~$70B,
+  // AMZN swung negative in years it generated tens of billions, and JPM came out at
+  // -$413B, which then valued the bank at a negative share price. A null here is
+  // recoverable (the Finnhub XBRL enrichment below fills many of them in, and
+  // consumers can skip the year); a plausible-looking wrong number is not.
+  const capex = pVal(cf, 'capital_expenditure') ??
     pVal(cf, 'payments_to_acquire_property_plant_and_equipment');
-  const investingCF = pVal(cf, 'net_cash_flow_from_investing_activities') ??
-    pVal(cf, 'net_cash_flow_from_investing_activities_continuing');
-  const capex = explicitCapex ?? investingCF;
 
   // Free cash flow: OCF + CapEx (CapEx is typically negative)
   const fcf = opCF != null && capex != null ? opCF + capex : null;
@@ -348,6 +367,54 @@ function findXBRL(entries: XBRLEntry[] | undefined, patterns: string[]): number 
  * Fixes: cash (missing for AMZN/AAPL/TSLA/META), capex/FCF (investingCF proxy),
  * and debt (currentDebt often missing from Polygon).
  */
+/**
+ * Fill capex, interest expense and operating cash flow from SEC EDGAR XBRL, then
+ * recompute free cash flow for any year that gains a capex figure.
+ *
+ * Only ever fills nulls — a value Polygon or Finnhub already supplied is left alone,
+ * so this can't silently reinterpret data that was already right. Free cash flow is
+ * recomputed only when BOTH sides of it are known, because a half-EDGAR/half-Polygon
+ * FCF would mix two definitions of operating cash flow.
+ */
+async function enrichFromEdgar(
+  ticker: string,
+  incomeParsed: { annual: ParsedIncomeStatement[]; quarterly: ParsedIncomeStatement[] },
+  cashFlowParsed: { annual: ParsedCashFlow[]; quarterly: ParsedCashFlow[] },
+): Promise<void> {
+  const { getEdgarAnnuals, valueForPeriod } = await import('./sec-edgar.service');
+  const edgar = await getEdgarAnnuals(ticker);
+  if (!edgar) return;
+
+  let filledCapex = 0, filledInterest = 0, filledFcf = 0;
+
+  for (const cf of cashFlowParsed.annual) {
+    if (cf.capitalExpenditures == null) {
+      const capex = valueForPeriod(edgar.capex, cf.fiscalDateEnding);
+      // XBRL reports capex as a positive outflow; this shape stores it negative.
+      if (capex != null) { cf.capitalExpenditures = -Math.abs(capex); filledCapex++; }
+    }
+    if (cf.operatingCashflow == null) {
+      const ocf = valueForPeriod(edgar.operatingCashFlow, cf.fiscalDateEnding);
+      if (ocf != null) cf.operatingCashflow = ocf;
+    }
+    if (cf.freeCashFlow == null && cf.operatingCashflow != null && cf.capitalExpenditures != null) {
+      cf.freeCashFlow = cf.operatingCashflow - Math.abs(cf.capitalExpenditures);
+      filledFcf++;
+    }
+  }
+
+  for (const is of incomeParsed.annual) {
+    if (is.interestExpense == null) {
+      const interest = valueForPeriod(edgar.interest, is.fiscalDateEnding);
+      if (interest != null) { is.interestExpense = interest; filledInterest++; }
+    }
+  }
+
+  if (filledCapex || filledInterest || filledFcf) {
+    console.log(`[EDGAR] ${ticker}: filled ${filledCapex} capex, ${filledInterest} interest, ${filledFcf} FCF years`);
+  }
+}
+
 async function enrichFromFinnhubReported(
   ticker: string,
   balanceParsed: { annual: ParsedBalanceSheet[]; quarterly: ParsedBalanceSheet[] },
@@ -582,6 +649,13 @@ async function refreshFundamentals(ticker: string): Promise<void> {
   try {
     await enrichFromFinnhubReported(upper, balanceParsed, cashFlowParsed);
   } catch { /* Finnhub enrichment is best-effort */ }
+
+  // Then SEC EDGAR, which is the filer's own XBRL and covers years the others miss.
+  // Runs last so it can fill anything still null — measured on real tickers, this is
+  // the difference between NVDA having 3 usable cash-flow years and having 10.
+  try {
+    await enrichFromEdgar(upper, incomeParsed, cashFlowParsed);
+  } catch { /* EDGAR enrichment is best-effort */ }
 
   await prisma.fundamentalsCache.upsert({
     where: { ticker: upper },

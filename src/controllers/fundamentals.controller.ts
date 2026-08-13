@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../types/auth';
-import { getEconomicDashboard, getInternationalEconomicDashboard } from '../services/economic.service';
+import { getEconomicDashboard, getInternationalEconomicDashboard, getRiskFreeRate } from '../services/economic.service';
 import { getPortfolioMacroImpact } from '../services/portfolioMacroImpact.service';
 import { getCompanyFundamentals } from '../services/polygon-fundamentals.service';
 import { getEarningsData } from '../services/earnings.service';
@@ -58,8 +58,15 @@ export async function getFundamentalsHandler(req: Request, res: Response): Promi
       res.status(400).json({ error: 'Ticker is required' });
       return;
     }
-    const data = await getCompanyFundamentals(ticker);
-    res.json(data);
+    // Ride the live 10Y along with the financials so the DCF's discount rate isn't
+    // anchored on a constant baked into the UI bundle. Fetched in PARALLEL — this
+    // endpoint is otherwise a single indexed read, and serialising a second query
+    // behind it doubles its time on the shared SQLite connection.
+    const [data, riskFreeRate] = await Promise.all([
+      getCompanyFundamentals(ticker),
+      getRiskFreeRate(),
+    ]);
+    res.json({ ...data, riskFreeRate });
   } catch (error: unknown) {
     console.error('Error fetching fundamentals:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch company fundamentals' });
