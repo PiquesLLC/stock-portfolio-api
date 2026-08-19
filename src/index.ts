@@ -45,6 +45,8 @@ import { refreshAllBillionaires, snapshotBillionaires } from './services/billion
 import { backupDatabase } from './services/backup.service';
 import { startWalWatchdog } from './services/db-watchdog.service';
 import { scheduleDailyAtUTC } from './utils/daily-schedule';
+import { refreshBottleneckMomentum, pruneBottleneckMomentum } from './services/bottleneck-momentum.service';
+import { invalidateBottlenecksMomentumCache } from './routes/discover.routes';
 import { scheduleSnapshotRetention } from './services/snapshot-retention.service';
 import { cleanupStaleData } from './services/cleanup.service';
 import { runDiskGuard } from './services/disk-guard.service';
@@ -429,6 +431,13 @@ function registerBackgroundJobHandlers(): void {
     if (count > 0) console.log(`[Analytics] Cleaned up ${count} events older than 90 days`);
   });
   registerJobHandler('stale_data_cleanup', cleanupStaleData);
+  // force=true: an operator triggering this by hand wants a rescore of the
+  // current week, not the weekly no-op.
+  registerJobHandler('bottleneck_momentum', async () => {
+    await refreshBottleneckMomentum(true);
+    invalidateBottlenecksMomentumCache();
+  });
+  registerJobHandler('bottleneck_momentum_prune', async () => { await pruneBottleneckMomentum(); });
 }
 
 let isShuttingDown = false;
@@ -1162,6 +1171,39 @@ const server = app.listen(config.port, async () => {
   // 1.2GB snapshot collided with retention + the daily fleet + market load
   // and triggered the 2026-07-14 write-timeout outage.
   scheduleDailyAtUTC(7, 10, () => void backupDatabase(), 'db-backup');
+
+  // Bottleneck momentum — the weekly Discover>Bottlenecks ranking. Checked
+  // DAILY at a fixed off-peak hour but scores at most once per ISO week: the
+  // job no-ops when the current week already has rows. That makes it
+  // self-healing — a deploy landing in the window costs a day, not a whole
+  // week, which a strict Monday-only timer could not survive (see the
+  // daily-schedule.ts note on timers not surviving restarts).
+  scheduleDailyAtUTC(9, 47, () => {
+    void runJob({
+      name: 'bottleneck_momentum',
+      fn: async () => {
+        const result = await refreshBottleneckMomentum();
+        // Only a run that actually wrote a week needs to evict the read cache.
+        if (result.scored > 0) invalidateBottlenecksMomentumCache();
+      },
+      maxAttempts: 2,
+      idempotencyKey: buildTimeBucketIdempotencyKey('bottleneck_momentum', 6 * 60 * 60 * 1000),
+      idempotencyTtlMs: 6 * 60 * 60 * 1000,
+    });
+  }, 'bottleneck-momentum');
+
+  // Retention for the above — keeps 12 scored weeks (~85 rows each). Weekly-ish
+  // is plenty; runs at a distinct off-peak minute so it never stacks with the
+  // scoring job or the rest of the maintenance fleet.
+  scheduleDailyAtUTC(10, 23, () => {
+    void runJob({
+      name: 'bottleneck_momentum_prune',
+      fn: async () => { await pruneBottleneckMomentum(); },
+      maxAttempts: 1,
+      idempotencyKey: buildTimeBucketIdempotencyKey('bottleneck_momentum_prune', 24 * 60 * 60 * 1000),
+      idempotencyTtlMs: 24 * 60 * 60 * 1000,
+    });
+  }, 'bottleneck-momentum-prune');
 
   // WAL watchdog — passive checkpoints + Sentry alert on checkpoint
   // starvation (the 2026-07-14 sustainer: WAL pinned at 258MB for hours).

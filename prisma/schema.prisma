@@ -1629,3 +1629,34 @@ model MonitoringReport {
   @@index([type, createdAt])
   @@index([createdAt])
 }
+
+// ─── Bottleneck Momentum (weekly Discover>Bottlenecks ranking) ───────
+// One row per catalog entry per ISO week. The catalog JSONs themselves are
+// owned by the weekly editorial cloud routine (which commits them via the
+// GitHub Contents API), so scores MUST live here rather than in those files —
+// writing to them from the app would collide with the editor's commits.
+model BottleneckMomentum {
+  id            String   @id @default(uuid())
+  entryId       String   // BottleneckEntry.id from the catalog JSON
+  sector        String
+  layer         String
+  isoWeek       String   // "2026-W34" — the week this score belongs to
+  momentum      Float    // -1..1 — benchmark-relative strength, clamped
+  editorial     Float    // 0..1 — layer position in LAYER_ORDER (the anchor)
+  score         Float    // 0..100 blended Pressure Score
+  rank          Int      // rank within the sector for this week (1 = highest)
+  prevRank      Int? // sector rank in the previous SCORED week, null if new
+  rankDelta     Int? // movement vs prevIsoWeek, measured over entries present in
+  //                    both weeks so catalog churn doesn't read as movement.
+  //                    Positive = moved up. Null if the entry is new.
+  prevIsoWeek   String? // the week rankDelta compares against — NOT necessarily
+  //                       the immediately preceding one if a week was skipped.
+  //                       The UI needs this to avoid claiming "since last week".
+  tickersUsed   String   @default("[]") // JSON array of tickers that resolved
+  tickersMissed String   @default("[]") // JSON array that had no usable candles
+  computedAt    DateTime
+
+  @@unique([entryId, isoWeek])
+  @@index([isoWeek, sector])
+  @@index([entryId])
+}
