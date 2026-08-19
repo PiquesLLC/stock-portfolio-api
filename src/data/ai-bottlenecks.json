@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-17T00:00:00Z",
+  "generatedAt": "2026-08-19T00:00:00Z",
   "entries": [
     {
       "id": "nvda-accelerated-compute",
@@ -11,45 +11,45 @@
         "AMD",
         "TSM"
       ],
-      "thesisShort": "NVIDIA still owns roughly 90% of merchant AI training silicon, and the Blackwell-to-Rubin transition extends that lead through 2026 as hyperscaler capex hits record levels.",
-      "thesisLong": "NVIDIA's chokehold on accelerated compute is the single most important bottleneck in the AI stack. The company shipped Hopper, then Blackwell (B200/GB200 NVL72), and is now ramping Blackwell Ultra (B300) with Rubin sampling in late 2026. Each generation has been allocation-constrained, not demand-constrained, and hyperscaler purchase orders for 2026 already exceed available CoWoS-L capacity at TSMC.\n\nThe moat is not just silicon. CUDA, NCCL, TensorRT-LLM, and the Mellanox/NVLink fabric form a software-plus-network stack that competitors cannot replicate in a single product cycle. Every serious foundation model lab — OpenAI, Anthropic, Google DeepMind, Meta, xAI — runs production training on NVIDIA, and inference is following the same path with NIM microservices and Dynamo.\n\nThe 2026 numbers are staggering. Data center revenue run-rate exceeds $150B annualized, gross margins sit in the mid-70s, and the company has visibility into roughly $400B+ of multi-year hyperscaler commitments. Sovereign AI deals (Saudi Humain, UAE G42, Japan, France) add a second demand vector independent of US hyperscalers.\n\nThe risk is that NVIDIA is now priced for perfection at a $3.5T+ market cap, and any hyperscaler capex pause, custom-silicon win (TPU, MTIA, Trainium, Maia), or China export shock can compress multiples 20-30% in weeks. But on the bottleneck question — who gates AI compute supply in 2026 — the answer remains Jensen.",
+      "thesisShort": "NVIDIA still supplies roughly 80-88% of the AI accelerator market, and Vera Rubin — in full production ramp since mid-2026 — extends that position as big-four hyperscaler capex steps up about 77% to roughly $725B in 2026.",
+      "thesisLong": "NVIDIA's chokehold on accelerated compute is the single most important bottleneck in the AI stack. Hopper gave way to Blackwell (B200/GB200 NVL72), then Blackwell Ultra (B300), and Vera Rubin moved into a full production ramp announced at GTC Taipei on 1 June 2026. The VR200 carries 288GB of HBM4 at 22 TB/s and roughly 50 PFLOPS of FP4 compute, about 3.3x the throughput of B300. Each generation has been allocation-constrained rather than demand-constrained: Rubin cloud instances are not expected before Q4 2026, and early supply is being routed to hyperscalers and frontier labs first.\n\nThe moat is not just silicon. CUDA, NCCL, TensorRT-LLM, and the Mellanox/NVLink fabric form a software-plus-network stack that competitors cannot replicate in a single product cycle. Every serious foundation model lab — OpenAI, Anthropic, Google DeepMind, Meta, xAI — runs production training on NVIDIA, and inference is following the same path.\n\nThe demand backdrop is the capex cycle underneath it. Amazon, Microsoft, Alphabet and Meta together plan roughly $725B of capital spending in 2026, up about 77% year over year, with roughly three-quarters of it AI-related. NVIDIA data center revenue was $75.2B in the April 2026 quarter alone, up 92% year over year and 21% sequentially, and the company guided its July quarter to about $91B of total revenue. Sovereign AI deals (Saudi Humain, UAE G42, Japan, France) add a second demand vector independent of US hyperscalers.\n\nThe pressure on the moat is now measurable rather than theoretical. TrendForce expects custom ASIC shipments to grow about 44.6% in 2026 against 16.1% for merchant GPUs, and Broadcom alone has booked multi-gigawatt XPU programs with Google, Anthropic, OpenAI and Meta. HBM4 supply and advanced-packaging capacity also physically cap how many Rubin racks can be built in 2026-2027. But on the bottleneck question — who gates AI compute supply in 2026 — the answer remains NVIDIA.",
       "chokepointMetrics": [
         {
-          "label": "AI training GPU share",
-          "value": "~90%"
+          "label": "Merchant AI accelerator share",
+          "value": "~80-88% (mid-2026, IDC/TrendForce/Bloomberg Intelligence)"
         },
         {
-          "label": "DC revenue run-rate",
-          "value": "$150B+"
+          "label": "Data center revenue",
+          "value": "$75.2B in Q1 FY2027 (+92% YoY, +21% QoQ)"
         },
         {
-          "label": "GB200 NVL72 lead time",
-          "value": "30-40 weeks"
+          "label": "Big-four hyperscaler capex",
+          "value": "~$725B planned for 2026 (+77% YoY)"
         },
         {
-          "label": "CUDA developers",
-          "value": "5M+"
+          "label": "Custom ASIC vs merchant GPU unit growth",
+          "value": "+44.6% vs +16.1% (2026E, TrendForce)"
         },
         {
-          "label": "Hyperscaler 2026 commits",
-          "value": "$400B+"
+          "label": "Rubin cloud instance availability",
+          "value": "Q4 2026 at the earliest; early supply allocated to hyperscalers"
         }
       ],
       "catalysts": [
-        "Blackwell Ultra (B300) volume ramp Q2-Q3 2026",
-        "Rubin platform sampling late 2026",
+        "Q2 FY2027 results on 26 August 2026 against a $91B ±2% revenue guide",
+        "Vera Rubin rack volume through 2H 2026 into cloud availability from Q4 2026",
         "Sovereign AI build-outs (Saudi, UAE, Japan, France)",
-        "Inference scaling to match training revenue",
-        "NVLink Fusion opens custom-silicon attach"
+        "Inference workloads scaling toward training-scale revenue",
+        "NVLink Fusion opening custom-silicon attach"
       ],
       "risks": [
-        "Hyperscaler ASIC adoption (TPU, Trainium, MTIA, Maia)",
-        "China export controls broadening to HBM/networking",
-        "Hyperscaler capex digestion in 2H26",
-        "Premium valuation magnifies any miss"
+        "Custom ASIC unit growth (+44.6% 2026E) outpacing merchant GPU (+16.1%)",
+        "China export controls broadening to HBM and networking",
+        "Hyperscaler capex digestion after the 2026 step-up",
+        "HBM4 and fab/packaging limits capping Rubin rack output"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -62,44 +62,44 @@
         "NVDA",
         "TSM"
       ],
-      "thesisShort": "Broadcom is the only credible second-source for hyperscaler AI compute via custom XPUs (Google TPU, Meta MTIA) and dominates the 800G/1.6T Ethernet switching that ties AI clusters together.",
-      "thesisLong": "Broadcom occupies a unique seat: it co-designs the custom AI accelerators that hyperscalers use to escape NVIDIA dependency, while simultaneously supplying the Tomahawk and Jericho switching silicon that fabrics every modern AI cluster — including NVIDIA's. That dual exposure makes Broadcom a winner whether the merchant-GPU thesis or the custom-silicon thesis prevails.\n\nThe TPU partnership with Google has scaled to v6 Trillium and v7, with Meta's MTIA and ByteDance reportedly added as named customers. Hock Tan's $60-90B AI serviceable addressable market by 2027 commentary implies three customers each shipping 1M+ XPUs annually, a step-change from 2024 levels.\n\nNetworking is the second leg. Tomahawk 5 (51.2T) is the workhorse of 800G AI fabrics, Tomahawk 6 (102.4T) is sampling for 1.6T deployments, and Jericho3-AI scales out to 32K+ GPU pods. As Ethernet displaces InfiniBand outside NVIDIA's reference designs, Broadcom's switch silicon share inside hyperscalers exceeds 80%.\n\nThe risk is concentration: three customers drive most AI revenue, and any single hyperscaler bringing networking in-house (as Google has tried with Aquila) compresses the moat. But for the next two years, the AI bottleneck story includes Broadcom by necessity.",
+      "thesisShort": "Broadcom is the primary second source for hyperscaler AI compute via custom XPUs and supplies the Ethernet switching that fabrics AI clusters; AI semiconductor revenue hit a record $10.8B in Q2 FY2026, up 143% year over year.",
+      "thesisLong": "Broadcom occupies a unique seat: it co-designs the custom AI accelerators that hyperscalers use to escape NVIDIA dependency, while simultaneously supplying the Tomahawk and Jericho switching silicon that fabrics every modern AI cluster — including NVIDIA-based ones. That dual exposure keeps Broadcom relevant whether the merchant-GPU path or the custom-silicon path prevails.\n\nThe custom-silicon book has moved from speculation to contracted volume. On its Q2 FY2026 call (3 June 2026), Broadcom reported record AI semiconductor revenue of $10.8B, up 143% year over year, and described long-term multi-gigawatt supply arrangements with Google, Anthropic, OpenAI and Meta, with significant new deployments beginning in fiscal 2027. A further $6B of AI orders was booked from two additional customers, including an initial one-gigawatt order covering XPUs and networking that starts delivery in the second half of 2027.\n\nNetworking is the second leg and roughly 40% of Q2 FY2026 AI revenue. Tomahawk 6, the industry’s only 100-terabit Ethernet switch, has been shipping for over a year, and the next-generation 200-terabit part taped out during the quarter. As Ethernet displaces InfiniBand outside NVIDIA reference designs, Broadcom switch silicon sits inside most hyperscaler fabrics.\n\nThe structural risk is concentration and timing: a handful of customers drive most AI revenue, the largest booked programs do not deliver until 2H 2027, and any hyperscaler bringing networking silicon in-house compresses the moat. But for the next two years, the AI bottleneck story includes Broadcom by necessity.",
       "chokepointMetrics": [
         {
-          "label": "Hyperscaler switch silicon share",
-          "value": "~80%"
+          "label": "AI semiconductor revenue",
+          "value": "$10.8B in Q2 FY2026 (+143% YoY)"
         },
         {
-          "label": "AI SAM by 2027",
-          "value": "$60-90B"
+          "label": "Networking share of AI revenue",
+          "value": "~40% (Q2 FY2026)"
         },
         {
-          "label": "Custom XPU customers",
-          "value": "3 named"
+          "label": "Named multi-gigawatt XPU partners",
+          "value": "Google, Anthropic, OpenAI, Meta (as of Q2 FY2026)"
         },
         {
-          "label": "Tomahawk 6 throughput",
-          "value": "102.4 Tbps"
+          "label": "Orders booked from two new customers",
+          "value": "$6B, incl. a 1 GW XPU + networking order (Q2 FY2026)"
         },
         {
-          "label": "AI revenue run-rate",
-          "value": "$28B+"
+          "label": "Top Ethernet switch throughput",
+          "value": "102.4 Tbps shipping; 200 Tbps successor taped out (Q2 FY2026)"
         }
       ],
       "catalysts": [
-        "Tomahawk 6 ramp into 1.6T AI fabrics",
-        "TPU v7 / MTIA v3 volume in 2026",
-        "Two new XPU customers reported in pipeline",
-        "VMware cross-sell into AI infra accounts",
-        "Co-packaged optics (CPO) commercial launch"
+        "1 GW XPU-plus-networking order beginning delivery in 2H 2027",
+        "200-terabit switch moving from tape-out to sampling",
+        "Multi-gigawatt deployments with Google, Anthropic, OpenAI and Meta starting fiscal 2027",
+        "Co-packaged optics attach inside AI fabrics",
+        "VMware cross-sell into AI infrastructure accounts"
       ],
       "risks": [
-        "Customer concentration in custom silicon",
+        "Customer concentration — a handful of XPU customers drive most AI revenue",
         "Hyperscalers in-housing network silicon",
-        "VMware integration execution risk"
+        "Revenue timing — the largest booked programs deliver from 2H 2027"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -112,44 +112,44 @@
         "TSM",
         "MU"
       ],
-      "thesisShort": "AMD's MI300X/MI325X are the only merchant alternative to NVIDIA at scale, and the MI355X/MI400 roadmap closes the gap in 2026 just as hyperscalers actively cultivate a second source.",
-      "thesisLong": "AMD is the credible #2 in merchant AI silicon. MI300X shipped first to Microsoft, Meta, and Oracle as inference workhorses; MI325X added 256GB HBM3e capacity that beats H200 on memory-bound workloads; MI355X (CDNA4) launched in 2025 with FP4/FP6 datatypes; and MI400 with the rack-scale Helios platform targets 2026 deployment to compete head-on with Rubin.\n\nThe ROCm software gap has narrowed materially. PyTorch, vLLM, SGLang, and the major inference stacks now run cleanly on MI-series, and Meta's deployment of MI300X for Llama inference at scale is the proof point that ROCm is production-ready for Tier 1 customers.\n\nManagement guides AI accelerator revenue toward $10B+ in 2026, with the MI400 rack platform — co-developed with Broadcom-style Ethernet partners — opening a path to tens of billions by 2027. AMD is also the only merchant supplier that pairs leading-edge GPUs with leading-edge server CPUs (Turin, Venice), giving it a unique full-rack story.\n\nThe bottleneck role is real but secondary: AMD is the hyperscaler hedge against NVIDIA scarcity and pricing. As long as NVIDIA remains supply-constrained, AMD captures spillover demand. If NVIDIA loosens supply, AMD must win on price-performance.",
+      "thesisShort": "AMD remains the only merchant alternative to NVIDIA at scale; data center revenue more than doubled to $6.7B in Q2 2026 as the MI400 and the Helios rack platform entered production, with revenue shipments starting at the end of Q3 2026.",
+      "thesisLong": "AMD is the credible number two in merchant AI silicon. MI300X shipped first to Microsoft, Meta and Oracle as inference workhorses; MI325X added HBM3e capacity that favoured memory-bound workloads; MI355X (CDNA4) brought FP4/FP6 datatypes; and at Advancing AI 2026 in San Francisco, Lisa Su unveiled the fully specified MI400 line, the Helios rack platform, and a 2027 MI500 preview. Each MI400 carries 432GB of HBM4, and AMD claims roughly 10x the frontier-model training performance of MI300X.\n\nThe financial trajectory has turned sharply. Data center revenue was $5.8B in Q1 2026 (+57% YoY) and $6.7B in Q2 2026 (+107% YoY, +16% sequentially), roughly 58% of total company revenue, driven by both EPYC server processors and the Instinct ramp. Helios entered full production with revenue shipments beginning at the end of Q3 2026, which is the point at which rack-scale AMD systems start competing directly with NVIDIA reference racks rather than at the accelerator level.\n\nThe software gap has narrowed materially. PyTorch, vLLM, SGLang and the major inference stacks run cleanly on MI-series, and production Llama inference at Meta is the proof point that the stack is viable for Tier 1 customers at scale.\n\nThe bottleneck role is real but secondary: AMD is the hyperscaler hedge against NVIDIA scarcity and pricing, and it is the only merchant supplier pairing leading-edge GPUs with leading-edge server CPUs (Turin, Venice) into a full rack. As long as NVIDIA stays supply-constrained, AMD captures spillover demand. If supply loosens, AMD has to win on price-performance instead.",
       "chokepointMetrics": [
         {
-          "label": "AI accelerator revenue 2026E",
-          "value": "$10B+"
+          "label": "Data center revenue",
+          "value": "$6.7B in Q2 2026 (+107% YoY, +16% QoQ)"
         },
         {
-          "label": "MI325X HBM3e capacity",
-          "value": "256GB"
+          "label": "Data center share of total revenue",
+          "value": "~58% (Q2 2026)"
         },
         {
-          "label": "Tier 1 customer count",
-          "value": "5+"
+          "label": "MI400 HBM4 per accelerator",
+          "value": "432 GB (2026)"
         },
         {
-          "label": "MI355X compute (FP4)",
-          "value": "~9.2 PFLOPS"
+          "label": "MI400 training uplift vs MI300X",
+          "value": "~10x on frontier-model training (AMD claim, 2026)"
         },
         {
-          "label": "Server CPU share",
-          "value": "~40%"
+          "label": "Helios rack revenue shipments",
+          "value": "Begin end of Q3 2026"
         }
       ],
       "catalysts": [
-        "MI355X production ramp through 2026",
-        "MI400 / Helios rack platform launch",
-        "ROCm 7 with broader framework parity",
-        "Sovereign AI deals (Saudi Humain, EU)",
-        "ZT Systems integration adds rack capability"
+        "Helios rack-scale revenue shipments from the end of Q3 2026",
+        "MI500 platform detailed for 2027",
+        "6th Gen EPYC (Venice) attach inside full-rack AI deals",
+        "Sovereign AI deals (Saudi Humain, EU)"
       ],
       "risks": [
-        "NVIDIA supply normalization compresses AMD pricing",
-        "Custom silicon (TPU, Trainium) eats merchant share",
-        "ROCm ecosystem lag persists at training scale"
+        "NVIDIA supply normalization compressing merchant pricing",
+        "Custom silicon (TPU, Trainium, MTIA) absorbing merchant share",
+        "Software ecosystem parity at training scale still closing",
+        "Helios ramp execution — revenue only begins at the end of Q3 2026"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -162,45 +162,45 @@
         "AMAT",
         "LRCX"
       ],
-      "thesisShort": "ASML is the sole supplier of EUV lithography on the planet, and every AI chip below 7nm — Blackwell, Rubin, MI400, TPU v7 — physically cannot exist without an ASML scanner.",
-      "thesisLong": "ASML's EUV monopoly is the most durable bottleneck in the entire technology economy. There is no second source. Nikon and Canon abandoned EUV development a decade ago, and the IP plus supply chain (Zeiss optics, Cymer light sources, ~5,000 component suppliers) is uncopiable inside any reasonable investment horizon. Every leading-edge logic node at TSMC, Samsung, and Intel runs on ASML scanners, full stop.\n\nThe Low-NA EUV installed base is roughly 250 systems and growing ~50 units per year. High-NA EUV (TWINSCAN EXE:5200/5400) launched commercially in 2024 at TSMC and Intel at approximately $380M per tool, doubling resolution and enabling N2 / 18A / N1.4 production. Hyper-NA development is under way for the late-2020s.\n\nThe order book tells the story. ASML's backlog sits near €36B, with 2025-2026 bookings driven by AI logic demand at TSMC (CoWoS-attached wafers), Intel Foundry's 18A ramp, and Samsung's 2nm push. Memory EUV (Micron and SK Hynix HBM4 base die, Samsung DRAM) adds a structurally new demand vector layered on top of logic.\n\nThe risks are concentrated and political: China export controls already blocked EUV shipments and tightened DUV in 2024, and any further escalation removes a piece of the addressable market. Cyclicality also matters — ASML revenue is lumpy because each tool is $200-380M. But on the chokepoint question, ASML is the textbook answer: a single Dutch company gates the physical creation of every advanced AI chip.",
+      "thesisShort": "ASML is the sole supplier of EUV lithography on the planet, and every leading-edge AI chip — Rubin, MI400, the hyperscaler TPUs — physically cannot exist without an ASML scanner.",
+      "thesisLong": "ASML's EUV monopoly is the most durable bottleneck in the entire technology economy. There is no second source. Nikon and Canon abandoned EUV development a decade ago, and the IP plus supply chain (Zeiss optics, Cymer light sources, thousands of component suppliers) is uncopiable inside any reasonable investment horizon. Every leading-edge logic node at TSMC, Samsung and Intel runs on ASML scanners, full stop.\n\nHigh-NA is now moving from demonstration to qualification. ASML recognised revenue on two High-NA systems in Q4 2025, shipped the first EXE:5200 for high-volume manufacturing, and reached a readiness milestone on the first high-volume logic product with Intel. Intel completed acceptance testing on a second-generation EXE:5200B, SK hynix installed the same system at a DRAM fab, Samsung took delivery of its first scanner in late 2025, and imec is targeting Q4 2026 qualification. The EXE:5200B lists at roughly $380M per tool.\n\nThe order book has become harder to read, which is itself part of the story. From Q1 2026 ASML stopped publishing quarterly net bookings; backlog is now effectively an annual disclosure, and the most recent published figure is roughly €38.8B at the end of 2025, of which about €25.5B was EUV. Guidance and management commentary now carry the signal instead. Q2 2026 delivered €9.3B of net sales at a 54.0% gross margin and €2.9B of net income, ahead of guidance on strong Installed Base Management sales, and full-year 2026 revenue guidance was raised to €36-40B.\n\nThe risks are concentrated and political: China export controls already blocked EUV and tightened DUV, and further escalation removes addressable market. Cyclicality also matters — each tool is a $200-380M lump. But on the chokepoint question, ASML is the textbook answer: a single Dutch company gates the physical creation of every advanced AI chip.",
       "chokepointMetrics": [
         {
           "label": "EUV market share",
-          "value": "100%"
-        },
-        {
-          "label": "Annual EUV units shipped",
-          "value": "~50"
-        },
-        {
-          "label": "High-NA system price",
-          "value": "$380M"
+          "value": "100% — sole supplier worldwide"
         },
         {
           "label": "Order backlog",
-          "value": "€36B"
+          "value": "~€38.8B at end-2025, incl. ~€25.5B EUV (now an annual disclosure)"
         },
         {
-          "label": "Tier 1 suppliers",
-          "value": "~5,000"
+          "label": "High-NA EXE:5200B system price",
+          "value": "~$380M per tool (2026)"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "€36-40B (raised, 2026)"
+        },
+        {
+          "label": "Q2 2026 net sales / gross margin",
+          "value": "€9.3B at 54.0%"
         }
       ],
       "catalysts": [
-        "High-NA EUV ramp at TSMC N2/A16 and Intel 18A/14A",
-        "HBM4 base die EUV adoption at Micron, SK Hynix, Samsung",
-        "Samsung 2nm yield recovery driving order normalization",
+        "High-NA EXE:5200B qualification at Intel, Samsung and SK hynix",
+        "imec High-NA qualification targeted for Q4 2026",
+        "HBM4 base-die EUV adoption at Micron, SK hynix and Samsung",
         "Sovereign fab build-outs (Japan Rapidus, US, EU)",
-        "2026 mid-cycle bookings inflection"
+        "Full-year 2027 framing at the next annual disclosure"
       ],
       "risks": [
         "China export controls expanding further",
-        "Customer concentration in TSMC, Samsung, Intel",
-        "Memory EUV demand timing tied to HBM cycle",
-        "Single-supplier execution risk on High-NA ramp"
+        "Customer concentration in TSMC, Samsung and Intel",
+        "Reduced disclosure — quarterly bookings no longer published, so order visibility is annual",
+        "Intel tooling 14A only against firm external commitments, capping one High-NA demand vector"
       ],
       "featured": true,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -213,44 +213,43 @@
         "AMAT",
         "LRCX"
       ],
-      "thesisShort": "KLA owns roughly 55% of process control globally and is the de facto standard for EUV defect inspection — every High-NA wafer at TSMC, Samsung, Intel passes through a KLA tool.",
-      "thesisLong": "KLA-Tencor is the unsung monopoly of leading-edge logic. As nodes shrink to 2nm and below, defect detection becomes existential — a single missed particle can kill an entire wafer worth tens of thousands of dollars. KLA's optical and e-beam inspection systems sit at every critical step of the EUV flow, with a market share that approaches monopoly in the most demanding applications.\n\nThe High-NA EUV transition is a particular tailwind. Smaller features mean smaller defects, which means more inspection passes and higher-resolution tools. KLA's 8xx-series and Voyager systems are the only platforms qualified for sub-3nm logic at TSMC and Samsung, and gross margins on those tools sit in the 60s.\n\nServices revenue compounds quietly in the background. Roughly a quarter of revenue comes from service contracts on the installed base, providing recurring cash flow that smooths the wafer-fab-equipment (WFE) cycle. The company has compounded EPS at >20% for half a decade with industry-leading margins.\n\nRisks are similar to other WFE names: China exposure, capex cyclicality, customer concentration. But process control is the least substitutable WFE category, and KLA is the least substitutable name in it.",
+      "thesisShort": "KLA holds roughly 60% of process control with no competitor above 8%, and it is the de facto standard for EUV defect inspection — every High-NA wafer at TSMC, Samsung and Intel passes through a KLA tool.",
+      "thesisLong": "KLA is the unsung monopoly of leading-edge logic. As nodes shrink to 2nm and below, defect detection becomes existential — a single missed particle can kill an entire wafer worth tens of thousands of dollars. KLA's optical and e-beam inspection systems sit at every critical step of the EUV flow, and third-party industry data published in 2026 puts its process control share near 60%, with no competitor above 8%.\n\nThe June 2026 quarter (fiscal Q4 2026) was a record: $3.66B of revenue and $1.36B of GAAP net income, with revenue, profitability and EPS all above the midpoint of guidance. Management attributed the strength to AI infrastructure investment, leading-edge foundry/logic demand, and rising process control intensity, and expects the process control systems business to grow more than 20% in 2026 — outpacing a wafer fab equipment market that peers now size in the low $150B range for the calendar year.\n\nThe High-NA EUV transition is a particular tailwind. Smaller features mean smaller defects, which means more inspection passes and higher-resolution tools. Advanced packaging adds a second vector as CoWoS capacity expands and hybrid bonding introduces new inspection steps.\n\nRisks are the familiar WFE set: China exposure under export controls, capex cyclicality after an exceptional 2026, and customer concentration at the top logic foundries. But process control is the least substitutable WFE category, and KLA is the least substitutable name in it.",
       "chokepointMetrics": [
         {
           "label": "Process control share",
-          "value": "~55%"
+          "value": "~60%, no competitor above 8% (third-party data cited 2026)"
         },
         {
-          "label": "Leading-edge inspection share",
-          "value": ">85%"
+          "label": "Quarterly revenue",
+          "value": "Record $3.66B (June-2026 quarter, FQ4 FY2026)"
         },
         {
-          "label": "Service revenue mix",
-          "value": "~25%"
+          "label": "Process control systems growth",
+          "value": ">20% expected in 2026, ahead of WFE (management)"
         },
         {
-          "label": "Operating margin",
-          "value": "~40%"
+          "label": "GAAP net income",
+          "value": "$1.36B (June-2026 quarter)"
         },
         {
-          "label": "Installed base",
-          "value": "20K+ systems"
+          "label": "2026 WFE market",
+          "value": "Low-$150B range (peer management view, July 2026)"
         }
       ],
       "catalysts": [
-        "High-NA EUV inspection attach growth",
-        "GAA/3DFET node transitions at TSMC and Samsung",
-        "Advanced packaging inspection ramp (CoWoS, hybrid bonding)",
-        "Memory cycle recovery driving DRAM/NAND tool orders",
-        "Service revenue compounding off larger installed base"
+        "Process control intensity rising with High-NA EUV and gate-all-around nodes",
+        "Advanced packaging inspection attach as CoWoS capacity expands",
+        "DRAM and HBM inspection demand through the 2026-2027 memory build",
+        "Service revenue compounding off a larger installed base"
       ],
       "risks": [
         "China revenue exposure under export controls",
-        "WFE capex cyclicality",
-        "Customer concentration at top 3 logic foundries"
+        "WFE capex cyclicality after a low-$150B 2026",
+        "Customer concentration at the top logic foundries"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -263,44 +262,43 @@
         "KLAC",
         "ASML"
       ],
-      "thesisShort": "Applied Materials is the broadest WFE supplier and the leader in deposition for advanced packaging and gate-all-around transistors, both critical to AI silicon at 2nm and below.",
-      "thesisLong": "Applied Materials is the swiss-army-knife of semiconductor manufacturing — deposition (CVD, PVD, epi), etch, ion implant, CMP, and inspection. No other company has product breadth across this many process steps, which is why Applied benefits from every node transition regardless of whether the bottleneck is logic, memory, or packaging.\n\nThe gate-all-around (GAA) transition at TSMC N2, Samsung 2nm, and Intel 18A is a meaningful tailwind. GAA stacks more deposition steps per wafer than FinFET, and Applied's epi and selective-etch tools are dominant at this transition. Applied estimates GAA adds approximately 20% more WFE intensity per wafer versus FinFET.\n\nAdvanced packaging is the second growth vector. Applied's hybrid bonding tools, through-silicon-via etch, and plating systems are core to CoWoS, SoIC, and Foveros workflows. As CoWoS capacity at TSMC doubles in 2026, Applied's packaging revenue scales with it.\n\nRisks include the same WFE cyclicality and China exposure as peers, plus the structural drag from ICAPS (legacy node) demand normalizing after the 2023-2024 buildout. But the company's diversification across nodes, devices, and customers makes it the most defensive name in the WFE complex.",
+      "thesisShort": "Applied Materials is the broadest WFE supplier and a leader in deposition for advanced packaging and gate-all-around transistors; fiscal Q3 2026 revenue hit a record $9.1B with the October quarter guided to roughly $10.25B.",
+      "thesisLong": "Applied Materials is the swiss-army-knife of semiconductor manufacturing — deposition (CVD, PVD, epi), etch, ion implant, CMP and inspection. No other company has product breadth across this many process steps, which is why Applied benefits from every node transition regardless of whether the bottleneck is logic, memory or packaging.\n\nFiscal Q3 2026 (reported August 2026) was a record: $9.115B of revenue, up 25% year over year and 15% sequentially, with non-GAAP EPS of $3.50 ahead of consensus. Semiconductor Systems drove the result as orders accelerated across DRAM, leading-edge foundry-logic and advanced packaging, lifting segment non-GAAP operating margin to 38.0%. Management guided the October quarter to roughly $10.25B, up 51% year over year, with non-GAAP EPS of about $4.02.\n\nThe gate-all-around transition at TSMC N2, Samsung 2nm and Intel 18A is a meaningful tailwind, since GAA stacks more deposition steps per wafer than FinFET and Applied estimates roughly 20% more WFE intensity per wafer as a result. Advanced packaging is the second growth vector: hybrid bonding tools, through-silicon-via etch and plating systems are core to CoWoS, SoIC and Foveros workflows, and Applied expects leading-edge foundry-logic, DRAM and advanced packaging to drive around 80% of WFE growth across 2026 and 2027.\n\nChina remains the structural swing factor. Its share of revenue eased to 28% in the quarter from 35% a year earlier under regulatory constraints, though the CFO expects absolute China revenue to grow this calendar year and next, led by 28nm foundry-logic. Cyclicality and ICAPS normalization are the other risks, but the breadth across nodes, devices and customers makes Applied the most diversified name in the WFE complex.",
       "chokepointMetrics": [
         {
-          "label": "WFE market share",
-          "value": "~22%"
+          "label": "Quarterly revenue",
+          "value": "Record $9.115B in FQ3 2026 (+25% YoY, +15% QoQ)"
         },
         {
-          "label": "GAA WFE intensity uplift",
-          "value": "+20%"
+          "label": "Next-quarter guidance",
+          "value": "~$10.25B for FQ4 2026 (+51% YoY)"
         },
         {
-          "label": "Service revenue",
-          "value": "$6B+"
+          "label": "China revenue share",
+          "value": "28% in FQ3 2026, down from 35% a year earlier"
         },
         {
-          "label": "R&D spend",
-          "value": "$3.5B+"
+          "label": "Semiconductor Systems operating margin",
+          "value": "38.0% non-GAAP (FQ3 2026)"
         },
         {
-          "label": "Installed base",
-          "value": "60K+ tools"
+          "label": "Share of 2026-27 WFE growth from leading-edge logic, DRAM and packaging",
+          "value": "~80% (Applied view)"
         }
       ],
       "catalysts": [
-        "GAA transition at TSMC N2 and Samsung 2nm",
-        "Advanced packaging tool ramp (hybrid bonding, TSV)",
-        "Backside power delivery node introduction",
-        "DRAM cycle recovery driving memory tool orders",
-        "AGS service revenue compounding"
+        "FQ4 2026 guided to a record ~$10.25B",
+        "Gate-all-around and backside power at N2 / 18A / 14A lifting deposition intensity",
+        "Advanced packaging tool ramp (hybrid bonding, TSV) as CoWoS capacity expands",
+        "China 28nm foundry-logic revenue expected to grow this calendar year and next"
       ],
       "risks": [
-        "ICAPS (mature node) demand normalization",
-        "China revenue exposure",
-        "WFE capex cyclicality"
+        "China regulatory constraints against a shrinking 28% revenue share",
+        "WFE capex cyclicality after an exceptional 2026",
+        "ICAPS / mature-node demand normalization"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -313,44 +311,43 @@
         "KLAC",
         "ASML"
       ],
-      "thesisShort": "Lam Research dominates etch — the most critical step for 3D NAND scaling and HBM through-silicon vias — making it the picks-and-shovels play on the AI memory cycle.",
-      "thesisLong": "Lam Research is the etch specialist of the WFE world. Etch share approaches 50%, and in the most demanding applications — high-aspect-ratio dielectric etch for 3D NAND, TSV etch for HBM, and selective etch for GAA — Lam's share is closer to 60-70%. As NAND stacks climb past 300 layers and HBM4 demands deeper vias, etch intensity per wafer rises structurally.\n\nThe HBM cycle is the near-term catalyst. HBM3e and HBM4 require deep silicon vias and precise stack alignment, with Lam's Vector and Sense.i platforms qualified at SK Hynix, Samsung, and Micron. Each HBM die uses dramatically more etch steps than commodity DRAM, and the share of HBM in total DRAM bits is rising past 25% in 2026.\n\nDry resist development with ASML and IBM is a longer-term call option. If dry resist replaces wet photoresist for EUV, Lam captures a step that previously belonged elsewhere in the flow. The technology is in qualification at multiple advanced logic and memory customers.\n\nRisks are familiar — China exposure (which has actually been a tailwind given mature node etch demand), memory cycle volatility, and customer concentration. But on the AI bottleneck question, Lam is the right answer for the memory side of the trade.",
+      "thesisShort": "Lam Research leads etch — the most critical step for 3D NAND scaling and HBM through-silicon vias — and posted $6.72B of revenue in the June 2026 quarter at a 52% gross margin, its highest in twenty years.",
+      "thesisLong": "Lam Research is the etch specialist of the WFE world. Third-party estimates of its etch share vary across roughly 45-55% depending on methodology, but in the most demanding applications — high-aspect-ratio dielectric etch for 3D NAND, TSV etch for HBM, and selective etch for gate-all-around — Lam's position is stronger still. As NAND stacks climb and HBM4 demands deeper vias, etch intensity per wafer rises structurally.\n\nThe June 2026 quarter showed that leverage: $6.72B of revenue, up 15% sequentially and 30% year over year, at a 52% gross margin — the company's best in two decades. The September 2026 quarter is guided to $8.10B ±$400M with a 39.5% ±1pt operating margin, a step-up that reflects how quickly memory and leading-edge logic orders have converted.\n\nThe HBM cycle is the near-term driver. HBM3e and HBM4 require deep silicon vias and precise stack alignment, and Lam platforms are qualified at SK hynix, Samsung and Micron. CEO Tim Archer now expects calendar 2026 wafer fab equipment spending in the low $150B range, raised from a prior view of about $140B with upside bias — a sector-level revision that frames how far the memory build has run ahead of April expectations.\n\nDry resist development with ASML remains a longer-term call option: if dry resist displaces wet photoresist for EUV, Lam captures a step that previously belonged elsewhere in the flow. The risks are the mirror image of the upside — memory cycle volatility after a record year, China demand normalization, and concentration at the top three memory makers.",
       "chokepointMetrics": [
         {
           "label": "Etch market share",
-          "value": "~50%"
+          "value": "~45-55% (2026 third-party estimates vary by methodology)"
         },
         {
-          "label": "HiAR dielectric etch share",
-          "value": "~70%"
+          "label": "Quarterly revenue",
+          "value": "$6.72B (June-2026 quarter, +30% YoY, +15% QoQ)"
         },
         {
-          "label": "Service revenue",
-          "value": "$6B+"
+          "label": "Gross margin",
+          "value": "52% — highest in 20 years (June-2026 quarter)"
         },
         {
-          "label": "HBM4 TSV per stack",
-          "value": ">10K vias"
+          "label": "Next-quarter guidance",
+          "value": "$8.10B ±$400M (September-2026 quarter)"
         },
         {
-          "label": "Installed chambers",
-          "value": "90K+"
+          "label": "2026 WFE spend outlook",
+          "value": "Low-$150B range (management, July 2026; raised from ~$140B)"
         }
       ],
       "catalysts": [
-        "HBM4 ramp at SK Hynix, Samsung, Micron",
-        "3D NAND scaling beyond 300 layers",
-        "Dry resist commercialization with ASML",
-        "GAA selective etch attach",
-        "Memory capex normalization in 2H26"
+        "September 2026 quarter guided to $8.10B ±$400M",
+        "HBM4 ramp at SK hynix, Samsung and Micron lifting TSV etch intensity",
+        "3D NAND layer-count scaling",
+        "Dry resist commercialization with ASML"
       ],
       "risks": [
-        "Memory cycle volatility",
+        "Memory cycle volatility after a record 2026",
         "China demand normalization",
-        "Customer concentration at top 3 memory makers"
+        "Customer concentration at the top three memory makers"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -363,44 +360,44 @@
         "LRCX",
         "AMAT"
       ],
-      "thesisShort": "Micron is the only US HBM supplier and the third leg of the HBM3e/HBM4 oligopoly with SK Hynix and Samsung — every NVIDIA Blackwell, Rubin, and AMD MI400 GPU needs this memory to function.",
-      "thesisLong": "High-Bandwidth Memory is the second-most-constrained component in AI compute after the GPU itself. Every Blackwell GPU pairs eight HBM3e stacks; every Rubin GPU will pair eight HBM4 stacks; every AMD MI355X / MI400 needs the same. There are only three suppliers globally — SK Hynix (the leader, with first-mover position at NVIDIA), Samsung (catching up after qualification delays), and Micron (the US national champion, now qualified at NVIDIA, AMD, and Broadcom for HBM3e).\n\nMicron's HBM ramp has been the fastest in company history. HBM revenue exceeded $4B in fiscal 2025 and management guides HBM annual revenue toward $10B+ in fiscal 2026. The company has effectively sold out HBM capacity through 2026 and is bringing online new wafer capacity in Idaho and Japan dedicated to HBM and DDR5.\n\nHBM4 is the next inflection. SK Hynix is leading qualification at NVIDIA Rubin, Samsung is rebuilding credibility, and Micron is targeting share gains by leveraging its 1-gamma node. HBM4 has 2x the bandwidth of HBM3e and, critically, allows logic-on-base-die customization — opening the door to higher ASPs and tighter customer relationships.\n\nThe risk is that memory is structurally cyclical, and HBM is no exception. A hyperscaler capex pause or excess supply from Samsung's recovery could compress HBM pricing in late 2026. But Micron is the cleanest US-listed pure play on AI memory, and the company is strategically protected by CHIPS Act funding and national-security positioning.",
+      "thesisShort": "Micron is the only US HBM supplier and the third leg of the HBM oligopoly with SK hynix and Samsung; its 2026 HBM supply is sold out under multi-year contracts, with management able to fill only half to two-thirds of customer demand.",
+      "thesisLong": "Micron is the only US-headquartered HBM supplier and the third leg of an oligopoly with SK hynix and Samsung. Every NVIDIA Rubin and AMD MI400 accelerator needs this memory to function, which makes HBM allocation — not wafer starts — the binding constraint on how many AI systems can physically be built.\n\nThe fiscal Q3 2026 quarter (reported 24 June 2026) showed how tight that constraint has become. Revenue reached roughly $41.5B, several times the year-ago quarter, with gross margin above 81% against 27% a year earlier. CEO Sanjay Mehrotra said Micron can fulfil only between half and two-thirds of customer demand, with the entire 2026 HBM supply sold out under multi-year contracts and both HBM3E and HBM4 fully booked through calendar 2027, with demand extending into 2028.\n\nHBM4 is the swing product. Micron's HBM4 revenue has already passed $1B and the generation is ramping roughly twice as fast as HBM3E. That said, Micron remains third by share among the three HBM suppliers and reportedly holds the thinnest slice of NVIDIA's HBM4 allocation, which is the clearest structural limit on how much of the cycle it captures.\n\nThe risks run in the opposite direction to the last two years. Supply additions from SK hynix and Samsung eventually normalize pricing, and a gross margin above 80% is a cyclical peak rather than a run-rate. Idaho and Japan capacity coming online, plus custom HBM base-die programs with hyperscalers, are the offsets that determine how much of this cycle converts into durable share.",
       "chokepointMetrics": [
         {
           "label": "HBM suppliers globally",
-          "value": "3"
+          "value": "3 — SK hynix, Samsung, Micron"
         },
         {
-          "label": "Micron HBM revenue FY26E",
-          "value": "$10B+"
+          "label": "Quarterly revenue",
+          "value": "~$41.5B in FQ3 2026 (record)"
         },
         {
-          "label": "HBM3e per Blackwell GPU",
-          "value": "8 stacks"
+          "label": "Gross margin",
+          "value": ">81% in FQ3 2026, vs 27% a year earlier"
         },
         {
-          "label": "HBM share of DRAM bits 2026",
-          "value": ">25%"
+          "label": "HBM supply status",
+          "value": "2026 sold out; can fill only half to two-thirds of demand (CEO, June 2026)"
         },
         {
-          "label": "CHIPS Act funding",
-          "value": "$6.1B"
+          "label": "HBM4 revenue",
+          "value": ">$1B, ramping ~2x faster than HBM3E (FQ3 2026)"
         }
       ],
       "catalysts": [
-        "HBM4 qualification at NVIDIA Rubin and AMD MI400",
+        "HBM4 volume at NVIDIA Rubin and AMD MI400",
+        "HBM3E and HBM4 booked through calendar 2027 with demand extending into 2028",
         "Idaho and Japan fab capacity coming online",
-        "Custom HBM base-die programs with hyperscalers",
-        "DDR5 / LPDDR5X server cycle in parallel",
-        "Samsung yield issues persisting longer than expected"
+        "Custom HBM base-die programs with hyperscalers"
       ],
       "risks": [
-        "Memory cycle downside in late 2026",
-        "Samsung HBM4 recovery compressing pricing",
-        "Hyperscaler capex digestion risk"
+        "Thinnest reported share of NVIDIA HBM4 allocation among the three suppliers",
+        "Supply additions from SK hynix and Samsung normalizing pricing",
+        "Memory cycle reversal from peak margins",
+        "Hyperscaler capex digestion"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -413,45 +410,45 @@
         "GFS",
         "ASML"
       ],
-      "thesisShort": "TSMC fabricates effectively every advanced AI chip on Earth — NVIDIA, AMD, Broadcom, Apple, Google TPU — with N3, N2, and A16 capacity sold out through 2026.",
-      "thesisLong": "TSMC is the most strategically important industrial company in the world. The company controls roughly 60% of foundry revenue overall and over 90% of leading-edge (sub-7nm) production, which means almost every advanced AI accelerator — NVIDIA Blackwell/Rubin, AMD MI-series, Broadcom XPUs, Google TPU, Apple silicon — is fabricated inside a TSMC fab.\n\nThe N3 family (N3E, N3P, N3X) is mature and fully utilized; N2 enters volume production in late 2025 with Apple as the lead customer and AI accelerators following in 2026; A16 with backside power delivery is targeted for 2026-2027 production. Each generation has been pre-sold via long-term agreements with hyperscalers and fabless leaders, with prepayments funding capex.\n\nGeographic diversification is finally happening. The Arizona Fab 21 is in volume production on N4/N5 with N3 ramping, the Kumamoto Fab 1 (Japan) is operational on mature nodes, the Dresden fab broke ground in 2024, and a second Arizona fab is in build-out for 2nm. None of this dilutes the Taiwan core, but it materially de-risks the geopolitical concentration.\n\nThe risks are well-known and existential: Taiwan Strait geopolitics, customer concentration (Apple + NVIDIA = ~40% of revenue), and the cost curve of leading-edge fabs heading toward $40B per fab. But on the bottleneck question, no other foundry can ship 2nm AI silicon at volume in 2026, full stop.",
+      "thesisShort": "TSMC fabricates effectively every advanced AI chip on Earth and controls more than 90% of global CoWoS output, and it raised 2026 capex to $60-64B to chase 2nm and advanced packaging demand.",
+      "thesisLong": "TSMC fabricates effectively every advanced AI chip on Earth — NVIDIA, AMD, Broadcom, Apple, the hyperscaler TPUs — and the constraint has shifted from transistors to packaging. Q2 2026 revenue was $40.2B at a 67.7% gross margin, modestly ahead of guidance.\n\nThe capex line is where the demand signal is clearest. TSMC raised full-year 2026 capex to $60-64B from a prior $52-56B range, implying second-half spending of $33.2-37.2B, a year-over-year increase of 56-75%. That step-up is a direct response to the 2nm ramp and to advanced packaging, where Chip-on-Wafer-on-Substrate has become the industry’s most critical bottleneck. TSMC controls more than 90% of global CoWoS output, and monthly capacity of roughly 90,000 wafers is expected to reach about 120,000 by the end of 2026.\n\nThe cost of that ramp is visible in the margin outlook. TSMC guided gross margin to 65-67%, below elevated expectations, with 2nm ramp costs the stated cause — the classic pattern where a node transition front-loads depreciation before the pricing benefit arrives. A16 with backside power delivery follows in 2027.\n\nThe risks are unchanged in kind and unchanged in weight: Taiwan Strait geopolitical exposure, concentration in a small number of very large customers, rising leading-edge fab costs, and currency translation between the NT dollar and USD.",
       "chokepointMetrics": [
         {
-          "label": "Leading-edge foundry share",
-          "value": ">90%"
-        },
-        {
-          "label": "N3 family revenue mix",
-          "value": "~25%"
+          "label": "Quarterly revenue / gross margin",
+          "value": "$40.2B at 67.7% (Q2 2026)"
         },
         {
           "label": "2026 capex",
-          "value": "$42-46B"
+          "value": "$60-64B, raised from $52-56B (July 2026)"
         },
         {
-          "label": "Top 2 customer share",
-          "value": "~40%"
+          "label": "Global CoWoS share",
+          "value": ">90%"
         },
         {
-          "label": "Arizona Fab 21 capacity",
-          "value": "20K WPM"
+          "label": "CoWoS capacity",
+          "value": "~90K wafers/month, targeting ~120K by end-2026"
+        },
+        {
+          "label": "Gross margin outlook",
+          "value": "65-67%, reflecting 2nm ramp costs (2026)"
         }
       ],
       "catalysts": [
-        "N2 volume ramp with Apple, NVIDIA, AMD, Broadcom",
-        "A16 with backside power delivery in 2026-2027",
-        "CoWoS capacity doubling driving advanced packaging revenue",
-        "Arizona Fab 2 (N2) construction milestones",
-        "Sovereign / hyperscaler prepayments unlocking capex"
+        "N2 volume ramp through 2H 2026",
+        "CoWoS capacity scaling toward ~120K wafers/month by end-2026",
+        "2H 2026 capex of $33-37B, up 56-75% year over year",
+        "A16 with backside power delivery in 2027",
+        "Arizona Fab 2 (N2) construction milestones"
       ],
       "risks": [
         "Taiwan Strait geopolitical risk",
-        "Customer concentration in Apple and NVIDIA",
-        "Rising leading-edge fab costs",
-        "Currency translation drag (NT vs USD)"
+        "2nm ramp costs weighing on the 65-67% gross margin outlook",
+        "Customer concentration in a handful of very large accounts",
+        "Currency translation drag (NT dollar vs USD)"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -464,45 +461,44 @@
         "GFS",
         "ASML"
       ],
-      "thesisShort": "Intel Foundry is the only meaningful US-soil leading-edge foundry alternative to TSMC, with 18A in pilot production and Microsoft, DoD, and Amazon among announced customers.",
-      "thesisLong": "Intel's foundry pivot is the riskiest and most strategically necessary turnaround in semiconductors. After years of process delays, Intel 18A is in pilot production in 2025 with Panther Lake on the IDM side, and external customers including Microsoft (custom SoC), the DoD (RAMP-C program), and Amazon Web Services have signed on. 14A is in development for 2027 production.\n\nThe restructuring under Lip-Bu Tan separates Foundry from Products, creates a true arms-length pricing model, and prioritizes external customer wins. The Apollo investment in the Ireland fab and the SoftBank stake in Intel itself provide capital and political support. CHIPS Act funding of $7.86B underwrites the Arizona, Ohio, and New Mexico expansions.\n\nThe near-term picture is grim: Foundry is loss-making at billions per quarter, capacity utilization is low, and the product side is contracting. But the strategic case is that the US government, US hyperscalers, and US defense customers will not allow leading-edge silicon to be produced exclusively in Taiwan. That structural demand for a non-TSMC alternative is the bottleneck thesis.\n\nThe risks are real and binary: 18A yield ramp must hit milestones in 2026, external foundry revenue must scale to billions by 2027, and Intel must avoid further share loss in CPUs. Equity is volatile and the path is uncertain, but Intel is the only Western leading-edge foundry option in the AI bottleneck conversation.",
+      "thesisShort": "Intel Foundry is the only meaningful US-soil leading-edge alternative to TSMC, with 18A now in high-volume internal production — but external foundry revenue was just $293M in Q2 2026 and no 14A anchor customer has been named.",
+      "thesisLong": "Intel Foundry is the only meaningful US-soil leading-edge foundry alternative to TSMC, and 2026 is the year the technology case and the commercial case visibly diverged.\n\nOn technology, the news is genuinely good. 18A reached high-volume internal production, and in Q2 2026 output exceeded internal targets by roughly 25% and rose more than 50% sequentially, with yields reported near 85% against roughly 90% at TSMC N2. Intel Foundry cut the cost of its primary Panther Lake SKU by roughly 50% year to date and targets a further 20% this year. 18A-P entered risk production, and the 0.9 PDK for Intel 14A is on track for October 2026 after PDK 0.5 completed.\n\nOn commerce, the gap is stark. External foundry revenue was $293M in Q2 2026 against a $2.1B Foundry operating loss, and no external 14A anchor customer has been named. Management has said explicitly that 14A capacity will only be developed against firm external commitments — a deliberate break from the previous build-first posture, and the single most important constraint on how large this business can become. A Fortinet agreement broke the customer-disclosure silence ahead of Q2, and Terafab, a reported joint venture involving Tesla, SpaceX and xAI, has been described as planning to use 14A, with firm supplier decisions expected between 2H 2026 and 1H 2027.\n\nSo the bottleneck framing holds — the West has exactly one candidate for a second leading-edge source — but the commercial proof is still ahead, and it is gated on the October 2026 PDK and the anchor-customer decisions that follow.",
       "chokepointMetrics": [
         {
-          "label": "CHIPS Act award",
-          "value": "$7.86B"
+          "label": "External foundry revenue",
+          "value": "$293M (Q2 2026)"
         },
         {
-          "label": "18A pilot status",
-          "value": "Production 2025"
+          "label": "Foundry operating loss",
+          "value": "$2.1B (Q2 2026)"
         },
         {
-          "label": "Foundry external customers",
-          "value": "5+ named"
+          "label": "18A yield",
+          "value": "~85%, vs ~90% at TSMC N2 (Q2 2026)"
         },
         {
-          "label": "US fab capex commitment",
-          "value": "$100B+"
+          "label": "18A output vs internal plan",
+          "value": "~25% above target, +50% QoQ (Q2 2026)"
         },
         {
-          "label": "Foundry operating loss FY25",
-          "value": "~$13B"
+          "label": "14A anchor customer",
+          "value": "None named; PDK 0.9 due October 2026"
         }
       ],
       "catalysts": [
-        "18A yield ramp through 2026",
-        "External foundry customer announcements (hyperscaler tier)",
-        "Panther Lake / Clearwater Forest IDM volume",
-        "Arizona Fab 52/62 commissioning",
-        "Foundry breakeven path articulated"
+        "Intel 14A PDK 0.9 release targeted for October 2026",
+        "18A-P moving through risk production",
+        "Fortinet agreement as the first named external customer disclosure",
+        "Reported Terafab (Tesla / SpaceX / xAI) 14A decision expected 2H 2026 to 1H 2027"
       ],
       "risks": [
-        "18A yield miss versus TSMC N2",
-        "CPU share continued erosion to AMD",
-        "Foundry losses extending beyond 2027",
-        "Geopolitical or funding policy shifts"
+        "14A capacity only tooled against firm external commitments",
+        "External foundry revenue still de minimis at $293M per quarter",
+        "18A yields trailing TSMC N2",
+        "Continued Foundry operating losses ($2.1B in Q2 2026)"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -515,44 +511,44 @@
         "INTC",
         "AMKR"
       ],
-      "thesisShort": "GlobalFoundries is the leading Western pure-play on specialty silicon — RF, automotive, silicon photonics, and FDX — that the AI infrastructure stack quietly depends on for power management, optical I/O, and networking ASICs.",
-      "thesisLong": "GlobalFoundries chose not to chase leading-edge logic and instead built a moat in differentiated specialty processes. Today GF is the largest US-headquartered foundry by revenue and a critical supplier of RF SOI for handsets, FDX for IoT and automotive, and silicon photonics for the optical interconnect that ties AI clusters together.\n\nThe AI angle is the silicon photonics platform. GF's 45CLO and emerging 9SP processes are the foundry layer beneath co-packaged optics and pluggable transceivers from Coherent, Lumentum, Marvell, and several hyperscaler-internal designs. As 1.6T optics ramp in 2026, GF's photonics revenue scales with it.\n\nThe secondary AI angle is power and analog. Server power management ICs, voltage regulators, and high-current PMICs use GF's specialty processes, and the dollar content of power silicon per AI rack has roughly doubled compared with traditional servers.\n\nRisks include automotive and handset weakness (which has dragged 2024-2025 results), customer concentration in a few large fabless names, and limited operating leverage at trough utilization. But on the bottleneck question, GF is the underappreciated US foundry exposure to AI infrastructure that doesn't depend on out-bidding TSMC for leading-edge wafers.",
+      "thesisShort": "GlobalFoundries is the leading Western pure-play on specialty silicon — RF, automotive, silicon photonics and FDX — that the AI infrastructure stack quietly depends on, and it ran fabs in the high-80s% utilization in Q2 2026.",
+      "thesisLong": "GlobalFoundries is the leading Western pure-play on specialty silicon — RF, automotive, silicon photonics and FDX — the categories the AI infrastructure stack quietly depends on for power management, optical I/O and networking ASICs. It does not chase leading-edge logic, which caps the multiple but also insulates it from the capex arms race.\n\nQ2 2026 (reported August 2026) showed the AI pivot working through the numbers: revenue of $1.79B and non-IFRS EPS of $0.46, both ahead of consensus, with non-IFRS operating margin of 16.7%, up 140 basis points year over year on improved manufacturing productivity. Management now expects full-year gross margin of about 30%, rather than merely exiting 2026 at that level. Fab utilization ran in the high 80s with roughly 10 points of headroom still available — enough to absorb incremental AI-adjacent demand without a new capex cycle.\n\nThe acquisition of Synopsys' Processor IP Solutions — the ARC and MIPS assets — added 150-plus patents, access to 300-plus customers and 400-plus engineers, and is now expected to contribute $100-120M of technology-services revenue in 2026, raised from a prior $60-100M. Those businesses are R&D-intensive but carry gross margins above corporate targets. The company also recognised $675M of government support in the quarter.\n\nThe risks are demand-side rather than technology-side: handset and automotive softness, customer concentration, and the structural fact that limited leading-edge participation caps how much of the AI build GlobalFoundries can address.",
       "chokepointMetrics": [
         {
-          "label": "RF SOI handset share",
-          "value": ">50%"
+          "label": "Quarterly revenue",
+          "value": "$1.79B (Q2 2026)"
         },
         {
-          "label": "Silicon photonics design wins",
-          "value": "10+ customers"
+          "label": "Fab utilization",
+          "value": "High-80s%, with ~10 points of headroom (Q2 2026)"
         },
         {
-          "label": "Specialty revenue mix",
-          "value": ">90%"
+          "label": "Non-IFRS operating margin",
+          "value": "16.7% (Q2 2026, +140bps YoY)"
         },
         {
-          "label": "CHIPS Act award",
-          "value": "$1.5B"
+          "label": "MIPS / ARC IP services revenue",
+          "value": "$100-120M expected in 2026, raised from $60-100M"
         },
         {
-          "label": "US/EU capacity share",
-          "value": "~70%"
+          "label": "Government support recognised",
+          "value": "$675M (Q2 2026)"
         }
       ],
       "catalysts": [
-        "Silicon photonics ramp for 1.6T optics",
-        "Automotive recovery through 2026",
-        "FDX design wins in edge AI / IoT",
-        "Malta, NY expansion via CHIPS Act",
-        "Defense and aerospace specialty wins"
+        "MIPS and ARC processor IP contributing $100-120M of technology-services revenue in 2026",
+        "AI data center specialty content (power, optical I/O) scaling",
+        "Full-year gross margin tracking to about 30%",
+        "Roughly 10 points of utilization headroom available to absorb demand"
       ],
       "risks": [
         "Handset and automotive end-market softness",
         "Customer concentration",
-        "Limited leading-edge participation caps multiple"
+        "Limited leading-edge participation caps addressable AI content",
+        "R&D-intensive IP business dilutes near-term operating leverage"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -565,44 +561,43 @@
         "ASE",
         "GFS"
       ],
-      "thesisShort": "Amkor is the only US-listed advanced packaging OSAT and TSMC's primary outsourced partner for CoWoS, fan-out, and advanced flip-chip — the package-side bottleneck for every AI accelerator.",
-      "thesisLong": "Advanced packaging is the second physical bottleneck for AI silicon, after wafers themselves. NVIDIA Blackwell, AMD MI-series, and Broadcom XPUs all use TSMC's CoWoS-S or CoWoS-L, and TSMC has been doubling CoWoS capacity year-over-year while still leaving customers short. Amkor is the named outsourced partner extending TSMC capacity, particularly in Arizona where the new Amkor advanced packaging facility colocates with TSMC Fab 21.\n\nAmkor also serves AMD, Broadcom, and the broader fabless ecosystem with fan-out wafer-level packaging (FOWLP), 2.5D interposer packaging, and high-end flip-chip BGA. The company's S.W.I.F.T. and SLIM technologies compete directly with TSMC's InFO platform and are increasingly chosen for cost-sensitive AI inference and networking ASICs.\n\nThe Vietnam and Korea capacity additions in 2024-2025 absorbed near-term demand, and the Arizona facility — funded in part by the CHIPS Act — opens the door to US-domiciled advanced packaging at scale. Hyperscaler customers actively want a non-Taiwan packaging option, which gives Amkor a structural premium.\n\nRisks are concentration (a few large customers drive most advanced packaging revenue) and the cyclical nature of the OSAT business outside of leading-edge AI. But the AI mix is now large enough — and growing fast enough — to dominate the equity narrative.",
+      "thesisShort": "Amkor is the only US-listed advanced packaging OSAT and now holds a ten-year advanced packaging agreement with TSMC in Arizona plus an NVIDIA packaging and test program — the package-side bottleneck for AI accelerators.",
+      "thesisLong": "Amkor is the only US-listed advanced packaging OSAT, and packaging — not lithography — is where AI accelerator supply is currently rationed. Q2 2026 was a record: revenue of $1.90B, up 26% year over year, with growth across all end markets and records in computing, automotive and industrial. Communications sales grew 32%, automotive and industrial 35%, and computing 23%.\n\nThe operating leverage finally showed. Gross margin expanded to 16.8%, up 480 basis points year over year, and net income attributable to Amkor rose to $173.8M, or $0.70 per diluted share. Q3 2026 is guided to roughly $2.0B of revenue.\n\nArizona is the strategic centre of gravity. Phase 1 of the Arizona facility is now fully committed, the company added 67 acres to the campus, and it is preparing further expansion to match customer demand. Two anchor relationships underpin it: a ten-year advanced packaging agreement with TSMC in Arizona, and an NVIDIA arrangement covering advanced packaging and test for next-generation AI infrastructure. That combination converts what was previously CoWoS overflow into contracted, onshore capacity.\n\nThe cost is cash. Capital spending of $688.4M in the first half drove free cash flow to negative $269.9M, and the 2026 capex plan remains $2.5-3.0B, most of it aimed at facilities and advanced packaging capacity. Customer concentration and capex absorption if AI packaging demand softens are the live risks.",
       "chokepointMetrics": [
         {
-          "label": "Advanced packaging revenue mix",
-          "value": ">60%"
+          "label": "Quarterly revenue",
+          "value": "Record $1.90B (Q2 2026, +26% YoY)"
         },
         {
-          "label": "Arizona facility capex",
-          "value": "$2B+"
+          "label": "Gross margin",
+          "value": "16.8% (Q2 2026, +480bps YoY)"
         },
         {
-          "label": "CHIPS Act award",
-          "value": "$407M"
+          "label": "2026 capex plan",
+          "value": "$2.5-3.0B, mostly advanced packaging"
         },
         {
-          "label": "Top customer share",
-          "value": "~25%"
+          "label": "Arizona Phase 1",
+          "value": "Fully committed; further expansion in planning (2026)"
         },
         {
-          "label": "Advanced flip-chip share",
-          "value": "~20%"
+          "label": "TSMC Arizona agreement term",
+          "value": "10-year advanced packaging deal (2026)"
         }
       ],
       "catalysts": [
-        "Arizona advanced packaging facility opening",
-        "CoWoS overflow from TSMC capacity tightness",
-        "AMD MI400 / NVIDIA Rubin packaging contracts",
-        "Hyperscaler XPU packaging wins",
-        "Co-packaged optics packaging volume"
+        "Arizona Phase 1 build-out moving toward production",
+        "Ten-year TSMC Arizona advanced packaging agreement execution",
+        "NVIDIA advanced packaging and test program",
+        "Q3 2026 guided to roughly $2.0B of revenue"
       ],
       "risks": [
-        "Customer concentration risk",
-        "OSAT pricing pressure outside AI mix",
-        "Capex absorption in 2026 if AI demand softens"
+        "Customer concentration",
+        "Negative free cash flow during the Arizona build (-$269.9M in 1H 2026)",
+        "Capex absorption if AI packaging demand softens"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -615,44 +610,43 @@
         "SMCI",
         "GEV"
       ],
-      "thesisShort": "Vertiv is the named partner for NVIDIA reference architectures on liquid cooling and power, and every GB200 NVL72 rack shipping in 2026 ships with Vertiv content.",
-      "thesisLong": "Vertiv is the picks-and-shovels winner of the AI rack-scale era. As GPU power density climbed from 350W per Hopper to 1000W per Blackwell to projected 1800W+ per Rubin, air cooling stopped working at the rack level. Vertiv designed the reference liquid-to-chip and rear-door heat exchanger systems that NVIDIA ships in its DGX and GB200/GB300 NVL72 reference architectures.\n\nThe order book is the proof. Backlog has roughly doubled since early 2024 and approaches $8B, with book-to-bill consistently above 1.2. Liquid cooling specifically grew triple-digit percent year-over-year through 2025, and management has effectively raised guidance every quarter for two years.\n\nThe second leg is power distribution. AI data centers require switchgear, busways, UPS, and high-density PDUs at gigawatt scale, and Vertiv competes directly with Eaton and Schneider in this category. The combination of liquid cooling plus power gives Vertiv content per AI rack that exceeds most semiconductor names on a dollar basis.\n\nRisks are valuation (the stock has compounded several hundred percent off pandemic lows), concentration in NVIDIA reference designs, and the cyclical nature of data-center capex. But on the bottleneck question, AI data centers physically cannot operate without liquid cooling and high-density power, and Vertiv is the volume leader.",
+      "thesisShort": "Vertiv supplies the thermal and power content inside AI reference racks, and raised 2026 guidance to $13.8-14.2B on 30-32% organic growth — though it stopped publishing backlog and order figures with the Q2 2026 release.",
+      "thesisLong": "Vertiv sits at the thermal and power layer of the AI rack: liquid cooling, busway, rack PDU and UPS content that ships alongside the accelerators rather than instead of them. Q2 2026 net sales were $3.274B, up $636M or 24% year over year, comprising 18% organic growth, 5% from acquisitions and 1% from favourable currency. Diluted EPS grew 53% and adjusted diluted EPS 60%.\n\nManagement raised full-year 2026 guidance across every key metric: net sales of $13.8-14.2B (30-32% organic growth), adjusted operating profit of $3.285-3.365B, adjusted diluted EPS of $6.65-6.75 (58-61% growth), and adjusted free cash flow of $2.4-2.6B.\n\nOne disclosure change matters for anyone tracking this as a bottleneck. The Q2 2026 release contained no backlog figure and no orders number at all — a break from prior practice, where the company had reported $8.5B of backlog at Q2 2025. Guidance is now the primary forward signal, and the visibility that made Vertiv legible as a leading indicator for AI rack deployment has narrowed.\n\nThe structural position is unchanged: liquid cooling is the default for new AI data center designs, and Vertiv content is specified into reference architectures rather than bid per project. The dependencies are the flip side of that — reliance on the accelerator vendors' reference designs, and exposure to any hyperscaler capex digestion.",
       "chokepointMetrics": [
         {
-          "label": "Backlog",
-          "value": "~$8B"
+          "label": "Quarterly net sales",
+          "value": "$3.274B (Q2 2026, +24% YoY, +18% organic)"
         },
         {
-          "label": "Book-to-bill",
-          "value": ">1.2"
+          "label": "2026 sales guidance",
+          "value": "$13.8-14.2B, 30-32% organic growth (raised July 2026)"
         },
         {
-          "label": "Liquid cooling growth",
-          "value": ">100% YoY"
+          "label": "2026 adjusted diluted EPS guidance",
+          "value": "$6.65-6.75 (58-61% growth)"
         },
         {
-          "label": "GB200 NVL72 attach",
-          "value": "Reference design"
+          "label": "2026 adjusted free cash flow guidance",
+          "value": "$2.4-2.6B"
         },
         {
-          "label": "AI revenue mix 2026E",
-          "value": ">25%"
+          "label": "Backlog disclosure",
+          "value": "Not published in the Q2 2026 release (last disclosed: $8.5B at Q2 2025)"
         }
       ],
       "catalysts": [
-        "GB300 NVL72 and Rubin rack deployments",
-        "Sovereign AI build-outs requiring full thermal/power stacks",
-        "Two new mega-factories online in 2026",
-        "Co-development with hyperscalers on next-gen cooling",
-        "Service revenue compounding with installed base"
+        "Rubin-generation rack deployments requiring full thermal and power stacks",
+        "Sovereign AI build-outs specifying complete power and cooling systems",
+        "Raised 2026 guidance across sales, margin, EPS and free cash flow",
+        "Service revenue compounding with the installed base"
       ],
       "risks": [
-        "Valuation premium to legacy power peers",
-        "NVIDIA reference design dependency",
+        "Backlog and orders no longer disclosed quarterly, reducing forward visibility",
+        "Dependence on accelerator-vendor reference designs",
         "Hyperscaler capex digestion"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -665,44 +659,44 @@
         "GEV",
         "SMCI"
       ],
-      "thesisShort": "Eaton's data center backlog has doubled since 2023, and the company is the largest US supplier of medium-voltage switchgear, busways, and PDUs that move power from substation to GPU.",
-      "thesisLong": "Eaton is the diversified electrical infrastructure giant whose data-center segment has become its fastest-growing and highest-multiple business. Data center revenue exceeded 20% of Electrical Americas by 2025, and the data-center backlog has more than doubled since 2023, with negotiated pipelines stretching 3-5 years out.\n\nThe specific bottleneck is medium-voltage power distribution. AI data centers consume hundreds of megawatts to gigawatts each, and the equipment chain — substations, transformers, switchgear, busways, UPS, PDUs — is supply-constrained globally. Eaton has the largest US manufacturing footprint in this category and is adding capacity in North Carolina, South Carolina, and Mexico to keep up.\n\nDiversification helps. Eaton also serves aerospace, vehicle electrification, utility grid hardening, and industrial automation, all of which provide ballast against any data-center pause. The grid-modernization tailwind alone is a multi-year independent driver.\n\nRisks are similar to other electrical names: capex digestion, supply chain (copper, GOES steel), and competitive intensity from Schneider, ABB, and Siemens. But Eaton's combination of US manufacturing footprint, hyperscaler relationships, and grid-electrification exposure makes it the cleanest large-cap power play on AI build-out.",
+      "thesisShort": "Eaton is the largest US supplier of the medium-voltage switchgear, busway and PDUs that move power from substation to GPU; data center orders rose roughly 240% year over year in Q2 2026 against a 307 GW announced US pipeline.",
+      "thesisLong": "Eaton sits at the grid-to-chip layer: medium-voltage switchgear, busway, PDUs and the electrical balance of plant that moves power from the substation to the GPU. It is a physical-delivery bottleneck rather than a technology one, and the Q2 2026 numbers show it tightening.\n\nData center organic revenue grew 65% in the second quarter against an underlying market growth rate of about 23%, and data center orders rose roughly 240% year over year. The twelve-month rolling average of Electrical Americas orders was up 41% organically, total backlog at the end of June was up 33% over June 2025, and total electrical backlog was up 43% year over year — visibility that now extends through the second half of 2026 and into 2027. Eaton raised organic growth guidance alongside the print.\n\nThe forward pipeline is larger than the backlog and slower to convert. The announced US data center pipeline has reached 307 gigawatts, equivalent to roughly fifteen years of construction at the 2025 build rate, and the majority of Eaton's data center backlog translates to 2028 and beyond. That is the honest shape of this bottleneck: the constraint is real, but the revenue recognition is long-dated, and announced pipelines are not orders.\n\nThe risks follow from that: hyperscaler capex digestion before the 2028 deliveries land, input cost inflation on copper and steel, and competitive intensity from European electrical peers chasing the same demand.",
       "chokepointMetrics": [
         {
-          "label": "Data center backlog growth",
-          "value": ">2x since 2023"
+          "label": "Data center organic revenue growth",
+          "value": "+65% in Q2 2026, vs ~23% underlying market"
         },
         {
-          "label": "DC pipeline visibility",
-          "value": "3-5 years"
+          "label": "Data center orders",
+          "value": "~+240% YoY (Q2 2026)"
         },
         {
-          "label": "DC mix of Electrical Americas",
-          "value": ">20%"
+          "label": "Electrical Americas orders",
+          "value": "+41% organic, 12-month rolling average (Q2 2026)"
         },
         {
-          "label": "Capex commitment",
-          "value": "$1.5B+"
+          "label": "Total electrical backlog",
+          "value": "+43% YoY (Q2 2026)"
         },
         {
-          "label": "Hyperscaler customer count",
-          "value": "All top 5"
+          "label": "Announced US data center pipeline",
+          "value": "307 GW — ~15 years at the 2025 build rate"
         }
       ],
       "catalysts": [
-        "Hyperscaler capex extending into 2027 and beyond",
-        "US grid modernization tailwind",
-        "Aerospace recovery cycle",
-        "Vehicle electrification continued growth",
-        "New manufacturing capacity online in 2026"
+        "Backlog visibility extending through 2H 2026 and into 2027",
+        "Announced 307 GW US pipeline converting to orders, mostly for 2028 and beyond",
+        "Raised 2026 organic growth guidance",
+        "US grid modernization capex"
       ],
       "risks": [
-        "Hyperscaler capex digestion",
-        "Copper / steel input cost inflation",
-        "Competitive intensity from European peers"
+        "Majority of the data center backlog delivers 2028 and beyond",
+        "Hyperscaler capex digestion before those deliveries land",
+        "Copper and steel input cost inflation",
+        "Competitive intensity from European electrical peers"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -715,44 +709,41 @@
         "VRT",
         "CEG"
       ],
-      "thesisShort": "GE Vernova is the largest US supplier of high-voltage transformers and gas turbines, and order books for both are sold out into the late 2020s as data centers race to secure firm power.",
-      "thesisLong": "GE Vernova spun out of GE in 2024 and quickly became the most direct equity exposure to AI-driven power demand. The company has three segments — Power (gas turbines), Wind, and Electrification (grid equipment) — and the Power and Electrification segments are both supply-constrained at multi-year horizons.\n\nGas turbines are the immediate AI story. Hyperscalers and colocation operators are signing reservation agreements for HA-class gas turbines that won't deliver until 2027-2028, and GE Vernova's slot allocations are effectively booked through the end of the decade. The company's 7HA and 9HA platforms are the workhorses of new behind-the-meter gas plants colocated with data centers.\n\nElectrification (grid) is the slower but larger story. High-voltage transformers — specifically large power transformers (LPTs) — have global lead times of 2-4 years, and GE Vernova is one of three or four credible Western suppliers. Every new data center requires LPTs to interconnect with the transmission grid.\n\nRisks include execution on the wind business (which has been a drag), nuclear small-modular-reactor (SMR) optionality that may not pay off in this decade, and the cyclical nature of utility capex. But for AI bottleneck investors, GE Vernova is the most direct way to express the firm-power thesis at large-cap scale.",
+      "thesisShort": "GE Vernova is a primary supplier of gas turbines and grid equipment, and its gas equipment backlog plus slot reservations grew from 100 GW to 116 GW in Q2 2026 with only about 10 GW of 2029-2030 slots left uncommitted.",
+      "thesisLong": "GE Vernova is where the AI power story stops being about electrons and starts being about factory slots. Gas Power equipment backlog and slot reservation agreements grew from 100 GW to 116 GW during Q2 2026, and the company now anticipates reaching at least 125 GW by year-end 2026.\n\nThe scarcity is in the calendar. Entering the first quarter GE Vernova had roughly 10 GW of available 2029 production capacity; customers then pulled aggressively into 2030 because engineering, procurement and construction schedules made the later slot more useful than the earlier one. After that reshuffle, approximately 10 GW remains available across 2029 and 2030 combined. When the next available delivery window for a large gas turbine is four years out and nearly sold, the turbine — not the permit and not the gas — is the binding constraint on new firm generation.\n\nCapacity is being added, but slowly relative to demand. The company remains on track for a 20 GW annual gas turbine output rate in Q3 2026, 24 GW in 2028, and is implementing actions to reach 30 GW in 2030. Each of those steps requires forgings, castings and grain-oriented electrical steel from supply chains with their own multi-year lead times.\n\nThe risks are execution-shaped rather than demand-shaped: slot reservations are not firm orders until they convert, the long-lead supply chain gates the output ramp, the wind segment remains a drag on consolidated results, and utility capex is exposed to regulatory shifts.",
       "chokepointMetrics": [
         {
-          "label": "Gas turbine slots through",
-          "value": "2028+ booked"
+          "label": "Gas equipment backlog + slot reservations",
+          "value": "116 GW (Q2 2026), up from 100 GW in Q1 2026"
         },
         {
-          "label": "LPT global lead time",
-          "value": "2-4 years"
+          "label": "Year-end 2026 target",
+          "value": "≥125 GW"
         },
         {
-          "label": "Power backlog",
-          "value": "$70B+"
+          "label": "Uncommitted 2029-2030 slots",
+          "value": "~10 GW remaining combined (Q2 2026)"
         },
         {
-          "label": "HA-class turbine units installed",
-          "value": "100+"
-        },
-        {
-          "label": "Data center reservation agreements",
-          "value": "Multi-GW"
+          "label": "Annual gas turbine output plan",
+          "value": "20 GW rate in Q3 2026, 24 GW in 2028, 30 GW targeted 2030"
         }
       ],
       "catalysts": [
-        "Behind-the-meter gas plant signings with hyperscalers",
-        "BWRX-300 SMR commercial deployments late decade",
-        "Grid electrification capex acceleration",
-        "Wind business returning to profitability",
-        "Service revenue compounding with installed base"
+        "Reaching at least 125 GW of gas backlog and slot reservations by year-end 2026",
+        "Hitting the 20 GW annual gas turbine output rate in Q3 2026",
+        "Remaining ~10 GW of 2029-2030 slots converting to firm orders",
+        "Capacity actions toward 30 GW of annual output by 2030",
+        "BWRX-300 SMR deployments late this decade"
       ],
       "risks": [
+        "Slot reservations converting to firm orders at scale",
+        "Long-lead-time supply chain (forgings, grain-oriented electrical steel)",
         "Wind segment execution and pricing",
-        "Long-lead-time supply chain (forgings, GOES steel)",
-        "Utility capex policy / regulatory shifts"
+        "Utility capex and regulatory shifts"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -765,45 +756,44 @@
         "HPE",
         "VRT"
       ],
-      "thesisShort": "Super Micro is the highest-velocity AI server integrator, with rack-scale liquid-cooled DLC platforms shipping at scale to hyperscalers, neoclouds, and sovereign customers.",
-      "thesisLong": "Super Micro Computer is the build-to-order specialist of the AI server era. The company's modular Building Block design, in-house liquid-cooling integration, and time-to-market on every NVIDIA generation make it the integrator of choice for neoclouds (CoreWeave, Lambda, Nebius), Tier 2 hyperscalers, and sovereign AI deployments.\n\nThe DLC (direct liquid cooling) platform is the flagship product. Super Micro ships rack-scale liquid-cooled NVL72 GB200 systems with manifold integration, CDU compatibility, and the fastest design cycle in the industry. Revenue has scaled from roughly $7B in fiscal 2023 to a run-rate well above $20B in fiscal 2026.\n\nThe credibility journey has been turbulent. The 2024 short-seller report and 10-K delay damaged investor confidence, but the company filed audited financials, retained BDO as auditor, and rebuilt governance. Hyperscaler and sovereign relationships continued through the noise, which speaks to the technical moat.\n\nRisks remain real: gross margins are thin, working capital swings are violent, customer concentration is high, and execution risk on the new Malaysia and Mexico capacity is elevated. But on the bottleneck question, Super Micro is the most exposed name to AI server integration outside the hyperscaler-direct ODMs.",
+      "thesisShort": "Super Micro is the highest-velocity AI server integrator; fiscal 2026 revenue reached $39.1B, it booked over $60B of new orders in the June quarter, and it guided fiscal 2027 to $65-72B.",
+      "thesisLong": "Super Micro is the highest-velocity AI server integrator — rack-scale liquid-cooled platforms shipped to hyperscalers, neoclouds and sovereign customers on cycle times its larger competitors do not match.\n\nFiscal 2026, ended 30 June 2026, was a step-change: revenue of $39.1B against $22.0B in fiscal 2025, at a full-year gross margin of 10.8%. The fourth quarter carried the acceleration — $11.1B of net sales versus $10.2B in Q3 and $5.8B a year earlier, with gross margin of 17.5% against 9.9% the prior quarter and 9.5% a year earlier, and net income of $1,178M versus $195M in Q4 FY2025. Margin expansion of that magnitude at this company is the single most notable line in the print, because thin margins have historically been the whole bear case.\n\nThe order book is what drives the forward guide. Super Micro received over $60B in new orders during the June quarter, taking the order book and backlog to record levels entering fiscal 2027, and guided the September quarter to $14.5-15.5B against roughly $11.7B of prior consensus, with full fiscal 2027 revenue of $65-72B against roughly $54.4B of consensus.\n\nThat gap between guidance and consensus is the risk as much as the opportunity. Guiding to nearly double fiscal 2026 revenue raises the execution bar on supply allocation, working capital and component pricing simultaneously, and customer concentration means a single large program slipping moves the whole year.",
       "chokepointMetrics": [
         {
-          "label": "FY26 revenue run-rate",
-          "value": "$20B+"
+          "label": "FY2026 revenue",
+          "value": "$39.1B (year to 30 June 2026), from $22.0B in FY2025"
         },
         {
-          "label": "DLC platform launch date",
-          "value": "Q1 2024"
+          "label": "FQ4 2026 revenue / gross margin",
+          "value": "$11.1B at 17.5%, vs 9.5% a year earlier"
         },
         {
-          "label": "NVL72 design wins",
-          "value": "10+ customers"
+          "label": "New orders booked in FQ4 2026",
+          "value": ">$60B"
         },
         {
-          "label": "Operating margin",
-          "value": "8-10%"
+          "label": "FY2027 revenue guidance",
+          "value": "$65-72B, vs ~$54.4B prior consensus"
         },
         {
-          "label": "Liquid-cooled racks shipped 2025",
-          "value": "5K+"
+          "label": "FQ1 2027 revenue guidance",
+          "value": "$14.5-15.5B, vs ~$11.7B prior consensus"
         }
       ],
       "catalysts": [
-        "Blackwell Ultra and Rubin rack volume",
-        "Sovereign AI customer wins",
-        "Malaysia and Mexico capacity ramping",
-        "Margin recovery as supply normalizes",
-        "Returning to NASDAQ-100 inclusion"
+        "Fiscal 2027 revenue guided to $65-72B on a record order book",
+        "Rubin-generation rack platforms shipping through fiscal 2027",
+        "Gross margin sustaining above the 10.8% FY2026 average",
+        "Sovereign AI customer wins"
       ],
       "risks": [
-        "Thin gross margins under price competition",
-        "Customer concentration",
-        "Governance and audit trail scrutiny",
-        "Working capital volatility"
+        "Guidance far above prior consensus raises the execution bar",
+        "Historically thin gross margins under price competition",
+        "Customer concentration — one large program slipping moves the year",
+        "Working capital intensity funding a near-doubling of revenue"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -816,44 +806,44 @@
         "CSCO",
         "CRDO"
       ],
-      "thesisShort": "Arista is the leader in 400G/800G data-center Ethernet switching and the named partner for hyperscaler AI fabrics from Meta, Microsoft, and Oracle.",
-      "thesisLong": "Arista Networks is the merchant Ethernet leader for AI back-end fabrics. As hyperscalers move away from InfiniBand for AI clusters — driven by Ultra Ethernet Consortium standards and Broadcom Tomahawk silicon — Arista's 7800R3 and 7700 series have become the workhorses of 400G and 800G AI fabrics at Meta, Microsoft, and Oracle.\n\nThe AI back-end revenue line is the headline number. Management guides $1.5B+ of AI back-end revenue in 2025 and a path to $2.5B+ in 2026, with five named major customers and a growing pipeline of Tier 2 wins. EOS, Arista's network operating system, is the software moat that makes large fabric deployments operationally tractable.\n\nThe parallel front-end opportunity is equally large. Every AI cluster needs front-end networking to connect to storage, management, and external networks, and Arista wins both legs of the deployment.\n\nRisks include customer concentration (Meta and Microsoft each more than 10% of revenue), Cisco competing harder in AI-specific designs, and white-box pressure from hyperscaler self-build. But Arista's track record of execution and software stickiness has proven durable through every prior networking cycle.",
+      "thesisShort": "Arista leads high-speed data center Ethernet switching for AI fabrics; Q2 2026 was its first $3B quarter, and it raised 2026 guidance to roughly $12.6B with an AI Fabrics target of at least $3.5B.",
+      "thesisLong": "Arista is the leader in high-speed data center Ethernet switching and the named partner for hyperscaler AI fabrics. Q2 2026 was its first $3B quarter — revenue of $3.036B, up 37.7% year over year and above guidance — driven by both AI and enterprise demand.\n\nManagement raised the 2026 outlook to roughly 40% revenue growth, about $12.6B, lifted the operating margin target to 48-49% and held gross margin at 62-64%. The AI-specific target is at least $3.5B of AI Fabrics revenue for 2026, and Etherlink AI-fabric deployments now span more than 100 cumulative customers — a meaningful broadening from the handful of mega-scale accounts that defined the early AI networking cycle.\n\nThe most important detail from the quarter is the supply framing: AI networking demand remains materially above available supply. That inverts the usual read on a networking vendor's numbers. Revenue is not measuring demand, it is measuring what could be built and shipped, which is exactly what makes this a bottleneck rather than a share story. Scale-across networking — connecting AI clusters to each other rather than within a rack — is the newer vector, and could represent roughly 30% of the AI target.\n\nThe risks are concentration in a small number of very large customers, white-box and merchant-silicon adoption pressure at the low end, and renewed competition from Cisco in AI-specific designs.",
       "chokepointMetrics": [
         {
-          "label": "AI back-end revenue 2026E",
-          "value": "$2.5B+"
+          "label": "Quarterly revenue",
+          "value": "$3.036B (Q2 2026, +37.7% YoY) — first $3B quarter"
         },
         {
-          "label": "Named AI mega customers",
-          "value": "5"
+          "label": "2026 revenue outlook",
+          "value": "~$12.6B, about 40% growth (raised August 2026)"
         },
         {
-          "label": "800G port share",
-          "value": ">35%"
+          "label": "2026 AI Fabrics target",
+          "value": "≥$3.5B"
         },
         {
-          "label": "Operating margin",
-          "value": "~40%"
+          "label": "Etherlink AI-fabric customers",
+          "value": ">100 cumulative (Q2 2026)"
         },
         {
-          "label": "EOS deployments",
-          "value": "10K+ networks"
+          "label": "2026 operating margin target",
+          "value": "48-49% (raised)"
         }
       ],
       "catalysts": [
-        "800G AI fabric deployments at Meta, Microsoft, Oracle",
-        "1.6T transition starting 2026",
-        "Ultra Ethernet Consortium spec ratification",
-        "Enterprise AI campus / inference deployments",
-        "Service revenue compounding"
+        "AI Fabrics revenue tracking to the ≥$3.5B 2026 target",
+        "Scale-across networking becoming a growing share of the AI target",
+        "1.6T fabric transition",
+        "Enterprise AI campus and inference deployments broadening the customer base"
       ],
       "risks": [
-        "Customer concentration in two hyperscalers",
-        "Cisco resurgence in AI-specific designs",
-        "White-box adoption pressure"
+        "AI networking demand above available supply — supply, not demand, caps realized revenue",
+        "Customer concentration in a small number of hyperscalers",
+        "White-box and merchant-silicon adoption pressure",
+        "Cisco competition in AI-specific designs"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -866,44 +856,42 @@
         "FN",
         "AVGO"
       ],
-      "thesisShort": "Coherent leads the 800G/1.6T optical transceiver market, owns critical indium-phosphide laser supply, and is the primary external supplier to NVIDIA's optical roadmap.",
-      "thesisLong": "Coherent (formerly II-VI plus Coherent merger) is the most vertically integrated optical company in the AI infrastructure stack. The company owns indium-phosphide (InP) laser fabs, datacom transceiver assembly, and the materials supply for vertical-cavity surface-emitting lasers (VCSELs) used in short-reach AI cluster optics.\n\nThe 800G transceiver ramp through 2025 has been a step-function in revenue, and 1.6T qualification is in progress at hyperscaler reference designs for 2026 deployment. Coherent's position as one of the few suppliers with InP laser self-sufficiency is a defensible moat — most peers depend on Coherent (or a small handful of Asian suppliers) for upstream laser content.\n\nThe industrial laser business provides ballast, but the datacom optics segment is the equity story. Management has guided datacom revenue to compound 30%+ through 2027, and gross margin expansion from product mix and capacity utilization adds operating leverage.\n\nRisks include execution on capacity ramps, balance sheet leverage from the merger, and pricing pressure from Asian transceiver competition (Innolight, HiSense). But on the bottleneck question, AI clusters cannot scale beyond a few thousand GPUs without dense optical interconnect, and Coherent is the volume leader on the most demanding form factors.",
+      "thesisShort": "Coherent supplies the 800G and 1.6T optical transceivers that AI fabrics depend on; fiscal Q4 2026 was its first $2B quarter, with Datacenter & Communications at 79% of revenue and up 59% year over year.",
+      "thesisLong": "Coherent sits at the optical interconnect layer, where the constraint is laser supply and transceiver manufacturing rather than switch silicon. Fiscal Q4 2026 was a record and the company's first $2B quarter: revenue of $2.05B, up 34% year over year, taking full-year FY2026 revenue to $7.12B, up 22.5%.\n\nThe mix shift is the story. Datacenter & Communications drove 79% of quarterly revenue and grew 59% year over year, supported by demand for both 800G and 1.6T transceivers. Co-packaged optics — where the optical engine moves onto the switch package rather than sitting in a pluggable module — is described as approaching revenue, which would be the first structural change to transceiver economics in several product generations.\n\nThe concentration that comes with that mix is the corresponding exposure. At 79% of revenue, datacom is no longer a segment inside a diversified photonics company; it is the company, and the non-datacom businesses no longer provide much counter-cyclical ballast. Pricing pressure from Asian transceiver competitors is the persistent structural risk in this category, and it bites hardest exactly when volume is scaling.",
       "chokepointMetrics": [
         {
-          "label": "InP laser self-supply",
-          "value": "100%"
+          "label": "Quarterly revenue",
+          "value": "$2.05B (FQ4 2026, +34% YoY) — first $2B quarter"
         },
         {
-          "label": "800G transceiver share",
-          "value": "~30%"
+          "label": "FY2026 revenue",
+          "value": "$7.12B (+22.5% YoY)"
         },
         {
-          "label": "Datacom revenue growth",
-          "value": ">50% YoY"
+          "label": "Datacenter & Communications share",
+          "value": "79% of FQ4 2026 revenue, +59% YoY"
         },
         {
-          "label": "Hyperscaler customer count",
-          "value": "All top 5"
+          "label": "Demand drivers",
+          "value": "800G and 1.6T transceiver ramp (FQ4 2026)"
         },
         {
-          "label": "Capacity expansion 2026",
-          "value": "+50%"
+          "label": "Co-packaged optics",
+          "value": "Revenue described as approaching (FQ4 2026 commentary)"
         }
       ],
       "catalysts": [
-        "1.6T transceiver qualification at hyperscalers",
-        "Co-packaged optics partnership wins",
-        "Industrial laser cycle recovery",
-        "Margin expansion via capacity utilization",
-        "Deleveraging post-merger"
+        "1.6T transceiver volume ramp",
+        "Co-packaged optics moving to revenue",
+        "Datacom mix continuing to lift consolidated growth"
       ],
       "risks": [
-        "Asian transceiver competition pricing pressure",
-        "Balance sheet leverage",
-        "Lumpy industrial laser segment"
+        "Asian transceiver competition and pricing pressure",
+        "Concentration — datacom is now 79% of revenue",
+        "Cyclicality in the smaller non-datacom segments"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -916,44 +904,39 @@
         "LITE",
         "AVGO"
       ],
-      "thesisShort": "Fabrinet is the contract manufacturer behind much of the 800G/1.6T optical transceiver supply chain, with NVIDIA, Cisco, and Coherent among named customers.",
-      "thesisLong": "Fabrinet is the quiet enabler of the optical AI build-out. The Thai contract manufacturer specializes in precision optical assembly for transceivers, sensors, and laser modules, and its customer list reads like a who's-who of optical infrastructure: Cisco, Coherent, Lumentum, NVIDIA, Infinera, and several hyperscaler-direct programs.\n\nThe AI optics tailwind has accelerated revenue meaningfully. Optical communications revenue grew over 50% in fiscal 2025, with datacom mix expanding as 800G and 1.6T transceivers ramped at hyperscalers. Fabrinet's NVIDIA relationship — supplying optical engines for InfiniBand and selected DGX programs — is a particular bright spot.\n\nThe business model is asset-light versus most peers. Fabrinet runs a build-to-order model with minimal finished-goods inventory, which produces a return on invested capital well above the contract-manufacturing average and a balance sheet with substantial net cash. Capital allocation has favored buybacks and modest capacity expansion.\n\nRisks include customer concentration (top 5 customers exceed 60% of revenue), pricing pressure as transceivers commoditize, and Thailand geographic concentration. But Fabrinet has executed cleanly through every optical cycle for over a decade, and the AI datacom tailwind is the strongest in company history.",
+      "thesisShort": "Fabrinet manufactures much of the high-speed optical transceiver supply chain; fiscal Q4 2026 revenue rose 45% to $1.316B with data center revenue up 68% to $669M.",
+      "thesisLong": "Fabrinet is the contract manufacturer behind much of the high-speed optical supply chain — the company that physically builds transceivers and optical engines for the brands that sell them. Fiscal Q4 2026 revenue was $1.316B, up 45% year over year and above the high end of guidance, on broad-based strength across data center, communications infrastructure and automotive/industrial.\n\nData center is now the engine: $669M in the quarter, up 68% year over year, led by DCI products reaching a $1B annualized run rate alongside strong HPC growth. The forward shape is unusually legible for a contract manufacturer, because Fabrinet described the specific programs coming: a hyperscaler-direct transceiver program starting to ramp in the current quarter, a merchant program beginning in the December 2026 quarter, and further programs getting off the ground in early calendar 2027.\n\nThat sequencing is what makes Fabrinet a useful read on the optical bottleneck — it books the manufacturing slots before the transceivers appear in anyone's revenue. The exposures are the standard contract-manufacturing set: customer concentration, transceiver pricing commoditization as volumes scale, and geographic concentration in Thailand.",
       "chokepointMetrics": [
         {
-          "label": "Optical communications growth",
-          "value": ">50% YoY"
+          "label": "Quarterly revenue",
+          "value": "$1.316B (FQ4 2026, +45% YoY)"
         },
         {
-          "label": "Top 5 customer share",
-          "value": "~60%"
+          "label": "Data center revenue",
+          "value": "$669M (FQ4 2026, +68% YoY)"
         },
         {
-          "label": "Net cash position",
-          "value": "$900M+"
+          "label": "DCI product run-rate",
+          "value": "~$1B annualized (FQ4 2026)"
         },
         {
-          "label": "Datacom mix",
-          "value": ">50%"
-        },
-        {
-          "label": "ROIC",
-          "value": ">25%"
+          "label": "New transceiver programs",
+          "value": "Hyperscaler-direct ramping FQ1 2027; merchant program from the Dec-2026 quarter"
         }
       ],
       "catalysts": [
-        "1.6T transceiver volume in 2026",
-        "NVIDIA optical engine programs",
-        "Co-packaged optics manufacturing wins",
-        "New facility expansion in Thailand",
-        "Capital return acceleration"
+        "Hyperscaler-direct transceiver program ramping this quarter",
+        "Merchant transceiver program starting in the December 2026 quarter",
+        "Further programs beginning in early calendar 2027",
+        "Data center mix continuing to lift consolidated growth"
       ],
       "risks": [
-        "Top 5 customer concentration",
-        "Transceiver pricing commoditization",
+        "Customer concentration",
+        "Transceiver pricing commoditization as volumes scale",
         "Thailand geographic concentration"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -966,44 +949,43 @@
         "ASML",
         "TSM"
       ],
-      "thesisShort": "Synopsys controls roughly a third of EDA software plus the broadest IP portfolio, and every leading-edge AI chip — from Blackwell to Rubin to MI400 — is designed using its tools.",
-      "thesisLong": "Synopsys sits at the design front of the AI silicon flow. Every advanced chip — NVIDIA Blackwell and Rubin, AMD MI400, Broadcom XPUs, Apple silicon, Google TPU — is designed using Synopsys's Fusion Design Platform and verified using its VCS simulator and emulation hardware. The company also licenses the broadest IP portfolio in the industry, including PCIe, USB, DDR/HBM controllers, and high-speed SerDes.\n\nThe Ansys acquisition (closed late 2025) extends Synopsys into multiphysics simulation — thermal, mechanical, electromagnetic — which is critical for the dense, liquid-cooled AI rack designs of 2026 and beyond. The combined company can deliver a chip-to-system simulation flow that no competitor matches.\n\nAI-driven design is the second growth vector. Synopsys.ai uses generative AI to optimize chip layouts, and the productivity gains are real enough that EDA pricing has held or expanded even as design complexity exploded. Recurring revenue exceeds 80% of total, and customer renewal rates are exceptional.\n\nRisks include the Ansys integration overhang, China revenue exposure, and the competitive intensity from Cadence on specific tool segments. But on the bottleneck question, no leading-edge AI chip can be designed without Synopsys (or Cadence) tools, and Synopsys is the larger of the two.",
+      "thesisShort": "Synopsys pairs EDA leadership with the broadest silicon IP portfolio and now Ansys multiphysics; Q2 FY2026 revenue rose 42% to $2.3B with Ansys contributing $652M.",
+      "thesisLong": "Synopsys is one half of the EDA duopoly, and every leading-edge AI chip is designed with its tools and increasingly built from its IP. The Ansys acquisition — roughly $35B — changed the shape of the company from EDA-plus-IP to what management calls silicon-to-systems, pairing chip design with multiphysics simulation and analysis.\n\nQ2 FY2026 showed the combination working through the P&L. Revenue rose 42% to $2.3B, with Design Automation revenue up 62% to $1.8B and Ansys contributing $652M. Synopsys Multiphysics Fusion integrates Ansys signoff engines directly with the EDA flow, which is the technical basis for the claim that a combined stack closes designs materially faster than stitching two vendors' tools together — and the specific axis on which Synopsys is now competing with Cadence.\n\nIntegration has had a visible cost. Roughly 2,000 employees, about 10% of the combined workforce, were cut post-merger. The other structural drag is policy: US export controls effectively restricted advanced EDA tools to Chinese customers across 2025-2026, removing a slice of historical revenue that all three major EDA vendors reported against.\n\nThe bottleneck logic is unchanged by any of this. There is no path to a leading-edge AI accelerator that routes around the two EDA houses, and the IP attach makes Synopsys content per design higher on each successive node.",
       "chokepointMetrics": [
         {
-          "label": "EDA market share",
-          "value": "~33%"
+          "label": "Quarterly revenue",
+          "value": "$2.3B (Q2 FY2026, +42% YoY)"
         },
         {
-          "label": "Recurring revenue mix",
-          "value": ">80%"
+          "label": "Design Automation revenue",
+          "value": "$1.8B (+62% YoY, Q2 FY2026)"
         },
         {
-          "label": "IP customer count",
-          "value": "1,000+"
+          "label": "Ansys contribution in quarter",
+          "value": "$652M (Q2 FY2026)"
         },
         {
-          "label": "Renewal rates",
-          "value": ">95%"
+          "label": "Ansys acquisition value",
+          "value": "~$35B (closed 2025)"
         },
         {
-          "label": "Ansys deal value",
-          "value": "$35B"
+          "label": "Post-merger restructuring",
+          "value": "~2,000 roles, about 10% of the combined workforce (2026)"
         }
       ],
       "catalysts": [
-        "Ansys integration synergies through 2027",
-        "Synopsys.ai monetization expansion",
+        "Multiphysics Fusion integrating Ansys signoff engines into the EDA flow",
+        "Synopsys.ai monetization across the design flow",
         "IP attach to AI accelerator designs",
-        "Multiphysics simulation for rack-scale design",
-        "Sovereign chip design tool licensing"
+        "Restructuring benefits flowing through the P&L"
       ],
       "risks": [
-        "Ansys integration execution risk",
-        "China revenue under export controls",
+        "China export restrictions on advanced EDA tools removing historical revenue",
+        "Ansys integration execution",
         "Cadence competitive intensity"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -1016,44 +998,43 @@
         "ASML",
         "TSM"
       ],
-      "thesisShort": "Cadence is Synopsys's twin in the EDA duopoly, with a dominant emulation business (Palladium) that every advanced AI chip uses for pre-silicon verification.",
-      "thesisLong": "Cadence Design Systems is the second pillar of the EDA duopoly. While Synopsys edges Cadence in market share, Cadence leads in several specific tool categories — most notably emulation and prototyping (Palladium and Protium), where AI chip teams spend tens of millions of dollars per design to verify functionality before tapeout. Every modern AI accelerator goes through Palladium emulation.\n\nThe Cadence.AI suite mirrors Synopsys's AI-driven design push, and customer adoption has been strong. The company has guided sustained mid-teens revenue growth through 2026 and 2027, with operating margins approaching the high 30s and recurring revenue exceeding 85%.\n\nThe BETA CAE acquisition extended Cadence into multiphysics simulation, paralleling Synopsys's Ansys move at smaller scale. The system design and analysis segment is now a meaningful third leg alongside chip design tools and IP.\n\nRisks include China exposure, the same Synopsys competitive overlap, and execution on multiphysics integration. But Cadence's track record of execution, leadership in emulation, and customer renewals make it a high-quality compounder regardless of how the AI chip cycle ultimately resolves.",
+      "thesisShort": "Cadence is Synopsys's twin in the EDA duopoly, with a dominant emulation business used for pre-silicon verification; Q2 2026 backlog reached a record $8.1B, up 27% year over year.",
+      "thesisLong": "Cadence is the other half of the EDA duopoly, and its emulation and prototyping business is the specific chokepoint: every advanced AI chip is verified pre-silicon on hardware emulators before a mask set is committed, and there are very few credible suppliers of that hardware.\n\nQ2 2026 beat across the guidance range. Revenue was $1.584B against $1.275B a year earlier, with non-GAAP diluted EPS of $2.11 versus $1.65. The line that matters most for a subscription-and-hardware business is backlog: $8.1B at quarter end, up 27% year over year, with $4.2B of remaining performance obligations expected to convert to revenue within twelve months. That is the visibility that lets Cadence raise a full-year guide with two quarters still to run.\n\nManagement raised 2026 guidance to 19% revenue growth — implying $6.26-6.34B — with non-GAAP operating margin of 44.25%, non-GAAP EPS of $8.10 and roughly $2B of operating cash flow at the midpoint, citing accelerating demand for AI-driven design solutions.\n\nThe risks are policy and competition. US export controls on advanced EDA tools to Chinese customers removed a slice of the historical revenue base across 2025-2026, and the Synopsys-Ansys combination now competes with Cadence across a wider silicon-to-systems surface than pure-play EDA ever did.",
       "chokepointMetrics": [
         {
-          "label": "EDA market share",
-          "value": "~30%"
+          "label": "Quarterly revenue",
+          "value": "$1.584B (Q2 2026), from $1.275B a year earlier"
         },
         {
-          "label": "Recurring revenue mix",
-          "value": ">85%"
+          "label": "Backlog",
+          "value": "Record $8.1B at quarter end (Q2 2026, +27% YoY)"
         },
         {
-          "label": "Palladium emulation share",
-          "value": ">50%"
+          "label": "Next-12-month remaining performance obligations",
+          "value": "$4.2B (Q2 2026)"
         },
         {
-          "label": "Operating margin",
-          "value": "~38%"
+          "label": "2026 revenue guidance",
+          "value": "$6.26-6.34B, about 19% growth (raised)"
         },
         {
-          "label": "Renewal rates",
-          "value": ">95%"
+          "label": "2026 non-GAAP operating margin guidance",
+          "value": "44.25%"
         }
       ],
       "catalysts": [
-        "Palladium Z3 / next-gen emulation refresh",
-        "Cadence.AI monetization",
-        "Multiphysics simulation expansion (BETA CAE)",
-        "IP attach to AI accelerator designs",
-        "Sustained pricing power on renewals"
+        "$8.1B backlog converting through 2027",
+        "Cadence.AI monetization across the design flow",
+        "Multiphysics and system analysis expansion",
+        "IP attach to AI accelerator designs"
       ],
       "risks": [
-        "China revenue under export controls",
-        "Synopsys competitive intensity",
-        "Multiphysics integration execution"
+        "China export restrictions on advanced EDA tools",
+        "Synopsys-Ansys combination competing across silicon-to-systems",
+        "Renewal timing concentration in a backlog-driven model"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -1066,45 +1047,45 @@
         "OKLO",
         "CCJ"
       ],
-      "thesisShort": "Constellation owns the largest US nuclear fleet (33 GW) and signed the headline 20-year PPA with Microsoft to restart Three Mile Island Unit 1 to power AI data centers.",
-      "thesisLong": "Constellation Energy is the cleanest large-cap equity exposure to the nuclear-for-AI thesis. The company operates roughly 33 GW of nuclear capacity, which is more than double any US peer, and has actively signed long-duration power purchase agreements with hyperscalers seeking firm, carbon-free power for AI data centers.\n\nThe headline deal is the 20-year Microsoft PPA to restart Three Mile Island Unit 1 (rebranded Crane Clean Energy Center) targeting 2028 commercial operation. The economics — reportedly above $100/MWh, locked for two decades — re-rated the entire nuclear sector and demonstrated hyperscaler willingness to pay premium prices for reliable carbon-free power.\n\nBeyond TMI, Constellation is pursuing uprates, license extensions, and additional hyperscaler PPAs across its fleet. The Calpine acquisition (closed 2025) added 27 GW of natural gas capacity, creating a flexible firm-power portfolio that can serve hyperscalers with both nuclear baseload and gas peaking.\n\nRisks include regulatory complexity (the FERC ruling on the Talen-Amazon co-location deal injected uncertainty), nuclear operational risk, and the long timelines for any new capacity. But Constellation's combination of existing fleet, hyperscaler relationships, and regulatory positioning makes it the dominant US nuclear-for-AI name.",
+      "thesisShort": "Constellation owns the largest US nuclear fleet and is restarting the former Three Mile Island Unit 1 — now the Crane Clean Energy Center — for Microsoft, with restart on track for 2027 and fuel on site by end-2026.",
+      "thesisLong": "Constellation owns the largest US nuclear fleet and, following the $16.4B Calpine acquisition that closed in 2026, is the largest private power producer globally. Q2 2026 was its first full quarter post-acquisition: revenue rose 64% to $11B, adjusted operating earnings were $2.74 per share, nuclear output reached 44,666 gigawatt-hours, and the company held its 2026 outlook of $11-12 per share.\n\nThe headline asset is the restart of the former Three Mile Island Unit 1, now renamed the Christopher M. Crane Clean Energy Center, under a twenty-year power purchase agreement with Microsoft. Restart remains on track for 2027 following a FERC waiver from PJM interconnection rules granted on 1 June 2026, and the plant is on schedule to receive nuclear material by the end of 2026, to be held in storage pending approval to return to operations. Environmental review and public comment progressed through July 2026.\n\nThe complication is transmission rather than the reactor. PJM determined that transmission upgrades are needed to safely deliver all of the 835 MW unit's output to the grid — a reminder that in this cycle, restarting generation is often easier than moving it. The restart itself carries a roughly $1.6B price tag.\n\nThe broader chokepoint logic holds: existing, licensed, already-interconnected nuclear capacity is the scarcest firm clean power available on a data center's timeline, and Constellation owns more of it than anyone else. FERC rulings on co-location, operational incidents and power market volatility remain the live risks.",
       "chokepointMetrics": [
         {
-          "label": "Nuclear capacity",
-          "value": "~33 GW"
+          "label": "Q2 2026 adjusted operating earnings",
+          "value": "$2.74/share; 2026 outlook held at $11-12/share"
         },
         {
-          "label": "TMI Unit 1 PPA term",
-          "value": "20 years"
+          "label": "Nuclear output",
+          "value": "44,666 GWh (Q2 2026)"
         },
         {
-          "label": "TMI restart target",
-          "value": "2028"
+          "label": "Calpine acquisition",
+          "value": "$16.4B, closed 2026 — largest private power producer globally"
         },
         {
-          "label": "Calpine gas capacity added",
-          "value": "~27 GW"
+          "label": "Crane Clean Energy Center restart",
+          "value": "On track for 2027; nuclear fuel on site by end-2026"
         },
         {
-          "label": "Carbon-free generation",
-          "value": ">90%"
+          "label": "Crane restart cost",
+          "value": "~$1.6B for the 835 MW unit"
         }
       ],
       "catalysts": [
-        "TMI Unit 1 restart milestones through 2027",
-        "Additional hyperscaler PPAs across the fleet",
-        "License extensions adding decades of value",
-        "Calpine integration synergies",
-        "Production tax credit policy clarity"
+        "Crane Clean Energy Center (former TMI Unit 1) restart targeted for 2027",
+        "Nuclear fuel delivery to the Crane site by end-2026",
+        "Completion of PJM transmission upgrades needed to deliver full Crane output",
+        "Calpine integration synergies through 2027",
+        "Additional hyperscaler PPAs across the fleet"
       ],
       "risks": [
-        "FERC regulatory rulings on co-location",
+        "PJM-identified transmission upgrades required before full Crane output can be delivered",
+        "FERC rulings on co-location",
         "Nuclear operational incidents",
-        "Long lead times for new capacity",
         "Power market price volatility"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -1117,45 +1098,44 @@
         "OKLO",
         "CCJ"
       ],
-      "thesisShort": "Vistra owns the second-largest US nuclear fleet plus a large gas portfolio in Texas — ground zero for AI data center load growth and PPA signings.",
-      "thesisLong": "Vistra Corp is the merchant power company most leveraged to AI-driven load growth in Texas and PJM. The company owns the Comanche Peak and Perry nuclear plants (Energy Harbor acquisition) plus a fleet of gas generation across ERCOT, PJM, and the Northeast. Texas load growth driven by data centers, Bitcoin mining, and electrification has been the strongest in any US region.\n\nThe AI thesis runs through both nuclear PPAs and merchant gas exposure. Vistra has signaled willingness to sign hyperscaler PPAs at premium prices, and the Comanche Peak nuclear plant in particular sits in a region with explosive AI data center growth (Stargate, Meta, Oracle, Microsoft). The merchant gas fleet captures the upside of any tightening in ERCOT and PJM forward power curves.\n\nThe stock has been volatile but the fundamental thesis is intact: firm, dispatchable power in Texas and PJM is structurally undersupplied through 2028, and Vistra owns a meaningful share of it. Capital return has been aggressive, with ongoing buybacks and a growing dividend.\n\nRisks include power market volatility, regulatory uncertainty (FERC again), and concentrated single-asset risk on the nuclear plants. But on the bottleneck question, the AI data center build-out cannot proceed without firm power, and Vistra owns more of it than nearly anyone.",
+      "thesisShort": "Vistra pairs a large nuclear fleet with Texas gas generation at the centre of AI load growth, and has now signed roughly 3.8 GW of twenty-year nuclear PPAs with AWS and Meta.",
+      "thesisLong": "Vistra owns one of the largest US nuclear fleets alongside a substantial gas portfolio in Texas — the intersection of firm clean power and the fastest-growing data center load in the country. Q2 2026 adjusted EBITDA was $1.767B, up 30% year over year from $1.35B, with Generation EBITDA up 68% to $994M and Retail roughly flat at $773M.\n\nThe contracting is what changes the business. Vistra has signed twenty-year nuclear PPAs totalling approximately 3.8 GW: 1,200 MW at Comanche Peak with AWS, with deliveries starting in Q4 2027, and 2,609 MW across its PJM plants with Meta. Combined with retail, those contracts are expected to shift close to 50% of EBITDA to retail and contracted sources, materially reducing merchant exposure. Comanche Peak is targeted for energization at the end of 2027. The company also unveiled a $1B Helix data center partnership with KKR and NVIDIA.\n\nThe honest caveat on all of it is timing. The largest contracted volumes do not start delivering until late 2027, so the EBITDA mix shift is announced rather than realized, and the intervening years remain merchant-exposed. Texas has also begun auditing its data center interconnection queue, though Vistra has indicated the baseload Comanche Peak project is not expected to be affected.\n\nThe residual risks are the ones that have always applied to merchant generation: power price volatility, weather tail risk in ERCOT, and gas commodity exposure.",
       "chokepointMetrics": [
         {
-          "label": "Total generation capacity",
-          "value": "~41 GW"
+          "label": "Adjusted EBITDA",
+          "value": "$1.767B (Q2 2026, +30% YoY)"
         },
         {
-          "label": "Nuclear capacity",
-          "value": "~6.4 GW"
+          "label": "Generation EBITDA",
+          "value": "$994M (Q2 2026, +68% YoY)"
         },
         {
-          "label": "ERCOT load growth 2025-2030",
-          "value": ">40%"
+          "label": "Signed 20-year nuclear PPAs",
+          "value": "~3.8 GW — 1,200 MW Comanche Peak/AWS, 2,609 MW PJM/Meta"
         },
         {
-          "label": "Forward EBITDA visibility",
-          "value": "2028"
+          "label": "Comanche Peak energization target",
+          "value": "End of 2027; AWS deliveries from Q4 2027"
         },
         {
-          "label": "Buyback authorization",
-          "value": "$5B+"
+          "label": "Contracted + retail share of EBITDA once in service",
+          "value": "~50%"
         }
       ],
       "catalysts": [
-        "Hyperscaler PPA signings at premium prices",
-        "ERCOT forward power curves tightening",
-        "Comanche Peak license extension and uprates",
-        "Continued aggressive buybacks",
-        "PJM capacity auction price strength"
+        "Comanche Peak data center energization targeted for end-2027",
+        "Meta PJM nuclear PPA deliveries beginning",
+        "$1B Helix data center partnership with KKR and NVIDIA",
+        "Further PPA signings across the fleet"
       ],
       "risks": [
-        "Power market price volatility",
-        "FERC regulatory rulings",
-        "Texas weather event tail risk",
+        "PPA delivery timing — the largest contracts start in Q4 2027",
+        "Texas data center interconnection queue audit",
+        "Power market price volatility and ERCOT weather tail risk",
         "Gas commodity price exposure"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -1168,45 +1148,44 @@
         "CCJ",
         "CEG"
       ],
-      "thesisShort": "Oklo is the highest-profile US small modular reactor developer with NRC licensing in progress and a partnership pipeline aimed at powering AI data centers behind the meter.",
-      "thesisLong": "Oklo is the speculative end of the nuclear-for-AI trade. The company is developing the Aurora powerhouse — a sodium-cooled fast reactor in the 15-75 MWe class — designed for behind-the-meter deployment at data center campuses. The first commercial deployment is targeted for late 2027 / 2028 at the Idaho National Laboratory site, with subsequent units planned at customer sites under build-own-operate contracts.\n\nThe demand side is real. Switch, Equinix, and other data center operators have signed letters of intent for hundreds of megawatts of Oklo capacity, and the founder-led management team (Jacob DeWitte) has been aggressive on customer development and regulatory engagement.\n\nThe NRC licensing pathway is the gating risk. Oklo's combined license application is in review, and any delay or denial pushes commercial deployment further out. The company's all-equity financial profile (no operating revenue, large cash burn) means equity is highly sensitive to milestone news.\n\nRisks are extreme by AI bottleneck standards: regulatory denial, fuel supply (HALEU is constrained), construction execution on a first-of-a-kind reactor, and competition from NuScale, X-energy, and BWXT. But for investors who want pure-play SMR exposure with a credible path to first kilowatts in this decade, Oklo is the most prominent name.",
+      "thesisShort": "Oklo is the highest-profile US advanced reactor developer, and in August 2026 its Groves isotope test reactor in Texas reached first criticality in about eleven months — though the commercial Aurora powerhouses remain years out.",
+      "thesisLong": "Oklo is the highest-profile US advanced reactor developer aimed at powering data centers behind the meter, and 2026 gave it the first hard proof point the sector has been waiting for.\n\nOn 5 August 2026, Oklo's Groves isotope test reactor at Lockhart, Texas reached first criticality — roughly eleven months from greenfield, with substantial construction completed in 229 days, funded privately and sited privately under DOE oversight. Management describes it as the fastest greenfield-to-criticality transition for a full-scale privately funded reactor. Whatever weight one puts on the record framing, it converts Oklo from a licensing story into a company that has actually built and started a reactor.\n\nThe commercial fleet is a separate and slower timeline, and the distinction matters. Groves is an isotope test reactor, not an Aurora powerhouse. Aurora-INL is now targeted for 2028 startup, moved back from earlier late-2027 guidance, and the 1.2 GW Ohio campus supporting Meta is not expected online until around 2030. DOE approved the Nuclear Safety Design Agreement for Aurora-INL early in 2026 and the Preliminary Documented Safety Analysis on 11 June 2026, and Oklo has completed two of four steps for DOE authorisation to fabricate its initial core at the Aurora Fuel Fabrication Facility at INL, drawing on 5 metric tons of HALEU allocated under a 2019 INL cooperative agreement plus EBR-II recovered fuel.\n\nThe pipeline is large and soft: approximately 14 GW of non-binding letters of intent, including a 12 GW arrangement with data center operator Switch and an LOI with Equinix. Oklo ended Q2 2026 with $3.0B of cash and marketable securities against a $124.2M first-half loss from operations, so funding is not the near-term constraint — conversion and construction are.",
       "chokepointMetrics": [
         {
-          "label": "First commercial target",
-          "value": "2027-2028"
+          "label": "Groves test reactor",
+          "value": "First criticality 5 Aug 2026, ~11 months from greenfield (229 days construction)"
         },
         {
-          "label": "Customer pipeline (LOIs)",
-          "value": "14 GW+"
+          "label": "Customer pipeline (non-binding LOIs)",
+          "value": "~14 GW (2026), incl. 12 GW with Switch"
         },
         {
-          "label": "Aurora unit size",
-          "value": "15-75 MWe"
+          "label": "Aurora-INL startup target",
+          "value": "2028, moved back from late 2027"
         },
         {
-          "label": "Cash position",
-          "value": "$300M+"
+          "label": "Liquidity",
+          "value": "$3.0B cash and marketable securities (Q2 2026)"
         },
         {
-          "label": "NRC license status",
-          "value": "Under review"
+          "label": "HALEU allocation",
+          "value": "5 metric tons via INL cooperative agreement, plus EBR-II recovered fuel"
         }
       ],
       "catalysts": [
-        "NRC combined license application progress",
-        "First fuel load milestone at INL",
-        "Hyperscaler PPA conversion from LOI",
-        "HALEU fuel supply secured (Centrus partnership)",
-        "Sam Altman / OpenAI affiliate deal flow"
+        "Aurora-INL targeted for 2028 startup",
+        "Remaining DOE authorisation steps for the Aurora Fuel Fabrication Facility at INL",
+        "Conversion of the ~14 GW non-binding LOI pipeline into firm contracts",
+        "1.2 GW Ohio campus supporting Meta, targeted online around 2030"
       ],
       "risks": [
-        "NRC license delay or denial",
-        "First-of-a-kind construction overruns",
-        "HALEU fuel supply shortages",
-        "Equity dilution risk"
+        "Aurora-INL startup already moved from late 2027 to 2028",
+        "Pipeline is non-binding letters of intent, not contracted capacity",
+        "Groves is an isotope test reactor, not a commercial powerhouse",
+        "Continued operating cash burn ($124.2M loss from operations in 1H 2026)"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     },
     {
@@ -1219,45 +1198,44 @@
         "CEG",
         "VST"
       ],
-      "thesisShort": "Cameco is the largest Western uranium miner and, via Westinghouse, the largest non-Russian fuel-cycle services provider — the input commodity to every nuclear plant powering AI.",
-      "thesisLong": "Cameco is the integrated fuel-cycle play on the nuclear renaissance. The company operates the Cigar Lake and McArthur River uranium mines in Saskatchewan — among the highest-grade in the world — and owns 49% of Westinghouse, the dominant Western reactor designer and fuel-cycle services provider.\n\nThe uranium thesis is structural. Spot prices climbed from sub-$30/lb in 2020 to $80-$100/lb through 2024-2025, driven by reactor restarts, license extensions, new builds, and Western de-risking from Russian conversion and enrichment. Cameco's long-term contract book locks in pricing at premium levels, with average realized prices climbing each year as legacy contracts roll off.\n\nWestinghouse adds a non-commodity earnings stream. As reactor newbuilds ramp globally — Eastern Europe, the Middle East, and selected US sites — Westinghouse captures fuel, services, and reactor design revenue with high margin and long-duration contracts.\n\nRisks include uranium price volatility, geopolitical supply disruptions (Kazakhstan, Russia), and operational execution at the mines. But on the bottleneck question, every nuclear-powered AI data center ultimately depends on uranium fuel, and Cameco is the cleanest Western exposure to it.",
+      "thesisShort": "Cameco is the largest Western uranium miner and, via its 49% Westinghouse stake, sits inside the largest non-Russian fuel-cycle franchise — now attached to an $80B US government reactor programme.",
+      "thesisLong": "Cameco is the largest Western uranium miner and, through its 49% stake in Westinghouse (Brookfield holds 51%), sits inside the largest non-Russian fuel-cycle and reactor franchise. The commodity is the input to every nuclear plant powering AI load, and the fuel cycle is where Western supply is thinnest.\n\nQ2 2026, reported on 31 July, was a softer quarter operationally: net earnings of $25M and adjusted EBITDA of $391M, taking first-half figures to $156M and $899M respectively. The year-over-year decline came mainly from lower equity earnings at Westinghouse and lower planned sales volumes, partly offset by higher average realized prices in both uranium and fuel services. Cameco reaffirmed 2026 uranium production guidance of 19.5-21.5 million pounds despite flooding-related disruption at its northern Saskatchewan operations.\n\nThe Westinghouse leg is where the AI linkage is most direct. The US government, Brookfield, Cameco and Westinghouse announced an $80B strategic partnership to deploy AP1000 reactors explicitly framed against data center electricity demand, backed by $17.5B in DOE loan facilities, with Westinghouse stating in July 2026 that it plans ten new US plants with construction starting in 2030. Westinghouse also confidentially submitted a draft Form S-1 to the SEC on 31 July 2026 for a proposed IPO, which would put a public market value on an asset currently carried through equity accounting.\n\nSpot uranium traded near $86.5 per pound in early August 2026 and has been range-bound, while long-term contract pricing has moved to multi-year highs on structural supply deficits — the divergence that matters most for a producer whose book is largely long-term contracted.",
       "chokepointMetrics": [
         {
-          "label": "Cigar Lake grade",
-          "value": "~17% U3O8"
+          "label": "Uranium spot price",
+          "value": "~$86.5/lb (early August 2026)"
+        },
+        {
+          "label": "2026 production guidance",
+          "value": "19.5-21.5M lb, reaffirmed at Q2 2026"
         },
         {
           "label": "Westinghouse stake",
-          "value": "49%"
+          "value": "49% (Brookfield holds 51%)"
         },
         {
-          "label": "Long-term contract book",
-          "value": "200+ MM lbs"
+          "label": "Q2 2026 adjusted EBITDA",
+          "value": "$391M; $899M for 1H 2026"
         },
         {
-          "label": "Spot uranium price 2025",
-          "value": "$80-100/lb"
-        },
-        {
-          "label": "Western share of Westinghouse fuel",
-          "value": "Dominant"
+          "label": "Westinghouse US programme",
+          "value": "$80B partnership, 10 AP1000 plants, $17.5B DOE loan facilities"
         }
       ],
       "catalysts": [
-        "Reactor restart wave (TMI, Palisades, Duane Arnold)",
-        "Western de-risking from Russian conversion / enrichment",
-        "New build announcements in Europe and Middle East",
-        "Westinghouse AP1000 export pipeline",
-        "Long-term contract pricing rolling higher"
+        "Westinghouse IPO process following the 31 July 2026 confidential Form S-1",
+        "Westinghouse plan for ten new US plants with construction from 2030",
+        "Long-term contract pricing at multi-year highs against ~$86/lb spot",
+        "Reactor restart wave (Crane, Palisades, Duane Arnold) lifting fuel demand"
       ],
       "risks": [
+        "Flooding and operational disruption at northern Saskatchewan mines",
+        "Lower equity earnings from Westinghouse weighing on reported results",
         "Uranium spot price volatility",
-        "Kazakh / Russian supply disruptions",
-        "Mine operational execution",
-        "Currency translation (CAD vs USD)"
+        "Kazakh and Russian supply and policy shifts"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28",
+      "lastUpdated": "2026-08-19",
       "sector": "AI"
     }
   ]
