@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-08T00:00:00Z",
+  "generatedAt": "2026-08-19T00:00:00Z",
   "entries": [
     {
       "id": "lly-tirzepatide-franchise",
@@ -7,31 +7,49 @@
       "sector": "Healthcare",
       "layer": "GLP-1 & Obesity",
       "primaryTicker": "LLY",
-      "relatedTickers": ["NVO", "VKTX", "AMGN"],
-      "thesisShort": "Eli Lilly's tirzepatide is the world's best-selling drug in 2025, with Zepbound holding ~70% of new branded obesity scripts and Mounjaro leading diabetes incretins on both sides of the Atlantic.",
-      "thesisLong": "Lilly is the single most important chokepoint in the GLP-1 era. Tirzepatide became the world's top-selling drug in Q3 2025, and the combined Mounjaro+Zepbound franchise drove roughly 56% of Lilly's revenue. Q4 2025 Mounjaro worldwide revenue grew 110% to $7.4B and US Zepbound grew 122% YoY, putting the franchise on a multi-tens-of-billions annualized run rate.\n\nThe moat is dual-mechanism. Tirzepatide's GLP-1/GIP dual agonism delivers superior weight loss versus Novo's semaglutide in head-to-head trials, and Lilly's oral orforglipron is on track to be the first oral small-molecule GLP-1 with submission and launch in 2026 — a manufacturing and distribution unlock that injectables can't match.\n\nCapacity is the bottleneck. Lilly is spending $50B+ on US manufacturing (Concord NC, Lebanon IN, Mount Pleasant NC, Houston TX, plus a new $3B site announced in Q3 2025) to relieve API and fill-finish constraints. Even with the build-out, demand still outstrips supply for higher-dose Zepbound vials.\n\n2026 guidance of $80–83B revenue with Lilly set to lead pharma by revenue in 2026 reflects how far ahead the franchise sits. Risks are concentrated: a single safety signal, accelerated Medicare price negotiation, or Viking/Amgen approvals each compress the moat — but on the question of who gates the obesity supercycle in 2026, the answer is Lilly.",
+      "relatedTickers": [
+        "NVO",
+        "VKTX",
+        "AMGN"
+      ],
+      "thesisShort": "Eli Lilly's tirzepatide franchise generated $14.87 billion in Q2 2026 alone — nearly two-thirds of company revenue — while the oral follow-up Foundayo (orforglipron) launched to a soft $98 million start.",
+      "thesisLong": "Eli Lilly's tirzepatide is the highest-grossing pharmaceutical franchise in the world, and the gap to Novo Nordisk has widened rather than closed.\n\nQ2 2026 worldwide revenue was $23.0 billion, up 48% year over year. Mounjaro, the type 2 diabetes presentation, grew 91% to $9.94 billion; Zepbound, the obesity presentation, grew 46% to $4.93 billion. Together they accounted for almost two-thirds of total company revenue. Across the first half of 2026 tirzepatide brought in roughly $27.7 billion, putting Lilly more than $10.2 billion ahead of Novo Nordisk on incretin revenue against a gap of under $2 billion a year earlier. Lilly raised its 2026 outlook again alongside the print.\n\nThe oral chapter has begun, and it started slowly. Foundayo — orforglipron, Lilly's oral GLP-1 — generated $98 million in the quarter, described by the company as very early in launch but visibly lagging Novo's oral Wegovy, which did $497 million over the same period. That is the single most important development for anyone underwriting Lilly's next leg: the injectable franchise is compounding, but the pill that was supposed to open the mass-market, supply-unconstrained channel is behind its direct competitor out of the gate.\n\nThe manufacturing thesis remains the structural moat. Lilly has committed tens of billions to US API and fill-finish capacity precisely because incretin supply, not demand, has governed revenue for three years, and the company that can physically make more doses captures the market.\n\nRisks are policy and competition: IRA price negotiation eventually reaching tirzepatide, next-generation entrants including Viking's VK2735 and Amgen's MariTide, and any adverse signal in long-duration outcomes data.",
       "chokepointMetrics": [
-        { "label": "Zepbound US new-Rx share (branded obesity)", "value": "~70%" },
-        { "label": "Q4 2025 Mounjaro WW revenue", "value": "$7.4B" },
-        { "label": "Lilly 2026 revenue guidance", "value": "$80-83B" },
-        { "label": "US manufacturing capex commitments", "value": "$50B+" },
-        { "label": "Incretin Rx share (US, Lilly)", "value": "~2 of 3 new" }
+        {
+          "label": "Q2 2026 Mounjaro revenue",
+          "value": "$9.94B (+91% YoY)"
+        },
+        {
+          "label": "Q2 2026 Zepbound revenue",
+          "value": "$4.93B (+46% YoY)"
+        },
+        {
+          "label": "Tirzepatide share of company revenue",
+          "value": "Almost two-thirds of $23.0B Q2 2026 total"
+        },
+        {
+          "label": "1H 2026 tirzepatide revenue",
+          "value": "~$27.7B — more than $10.2B ahead of Novo Nordisk"
+        },
+        {
+          "label": "Foundayo (orforglipron) launch",
+          "value": "$98M in Q2 2026, behind oral Wegovy’s $497M"
+        }
       ],
       "catalysts": [
-        "Orforglipron oral GLP-1 FDA submission and 2026 launch",
-        "Mount Pleasant and Houston API plant qualifications",
-        "Tirzepatide HFpEF, OSA, and MASH label expansions",
-        "Retatrutide (triple agonist) Phase 3 readouts",
-        "Direct-to-consumer LillyDirect channel scaling"
+        "Foundayo (orforglipron) scaling from a $98M first full quarter",
+        "US API and fill-finish plant qualifications adding dose capacity",
+        "Tirzepatide label expansions beyond diabetes and obesity",
+        "Retatrutide (triple agonist) Phase 3 readouts"
       ],
       "risks": [
-        "Medicare IRA price negotiation reaching tirzepatide",
-        "Compounded GLP-1 reintroduction if shortage list returns",
-        "Viking VK2735 or Amgen MariTide encroaching",
+        "Oral Foundayo launch trailing Novo’s oral Wegovy in its first quarter",
+        "Medicare IRA price negotiation eventually reaching tirzepatide",
+        "Next-generation entrants (Viking VK2735, Amgen MariTide)",
         "Adverse safety signal in long-duration outcomes data"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "nvo-semaglutide-franchise",
@@ -39,31 +57,49 @@
       "sector": "Healthcare",
       "layer": "GLP-1 & Obesity",
       "primaryTicker": "NVO",
-      "relatedTickers": ["LLY", "TMO", "WST"],
-      "thesisShort": "Novo Nordisk still owns roughly 60% of branded obesity GLP-1 volume globally and used the $16.5B Catalent deal to vertically integrate three fill-finish sites that gate Wegovy and Ozempic supply.",
-      "thesisLong": "Novo is the incumbent GLP-1 power. 2025 Wegovy sales reached DKK 79.1B and Ozempic DKK 127.1B, with obesity care growing 26% in DKK and the company maintaining a 59.6% branded volume share in obesity GLP-1s. Even after Lilly's tirzepatide caught up on weight-loss efficacy, Novo's installed prescriber base and DTC machine kept semaglutide growing.\n\nThe Catalent transaction is the structural story. Novo Holdings closed the $16.5B Catalent acquisition and routed three fill-finish sites (Anagni Italy, Brussels Belgium, Bloomington Indiana) to Novo Nordisk in an $11B sub-deal. Brussels capacity is set to double to 100–150M vials/year and Indiana adds another 70M vials, with first-volume contribution beginning in 2026 — the structural fix to the multi-year supply shortage.\n\nNovo also slashed US GLP-1 prices up to 70% in late 2025 to widen access and head off compounders, but management still expects 2026 semaglutide revenue to hold or grow on volume. The Akero acquisition layered on a MASH thesis adjacent to the obesity franchise.\n\nThe risk is Lilly. Tirzepatide's efficiency edge and orforglipron's oral path narrowed Novo's lead, and CagriSema's mixed Phase 3 readout in late 2025 dented the next-gen story. But the installed manufacturing footprint, the Catalent vertical integration, and 60% share of branded obesity make Novo a permanent fixture in the GLP-1 chokepoint map.",
+      "relatedTickers": [
+        "LLY",
+        "TMO",
+        "WST"
+      ],
+      "thesisShort": "Novo Nordisk's injectable franchise has flattened — Ozempic grew 3% and injectable Wegovy 1% in Q2 2026 — but the Wegovy pill has launched strongly at $497 million in its quarter.",
+      "thesisLong": "Novo Nordisk built the obesity market and is now defending it against a competitor with a larger franchise and faster growth. The Q2 2026 numbers make the shape of that defence clear.\n\nInjectable growth has essentially stopped. Ozempic recorded worldwide sales of about $4.8 billion, up 3% year over year, and injectable Wegovy $3.0 billion, up 1%. Against Lilly's Mounjaro at +91% and Zepbound at +46% in the same quarter, that is not a share fight Novo is winning on the injectable side.\n\nThe oral franchise is where Novo is ahead. The Wegovy pill generated $497 million in Q2 2026, roughly five times what Lilly's competing Foundayo managed in the same period. Novo got the oral formulation to market and to scale first, and the pill is the format that reaches patients who refuse injections and channels that cannot handle cold-chain pens — a genuinely different addressable population rather than a substitution of its own injectable base.\n\nThe supply chokepoint that defined 2023-2024 is now largely internalised. Novo Holdings' acquisition of Catalent moved three fill-finish sites inside the group, which is why fill-finish capacity no longer gates Wegovy the way it once did — and why the merchant CDMO market lost a large block of capacity to a single buyer.\n\nThe risks now run through pricing and pipeline rather than manufacturing: US price concessions compressing gross margin, continued tirzepatide share gains, and the need for next-generation assets to re-establish growth on the injectable side.",
       "chokepointMetrics": [
-        { "label": "Branded obesity GLP-1 volume share", "value": "~60%" },
-        { "label": "2025 Ozempic sales", "value": "~$15.4B" },
-        { "label": "2025 Wegovy sales", "value": "DKK 79B" },
-        { "label": "Catalent fill-finish vials added", "value": "170M+/yr" },
-        { "label": "US GLP-1 price cut depth", "value": "Up to 70%" }
+        {
+          "label": "Q2 2026 Ozempic sales",
+          "value": "~$4.8B (+3% YoY)"
+        },
+        {
+          "label": "Q2 2026 injectable Wegovy sales",
+          "value": "$3.0B (+1% YoY)"
+        },
+        {
+          "label": "Q2 2026 Wegovy pill sales",
+          "value": "$497M — roughly 5x Lilly’s competing oral in the same quarter"
+        },
+        {
+          "label": "Incretin revenue gap to Lilly",
+          "value": "More than $10.2B behind on 1H 2026, from under $2B a year earlier"
+        },
+        {
+          "label": "Fill-finish integration",
+          "value": "Three former Catalent sites brought in-house via Novo Holdings"
+        }
       ],
       "catalysts": [
-        "Catalent fill-finish ramp into 2026 Wegovy supply",
-        "Oral semaglutide 25mg obesity launch progression",
-        "Akero MASH portfolio integration",
-        "Kalundborg and Clayton API expansions online",
-        "Medicare and Medicaid GLP-1 access expansion"
+        "Oral Wegovy scaling from a $497M quarter",
+        "Telehealth distribution partnerships broadening the oral channel",
+        "International launches of the Wegovy pill in Europe",
+        "Internalised fill-finish capacity removing the historical supply constraint"
       ],
       "risks": [
-        "Lilly tirzepatide and orforglipron share gains",
-        "CagriSema next-gen disappointment",
-        "Pricing concessions compress gross margin",
-        "Compounding reentry if FDA shortage list reactivates"
+        "Injectable franchise growth flattened to low single digits",
+        "Tirzepatide share gains widening the revenue gap",
+        "US pricing concessions compressing gross margin",
+        "Next-generation pipeline needing to re-establish injectable growth"
       ],
       "featured": false,
-      "lastUpdated": "2026-07-08"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "vktx-vk2735-dual-agonist",
@@ -71,31 +107,49 @@
       "sector": "Healthcare",
       "layer": "GLP-1 & Obesity",
       "primaryTicker": "VKTX",
-      "relatedTickers": ["LLY", "NVO", "AMGN"],
-      "thesisShort": "Viking is the most credible third entrant in the GLP-1 race, with both subcutaneous and oral VK2735 in Phase 3 and a maintenance-dosing differentiation that could carve out a unique slot.",
-      "thesisLong": "Viking Therapeutics is the merchant disruptor in the GLP-1 duopoly. VK2735 is a dual GLP-1/GIP agonist with two Phase 3 obesity trials underway: VANQUISH-1 (obesity, enrollment complete) and VANQUISH-2 (obesity + T2D, enrollment completed March 2026). Both are 78-week subcutaneous studies that should read out in 2027.\n\nThe oral story is what differentiates Viking from a generic biosimilar threat. The Phase 2 VENTURE-Oral trial showed 12% weight loss with the tablet formulation, and Viking has guided to advancing oral VK2735 into Phase 3 in Q3 2026 — a credible path to becoming the first oral dual agonist on market and a real competitive threat to Lilly's orforglipron.\n\nA third differentiator is the Maintenance Dosing study with results expected Q3 2026, exploring monthly dosing or subcutaneous-to-oral transition for weight maintenance. If clean, that opens a unique label position no other GLP-1 player can match.\n\nThe risk is binary: Viking is single-asset and pre-revenue, the cap table is heavily diluted by R&D spend, and any safety or efficacy stumble in VANQUISH could collapse the equity. But on the bottleneck question — who breaks the GLP-1 duopoly first — VK2735 is the asset most likely to do it.",
+      "relatedTickers": [
+        "LLY",
+        "NVO",
+        "AMGN"
+      ],
+      "thesisShort": "Viking is the most credible third entrant in the incretin race, with both Phase 3 VANQUISH trials fully enrolled and the oral VK2735 Phase 3 now slated to start in Q4 2026.",
+      "thesisLong": "Viking Therapeutics is the most credible independent third entrant in the incretin race, and 2026 has been an enrolment year rather than a data year.\n\nThe subcutaneous Phase 3 obesity programme comprises VANQUISH-1 and VANQUISH-2. VANQUISH-1 completed enrolment in November 2025; VANQUISH-2, which enrolled approximately 1,000 patients, completed enrolment in March 2026. VANQUISH-2 is a randomised, double-blind, placebo-controlled multicentre trial of once-weekly subcutaneous VK2735 over 78 weeks, with percent change in body weight as the primary endpoint and thresholds at 5%, 10%, 15% and 20% weight reduction as secondary measures. A 78-week endpoint on a study that finished enrolling in March 2026 puts topline data well into 2027 — the timeline is the single most important fact for anyone modelling this name.\n\nThe oral programme has slipped. Initiation of the Phase 3 oral VK2735 obesity trial is now expected in Q4 2026, later than the Q3 2026 previously indicated. That matters more than a one-quarter delay normally would, because both Novo and Lilly have already launched oral incretins commercially — Viking's oral asset is now entering Phase 3 into a market with two approved competitors rather than an open field.\n\nThe structural exposure is unchanged and severe: this is effectively a single-asset company whose value turns on two readouts, with no commercial-scale manufacturing of its own and a capital requirement that grows as the programmes advance.",
       "chokepointMetrics": [
-        { "label": "VENTURE-Oral 13-week weight loss", "value": "Up to 12%" },
-        { "label": "VANQUISH-2 enrollment status", "value": "Complete (Mar 2026)" },
-        { "label": "Oral VK2735 Phase 3 start", "value": "Q3 2026" },
-        { "label": "Subcutaneous Phase 3 dose duration", "value": "78 weeks" },
-        { "label": "Maintenance dosing readout", "value": "Q3 2026" }
+        {
+          "label": "VANQUISH-1 enrolment",
+          "value": "Completed November 2025"
+        },
+        {
+          "label": "VANQUISH-2 enrolment",
+          "value": "Completed March 2026, ~1,000 patients"
+        },
+        {
+          "label": "Subcutaneous Phase 3 treatment duration",
+          "value": "78 weeks once-weekly"
+        },
+        {
+          "label": "Oral VK2735 Phase 3 initiation",
+          "value": "Expected Q4 2026, moved from Q3 2026"
+        },
+        {
+          "label": "Competing oral incretins already launched",
+          "value": "2 — Novo’s oral Wegovy and Lilly’s Foundayo"
+        }
       ],
       "catalysts": [
-        "VANQUISH-1 and VANQUISH-2 Phase 3 readouts in 2027",
-        "Oral VK2735 Phase 3 initiation Q3 2026",
-        "Maintenance dosing Phase 2 results Q3 2026",
-        "Potential M&A premium from large-cap buyer",
-        "VK0214 X-linked adrenoleukodystrophy program updates"
+        "VANQUISH-1 and VANQUISH-2 topline data following 78-week treatment periods",
+        "Oral VK2735 Phase 3 initiation in Q4 2026",
+        "Maintenance-dosing differentiation data",
+        "VK0214 X-linked adrenoleukodystrophy programme updates"
       ],
       "risks": [
+        "Oral Phase 3 start slipped to Q4 2026 into a market with two launched oral competitors",
         "Single-asset binary execution risk",
-        "Lilly orforglipron oral approval first-to-market",
         "Manufacturing partner scarcity at commercial scale",
-        "Capital raise dilution before launch"
+        "Capital requirements before any commercial revenue"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "ctlt-novo-fill-finish",
@@ -103,30 +157,49 @@
       "sector": "Healthcare",
       "layer": "CDMO / Bio Manufacturing",
       "primaryTicker": "TMO",
-      "relatedTickers": ["NVO", "LLY", "WST"],
-      "thesisShort": "With Catalent taken private by Novo Holdings, Thermo Fisher's Patheon sterile network is now the largest listed independent representative of the fill-finish chokepoint — the binding constraint on how many GLP-1 pens and injectable-biologic vials reach patients.",
-      "thesisLong": "Sterile fill-finish — filling drug substance into vials, syringes, and pens under aseptic conditions — is the textbook injectable-biologics bottleneck, and the public representative shifted in 2024. Novo Holdings took Catalent private for $16.5B and Novo Nordisk absorbed its three marquee sites (Anagni IT, Brussels BE, Bloomington IN) for $11B, removing the sector's largest merchant fill-finish name from public markets. Thermo Fisher Scientific (TMO), through its Patheon sterile drug-product network, is now the largest listed independent representative of this chokepoint.\n\nThe industry context is unchanged: GLP-1 demand outpaced sterile injectable fill-finish capacity by 2–3x for two consecutive years, and Patheon, Lonza, Samsung Biologics, and the former Catalent sites all sat on multi-year backlogs, with aseptic fill lead times still routinely exceeding a year at peak. Thermo Fisher has been expanding sterile fill-finish across its Patheon footprint to absorb spillover demand as Novo internalizes its own semaglutide volume.\n\nThe structural lesson holds: fill-finish, not API synthesis, is the binding constraint for injectable biologics — and any listed CDMO with proven sterile fill capacity (Thermo Fisher / Patheon most prominently, with Lonza and Samsung Biologics on foreign exchanges) is effectively a long-dated royalty on the GLP-1 and biologics build-out.\n\nFor portfolio purposes the cleanest vertically integrated public proxies remain LLY and NVO themselves, with WST supplying the elastomer components in every pen. Thermo Fisher is a diversified tools-and-CDMO conglomerate, so Patheon fill-finish is one line within a much larger story rather than a pure play.",
+      "relatedTickers": [
+        "NVO",
+        "LLY",
+        "WST"
+      ],
+      "thesisShort": "With Catalent taken private by Novo Holdings, Thermo Fisher's Patheon network is the largest listed independent representative of the sterile fill-finish chokepoint — six facilities supporting aseptic manufacturing worldwide.",
+      "thesisLong": "Sterile fill-finish is the step where a biologic becomes a dose: filling vials, cartridges and pen devices under aseptic conditions. It is capital-intensive, heavily regulated, slow to qualify, and it is where injectable supply is physically rationed.\n\nThe listed representation of this chokepoint narrowed sharply when Novo Holdings acquired Catalent and moved three fill-finish sites in-house to serve Novo's own GLP-1 volumes. That removed the purest public proxy and took a large block of capacity out of the merchant market simultaneously. Thermo Fisher's Patheon network is now the largest listed independent representative: six facilities support aseptic manufacturing and sterile fill-finish globally, including a 24,000 square metre Singapore site with a high-speed, fully automated aseptic line for both small and large molecules.\n\nThermo Fisher itself is performing. Q2 2026 revenue was $11.99 billion, up 10% including 5% organic growth, with GAAP diluted EPS of $4.68 and adjusted EPS of $6.03, and the company raised its 2026 outlook. Growth was led by the laboratory products and biopharma services business.\n\nThe honest limitation of this entry is proportionality. Sterile fill-finish is a modest slice of a diversified $12 billion-per-quarter instruments and services conglomerate, so Thermo Fisher's reported results are a weak read on fill-finish tightness specifically. Anyone using this entry as a fill-finish gauge should treat it as the best available listed proxy rather than a direct one — the pure-play has been taken private, and no equivalent replaced it.\n\nThe demand drivers remain intact: GLP-1 pens, injectable biologics, ADCs and biosimilars all need aseptic fill, and the EU Annex 1 revision forces a reinvestment cycle in high-specification capacity.",
       "chokepointMetrics": [
-        { "label": "Largest listed fill-finish rep", "value": "TMO / Patheon" },
-        { "label": "GLP-1 demand vs fill capacity", "value": "2-3x backlog" },
-        { "label": "Aseptic fill lead times (peak)", "value": ">12 months" },
-        { "label": "Catalent sites taken private (2024)", "value": "3 (IT/BE/US)" },
-        { "label": "Former Catalent Brussels capacity", "value": "100-150M vials/yr" }
+        {
+          "label": "Largest listed fill-finish representative",
+          "value": "Thermo Fisher / Patheon, after Catalent was taken private"
+        },
+        {
+          "label": "Patheon aseptic network",
+          "value": "Six facilities supporting aseptic manufacturing and sterile fill-finish"
+        },
+        {
+          "label": "Singapore sterile site",
+          "value": "24,000 m², high-speed fully automated aseptic line"
+        },
+        {
+          "label": "TMO Q2 2026 revenue",
+          "value": "$11.99B (+10%, +5% organic); adjusted EPS $6.03 (+13%)"
+        },
+        {
+          "label": "Catalent sites taken private",
+          "value": "3, moved in-house under Novo Holdings"
+        }
       ],
       "catalysts": [
-        "Patheon sterile fill-finish capacity expansions absorbing spillover demand",
-        "GLP-1 and injectable-biologics volume growth into 2026",
-        "Annex 1 reinvestment cycle lifting demand for high-spec aseptic fill",
-        "Biosimilar and ADC launches broadening sterile fill pipelines",
-        "Sterile injectable pricing firm on multi-year backlogs"
+        "Patheon aseptic capacity absorbing demand displaced by Catalent going in-house",
+        "Annex 1 reinvestment cycle lifting demand for high-specification aseptic fill",
+        "ADC and biosimilar launches broadening sterile fill pipelines",
+        "Thermo Fisher raising its 2026 outlook on biopharma services strength"
       ],
       "risks": [
-        "GLP-1 demand surprise to the downside after price cuts",
-        "Patheon fill-finish is a small slice of a diversified TMO conglomerate",
-        "Novo internalizing volume reduces merchant CDMO demand"
+        "Fill-finish is a small slice of a diversified conglomerate — a weak direct proxy",
+        "Novo internalising volume permanently reduces merchant CDMO demand",
+        "GLP-1 volume growth moderating after price concessions",
+        "No listed pure-play remains for this chokepoint"
       ],
       "featured": false,
-      "lastUpdated": "2026-07-08"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "rgen-bioprocessing-consumables",
@@ -134,30 +207,48 @@
       "sector": "Healthcare",
       "layer": "CDMO / Bio Manufacturing",
       "primaryTicker": "RGEN",
-      "relatedTickers": ["DHR", "TMO", "SRT"],
-      "thesisShort": "Repligen sells the disposable bags, filters, and Protein A resins that every monoclonal antibody and cell therapy facility consumes by the kilogram — a recurring-revenue toll on the entire biologics buildout.",
-      "thesisLong": "Repligen sits inside every modern biologics suite. The company makes Protein A affinity resins (chromatography purification of mAbs), tangential flow filters, single-use bioprocessing bags, and analytics — the high-touch consumables that scale linearly with biologics output. After the post-COVID destock, the business returned to growth: 2025 revenue was $738M, +16% YoY (reported and organic ex-COVID), with 14% organic growth in Q4 2025 led by Analytics and Proteins.\n\nThe FlexBiosys acquisition (2025) vertically integrated single-use bags and assemblies into the systems portfolio — closing the gap with Sartorius and Cytiva on full-flow single-use offerings. Cross-selling to large biopharma and CDMO accounts continues to be the operating leverage story.\n\nStructural tailwinds: ADC pipeline expansion (Pfizer/Seagen, AstraZeneca/Daiichi), GLP-1 capacity build-out, cell and gene therapy commercialization (Casgevy, CAR-T expansions), and biosimilar wave entering manufacturing all push consumables demand higher. Bioprocessing is back on a 10–12% medium-term CAGR after the COVID hangover cleared.\n\nThe risk is customer concentration in the CDMO channel and the fact that Sartorius, Cytiva (Danaher), and Thermo are all larger and can bundle. But Repligen's pure-play exposure and Protein A franchise (where it's the merchant leader) make it the cleanest public name on the bioprocessing-consumables chokepoint.",
+      "relatedTickers": [
+        "DHR",
+        "TMO",
+        "SRT"
+      ],
+      "thesisShort": "Repligen sells the bags, filters and Protein A resins every biologics facility consumes by the kilogram; Q2 2026 organic growth accelerated to 13% with margins up 460 basis points and guidance raised.",
+      "thesisLong": "Repligen sells the consumables that biologics manufacturing burns through continuously — single-use bags and assemblies, filtration systems, chromatography hardware and Protein A affinity resins. Every monoclonal antibody, ADC and cell therapy facility buys them repeatedly, which makes this a recurring toll on the entire biologics build-out rather than a capital-equipment cycle.\n\nQ2 2026 showed the bioprocessing recovery accelerating rather than merely continuing. Revenue was $204 million, up 12% as reported and 13% organically, with the CEO noting sequential acceleration and continued market outperformance. Profitability moved faster than revenue: adjusted income from operations reached $34 million against $22 million a year earlier, non-GAAP adjusted EPS was $0.54 versus $0.37, and margins expanded 460 basis points. The company raised full-year organic revenue and EPS guidance.\n\nMargin expansion at that pace in a consumables business is the signal worth isolating, because it indicates volume leverage on installed capacity rather than price — the pattern that appears when customers move from destocking back to normal consumption.\n\nThe demand vectors ahead are the ADC manufacturing build-out, which is filtration- and resin-intensive; process intensification driven by very large-volume products; cell and gene therapy commercial launches; and the biosimilar wave reaching the US.\n\nThe competitive risk is structural: Sartorius, Cytiva and Thermo Fisher all bundle consumables with equipment and can price the attach aggressively. CDMO destocking cycles and China biopharma exposure under BIOSECURE-type rules are the other exposures.",
       "chokepointMetrics": [
-        { "label": "2025 revenue", "value": "$738M" },
-        { "label": "2025 organic growth ex-COVID", "value": "+16%" },
-        { "label": "Q4 2025 organic growth", "value": "+14%" },
-        { "label": "Protein A merchant share", "value": "Leader" },
-        { "label": "FlexBiosys deal year", "value": "2025" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$204M (+12% reported, +13% organic)"
+        },
+        {
+          "label": "Q2 2026 adjusted EPS",
+          "value": "$0.54, vs $0.37 a year earlier"
+        },
+        {
+          "label": "Adjusted income from operations",
+          "value": "$34M, vs $22M a year earlier"
+        },
+        {
+          "label": "Margin expansion",
+          "value": "+460 basis points (Q2 2026)"
+        },
+        {
+          "label": "2026 guidance",
+          "value": "Organic revenue and EPS guidance raised"
+        }
       ],
       "catalysts": [
-        "ADC manufacturing buildout driving filter/resin demand",
-        "GLP-1 process intensification orders",
-        "Cell & gene therapy commercial launches",
-        "FlexBiosys cross-sell into large CDMO accounts",
-        "Biosimilar wave hitting US in 2026-2028"
+        "Organic growth accelerating sequentially to 13%",
+        "ADC manufacturing build-out driving filter and resin demand",
+        "Cell and gene therapy commercial launches",
+        "Biosimilar wave reaching the US market"
       ],
       "risks": [
-        "Sartorius / Cytiva / Thermo bundling competition",
+        "Sartorius, Cytiva and Thermo Fisher bundling competition",
         "CDMO customer destocking cycles",
         "China biopharma exposure under BIOSECURE-type rules"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "wst-glp1-elastomers",
@@ -165,30 +256,48 @@
       "sector": "Healthcare",
       "layer": "CDMO / Bio Manufacturing",
       "primaryTicker": "WST",
-      "relatedTickers": ["LLY", "NVO", "RGEN"],
-      "thesisShort": "West makes the elastomer stoppers, plungers, and seals inside every GLP-1 pen and vial — a quiet ~9% revenue line that grows in lockstep with Wegovy, Zepbound, and the broader injectable biologics surge.",
-      "thesisLong": "West Pharmaceutical Services is the picks-and-shovels play on injectables. Its proprietary elastomer components (NovaPure, FluroTec, Westar) seal essentially every prefilled syringe, autoinjector, and lyophilized vial in modern biologics, and GLP-1 pens are now a measurable single-product line: GLP-1 elastomer parts hit ~9% of company revenue in Q3 2025, up from ~8% in Q2.\n\nThe capital plan is sized to the opportunity: West is spending $350–400M in 2025 on high-value product (HVP) capacity, with key build-outs at Waterford Ireland and Kinston North Carolina aimed at GLP-1 components and premium elastomers. EU GMP Annex 1 sterile manufacturing rules are simultaneously forcing customers to upgrade to higher-spec components, lifting mix.\n\nPast the GLP-1 wave, West has an embedded structural tailwind: every new biologic launches in injectable form, every autoinjector has 3–7 West parts, and the qualified-supplier list at Tier 1 pharma is short. Switching costs are high because primary container changes require regulatory filings.\n\nThe risk is execution on the HVP buildouts (Annex 1 capex is back-loaded) and customer destocking after the COVID-era over-order. But on the GLP-1 chokepoint map, West sits alongside Catalent and the API players as a name that physically gates how many pens ship in 2026.",
+      "relatedTickers": [
+        "LLY",
+        "NVO",
+        "RGEN"
+      ],
+      "thesisShort": "West makes the elastomer stoppers, plungers and seals inside every GLP-1 pen and vial; Q2 2026 revenue rose 13.8% to $872.3 million and the company raised both sales and EPS guidance for 2026.",
+      "thesisLong": "West Pharmaceutical Services makes the parts of an injectable drug that are not the drug: the elastomer stoppers, plungers, seals and needle shields that sit inside every vial, cartridge and pen. Each autoinjector uses several of them, and every one must be qualified with the specific molecule it contacts — which is why switching suppliers mid-programme is close to impossible and why this is a genuine chokepoint rather than a commodity supply line.\n\nQ2 2026 beat on both lines. Revenue was $872.3 million, up 13.8% year over year, with adjusted EPS of $2.37, up 28.8%. Management raised full-year 2026 sales guidance to $3.345-3.380 billion from $3.29-3.35 billion and adjusted EPS guidance to $8.85-9.05 from $8.40-8.75 — a raise at both the top and bottom line, with EPS raised proportionally more, which points at high-value product mix rather than volume alone.\n\nManagement attributed the quarter to strong demand in biologics, GLP-1 elastomers and high-value product components. High-value products are the margin engine here: the coated and film-laminated components required for sensitive biologics and for compliance with the EU Annex 1 revision, which is forcing a multi-year upgrade cycle across the industry's fill lines.\n\nThe structural position holds as long as injectables grow — GLP-1 pens, ADCs, biosimilars and the shift of oncology and immunology therapies into autoinjector formats all expand container-closure demand.\n\nThe exposures are customer concentration among the largest GLP-1 makers, destocking risk if those customers over-order, and execution on the capacity expansions being built for Annex 1 compliance.",
       "chokepointMetrics": [
-        { "label": "GLP-1 share of total revenue (Q3'25)", "value": "~9%" },
-        { "label": "2025 HVP capex", "value": "$350-400M" },
-        { "label": "Key capacity sites", "value": "Waterford, Kinston" },
-        { "label": "Components per autoinjector", "value": "3-7 parts" },
-        { "label": "Annex 1 upgrade tailwind", "value": "Multi-year" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$872.3M (+13.8% YoY)"
+        },
+        {
+          "label": "Q2 2026 adjusted EPS",
+          "value": "$2.37 (+28.8% YoY)"
+        },
+        {
+          "label": "2026 sales guidance",
+          "value": "Raised to $3.345-3.380B from $3.29-3.35B"
+        },
+        {
+          "label": "2026 adjusted EPS guidance",
+          "value": "Raised to $8.85-9.05 from $8.40-8.75"
+        },
+        {
+          "label": "Demand drivers cited",
+          "value": "Biologics, GLP-1 elastomers and high-value product components"
+        }
       ],
       "catalysts": [
-        "Waterford and Kinston capacity online for 2026 GLP-1",
-        "Annex 1 driven HVP mix shift acceleration",
-        "ADC and biologics launches expanding container demand",
-        "Biosimilar wave requiring new container qualifications",
-        "Auto-injector adoption in oncology and immunology"
+        "Both sales and EPS guidance raised for 2026",
+        "Annex 1 driving a multi-year high-value product mix shift",
+        "ADC and biosimilar launches expanding container-closure demand",
+        "Autoinjector adoption in oncology and immunology"
       ],
       "risks": [
-        "GLP-1 destock cycle from over-ordered customers",
-        "Capex execution risk on Annex 1 expansions",
-        "Customer concentration with Lilly and Novo"
+        "Customer concentration among the largest GLP-1 manufacturers",
+        "Destocking cycle if customers over-order components",
+        "Capex execution risk on Annex 1 capacity expansions"
       ],
       "featured": true,
-      "lastUpdated": "2026-07-07"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "vrtx-casgevy-rare-disease",
@@ -196,30 +305,49 @@
       "sector": "Healthcare",
       "layer": "Gene & Cell Therapy",
       "primaryTicker": "VRTX",
-      "relatedTickers": ["CRSP", "BLUE", "BMRN"],
-      "thesisShort": "Vertex is the dominant cash-generating gene therapy commercial machine, ramping Casgevy through ~300 patient initiations in 2025 while leveraging cystic fibrosis cash flow into rare disease and pain.",
-      "thesisLong": "Vertex is unique in biotech: a profitable, growing rare-disease franchise (cystic fibrosis with Trikafta/Kaftrio) that funds an aggressive expansion into gene therapy, sickle cell, type 1 diabetes, and non-opioid pain (Journavx). Casgevy — the first approved CRISPR gene therapy — initiated cell collections in roughly 300 patients in 2025, with 150 first cell collections and 64 infusions in Q4 alone. That 2025 ramp nearly tripled 2024.\n\nThe bottleneck is real and it's not pricing. Casgevy requires myeloablative conditioning, hospital-grade authorized treatment centers, and weeks of inpatient time per patient — capacity sits at the ATC/hospital level, not at Vertex. Vertex has been investing in ATC qualification and patient navigation to widen the funnel; William Blair models 2026 Casgevy revenue at ~$344M with Vertex taking ~$212M.\n\nThe pediatric expansion is the next unlock. Vertex completed enrollment in the 5–11 SCD/TDT studies and plans global filings in H1 2026, including a US sBLA. England reimbursement was secured in 2025; access in MENA and other ex-US markets continues to broaden.\n\nThe equity story extends well beyond Casgevy: vanzacaftor triplet (next-gen CF), Journavx for acute pain (NaV1.8 inhibitor), zimislecel for type 1 diabetes islet replacement, and inaxaplin for APOL1 kidney disease all sit in late-stage. The risk is Casgevy's slow ramp continues to disappoint, but the diversified pipeline gives Vertex more shots on goal than any pure-play gene therapy peer.",
+      "relatedTickers": [
+        "CRSP",
+        "SRPT",
+        "BMRN"
+      ],
+      "thesisShort": "Vertex is the cash-generating engine of commercial gene therapy; Casgevy revenue reached $76 million in Q2 2026, up 151% year over year, and the FDA approved it for children as young as two.",
+      "thesisLong": "Vertex is the rare company that funds gene therapy commercialisation out of its own operating cash flow rather than capital markets, using a dominant cystic fibrosis franchise to underwrite Casgevy, acute pain and type 1 diabetes programmes simultaneously.\n\nQ2 2026 total revenue was $3.3 billion, up 12%, and the non-CF products finally became visible. Casgevy generated $76 million in the quarter — up 78% sequentially and 151% year over year — which is the inflection the ramp had been waiting for after a slow start gated by authorised treatment centre capacity and the months-long patient journey each infusion requires. Journavx delivered $50 million against $12 million a year earlier.\n\nThe regulatory news is the more durable development. The FDA approved Casgevy in children two years of age and older with sickle cell disease or transfusion-dependent beta thalassemia, making it the first genetic therapy indicated for children as young as two in both conditions. Treating earlier means treating before irreversible organ damage accumulates, which changes both the clinical case and the addressable population.\n\nVertex raised full-year 2026 revenue guidance to $13.1-13.2 billion from $12.95-13.1 billion, including expectations of $500 million or more from non-CF products.\n\nThe type 1 diabetes programme is in flux: the company is weighing whether to bring the Type O candidate to market first or close behind zimislecel, with updated plans and timelines expected in the second half of 2026 — an unresolved strategic question rather than a scheduled catalyst.",
       "chokepointMetrics": [
-        { "label": "2025 Casgevy patient initiations", "value": "~300" },
-        { "label": "Q4 2025 Casgevy infusions", "value": "64" },
-        { "label": "2026 Casgevy revenue (analyst est.)", "value": "~$344M" },
-        { "label": "Pediatric BLA filing", "value": "H1 2026" },
-        { "label": "Authorized treatment centers", "value": "Expanding" }
+        {
+          "label": "Q2 2026 Casgevy revenue",
+          "value": "$76M (+78% QoQ, +151% YoY)"
+        },
+        {
+          "label": "Casgevy pediatric approval",
+          "value": "FDA approved for children 2 years and older in SCD and TDT"
+        },
+        {
+          "label": "Q2 2026 Journavx revenue",
+          "value": "$50M, vs $12M a year earlier"
+        },
+        {
+          "label": "Q2 2026 total revenue",
+          "value": "$3.3B (+12% YoY)"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "Raised to $13.1-13.2B, incl. $500M+ from non-CF products"
+        }
       ],
       "catalysts": [
-        "Pediatric SCD/TDT global regulatory submissions H1 2026",
-        "ATC capacity additions widening patient funnel",
-        "Journavx (suzetrigine) commercial ramp in acute pain",
-        "Vanzacaftor triplet share gains in CF",
-        "Zimislecel pivotal data in type 1 diabetes"
+        "Casgevy pediatric label expanding the treatable population",
+        "Casgevy revenue compounding from a $76M quarter",
+        "Journavx acute pain ramp from $50M per quarter",
+        "Zimislecel and Type O strategy update expected in 2H 2026"
       ],
       "risks": [
-        "Casgevy ramp continues to disappoint on hospital bottleneck",
-        "Suzetrigine label competition vs opioids",
-        "CF franchise erosion if HHS pricing concessions accelerate"
+        "Casgevy ramp still constrained by treatment centre capacity and patient journey length",
+        "Type 1 diabetes commercialisation sequence unresolved",
+        "Journavx competing against entrenched generic pain options",
+        "CF franchise concentration in the revenue base"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "crsp-in-vivo-editing",
@@ -227,30 +355,49 @@
       "sector": "Healthcare",
       "layer": "Gene & Cell Therapy",
       "primaryTicker": "CRSP",
-      "relatedTickers": ["VRTX", "NTLA", "BEAM"],
-      "thesisShort": "CRISPR Therapeutics owns the platform side of Casgevy plus the most advanced in vivo CRISPR pipeline, with three LNP-delivered editors entering or running clinical trials in 2026.",
-      "thesisLong": "CRISPR Therapeutics is the platform-level beneficiary of Casgevy and the leading independent in vivo gene editor. CASGEVY contributed $100M of total program revenue in 2025 to CRSP, with the share of commercial economics expected to grow as Vertex scales infusions in 2026 and adds the pediatric label.\n\nThe in vivo pipeline is what makes CRSP a distinct asset versus Vertex. CTX310 (LNP-delivered ANGPTL3 editor for triglycerides and LDL) showed durable lipid lowering after a single IV dose, with updates expected H2 2026. CTX340 (refractory hypertension via AGT editing) showed >90% AGT reduction in NHPs and enters clinical testing H1 2026. CTX460 (alpha-1 antitrypsin deficiency in vivo correction) starts clinical mid-2026.\n\nThe strategic prize is in vivo editing of hematopoietic stem cells, which would replace Casgevy's ex vivo workflow with a single IV infusion and collapse the ATC bottleneck entirely. CRSP is actively developing an LNP-based HSC editing approach for SCD/TDT — speculative but transformational if it works.\n\nThe risk profile is high: in vivo editing has had safety setbacks across the field (Intellia, Beam, Verve), the LNP delivery science is unforgiving, and CRSP's cash runway depends on Casgevy royalties scaling on schedule. But the breadth of in vivo programs combined with the embedded Casgevy stake makes CRSP the most diversified merchant CRISPR equity.",
+      "relatedTickers": [
+        "VRTX",
+        "NTLA",
+        "BEAM"
+      ],
+      "thesisShort": "CRISPR Therapeutics owns the platform side of Casgevy plus the deepest in vivo CRISPR pipeline, with CTX340 and CTX460 both now in Phase 1 and a CTX310 durability update due at ESC Congress in August 2026.",
+      "thesisLong": "CRISPR Therapeutics is the platform half of Casgevy — Vertex commercialises it — and its more consequential value driver is the in vivo pipeline, where a lipid nanoparticle delivers the editor to the liver rather than requiring cells to be removed, edited and reinfused.\n\nThat pipeline moved from preclinical to clinical across 2026. CTX340, targeting angiotensinogen for refractory hypertension, received FDA IND clearance and has entered a Phase 1 trial. CTX460, targeting SERPINA1 for alpha-1 antitrypsin deficiency and the first candidate from the company's SyNTase editing platform, has also entered Phase 1. CTX321, targeting LPA for elevated lipoprotein(a), is in development alongside them, giving three cardiovascular in vivo programmes plus AATD.\n\nCTX310, the ANGPTL3 programme for familial hypercholesterolemia, mixed dyslipidemias and severe hypertriglyceridemia, is the most advanced. A late-breaking abstract on the durability of its effects was accepted for the European Society of Cardiology Congress in Munich on 28 August 2026, with a Phase 1b clinical update expected in the second half of the year. Durability is the specific question that determines whether one-time in vivo editing displaces chronic therapy, which makes that presentation the most informative near-term event on the calendar.\n\nThe company raised $600 million in convertible notes during the quarter, funding the clinical programmes without depending on Casgevy economics.\n\nThe field-level risk is a safety event in any in vivo CRISPR programme, which would affect every developer at once, alongside the known limitation that LNP delivery reaches the liver far more readily than other tissues.",
       "chokepointMetrics": [
-        { "label": "2025 Casgevy program revenue to CRSP", "value": "$100M" },
-        { "label": "In vivo programs in clinic by mid-2026", "value": "3+" },
-        { "label": "CTX340 AGT reduction (NHP)", "value": ">90%" },
-        { "label": "CTX340 clinical start", "value": "H1 2026" },
-        { "label": "CTX460 (AATD) clinical start", "value": "Mid-2026" }
+        {
+          "label": "In vivo programmes in the clinic",
+          "value": "CTX310, CTX340 and CTX460 — plus CTX321 in development"
+        },
+        {
+          "label": "CTX340 (refractory hypertension)",
+          "value": "IND cleared; Phase 1 initiated (2026)"
+        },
+        {
+          "label": "CTX460 (AATD)",
+          "value": "Phase 1 initiated; first candidate from the SyNTase editing platform"
+        },
+        {
+          "label": "CTX310 durability data",
+          "value": "Late-breaking presentation at ESC Congress, Munich, 28 August 2026"
+        },
+        {
+          "label": "Financing",
+          "value": "$600M convertible notes (Q2 2026)"
+        }
       ],
       "catalysts": [
-        "CTX310 Phase 1 update H2 2026",
-        "CTX340 first-in-human dosing in refractory hypertension",
-        "Casgevy pediatric label expansion driving royalties",
-        "In vivo HSC editing IND filing (SCD/TDT)",
-        "Potential platform deal or partnership"
+        "CTX310 durability data at ESC Congress on 28 August 2026",
+        "CTX310 Phase 1b clinical update expected in 2H 2026",
+        "CTX340 Phase 1 dosing in refractory hypertension",
+        "Casgevy pediatric label expansion driving collaboration economics"
       ],
       "risks": [
-        "In vivo CRISPR safety event across the field",
-        "LNP delivery limitations to non-liver tissues",
-        "Casgevy ramp slower than expected hits royalties"
+        "A safety event in any in vivo CRISPR programme would affect the whole field",
+        "LNP delivery limitations outside the liver",
+        "Casgevy ramp pace affecting collaboration revenue",
+        "Multiple simultaneous Phase 1 programmes competing for capital"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "mrk-keytruda-post-loe",
@@ -258,30 +405,49 @@
       "sector": "Healthcare",
       "layer": "Oncology Pipeline",
       "primaryTicker": "MRK",
-      "relatedTickers": ["BMY", "AZN", "PFE"],
-      "thesisShort": "Merck's Keytruda hit ~$31.7B in 2025 sales as the world's top-selling drug, but with US LOE in December 2028 the entire equity now hinges on whether the post-Keytruda pipeline can replace $30B+ of revenue.",
-      "thesisLong": "Merck is the cleanest LOE-cliff trade in big pharma. Keytruda generated nearly $31.7B in 2025 (+7% YoY) and accounts for ~55% of Merck's pharmaceutical sales. Management expects peak sales of $35B by 2028, with US revenue starting to decline in January 2028 (IRA pricing) and falling sharply after the December 2028 compound patent expiry. EU LOE follows in 2031.\n\nThe defense plan rests on a portfolio of 20+ growth drivers Merck claims hold blockbuster potential: $25B+ in oncology, $20B+ in cardiometabolic, $15B+ in infectious disease. Subcutaneous Keytruda (extended IP runway), Winrevair (pulmonary arterial hypertension, acquired via Acceleron), Capvaxive (pneumococcal vaccine), Welireg (VHL/RCC), and the late-stage ADC pipeline acquired through partnerships (Daiichi Sankyo collaboration on ADCs) form the bridge.\n\nMerck split oncology into a standalone business unit in late 2025 to focus operational accountability on the post-Keytruda oncology portfolio. The Phase 3 pipeline has nearly tripled since 2021 through internal advancement and M&A.\n\nThe bet is execution: management guides to $70B+ of non-risk-adjusted commercial opportunity by mid-2030s, but every analyst model assumes meaningful pipeline failures. The chokepoint dimension is that Keytruda is itself the global standard-of-care immunotherapy backbone — combinations with Keytruda are how almost every new I-O asset is tested. Loss of that anchor is a generational test for big pharma R&D.",
+      "relatedTickers": [
+        "BMY",
+        "AZN",
+        "PFE"
+      ],
+      "thesisShort": "Merck's Keytruda grew 5% to $8.37 billion in Q2 2026, and the subcutaneous version — Keytruda Qlex — reached $463 million in its second quarter, tracking toward 30-40% US adoption by the end of 2027.",
+      "thesisLong": "Merck's central problem is well known: Keytruda is the world's best-selling drug and its US compound patent protection ends at the end of the decade, so the equity turns on what replaces it.\n\nThe most substantive answer so far is reformulation, and it is working faster than expected. Q2 2026 Keytruda sales rose 5% to $8.37 billion, of which $463 million came from Keytruda Qlex, the subcutaneous formulation — up from $128 million in Q1 2026, more than tripling in a single quarter and surpassing investor expectations. Merck reports double-digit Qlex adoption as a share of the total US business and a path to 30-40% adoption by the end of 2027.\n\nThe strategic logic is that a subcutaneous injection administered in minutes carries its own intellectual property and a materially different administration economics from a lengthy intravenous infusion. Converting a large share of the franchise before biosimilar intravenous pembrolizumab arrives blunts the erosion, because a biosimilar of the IV product does not automatically substitute for the subcutaneous one. How much of the base converts by 2028-2029 is the single most important variable in this entry.\n\nCompany-wide, Q2 2026 worldwide sales were $16.6 billion and Merck raised 2026 revenue guidance to $66.3-67.3 billion from $65.8-67.0 billion, with contributions from newer launches building.\n\nThe risks are unchanged in kind: biosimilar entry timing, the need for pipeline assets to carry meaningful revenue by the end of the decade, and IRA price negotiation broadening into oncology.",
       "chokepointMetrics": [
-        { "label": "2025 Keytruda revenue", "value": "$31.7B" },
-        { "label": "Keytruda share of pharma sales", "value": "~55%" },
-        { "label": "US compound patent expiry", "value": "Dec 2028" },
-        { "label": "Peak sales target", "value": "$35B (2028)" },
-        { "label": "Mid-2030s commercial opportunity", "value": "$70B+" }
+        {
+          "label": "Q2 2026 Keytruda sales",
+          "value": "$8.37B (+5% YoY)"
+        },
+        {
+          "label": "Keytruda Qlex (subcutaneous)",
+          "value": "$463M in Q2 2026, up from $128M in Q1 2026"
+        },
+        {
+          "label": "Qlex US adoption",
+          "value": "Double-digit share of the US business; 30-40% targeted by end-2027"
+        },
+        {
+          "label": "Q2 2026 worldwide sales",
+          "value": "$16.6B"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "Raised to $66.3-67.3B from $65.8-67.0B"
+        }
       ],
       "catalysts": [
-        "Subcutaneous Keytruda launch extending IP",
-        "Winrevair PAH label expansion to earlier lines",
-        "Daiichi-partnered ADC Phase 3 readouts",
-        "Welireg label expansions in solid tumors",
-        "M&A to backfill pipeline gaps"
+        "Keytruda Qlex conversion tracking toward 30-40% US adoption by end-2027",
+        "Raised 2026 revenue guidance on launch contributions",
+        "Partnered ADC Phase 3 readouts",
+        "Label expansions across the newer launch portfolio"
       ],
       "risks": [
-        "Keytruda biosimilar entry timing in US 2028-2029",
-        "Pipeline blockbuster failures (PD-1/VEGF combos, etc.)",
-        "IRA price negotiation broadening to oncology"
+        "Intravenous Keytruda biosimilar entry toward the end of the decade",
+        "Subcutaneous conversion rate determining how much of the base is protected",
+        "Pipeline assets needing to carry revenue by the end of the decade",
+        "IRA price negotiation broadening into oncology"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "pfe-seagen-adc-portfolio",
@@ -289,30 +455,49 @@
       "sector": "Healthcare",
       "layer": "Oncology Pipeline",
       "primaryTicker": "PFE",
-      "relatedTickers": ["MRK", "BMY", "AZN"],
-      "thesisShort": "Pfizer's $43B Seagen acquisition doubled the oncology pipeline to 60 programs and 12 ADCs, anchored by four approved vedotin medicines that are scaling into broader indications across 2025-2026.",
-      "thesisLong": "Pfizer's oncology strategy is now Seagen plus everything else. The $43B Seagen acquisition doubled the oncology clinical pipeline to 60 programs across ADCs, small molecules, bispecifics, and immunotherapies, with 12 ADCs now in development across four payload classes (vedotin, TOPO1 inhibitor, next-gen auristatin, and novel mechanisms).\n\nThe four approved Seagen-origin ADCs anchor the commercial story: ADCETRIS (brentuximab vedotin) in Hodgkin lymphoma, PADCEV (enfortumab vedotin) in urothelial cancer, TIVDAK (tisotumab vedotin) in cervical cancer, and TUKYSA (tucatinib) in HER2+ breast and colorectal. Combined with Pfizer's legacy Ibrance (CDK4/6), Xtandi (prostate), and Lorbrena (lung), the oncology portfolio now spans 25+ approved medicines and biosimilars across 40+ indications.\n\nThe 2025-2026 catalysts focus on late-stage assets: sigvotatug vedotin is in Phase 3 for NSCLC with data anticipated in 2025-2026, and atirmociclib (next-gen CDK4-selective inhibitor) is advancing in HR+ breast cancer. Padcev's expansion into earlier-line urothelial use is broadening the franchise materially.\n\nThe risk is execution and integration: Seagen's burn was material, ADC-class ILD safety overhang from Daiichi's Enhertu colors investor confidence in all ADC platforms, and Pfizer's overall revenue base is still recovering from the post-COVID step-down. But on the chokepoint question of who gates ADC innovation outside Daiichi, Pfizer-Seagen is the clearest answer in big pharma.",
+      "relatedTickers": [
+        "MRK",
+        "BMY",
+        "AZN"
+      ],
+      "thesisShort": "Pfizer's Seagen-derived ADC portfolio is delivering: Padcev grew 23% operationally in Q2 2026 and won FDA approval as the first platinum-free perioperative regimen for muscle-invasive bladder cancer.",
+      "thesisLong": "Pfizer paid $43 billion for Seagen to buy an antibody-drug conjugate platform rather than a single product, and 2026 has produced the clearest evidence yet that the assets are moving into larger populations.\n\nPadcev, the enfortumab vedotin ADC marketed with Astellas, posted 23% operational revenue growth in Q2 2026 on expanded share in first-line locally advanced or metastatic urothelial cancer. More importantly, Pfizer and Astellas announced FDA approval of Padcev in combination with pembrolizumab as neoadjuvant and adjuvant treatment for adults with muscle-invasive bladder cancer regardless of cisplatin eligibility, based on the Phase 3 EV-304 (KEYNOTE-B15) trial. That is the first platinum-free regimen approved in this setting, and moving an ADC from metastatic into perioperative use is the transition that multiplies treated patients — earlier-line approvals reach far more people than late-line ones.\n\nThe wider company is stabilising around the oncology franchise. Non-COVID revenue grew 18% operationally in Q2 2026, Eliquis contributed $2.43 billion on 19% operational growth helped by lower US rebates and favourable channel mix, and Pfizer raised full-year guidance by $500 million at the midpoint to $60.5-62.5 billion.\n\nThe risks remain class-level and structural. ADC-class interstitial lung disease scrutiny applies across every developer in the category, and Pfizer still faces loss of exclusivity pressure on older products that the oncology portfolio has to outgrow rather than merely offset.",
       "chokepointMetrics": [
-        { "label": "Seagen acquisition value", "value": "$43B" },
-        { "label": "Oncology pipeline programs", "value": "60+" },
-        { "label": "ADCs in development", "value": "12" },
-        { "label": "Approved Seagen vedotin medicines", "value": "4" },
-        { "label": "Total oncology approved medicines", "value": "25+" }
+        {
+          "label": "Q2 2026 Padcev growth",
+          "value": "+23% operational"
+        },
+        {
+          "label": "Padcev MIBC approval",
+          "value": "FDA approved with pembrolizumab as neoadjuvant/adjuvant, regardless of cisplatin eligibility"
+        },
+        {
+          "label": "Basis of approval",
+          "value": "Phase 3 EV-304 (KEYNOTE-B15) — first platinum-free regimen in this setting"
+        },
+        {
+          "label": "Q2 2026 non-COVID revenue",
+          "value": "+18% operationally"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "Raised $500M at the midpoint to $60.5-62.5B"
+        }
       ],
       "catalysts": [
-        "Sigvotatug vedotin Phase 3 NSCLC readout",
-        "Padcev earlier-line urothelial expansion",
-        "Atirmociclib (CDK4-selective) Phase 3 progression",
-        "Elrexfio (BCMA bispecific) multiple myeloma growth",
-        "Vepdegestrant (PROTAC SERD) advancement"
+        "Padcev moving into perioperative muscle-invasive bladder cancer",
+        "Further earlier-line ADC expansions from the Seagen portfolio",
+        "Elrexfio and the bispecific portfolio in multiple myeloma",
+        "Raised full-year 2026 guidance"
       ],
       "risks": [
-        "ADC-class ILD safety scrutiny",
+        "ADC-class interstitial lung disease safety scrutiny",
+        "Loss of exclusivity pressure on older products",
         "Seagen integration execution",
-        "Ibrance and Xtandi LOE pressure approaching"
+        "Reliance on a small number of ADC franchises for oncology growth"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "bmy-growth-portfolio-pivot",
@@ -320,30 +505,49 @@
       "sector": "Healthcare",
       "layer": "Oncology Pipeline",
       "primaryTicker": "BMY",
-      "relatedTickers": ["MRK", "PFE", "AZN"],
-      "thesisShort": "BMY's Eliquis and Opdivo together drove ~$24.5B (51% of revenue) in 2025 but face EU Eliquis generics in May 2026 and US Opdivo LOE in 2028, forcing a pivot to a 60%-of-revenue growth portfolio led by Breyanzi, Camzyos, and Reblozyl.",
-      "thesisLong": "Bristol-Myers Squibb is the LOE-vs-pipeline trade. Eliquis (anticoagulant) and Opdivo (PD-1) generated combined worldwide sales of $24.5B in 2025 — 51% of revenue. Eliquis loses US exclusivity in 2026 with EU generic entry already starting in May 2026, and Opdivo LOE follows in 2028 (US), 2030 (EU), 2031 (Japan).\n\nThe defense is the growth portfolio, now approaching ~60% of total revenue. Key assets: Breyanzi (CAR-T for LBCL/CLL/follicular), Camzyos (cardiac myosin inhibitor in obstructive HCM), Opdualag (PD-1 + LAG-3 fixed-dose combo in melanoma), Reblozyl (anemia in MDS/beta-thal), Sotyktu (TYK2 in psoriasis), Cobenfy (KarXT acquired via Karuna for schizophrenia and now Alzheimer's psychosis trials).\n\nManagement describes the pipeline as the richest in a decade, with up to 12 late-stage readouts across eight assets. Recent Opdivo wins include the cHL combination approval and expanded perioperative NSCLC use — extending Opdivo's lifetime even with the patent clock running.\n\nThe risk profile is heavy: Eliquis erosion is faster than initially modeled, the growth portfolio still needs to absorb $20B+ of revenue replacement in 4 years, and FY2026 guidance was cautious. But on the bottleneck map, BMY's CAR-T (Breyanzi), cardiac myosin (Camzyos), and TYK2 (Sotyktu) franchises each occupy distinct chokepoints with limited direct competition.",
+      "relatedTickers": [
+        "MRK",
+        "PFE",
+        "AZN"
+      ],
+      "thesisShort": "Bristol Myers' growth portfolio rose 14% in Q2 2026 and Eliquis grew 22% to $4.48 billion, with full-year Eliquis growth now guided to 20-25% — the anticipated erosion has not yet appeared in reported results.",
+      "thesisLong": "Bristol Myers Squibb's thesis has been a race between the decline of two enormous legacy products and the ramp of a growth portfolio meant to replace them. In 2026 the legacy side has held up better than the framing assumed.\n\nEliquis grew 22% in Q2 2026 to $4,481 million, and full-year 2026 Eliquis revenue growth is now guided to 20-25%. Whatever generic exposure is coming, it has not yet appeared in reported results, and the near-term revenue base is stronger than a straightforward cliff narrative implies. Opdivo is the softer half: first-half 2026 sales of $4.63 billion were down 3.9% year over year, so the immuno-oncology franchise is eroding while the anticoagulant is not.\n\nThe growth portfolio rose 14% in the quarter, and Bristol Myers raised both revenue and adjusted EPS guidance for the full year, with Q2 EPS of $1.62.\n\nCobenfy remains the highest-variance asset. It grew 81% to $63 million — a large percentage on a small base — and the company has flagged slow physician titration to effective doses and repeat prescribing as the practical constraints in schizophrenia. Those are commercial execution problems rather than efficacy problems, but they are the ones that determine whether Cobenfy becomes a major franchise or a modest one, and they will apply again in any Alzheimer's psychosis indication.\n\nThe risk shape has therefore shifted: less about an imminent Eliquis cliff, more about whether the growth portfolio compounds fast enough before Opdivo's decline steepens.",
       "chokepointMetrics": [
-        { "label": "2025 Eliquis + Opdivo combined sales", "value": "~$24.5B" },
-        { "label": "Share of total BMY revenue", "value": "~51%" },
-        { "label": "Growth portfolio share of revenue", "value": "~60%" },
-        { "label": "Eliquis EU generic entry", "value": "May 2026" },
-        { "label": "Opdivo US LOE", "value": "2028" }
+        {
+          "label": "Q2 2026 Eliquis revenue",
+          "value": "$4,481M (+22% YoY)"
+        },
+        {
+          "label": "2026 Eliquis growth guidance",
+          "value": "20-25%"
+        },
+        {
+          "label": "1H 2026 Opdivo sales",
+          "value": "$4.63B (-3.9% YoY)"
+        },
+        {
+          "label": "Q2 2026 growth portfolio",
+          "value": "+14% YoY"
+        },
+        {
+          "label": "Q2 2026 Cobenfy revenue",
+          "value": "$63M (+81% YoY)"
+        }
       ],
       "catalysts": [
-        "Breyanzi label expansions and outpatient access growth",
-        "Camzyos non-obstructive HCM Phase 3 readout",
-        "Cobenfy Alzheimer's psychosis Phase 3 data",
-        "Opdivo perioperative NSCLC expansion",
-        "Reblozyl first-line MDS launch"
+        "Growth portfolio compounding at 14% year over year",
+        "Raised 2026 revenue and adjusted EPS guidance",
+        "Cobenfy expansion beyond schizophrenia",
+        "Eliquis growth guided at 20-25% for the full year"
       ],
       "risks": [
-        "Eliquis revenue cliff steeper than guided",
-        "Cobenfy Alzheimer's data disappointment",
-        "Slower-than-modeled growth portfolio ramp"
+        "Opdivo declining while the growth portfolio is still scaling",
+        "Cobenfy constrained by slow physician titration and repeat prescribing",
+        "Eventual Eliquis erosion once generic exposure materialises",
+        "Growth portfolio ramp needing to outpace legacy decline"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "dxcm-cgm-leadership",
@@ -351,30 +555,49 @@
       "sector": "Healthcare",
       "layer": "Diagnostics & Imaging",
       "primaryTicker": "DXCM",
-      "relatedTickers": ["PODD", "MDT", "ABT"],
-      "thesisShort": "Dexcom owns ~74% US CGM share with $4.66B in 2025 revenue, and the G7 15-Day system plus over-the-counter Stelo extend the franchise into Type 2 diabetes and the prediabetic obesity adjacent population.",
-      "thesisLong": "Dexcom is the CGM category leader. 2025 revenue grew 16% to $4.662B (15% organic), with US +11% and international +18%. Management guided 2026 to $5.16–5.25B (+11–13%). Approximately 74% US CGM share gives Dexcom near-utility status in the Type 1 and intensive-insulin Type 2 segments.\n\nThe G7 15-Day System, launched broadly in 2025, extends sensor wear from 10 to 15 days — meaningfully improving reimbursement economics and patient experience versus Abbott's FreeStyle Libre. The Stelo over-the-counter sensor (cleared by FDA in 2024) opened a new wedge into non-insulin Type 2 and adjacent wellness/obesity use cases, where GLP-1 patients increasingly use CGMs to track metabolic response.\n\nThe TAM is being recast upward. The global CGM market is on a path to $47B+, and Dexcom is investing in international expansion (notably Japan, Korea, Brazil, India) and in software (Dexcom ONE+, partnership with Oura).\n\nThe bottleneck story: CGM sensor manufacturing requires high-precision enzyme deposition, complex multi-layer fabrication, and validated supply chains that take years to certify. Only Dexcom, Abbott, and Medtronic ship at scale. The risks are share loss to Abbott Libre 3 in cost-sensitive markets, GLP-1-driven Type 2 prevalence reductions over time, and Medicare DME reimbursement changes — but in 2026 Dexcom remains the chokepoint name on real-time glucose data.",
+      "relatedTickers": [
+        "PODD",
+        "MDT",
+        "ABT"
+      ],
+      "thesisShort": "Dexcom grew Q2 2026 revenue 13% to $1.308 billion with gross margin up 400 basis points on the G7 15-day transition, and won the first FDA clearance for an over-the-counter CGM in children.",
+      "thesisLong": "Dexcom is the reference continuous glucose monitor in the United States, and 2026 has been a year of margin structure improving alongside addressable population expanding.\n\nQ2 2026 revenue was $1.308 billion, up 13% reported and 12% organically, with US revenue up 11% and international up 19% reported. The more consequential line is gross margin at 64.1%, up 400 basis points year over year, driven by manufacturing efficiencies and the transition to the G7 15-day system. Extending sensor wear from ten to fifteen days cuts the number of sensors a patient consumes per year, which lowers Dexcom's cost to serve while improving the patient experience — the rare change that helps both sides. The company is on track to convert roughly 50% of its US customer base to extended wear by the end of 2026.\n\nThe population expansion came through Stelo. In June 2026 the FDA cleared the Stelo glucose biosensor system for children, making it the first over-the-counter CGM cleared for paediatric prediabetic and diabetic patients. Over-the-counter access removes the prescription gate entirely, and paediatric clearance extends it to a population that was previously unreachable without a physician.\n\nFull-year 2026 revenue guidance was raised slightly to $5.18-5.25 billion, with non-GAAP gross margin around 64%, operating margin of 23.5-24% and adjusted EBITDA margin of 31.5-32%.\n\nRisks are competitive and reimbursement-driven: Abbott's FreeStyle Libre franchise competing directly, Medicare durable medical equipment reimbursement pressure, and the long-run question of whether GLP-1 adoption reduces diabetes prevalence.",
       "chokepointMetrics": [
-        { "label": "US CGM share", "value": "~74%" },
-        { "label": "2025 revenue", "value": "$4.66B" },
-        { "label": "2026 revenue guide", "value": "$5.16-5.25B" },
-        { "label": "G7 sensor wear duration", "value": "15 days" },
-        { "label": "Global CGM TAM", "value": "$47B+" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$1.308B (+13% reported, +12% organic)"
+        },
+        {
+          "label": "Q2 2026 gross margin",
+          "value": "64.1%, up 400 basis points YoY on the G7 15-day transition"
+        },
+        {
+          "label": "G7 15-day conversion",
+          "value": "~50% of US customer base targeted by end-2026"
+        },
+        {
+          "label": "Stelo pediatric clearance",
+          "value": "First OTC CGM cleared for children (FDA, June 2026)"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "$5.18-5.25B"
+        }
       ],
       "catalysts": [
-        "Stelo OTC scale into prediabetes and GLP-1 users",
-        "International expansion in Japan, Korea, Brazil, India",
-        "G7 15-Day reimbursement uptake",
-        "Type 2 non-insulin coverage expansions",
-        "Software / pump-integration partnerships"
+        "G7 15-day conversion reaching ~50% of the US base by end-2026",
+        "Stelo over-the-counter expansion into paediatric and prediabetic populations",
+        "International revenue growing 19% and outpacing the US",
+        "Margin structure improving with extended-wear economics"
       ],
       "risks": [
-        "Abbott FreeStyle Libre 3 share gains",
-        "Medicare DME reimbursement headwinds",
-        "GLP-1 success reducing diabetes prevalence over time"
+        "Abbott FreeStyle Libre competition intensifying",
+        "Medicare durable medical equipment reimbursement pressure",
+        "US growth (+11%) trailing international",
+        "GLP-1 adoption reducing long-run diabetes prevalence"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "ew-tavr-tmtt-leadership",
@@ -382,30 +605,49 @@
       "sector": "Healthcare",
       "layer": "Diagnostics & Imaging",
       "primaryTicker": "EW",
-      "relatedTickers": ["MDT", "ABT", "BSX"],
-      "thesisShort": "Edwards holds ~72% US TAVR share with the Sapien platform driving $4.5B in 2025 sales, while TMTT (Pascal, Evoque, Sapien M3) just grew 62% to a $134M run-rate and is guided to $740-780M in 2026.",
-      "thesisLong": "Edwards Lifesciences is the structural heart category leader. Sapien TAVR holds ~72.3% US share in 2025 with full-year segment sales of $4.5B and 2026 guidance of $4.6–4.9B (+6–8%). Sapien is the most-studied TAVR valve with 15+ years of clinical data, 10 NEJM publications, and 1.2M+ patients treated globally — the gold-standard install base.\n\nTMTT (Transcatheter Mitral and Tricuspid Therapies) is the explosive growth segment. 2025 TMTT sales hit $134.5M, up 61.9% YoY, and 2026 guidance calls for $740–780M (+35–45%). The segment includes Pascal (mitral repair), Evoque (tricuspid replacement), and the just-approved Sapien M3 (mitral replacement). Long-term targets put TMTT at $2B by 2030.\n\nThe bottleneck is structural: transcatheter heart valve approvals require massive multi-year RCTs (PARTNER program for TAVR), training of interventional cardiology / structural heart programs, and procedural reimbursement infrastructure. Only Edwards and Medtronic compete in TAVR at scale; Abbott (MitraClip) and Edwards are the duopoly in mitral repair; Edwards is essentially alone in tricuspid replacement with Evoque.\n\nThe risks are mid-term TAVR mature-market share normalization (Medtronic Evolut FX and Abbott Navitor pushing back), execution on TMTT clinical ramp, and reimbursement scrutiny on Evoque tricuspid. But on the chokepoint map for structural heart, Edwards is the dominant name through the rest of the decade.",
+      "relatedTickers": [
+        "MDT",
+        "ABT",
+        "BSX"
+      ],
+      "thesisShort": "Edwards leads structural heart with Sapien TAVR, and its transcatheter mitral and tricuspid business grew 47% in Q2 2026 to $195.9 million with full-year guidance raised to $760-780 million.",
+      "thesisLong": "Edwards Lifesciences built the transcatheter aortic valve replacement market and is now building the mitral and tricuspid one, which is the larger and less penetrated opportunity.\n\nQ2 2026 sales were $1.74 billion, up 12.5%, with adjusted EPS of $0.78. TAVR contributed $1.3 billion, up 10.5%, supported by sustained clinical momentum and a competitor's prior-year exit, with Sapien holding its position as the durability benchmark. TMTT — the Pascal and Evoque platforms addressing mitral and tricuspid disease — grew 47.3% to $195.9 million, or 44.8% in constant currency.\n\nManagement raised guidance across the board: full-year sales growth to 10-11% from 9-11%, TAVR growth to 8-9% from 7-9%, and TMTT to $760-780 million from $740-780 million, implying total company sales of $6.6-6.9 billion and TAVR sales of $4.75-5.0 billion. Adjusted EPS guidance of $2.95-3.05 was reaffirmed even while assuming the effective tax rate lands at the high end of the original 16-19% range — a raise on revenue absorbed without an EPS cut.\n\nThe long-run framing management has set is TMTT reaching $2 billion of revenue by 2030, supported by Pascal for tricuspid and next-generation Capture Clarity technology. Getting from under $800 million to $2 billion in four years is roughly a 27% compound rate in a category where procedure adoption depends on training centres and reimbursement, not just device availability.\n\nRisks are competitive and regulatory: Medtronic and Abbott competing across both TAVR and transcatheter repair, and reimbursement tightening on novel structural heart procedures.",
       "chokepointMetrics": [
-        { "label": "US TAVR share", "value": "~72%" },
-        { "label": "2025 TAVR sales", "value": "$4.5B" },
-        { "label": "2025 TMTT sales", "value": "$134.5M (+62%)" },
-        { "label": "2026 TMTT guidance", "value": "$740-780M" },
-        { "label": "Sapien patients treated globally", "value": "1.2M+" }
+        {
+          "label": "Q2 2026 sales",
+          "value": "$1.74B (+12.5% YoY); adjusted EPS $0.78"
+        },
+        {
+          "label": "Q2 2026 TAVR sales",
+          "value": "$1.3B (+10.5% YoY)"
+        },
+        {
+          "label": "Q2 2026 TMTT sales",
+          "value": "$195.9M (+47.3% YoY, +44.8% constant currency)"
+        },
+        {
+          "label": "2026 TMTT guidance",
+          "value": "Raised to $760-780M from $740-780M"
+        },
+        {
+          "label": "2026 total sales guidance",
+          "value": "$6.6-6.9B, with TAVR at $4.75-5.0B"
+        }
       ],
       "catalysts": [
-        "Sapien M3 mitral replacement commercial launch",
-        "Evoque tricuspid market education and adoption",
-        "TAVR moderate AS / asymptomatic indication expansion",
-        "International TAVR penetration",
-        "PASCAL Precision iterative launches"
+        "TMTT growing 47% and guided toward $2B of revenue by 2030",
+        "PASCAL for tricuspid and next-generation Capture Clarity launches",
+        "Full-year sales growth guidance raised to 10-11%",
+        "International TAVR penetration"
       ],
       "risks": [
-        "Medtronic Evolut FX share recovery in TAVR",
-        "Abbott Navitor and TriClip competitive pressure",
-        "Reimbursement tightening on novel TMTT procedures"
+        "Medtronic and Abbott competing across TAVR and transcatheter repair",
+        "Reimbursement tightening on novel structural heart procedures",
+        "TMTT 2030 target implying a sustained high-20s growth rate",
+        "Effective tax rate assumed at the high end of the guided range"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "isrg-davinci-robotic-surgery",
@@ -413,30 +655,49 @@
       "sector": "Healthcare",
       "layer": "Medical Devices Surgery",
       "primaryTicker": "ISRG",
-      "relatedTickers": ["SYK", "MDT", "JNJ"],
-      "thesisShort": "Intuitive Surgical's da Vinci is the global standard for soft-tissue robotic surgery with 11,106 systems installed worldwide as of December 2025, and the da Vinci 5 ramp drove a 12% installed-base expansion in a single year.",
-      "thesisLong": "Intuitive Surgical owns soft-tissue robotic surgery. The da Vinci installed base reached 11,106 systems at year-end 2025 (+12% YoY), and 2025 placements totaled 1,721 systems, of which 870 were the next-generation da Vinci 5 — up from 362 in 2024. Full year 2025 revenue hit $10.06B (+21%).\n\nThe moat is multi-layered: 25 years of clinical data across urology, gynecology, general surgery, and thoracic; a 2M+ procedure-per-year recurring instruments and accessories revenue stream (the razor-blade economics); deeply trained surgeon population with multi-year learning curves; and integrated training and simulation infrastructure that hospitals built around da Vinci.\n\nThe da Vinci 5 transition is the most important platform refresh in a decade. Force feedback, 10,000x compute headroom for AI, and improved imaging make it the upgrade path for the entire installed base. SP (single-port) extends the franchise into transoral, transanal, and other narrow-corridor procedures that multi-port can't reach.\n\nCompetition is finally real but contained. Medtronic Hugo is rolling out internationally; Stryker is extending Mako into soft tissue; J&J Ottava is approaching first-in-human. None have the procedure breadth, instrument library, or surgeon network that da Vinci has compounded over 25 years. Risks are tariff exposure on Chinese-made components, Hugo's price-aggressive entry into emerging markets, and any meaningful da Vinci 5 ramp execution stumble — but Intuitive remains the textbook chokepoint name in surgical robotics.",
+      "relatedTickers": [
+        "SYK",
+        "MDT",
+        "JNJ"
+      ],
+      "thesisShort": "Intuitive's da Vinci installed base reached 11,710 systems at 30 June 2026, up 12% year over year, with worldwide procedures growing 16% and revenue up 19% to $2.89 billion.",
+      "thesisLong": "Intuitive Surgical's da Vinci is the global standard for soft-tissue robotic surgery, and the business compounds through a razor-and-blade structure: systems are placed, then generate instrument and accessory revenue on every procedure performed for the life of the system.\n\nBoth halves grew in Q2 2026. The installed base reached 11,710 systems as of 30 June 2026, up 12% from 10,488 a year earlier, on 468 placements in the quarter against 395 in Q2 2025 — of which 246 were da Vinci 5 systems, up from 180. Worldwide procedures across da Vinci and Ion grew approximately 16%, with da Vinci procedures up 15% and Ion procedures up 36%. Revenue was $2.89 billion, up 19% from $2.44 billion.\n\nThe combination is what makes this a bottleneck rather than a growth story. Procedure growth running ahead of installed base growth means utilisation per system is rising, so the recurring revenue base compounds faster than the capital placements that create it. And every additional year of surgeon training on da Vinci raises the switching cost for the hospitals that would have to retrain to move.\n\nIon's 36% procedure growth is the newer vector — robotic bronchoscopy for lung biopsy addresses a different specialty and a different referral pathway than the surgical franchise.\n\nCompetition is now real rather than theoretical: Medtronic's Hugo is establishing international positions and Johnson & Johnson's Ottava is entering clinical use. Component tariffs are the other operational exposure.",
       "chokepointMetrics": [
-        { "label": "Installed base (Dec 2025)", "value": "11,106 systems" },
-        { "label": "2025 installed base growth", "value": "+12%" },
-        { "label": "2025 revenue", "value": "$10.06B (+21%)" },
-        { "label": "da Vinci 5 placements 2025", "value": "870" },
-        { "label": "Annual procedures (recurring)", "value": "~2M+" }
+        {
+          "label": "Installed base",
+          "value": "11,710 systems at 30 June 2026 (+12% vs 10,488)"
+        },
+        {
+          "label": "Q2 2026 system placements",
+          "value": "468, vs 395 a year earlier — including 246 da Vinci 5 vs 180"
+        },
+        {
+          "label": "Worldwide procedure growth",
+          "value": "~16% (da Vinci +15%, Ion +36%)"
+        },
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$2.89B (+19% YoY)"
+        },
+        {
+          "label": "Utilisation trend",
+          "value": "Procedure growth running ahead of installed base growth"
+        }
       ],
       "catalysts": [
-        "da Vinci 5 ramp into existing installed base",
-        "SP indication expansion in colorectal and urology",
-        "International (Japan, India, Korea) penetration",
-        "AI-enhanced surgical analytics monetization",
-        "Outpatient surgery channel expansion"
+        "da Vinci 5 now a majority of placements and ramping through the installed base",
+        "Ion procedures growing 36% in robotic bronchoscopy",
+        "International penetration in Japan, India and Korea",
+        "Rising utilisation lifting recurring instrument revenue per system"
       ],
       "risks": [
-        "Medtronic Hugo gaining international beachheads",
-        "J&J Ottava entering clinical use",
-        "Tariffs on China-sourced componentry"
+        "Medtronic Hugo establishing international positions",
+        "Johnson & Johnson Ottava entering clinical use",
+        "Tariffs on sourced componentry",
+        "Capital budget sensitivity at hospital customers"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "syk-mako-orthopedic-robotics",
@@ -444,30 +705,49 @@
       "sector": "Healthcare",
       "layer": "Medical Devices Surgery",
       "primaryTicker": "SYK",
-      "relatedTickers": ["ZBH", "JNJ", "MDT"],
-      "thesisShort": "Stryker's Mako has 3,000+ installations and 2M+ procedures across 46 countries, and the new handheld Mako RPS extends robotic-assist into a much larger surgeon population than the bulky main system can reach.",
-      "thesisLong": "Stryker's Mako is the dominant orthopedic surgical robot. 3,000+ Mako platform installations globally and 2M+ cumulative procedures across 46 countries make it the procedural standard in robot-assisted total knee, partial knee, and total hip arthroplasty. Record installation quarters in 2025 reflect ongoing share capture from Zimmer (Rosa) and J&J (Velys).\n\nThe pull-through economics are the moat. Hospitals that buy a Mako system commit to Stryker's implant ecosystem (Triathlon knees, Insignia hips, Tritanium acetabular cups) — and switching surgeons off a system they trained on is exceptionally difficult. Mako installs drive multi-year implant share gains in every account.\n\nThe Mako RPS (Robotic Power System) handheld launch in early 2026 is a strategic expansion. Where the main Mako requires a dedicated robot bay, Mako RPS is a handheld robotic device that extends robotic precision to ambulatory surgery centers (ASCs) and lower-volume hospitals — potentially doubling the addressable surgical population. Limited market release is underway with full launch through 2026.\n\nThe global orthopedic surgical robotics market is projected to grow from $13.7B in 2025 to $27.1B by 2030 (14.7% CAGR), and Stryker is the share leader. Risks are competition from J&J Velys and Zimmer Rosa in price-sensitive accounts, ASC migration shifting reimbursement, and any safety event with the new handheld platform — but Mako is the chokepoint franchise on which the rest of Stryker's MedSurg business compounds.",
+      "relatedTickers": [
+        "ZBH",
+        "JNJ",
+        "MDT"
+      ],
+      "thesisShort": "Stryker delivered its best-ever second quarter for Mako installations in both US and international markets, with 9% organic sales growth to roughly $6.3 billion and adjusted EPS up 17.9%.",
+      "thesisLong": "Stryker's Mako platform is the orthopaedic counterpart to da Vinci: place the robot, then pull through the implants and instruments used in every procedure it performs. Once a surgeon plans cases on Mako software and a hospital has standardised on Stryker implants, the switching cost spans both capital and consumables.\n\nQ2 2026 delivered 9% organic sales growth to approximately $6.3 billion with adjusted EPS of $3.69, up 17.9%. The company recorded its best-ever second quarter for Mako installations in both US and international markets, and utilisation across the installed base continued to rise. US Orthopaedics organic sales grew 9.2% driven by those installations, MedSurg and Neurotechnology grew 9.2% organically, and orthopaedics overall grew 8.6%.\n\nRising utilisation on a growing base is the mechanic that matters. Capital placements are lumpy and hospital budget-dependent; the implant and instrument pull-through they create is recurring, and it compounds with every additional procedure performed on each installed system.\n\nStryker narrowed full-year 2026 guidance to organic sales growth of 8.3-9.3%, from 8-9.5%, and adjusted EPS of $14.95-15.10, citing strong orders, production ramp and stable procedural trends — and resumed share repurchases. The quarter was delivered while recovering from a cyber incident and associated one-time charges, which makes the underlying operating performance somewhat better than the headline.\n\nCompetition from Johnson & Johnson's Velys and Zimmer Biomet's Rosa continues, and ambulatory surgery centre reimbursement shifts affect how capital equipment is purchased.",
       "chokepointMetrics": [
-        { "label": "Mako installations globally", "value": "3,000+" },
-        { "label": "Cumulative Mako procedures", "value": "2M+" },
-        { "label": "Countries with Mako presence", "value": "46" },
-        { "label": "Ortho robot market 2030E", "value": "$27.1B" },
-        { "label": "Mako RPS launch", "value": "2026 LMR" }
+        {
+          "label": "Q2 2026 organic sales growth",
+          "value": "9%, to approximately $6.3B"
+        },
+        {
+          "label": "Q2 2026 adjusted EPS",
+          "value": "$3.69 (+17.9% YoY)"
+        },
+        {
+          "label": "Mako installations",
+          "value": "Best-ever second quarter in both US and international markets"
+        },
+        {
+          "label": "US Orthopaedics organic growth",
+          "value": "+9.2%, driven by Mako installations"
+        },
+        {
+          "label": "2026 guidance",
+          "value": "Narrowed to 8.3-9.3% organic growth and $14.95-15.10 adjusted EPS"
+        }
       ],
       "catalysts": [
-        "Mako RPS handheld full commercial launch",
-        "ASC channel expansion driving placement velocity",
-        "International (Japan, China, Latin America) growth",
-        "Insignia hip and Triathlon knee pull-through",
-        "Spine and shoulder Mako applications"
+        "Record second-quarter Mako installations with utilisation rising",
+        "Implant and instrument pull-through compounding on a larger installed base",
+        "Ambulatory surgery centre channel expansion",
+        "Share repurchases resumed"
       ],
       "risks": [
-        "J&J Velys and Zimmer Rosa competitive pressure",
-        "ASC reimbursement shifts compressing capital sales",
-        "Slower than modeled Mako RPS adoption"
+        "Johnson & Johnson Velys and Zimmer Biomet Rosa competitive pressure",
+        "Ambulatory surgery centre reimbursement shifts affecting capital purchasing",
+        "Residual effects of the cyber incident and associated charges",
+        "Hospital capital budget sensitivity"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "teva-austedo-biosimilars",
@@ -475,30 +755,49 @@
       "sector": "Healthcare",
       "layer": "Generics & Compounding",
       "primaryTicker": "TEVA",
-      "relatedTickers": ["VTRS", "ORGN", "BIIB"],
-      "thesisShort": "Teva grew to $17.3B in 2025 revenue across 11 consecutive quarters of growth, with Austedo hitting $2.2B (+35%) and a biosimilar portfolio targeting double-revenue by 2027.",
-      "thesisLong": "Teva is the generics-to-innovative pivot story. 2025 revenue of $17.3B reflected 11 consecutive quarters of growth as the Pivot to Growth strategy under CEO Richard Francis worked through the system. Austedo (deutetrabenazine for Huntington's chorea and tardive dyskinesia) hit $2.2B in 2025 (+35%) and is the franchise leading the innovative transition.\n\nThe core generics business is mature and pressured: global generics declined 2% in local currency, with US generics down 6%, Europe +1%, International -1%. But that mix is now less than half of revenue, with innovative (Austedo, Ajovy migraine, Uzedy long-acting risperidone) and biosimilars carrying the growth.\n\nBiosimilars are the quiet wedge. Teva is targeting biosimilar revenue doubling by 2027 with launches across Humira, Stelara, Prolia (denosumab), and others. The portfolio leverages Teva's existing complex-generic manufacturing scale and supply-chain footprint that few competitors can match.\n\nThe near-term setback is 2026 guidance: Teva guided $16.4–16.8B, signaling a step-down from 2025 driven by US generic erosion and select LOEs. The longer story is whether Austedo growth + biosimilar ramp can offset the generics drag and make Teva a compounded mid-single-digit revenue grower. On the chokepoint map, Teva remains the largest pure-play generics + biosimilar manufacturer globally — a structural utility for affordable medicine access that any drug-pricing reform tailwind benefits.",
+      "relatedTickers": [
+        "VTRS",
+        "OGN",
+        "BIIB"
+      ],
+      "thesisShort": "Teva's innovative brands are carrying the company — Austedo, Uzedy and Ajovy grew a combined 43% in Q2 2026 — but total revenue slipped 1% to about $4.1 billion with a GAAP net loss of $576 million.",
+      "thesisLong": "Teva's pivot from a generics business into a branded-plus-biosimilars business is visible in the composition of its results and, so far, not in the total.\n\nQ2 2026 revenue was approximately $4.1 billion, down 1% year over year, with a GAAP net loss of $576 million, or $0.49 per share. Underneath that, the three innovative brands grew a combined 43%: Austedo up 40%, Uzedy up 43% and Ajovy up 56%. Teva raised its full-year revenue outlook for all three. The divergence between a 43% growth engine and a flat consolidated top line is the whole story — the branded portfolio is compounding fast but is not yet large enough to offset generics pricing pressure across the rest of the business.\n\nBiosimilars are the second leg and are running ahead of plan. Teva now expects to exceed its target of $800 million in biosimilar revenue by 2027, with 15 biosimilars already in market and 14 more in the pipeline. Biosimilars sit in a genuinely defensible position for a company with Teva's manufacturing base: they require regulatory and production capability that pure generics competitors lack, but do not carry the discovery risk of novel drugs.\n\nThe risk is arithmetic. Until the innovative and biosimilar portfolios are large enough to outweigh the declining base, consolidated growth stays near zero regardless of how fast the growth products compound — and drug pricing reform pressure applies to both halves.",
       "chokepointMetrics": [
-        { "label": "2025 revenue", "value": "$17.3B" },
-        { "label": "2025 Austedo revenue", "value": "$2.2B (+35%)" },
-        { "label": "Consecutive growth quarters", "value": "11" },
-        { "label": "2026 revenue guide", "value": "$16.4-16.8B" },
-        { "label": "Biosimilar revenue target", "value": "2x by 2027" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "~$4.1B (-1% YoY); GAAP net loss $576M (-$0.49/share)"
+        },
+        {
+          "label": "Austedo growth",
+          "value": "+40% YoY (Q2 2026)"
+        },
+        {
+          "label": "Three innovative brands combined",
+          "value": "+43% YoY (Austedo, Uzedy, Ajovy)"
+        },
+        {
+          "label": "Biosimilar portfolio",
+          "value": "15 in market, 14 in pipeline"
+        },
+        {
+          "label": "Biosimilar revenue target",
+          "value": "Expects to exceed $800M by 2027"
+        }
       ],
       "catalysts": [
-        "Austedo XR uptake and TD label expansion",
-        "Biosimilar Stelara, Prolia, Humira launches",
-        "Uzedy long-acting risperidone share growth",
-        "Debt paydown improving leverage profile",
-        "Olanzapine LAI Phase 3 readout"
+        "Full-year outlook raised for all three innovative brands",
+        "Biosimilar revenue expected to exceed the $800M 2027 target",
+        "14 additional biosimilars in the pipeline",
+        "Uzedy and Ajovy each growing above 40%"
       ],
       "risks": [
+        "Consolidated revenue still declining despite 43% growth in the innovative portfolio",
+        "GAAP net loss of $576M in the quarter",
         "US generics pricing pressure persisting",
-        "Austedo growth deceleration",
         "Drug pricing reform compressing biosimilar economics"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "hims-direct-rx-platform",
@@ -506,31 +805,49 @@
       "sector": "Healthcare",
       "layer": "Generics & Compounding",
       "primaryTicker": "HIMS",
-      "relatedTickers": ["LLY", "NVO", "TDOC"],
-      "thesisShort": "Hims hit 2.5M subscribers and $2.35B revenue in 2025, then pivoted hard in early 2026 from compounded GLP-1s into a Wegovy distribution role with Novo and a LillyDirect routing arrangement for Zepbound.",
-      "thesisLong": "Hims & Hers built the largest consumer-direct telehealth platform in the US: 2.5M subscribers at year-end 2025 (+282K YoY) and $2.35B in revenue (up from $1.5B in 2024). The growth was juiced by compounded GLP-1s, which contributed roughly $420M of H1 2025 sales (~38% of revenue), but that line collapsed when FDA shortage-list status ended for semaglutide and tirzepatide.\n\nThe February 2026 reset was decisive. FDA, HHS, and Novo Nordisk all moved against Hims' compounding strategy in a single week. Hims pulled the $49 oral semaglutide pill and pivoted to a Wegovy distribution arrangement with Novo plus LillyDirect routing for Zepbound and orforglipron — converting from compounding pirate to legitimate branded distribution channel.\n\nThe core platform underneath remains valuable: hair, sexual health, mental health, dermatology, and weight loss verticals all subscribe at scale; ~95% of subscribers are not on GLP-1s; the Eucalyptus acquisition extended the platform internationally. The peptide pipeline (testosterone, NAD+, longevity peptides) is the next compounded category but carries its own regulatory risk.\n\nThe chokepoint framing is unique: Hims doesn't gate any drug supply, but it gates patient acquisition cost and direct-to-consumer Rx workflow at a scale (millions of subscribers, in-house pharmacy, telemedicine network across all 50 states) that branded pharma now needs as a distribution partner. Whether the platform can grow without compounded GLP-1 economics is the 2026 question.",
+      "relatedTickers": [
+        "LLY",
+        "NVO",
+        "TDOC"
+      ],
+      "thesisShort": "Hims & Hers has completed its pivot from compounded GLP-1s into branded distribution, growing Q2 2026 revenue 38% to $753.2 million under a March 2026 Novo Nordisk agreement to sell injectable and oral Wegovy and Ozempic.",
+      "thesisLong": "Hims & Hers spent 2025 as a compounded-GLP-1 seller and 2026 as a branded distribution partner, and the transition has gone considerably better than the risk framing implied.\n\nOn 9 March 2026, Novo Nordisk and Hims & Hers announced an agreement to sell branded GLP-1 medications — including injectable and oral forms of Wegovy and Ozempic — through the Hims & Hers telehealth platform. Novo has since described Hims as one of its most voluminous telehealth partners. The timing was fortunate: the launch of Novo's Wegovy pill removed both the needle objection and part of the price objection for consumers, and Hims was positioned as a primary channel for it.\n\nQ2 2026 revenue was $753.2 million, up 38.2% year over year, with adjusted EBITDA of $60.3 million and international revenue of $131 million. The company raised its full-year forecast to $3.3 billion. International expansion is following the same product: Germany and the UK generated tens of thousands of waitlist sign-ups within days of preparing for the Wegovy pill launch.\n\nThe structural question this entry exists to track is whether a distribution platform captures durable economics or is disintermediated. Hims does not own the molecule; it owns the customer relationship, the prescribing workflow and the subscription. Manufacturers running their own direct channels are the standing competitive threat, and platform economics depend on customer acquisition cost staying below lifetime value across the non-GLP-1 verticals too.",
       "chokepointMetrics": [
-        { "label": "2025 subscribers", "value": "2.5M (+282K)" },
-        { "label": "2025 revenue", "value": "$2.35B" },
-        { "label": "2024 revenue", "value": "$1.5B" },
-        { "label": "H1'25 GLP-1 share of revenue", "value": "~38%" },
-        { "label": "Branded GLP-1 partnerships", "value": "Novo + Lilly (2026)" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$753.2M (+38.2% YoY)"
+        },
+        {
+          "label": "Q2 2026 adjusted EBITDA",
+          "value": "$60.3M"
+        },
+        {
+          "label": "International revenue",
+          "value": "$131M (Q2 2026)"
+        },
+        {
+          "label": "2026 revenue forecast",
+          "value": "Raised to $3.3B"
+        },
+        {
+          "label": "Novo Nordisk agreement",
+          "value": "Signed 9 March 2026 for injectable and oral Wegovy and Ozempic"
+        }
       ],
       "catalysts": [
-        "Wegovy distribution partnership scaling",
-        "LillyDirect routing for Zepbound and orforglipron",
-        "Peptide and longevity vertical launches",
-        "Eucalyptus international expansion",
-        "Mental health and dermatology subscriber growth"
+        "Oral Wegovy driving demand through the platform",
+        "International rollout with waitlists building in Germany and the UK",
+        "Raised full-year revenue forecast to $3.3B",
+        "Non-GLP-1 verticals broadening the subscriber base"
       ],
       "risks": [
-        "GLP-1 revenue replacement gap into 2026",
-        "FDA scrutiny of compounded peptides",
-        "CAC inflation in non-GLP-1 verticals",
-        "Competition from Amazon Pharmacy and LillyDirect direct"
+        "No ownership of the underlying molecule — economics depend on the partnership continuing",
+        "Manufacturer direct-to-consumer channels competing for the same patients",
+        "Customer acquisition cost inflation in non-GLP-1 verticals",
+        "Regulatory scrutiny of telehealth prescribing workflows"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "grfs-plasma-immunoglobulin",
@@ -538,30 +855,49 @@
       "sector": "Healthcare",
       "layer": "Plasma / Blood Products",
       "primaryTicker": "GRFS",
-      "relatedTickers": ["TAK", "CSLLY", "OPK"],
-      "thesisShort": "Grifols' immunoglobulin franchise grew 14.7% constant-currency to lead $7.5B in 2025 revenue, with subcutaneous Xembify up 60% and plasma collection volumes rising 8% industry-wide.",
-      "thesisLong": "Grifols sits at one end of an oligopoly that gates plasma-derived therapies. 2025 revenue of EUR 7.524B grew 7% constant currency, with the immunoglobulin (IG) franchise growing 14.7% CC and subcutaneous Xembify surging 59.5% YoY. Group profit more than doubled to EUR 402M.\n\nThe plasma chokepoint is real and difficult to displace. IVIG and SCIG (intravenous and subcutaneous immunoglobulins) are used in primary immune deficiencies, CIDP, ITP, and multifocal motor neuropathy. The supply chain requires 1,000+ paid-donor plasma collection centers globally (Grifols, CSL Behring, Takeda dominate), 9-12 month plasma-to-product lead times, and FDA-licensed fractionation plants. New entrants face a multi-year build-out before any commercial volume.\n\nIndustry plasma collection volumes grew 8% in 2025, easing the pandemic-era supply shortage. Strategic moves to widen plasma access include Grifols' EMA-approved Egypt arrangement and its Canadian Blood Services partnership in Canada (the world's fourth-largest IgG market). Shanghai RAAS partnership manages China dynamics.\n\nThe near-term overhang is the albumin segment (-5.1% in 2025) on China pricing pressure, plus the lingering balance-sheet questions from the post-Brookfield bid period. But the core IG growth engine, the expanded plasma footprint, and the structural supply-side moat make Grifols the clearest public way to play the plasma chokepoint after Takeda's diversification and CSL's Australian listing.",
+      "relatedTickers": [
+        "TAK",
+        "CSLLY",
+        "OPK"
+      ],
+      "thesisShort": "Grifols' immunoglobulin franchise grew 12.8% at constant currency in the first half of 2026, led by 17.7% subcutaneous growth, while first-half net profit rose 28.7% to EUR 227 million.",
+      "thesisLong": "Plasma is a genuine physical bottleneck: immunoglobulin cannot be synthesised, so every gram traces back to a donor, a collection centre and a fractionation plant with multi-year lead times. Grifols owns one of the three global collection and fractionation networks.\n\nFirst-half 2026 net revenue was EUR 3.574 billion, up 2.6% at constant currency, with Q2 net revenue of EUR 1.874 billion. Net profit through June rose 28.7% to EUR 227 million, and cash flow improved materially on refinancing. Management held full-year guidance.\n\nImmunoglobulins are doing the work. The franchise grew 12.8% at constant currency in the first half — intravenous IG up 12.5% on Gamunex demand in the US and Europe, and subcutaneous IG up 17.7%, driven by strong second-quarter commercial growth in Xembify. Subcutaneous administration lets patients dose at home rather than in an infusion centre, which is why it grows faster than the intravenous format and why it expands the treated population rather than merely shifting it.\n\nThe most strategically important disclosure concerns supply geography. Grifols expects ex-US plasma collections to increase roughly 2.5 times by 2029, with Egypt accounting for around half, reducing reliance on US-sourced plasma for international markets. Plasma supply has been overwhelmingly American for decades because of compensated donation rules; diversifying the collection base is the structural fix to a single-country dependency.\n\nFor the second half, Grifols projects mid-to-high single-digit IG growth in core markets, continued strong double-digit subcutaneous growth, and stabilising albumin comparisons as China pricing normalisation completes.\n\nRisks include FcRn antagonists displacing IG in some autoimmune indications, China albumin pricing, and donor compensation regulation.",
       "chokepointMetrics": [
-        { "label": "2025 revenue", "value": "EUR 7.524B (+7% CC)" },
-        { "label": "IG franchise growth", "value": "+14.7% CC" },
-        { "label": "Xembify subcutaneous growth", "value": "+59.5%" },
-        { "label": "Industry plasma collection growth", "value": "+8%" },
-        { "label": "2025 group profit", "value": "EUR 402M" }
+        {
+          "label": "1H 2026 net revenue",
+          "value": "EUR 3.574B (+2.6% constant currency); Q2 EUR 1.874B"
+        },
+        {
+          "label": "1H 2026 immunoglobulin growth",
+          "value": "+12.8% constant currency"
+        },
+        {
+          "label": "Subcutaneous IG growth",
+          "value": "+17.7%, led by Xembify"
+        },
+        {
+          "label": "1H 2026 net profit",
+          "value": "EUR 227M (+28.7%)"
+        },
+        {
+          "label": "Ex-US plasma collections",
+          "value": "Expected to rise ~2.5x by 2029, Egypt roughly half"
+        }
       ],
       "catalysts": [
-        "Xembify subcutaneous IG continued share gains",
-        "Egypt and Canada plasma collection scaling",
-        "Fibrinogen approval ramp",
-        "Albumin China pricing stabilization",
-        "Debt refinancing improving capital structure"
+        "Xembify subcutaneous IG continuing double-digit growth",
+        "Egypt and Canada plasma collection scaling toward 2.5x ex-US volume by 2029",
+        "China albumin pricing normalisation completing",
+        "Refinancing improving the capital structure and cash flow"
       ],
       "risks": [
-        "China albumin pricing further deterioration",
-        "FcRn antagonists (efgartigimod) eating IG indications",
-        "Donor compensation regulation changes"
+        "FcRn antagonists displacing immunoglobulin in autoimmune indications",
+        "China albumin pricing pressure",
+        "Donor compensation regulation changes",
+        "Consolidated revenue growth of 2.6% well below the IG franchise rate"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "zts-companion-animal-pharma",
@@ -569,30 +905,49 @@
       "sector": "Healthcare",
       "layer": "Animal Health",
       "primaryTicker": "ZTS",
-      "relatedTickers": ["ELAN", "IDXX", "MRK"],
-      "thesisShort": "Zoetis is the global animal-health leader with $9.35B in 2025 revenue and 70% companion-animal mix, anchored by the Apoquel/Cytopoint dermatology franchise and a recovering Librela osteoarthritis biologic.",
-      "thesisLong": "Zoetis is the only public pure-play global animal-health leader at scale. 2025 revenue hit ~$9.35B (US $5.1B, International $4.25B), with companion animal at ~70% of mix and livestock at ~29%. The recurring nature of pet pharma — chronic dermatology, OA pain, parasiticides, vaccines — produces consistent mid-single-digit organic growth with FDA-class margins.\n\nThe Key Dermatology franchise (Apoquel, Apoquel Chewable, Cytopoint) hit $608M in 2025, +10% operationally. Apoquel/Apoquel Chewable alone is roughly 12% of total revenue — the kind of single-product franchise that defines the moat. Parasiticides (Simparica Trio in dogs, Revolution Plus in cats) and vaccines round out the companion portfolio.\n\nLibrela (anti-NGF monoclonal antibody for canine OA pain) had a tough 2025: US sales -16%, with the broader OA-pain mAb segment -12% on safety-perception headwinds and slower vet adoption than originally guided. Zoetis is investing in vet education and label clarification to restore growth in 2026.\n\nThe chokepoint framing: Zoetis owns the relationship with vet clinics. Sales reps, training programs, diagnostic integration, and decades of clinical data make displacement extraordinarily difficult — and the industry duopoly with Elanco gives Zoetis pricing discipline through the cycle. Risks are Librela ramp slower than modeled, generic Apoquel exposure post-LOE, and pet-spend cyclicality, but on the bottleneck question for animal health innovation, Zoetis is the name.",
+      "relatedTickers": [
+        "ELAN",
+        "IDXX",
+        "MRK"
+      ],
+      "thesisShort": "Zoetis remains the global animal health leader, but Q2 2026 revenue was flat at $2.5 billion with US sales down 7%, and management cut full-year guidance to $9.12-9.32 billion from $9.68-9.96 billion.",
+      "thesisLong": "Zoetis is the global animal health leader, and 2026 has been the year the US companion animal business stopped compounding.\n\nQ2 2026 revenue was $2.5 billion, flat against the prior year and down 1% on an organic operational basis. The US segment fell to $1.3 billion, down 7% both reported and organically. Management cut full-year 2026 guidance to revenue of $9.12-9.32 billion and adjusted diluted EPS of $6.15-6.25, from a prior $9.68-9.96 billion, implying organic operational growth of negative 3% to negative 1% for the year. A guidance cut of that magnitude mid-year is the most important fact in this entry and reverses the recovery framing that previously applied.\n\nThe osteoarthritis pain franchise is the specific problem. Canine OA pain monoclonal antibodies — Librela and Lenivia combined — delivered $105 million, down 8%, with the US portion at $51 million, down 18% and canine OA mAbs specifically down 24%. Management attributed the decline to a high year-over-year comparison, softer clinic visit trends, and a value-conscious consumer environment affecting premium therapies generally.\n\nThat last point is the one worth separating out. If the driver is pet-owner spending restraint rather than product-specific safety perception, then the weakness extends beyond one franchise and is a demand condition rather than a marketing problem — which is consistent with the full-year cut rather than a product-level reset.\n\nInternational and livestock businesses continued to grow but were not large enough to offset the US decline.",
       "chokepointMetrics": [
-        { "label": "2025 revenue", "value": "$9.35B" },
-        { "label": "Companion animal mix", "value": "~70%" },
-        { "label": "2025 Key Dermatology revenue", "value": "$608M (+10%)" },
-        { "label": "Apoquel share of total revenue", "value": "~12%" },
-        { "label": "2025 Librela US growth", "value": "-16%" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$2.5B, flat YoY; -1% organic operational"
+        },
+        {
+          "label": "Q2 2026 US segment revenue",
+          "value": "$1.3B (-7% reported and organic)"
+        },
+        {
+          "label": "Canine OA pain mAbs (Librela + Lenivia)",
+          "value": "$105M (-8%); US portion $51M (-18%)"
+        },
+        {
+          "label": "2026 revenue guidance",
+          "value": "Cut to $9.12-9.32B from $9.68-9.96B"
+        },
+        {
+          "label": "2026 organic operational growth guidance",
+          "value": "(3)% to (1)%"
+        }
       ],
       "catalysts": [
-        "Librela US commercial reset and education ramp",
-        "Apoquel Chewable continued share gains",
-        "Simparica Trio international expansion",
-        "Solensia (cat OA) growth",
-        "Pet diagnostic and AI integration partnerships"
+        "International and livestock businesses continuing to grow",
+        "Lenivia broadening the canine OA pain portfolio alongside Librela",
+        "Companion animal dermatology franchise",
+        "Comparison base easing after a high prior-year quarter"
       ],
       "risks": [
-        "Librela safety-perception persistence",
-        "Apoquel LOE approaching with generic threat",
-        "Pet-spend recession sensitivity"
+        "Full-year guidance cut with organic growth now guided negative",
+        "US segment revenue down 7% year over year",
+        "Value-conscious pet-owner spending affecting premium therapies broadly",
+        "Softer veterinary clinic visit trends"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     },
     {
       "id": "hca-hospital-network",
@@ -600,31 +955,49 @@
       "sector": "Healthcare",
       "layer": "Hospital REITs / Operators",
       "primaryTicker": "HCA",
-      "relatedTickers": ["UHS", "THC", "CYH"],
-      "thesisShort": "HCA generated $75.6B in 2025 revenue across 190 hospitals and ~2,500 ambulatory sites, with a 27% market share target rising to 29% by 2030 in its core MSAs.",
-      "thesisLong": "HCA Healthcare is the largest for-profit hospital operator in the US and the volume-share leader in most of its core markets. 2025 revenue of $75.6B (up from $70.6B in 2024) reflected 190 hospitals and ~2,500 ambulatory sites of care across 19 states and the UK. 2026 revenue is guided to $76.5–80B.\n\nThe market-share thesis is the chokepoint. HCA targets 29% share in its addressable markets by 2030, up from 27% today. Geographic clustering (Florida, Texas, Tennessee, Virginia, Colorado) creates network effects: physician recruitment, payer contracting leverage, and capex efficiency that smaller systems can't match. The ambulatory build-out (freestanding ERs, urgent care, ASCs, physician clinics) extends the funnel into the hospital and protects against site-of-care shifts.\n\nA $10B share repurchase program announced in early 2026 reflects management's confidence in cash generation. The model carries leverage but funds it with predictable hospital EBITDA in concentrated markets where HCA is often the largest employer.\n\nThe risk profile is policy-heavy: any meaningful change to commercial-rate negotiating power, 340B drug pricing, Medicaid expansion rollback, or site-of-service payment parity would compress margins. Labor inflation and physician practice consolidation also remain pressures. But on the question of who controls acute-care delivery in the highest-growth US MSAs, HCA is the chokepoint operator with no comparable scale challenger — a defensive infrastructure asset masquerading as a healthcare equity.",
+      "relatedTickers": [
+        "UHS",
+        "THC",
+        "CYH"
+      ],
+      "thesisShort": "HCA grew Q2 2026 revenue 8.7% to $20.23 billion on 2.5% same-facility admissions growth, but now expects health insurance exchange payer-mix losses of $1.0-1.2 billion for the year, up from $600-900 million.",
+      "thesisLong": "HCA is the largest US for-profit hospital operator, and its scale advantage runs through commercial payer negotiations, trauma and tertiary referral capture, and an ambulatory network that keeps patients inside the system.\n\nQ2 2026 volumes were solid where it counts. Revenue rose 8.7% to $20.230 billion, net income was $1.699 billion, up 2.8%, and diluted EPS was $7.62, up 11.6%, on adjusted EBITDA of $4.027 billion. Same-facility admissions grew 2.5%, equivalent admissions 2.7% and emergency room visits 3.6% — though inpatient surgeries fell 2.3% and outpatient surgeries 3.4%.\n\nThe defining issue is payer mix rather than volume. Reduced Affordable Care Act exchange enrolment shifted patients into uninsured status — HCA has described the exchange volume dropoff as almost one-for-one converting to uninsurance — which reduced income before income taxes by roughly $400 million in the quarter alone. HCA had guided in April to a $600-900 million full-year unfavourable impact; it now expects $1.0-1.2 billion. That escalation is the single most important change in this entry, and it is a policy outcome rather than an operating one.\n\nOffsetting it, approximately $400 million of incremental net benefit came from Medicaid Supplemental Payment Programs, largely a Florida directed payment programme that added $1.372 billion of revenue and $829 million of other operating expense for periods back to 1 October 2024.\n\nUpdated 2026 guidance is revenue of $39.5-40.5 billion and EPS of $15.20-16.10. The risks are all policy-shaped: further coverage erosion, site-of-service payment parity, 340B restrictions, and labour cost re-acceleration.",
       "chokepointMetrics": [
-        { "label": "2025 revenue", "value": "$75.6B" },
-        { "label": "Hospital count", "value": "190" },
-        { "label": "Ambulatory sites", "value": "~2,500" },
-        { "label": "Current market share (target MSAs)", "value": "27%" },
-        { "label": "2030 market share target", "value": "29%" }
+        {
+          "label": "Q2 2026 revenue",
+          "value": "$20.230B (+8.7% YoY); diluted EPS $7.62 (+11.6%)"
+        },
+        {
+          "label": "Same-facility admissions",
+          "value": "+2.5%; equivalent admissions +2.7%; ER visits +3.6%"
+        },
+        {
+          "label": "Exchange payer-mix impact",
+          "value": "~$400M reduction to pre-tax income in Q2 2026"
+        },
+        {
+          "label": "Full-year exchange drag",
+          "value": "Now $1.0-1.2B, raised from $600-900M guided in April 2026"
+        },
+        {
+          "label": "2026 guidance",
+          "value": "Revenue $39.5-40.5B; EPS $15.20-16.10"
+        }
       ],
       "catalysts": [
-        "$10B share repurchase execution",
-        "Ambulatory site expansion across core MSAs",
-        "Commercial payer rate increases for 2026 contracts",
-        "Trauma and tertiary referral volume growth",
-        "International (UK) capacity additions"
+        "Same-facility admissions and ER visits still growing",
+        "Medicaid Supplemental Payment Programs contributing ~$400M of incremental net benefit",
+        "Commercial payer rate increases on renewing contracts",
+        "Ambulatory site expansion across core markets"
       ],
       "risks": [
-        "Medicaid expansion rollback in red states",
-        "Site-of-service payment parity legislation",
-        "Labor cost re-acceleration",
-        "340B program restrictions"
+        "Health insurance exchange coverage losses now expected to cost $1.0-1.2B in 2026",
+        "Exchange volume converting almost one-for-one to uninsured",
+        "Inpatient and outpatient surgical volumes both declining",
+        "Site-of-service payment parity and 340B restrictions"
       ],
       "featured": false,
-      "lastUpdated": "2026-04-28"
+      "lastUpdated": "2026-08-19"
     }
   ]
 }
