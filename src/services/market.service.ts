@@ -252,6 +252,26 @@ function appendFresherTail(primary: IntradayCandle[], fallback: IntradayCandle[]
   return tail.length > 0 ? [...primary, ...tail] : primary;
 }
 
+/** Sessions a "1W" chart shows, on every interval and from either source. */
+const WEEK_SESSIONS = 5;
+
+/**
+ * Keep only the bars falling on the most recent `n` distinct ET sessions.
+ *
+ * Makes a period mean the same window whichever source answered it. Yahoo
+ * returns exactly 5 sessions for range='5d', while the Polygon fallback asks for
+ * a deliberately generous CALENDAR range (getPeriodDays) and would otherwise
+ * hand back several days more — which is precisely how 1W/1h came to show 9 days
+ * while 1W/5m showed 5.
+ */
+export function trimToLastSessions(candles: IntradayCandle[], n: number): IntradayCandle[] {
+  if (candles.length === 0 || n <= 0) return candles;
+  const days = [...new Set(candles.map(candle => etDate(new Date(candle.time))))].sort();
+  if (days.length <= n) return candles;
+  const keep = new Set(days.slice(-n));
+  return candles.filter(candle => keep.has(etDate(new Date(candle.time))));
+}
+
 const candleLogSeen = new Map<string, string>();
 
 /** True the first time `key` comes up on an ET day. Bounded by evicting from the
@@ -340,7 +360,11 @@ function getPeriodDays(period: CandlePeriod): number {
     case '1Y':
       return 370;
     case 'MAX':
-      return 3650;
+      // Full history, not a decade. Was 3650 (10y), which silently truncated
+      // every long-lived listing — AAPL, NVDA and ASML all returned an
+      // identical 2513 bars starting exactly 10 years back, so "MAX" was
+      // really "10Y". Only reached when the Yahoo 'max' range fails.
+      return 365 * 50;
     case 'YTD':
       return Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000) + 5;
   }
@@ -365,10 +389,16 @@ function getYahooRange(period: CandlePeriod, interval: CandleInterval): string |
       if (period === '1W') return '5d';
       return null;
     case '15m':
+      if (period === '1D') return '1d';
       if (period === '1W') return '5d';
       if (period === '1M') return '1mo';
       return null;
     case '1h':
+      // '1W' was missing here, so 1W/1h alone fell through to Polygon and got
+      // getPeriodDays('1W') = 9 CALENDAR days while 1W/5m got Yahoo's 5
+      // TRADING days. Same period button, two different windows depending on
+      // which interval you happened to be on.
+      if (period === '1W') return '5d';
       if (period === '1M') return '1mo';
       if (period === '3M') return '3mo';
       return null;
@@ -380,19 +410,45 @@ function getYahooRange(period: CandlePeriod, interval: CandleInterval): string |
       if (period === '6M') return '6mo';
       if (period === 'YTD') return 'ytd';
       if (period === '1Y') return '1y';
-      if (period === 'MAX') return '10y';
+      if (period === 'MAX') return 'max';
       return null;
     default:
       return null;
   }
 }
 
-async function fetchYahooCandles(ticker: string, period: CandlePeriod, interval: CandleInterval): Promise<IntradayCandle[]> {
+/**
+ * The Yahoo chart URL for a (period, interval), or null when Yahoo can't serve
+ * that combination and Polygon must.
+ *
+ * MAX is asked by explicit EPOCH WINDOW, not by range. Yahoo SILENTLY IGNORES
+ * interval=1d when range=max and answers with quarterly bars — measured
+ * 2026-08-20: AAPL at range=max returned 168 points at dataGranularity '3mo',
+ * where period1=0 returns 11,514 true daily bars back to its 1980-12-12
+ * listing. (range=10y, the previous setting, IS honoured at 1d, which is why
+ * MAX quietly meant 10Y and every long-lived ticker returned an identical 2513
+ * bars.) A recent listing is unaffected: GEV still starts 2024-03-27.
+ *
+ * Exported for tests: the failure is invisible without inspecting
+ * `meta.dataGranularity`, so "simplify" this back to range=max and nothing
+ * looks wrong until someone counts the bars.
+ */
+export function buildYahooChartUrl(
+  ticker: string,
+  period: CandlePeriod,
+  interval: CandleInterval,
+  nowSec: number = Math.floor(Date.now() / 1000),
+): string | null {
   const range = getYahooRange(period, interval);
-  if (!range) return [];
-
+  if (!range) return null;
   const yahooInterval = interval === '1h' ? '60m' : interval === '1D' ? '1d' : interval;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${yahooInterval}&range=${range}&includePrePost=true`;
+  const window = range === 'max' ? `period1=0&period2=${nowSec}` : `range=${range}`;
+  return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${yahooInterval}&${window}&includePrePost=true`;
+}
+
+async function fetchYahooCandles(ticker: string, period: CandlePeriod, interval: CandleInterval): Promise<IntradayCandle[]> {
+  const url = buildYahooChartUrl(ticker, period, interval);
+  if (!url) return [];
 
   try {
     const resp = await yahooGet(url);
@@ -438,27 +494,54 @@ export async function fetchCandles(ticker: string, period: string, interval: str
   const normalizedPeriod = period.toUpperCase() as CandlePeriod;
   const normalizedInterval = interval as CandleInterval;
   const cacheKey = `candle:${upperTicker}:${normalizedPeriod}:${normalizedInterval}`;
-  const cacheTTL = normalizedInterval === '1D' || normalizedInterval === '1W' || normalizedInterval === '1M' ? 3600 : 15;
+  const isCoarseInterval = normalizedInterval === '1D' || normalizedInterval === '1W' || normalizedInterval === '1M';
+  const cacheTTL = isCoarseInterval ? 3600 : 15;
   const cached = candleCache.get<IntradayCandle[]>(cacheKey);
   if (cached) return cached;
 
+  const range = `${normalizedPeriod}/${normalizedInterval}`;
   const yahooSupported = normalizedInterval === '1m' || normalizedInterval === '5m' || normalizedInterval === '15m' || normalizedInterval === '1h' || normalizedInterval === '1D';
-  let candles: IntradayCandle[] = [];
-  if (yahooSupported) {
-    candles = await fetchYahooCandles(upperTicker, normalizedPeriod, normalizedInterval);
-  }
-  if (candles.length === 0) {
-    candles = await fetchPolygonCandles(upperTicker, normalizedPeriod, normalizedInterval, cacheTTL);
+  let candles: IntradayCandle[] = yahooSupported
+    ? await fetchYahooCandles(upperTicker, normalizedPeriod, normalizedInterval)
+    : [];
+
+  // Source arbitration. Yahoo answering with ANYTHING used to end it here, so a
+  // provider silently lagging one ticker by a whole session rendered a stale
+  // session on the candlestick chart with nothing to catch it — the
+  // 2026-08-12 DE signature, which until now was only guarded on the line-chart
+  // paths (fetchIntradayCandles / fetchHourlyCandles / fetchDailyCandles).
+  // Cross-check Polygon when Yahoo is empty OR behind, and pay for that second
+  // fetch only in those cases.
+  const yahooDay = latestCandleDay(candles);
+  if (candles.length === 0 || isStaleForSession(upperTicker, yahooDay)) {
+    const polygonCandles = await fetchPolygonCandles(upperTicker, normalizedPeriod, normalizedInterval, cacheTTL);
+    if (candles.length === 0) {
+      candles = polygonCandles;
+    } else if (polygonCandles.length > 0 && latestCandleDay(polygonCandles) > yahooDay) {
+      // Graft, never replace: Yahoo carries the better pre/post-market history
+      // and a short Polygon reply must not truncate it to gain one session.
+      candles = appendFresherTail(candles, polygonCandles);
+      logLaggingSource(upperTicker, range, 'Yahoo', yahooDay, latestCandleDay(candles));
+    }
   }
 
-  // For 1D period with intraday intervals, keep only the last trading day
-  if (normalizedPeriod === '1D' && candles.length > 0 && normalizedInterval !== '1D' && normalizedInterval !== '1W' && normalizedInterval !== '1M') {
-    const lastDate = etDate(new Date(candles[candles.length - 1].time));
-    candles = candles.filter(c => etDate(new Date(c.time)) === lastDate);
+  // 1D is a single session — whichever one the winning source actually reached.
+  if (normalizedPeriod === '1D' && candles.length > 0 && !isCoarseInterval) {
+    candles = singleSessionOnly(upperTicker, candles, latestCandleDay(candles));
+  }
+
+  // 1W is five sessions on every interval, from either source.
+  if (normalizedPeriod === '1W' && candles.length > 0) {
+    candles = trimToLastSessions(candles, WEEK_SESSIONS);
   }
 
   if (candles.length > 0) {
-    candleCache.set(cacheKey, candles, cacheTTL);
+    const servedDay = latestCandleDay(candles);
+    warnIfStaleCandles(upperTicker, range, servedDay);
+    // A series still a session behind gets a short lease, so the next request
+    // retries rather than serving stale bars for the full hour.
+    const ttl = isStaleForSession(upperTicker, servedDay) ? Math.min(cacheTTL, 60) : cacheTTL;
+    candleCache.set(cacheKey, candles, ttl);
   }
 
   return candles;
