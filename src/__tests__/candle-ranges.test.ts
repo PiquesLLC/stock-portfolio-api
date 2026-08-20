@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildYahooChartUrl, trimToLastSessions } from '../services/market.service';
+import { buildYahooChartUrl, trimToLastSessions, mergeTrailingPartialBar } from '../services/market.service';
 import type { IntradayCandle } from '../types';
 
 /**
@@ -101,5 +101,86 @@ describe('trimToLastSessions', () => {
     const shuffled = [series[6], series[0], series[3], series[5], series[1]];
     const days = [...new Set(trimToLastSessions(shuffled, 2).map(c => c.time.slice(0, 10)))].sort();
     expect(days).toEqual(['2026-08-17', '2026-08-18']);
+  });
+});
+
+describe('mergeTrailingPartialBar', () => {
+  // Yahoo appends the live quote stamped at the CURRENT time, not on the bar
+  // grid. Measured on AAPL 1D/15m 2026-08-20: bars 0-43 on :00/:15/:30/:45,
+  // then bar 44 at 14:49 with open == close. Four minutes is a fraction of a
+  // 15m slot, so it rendered on top of the previous candle.
+  const M15 = 15 * 60_000;
+
+  function ohlc(iso: string, o: number, h: number, l: number, c: number, v = 100): IntradayCandle {
+    return { time: iso, open: o, high: h, low: l, close: c, volume: v };
+  }
+
+  it('folds a short straggler into the bar it belongs to', () => {
+    const out = mergeTrailingPartialBar([
+      ohlc('2026-08-20T18:30:00Z', 316.6, 316.7, 316.2, 316.3),
+      ohlc('2026-08-20T18:45:00Z', 315.63, 315.8, 315.1, 315.23),
+      ohlc('2026-08-20T18:49:00Z', 315.40, 315.40, 315.40, 315.40, 0), // the live element
+    ], M15);
+
+    expect(out).toHaveLength(2);
+    const forming = out[1];
+    // Keeps the GRID bar's identity...
+    expect(forming.time).toBe('2026-08-20T18:45:00Z');
+    expect(forming.open).toBe(315.63);
+    // ...but takes the newer close and the widened range.
+    expect(forming.close).toBe(315.40);
+    expect(forming.high).toBe(315.8);
+    expect(forming.low).toBe(315.1);
+  });
+
+  it('extends high/low when the live print is a new extreme', () => {
+    const out = mergeTrailingPartialBar([
+      ohlc('2026-08-20T18:45:00Z', 100, 101, 99, 100),
+      ohlc('2026-08-20T18:52:00Z', 105, 105, 98, 105, 0),
+    ], M15);
+    expect(out[0].high).toBe(105);
+    expect(out[0].low).toBe(98);
+    expect(out[0].close).toBe(105);
+  });
+
+  it('leaves a legitimate full-interval bar alone', () => {
+    const bars = [
+      ohlc('2026-08-20T18:30:00Z', 1, 1, 1, 1),
+      ohlc('2026-08-20T18:45:00Z', 2, 2, 2, 2),
+      ohlc('2026-08-20T19:00:00Z', 3, 3, 3, 3),
+    ];
+    expect(mergeTrailingPartialBar(bars, M15)).toEqual(bars);
+  });
+
+  it('takes max volume, never the sum — the stub would double-count the bar', () => {
+    const out = mergeTrailingPartialBar([
+      ohlc('2026-08-20T18:45:00Z', 1, 1, 1, 1, 5000),
+      ohlc('2026-08-20T18:49:00Z', 1, 1, 1, 1, 0),
+    ], M15);
+    expect(out[0].volume).toBe(5000);
+  });
+
+  it('is a no-op on degenerate input', () => {
+    expect(mergeTrailingPartialBar([], M15)).toEqual([]);
+    const one = [ohlc('2026-08-20T18:45:00Z', 1, 1, 1, 1)];
+    expect(mergeTrailingPartialBar(one, M15)).toEqual(one);
+    expect(mergeTrailingPartialBar(one, 0)).toEqual(one);
+  });
+
+  it('does not merge a bar that is out of order', () => {
+    const bars = [
+      ohlc('2026-08-20T18:45:00Z', 1, 1, 1, 1),
+      ohlc('2026-08-20T18:40:00Z', 2, 2, 2, 2),
+    ];
+    expect(mergeTrailingPartialBar(bars, M15)).toEqual(bars);
+  });
+
+  it('scales with the interval — 4min is a straggler at 15m but a real bar at 1m', () => {
+    const bars = [
+      ohlc('2026-08-20T18:45:00Z', 1, 1, 1, 1),
+      ohlc('2026-08-20T18:49:00Z', 2, 2, 2, 2),
+    ];
+    expect(mergeTrailingPartialBar(bars, M15)).toHaveLength(1);
+    expect(mergeTrailingPartialBar(bars, 60_000)).toHaveLength(2);
   });
 });

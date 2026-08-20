@@ -255,6 +255,63 @@ function appendFresherTail(primary: IntradayCandle[], fallback: IntradayCandle[]
 /** Sessions a "1W" chart shows, on every interval and from either source. */
 const WEEK_SESSIONS = 5;
 
+/** Milliseconds each candle interval covers. */
+const INTERVAL_MS: Record<CandleInterval, number> = {
+  '1m': 60_000,
+  '5m': 300_000,
+  '15m': 900_000,
+  '1h': 3_600_000,
+  '1D': 86_400_000,
+  '1W': 604_800_000,
+  '1M': 2_592_000_000,
+};
+
+/**
+ * Fold a trailing partial bar into the interval it actually belongs to.
+ *
+ * Yahoo appends the LIVE QUOTE to a chart response as an extra element stamped
+ * at the current time rather than on the bar grid. Measured on AAPL 1D/15m
+ * 2026-08-20: 45 bars, of which 0-43 sat exactly on :00/:15/:30/:45 and bar 44
+ * landed at 14:49 — 4.15 minutes after bar 43 — with open == close. On a
+ * time-based x-axis that is a fraction of a slot, so its body rendered ON TOP
+ * of the previous candle.
+ *
+ * Merged rather than dropped, because the last candle on a live chart IS the
+ * forming interval: keep the grid bar's open and timestamp, extend its high and
+ * low, and take the newer close. The result is one candle per interval whose
+ * final one updates in place, which is what a candlestick chart is supposed to
+ * do.
+ *
+ * Volume takes the max, not the sum — the synthetic element usually carries 0,
+ * and where it carries a running total, adding it would double-count the bar.
+ */
+export function mergeTrailingPartialBar(
+  candles: IntradayCandle[],
+  intervalMs: number,
+): IntradayCandle[] {
+  if (candles.length < 2 || !(intervalMs > 0)) return candles;
+
+  const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  const lastMs = Date.parse(last.time);
+  const prevMs = Date.parse(prev.time);
+  if (!Number.isFinite(lastMs) || !Number.isFinite(prevMs)) return candles;
+
+  const gap = lastMs - prevMs;
+  // A bar a full interval (or more) past its predecessor is a legitimate bar of
+  // its own. Only a short straggler is the appended live quote.
+  if (gap <= 0 || gap >= intervalMs) return candles;
+
+  const merged: IntradayCandle = {
+    ...prev,
+    high: Math.max(prev.high, last.high),
+    low: Math.min(prev.low, last.low),
+    close: last.close,
+    volume: Math.max(prev.volume || 0, last.volume || 0),
+  };
+  return [...candles.slice(0, -2), merged];
+}
+
 /**
  * Keep only the bars falling on the most recent `n` distinct ET sessions.
  *
@@ -524,6 +581,10 @@ export async function fetchCandles(ticker: string, period: string, interval: str
       logLaggingSource(upperTicker, range, 'Yahoo', yahooDay, latestCandleDay(candles));
     }
   }
+
+  // Fold the provider's appended live quote into the forming bar, before any
+  // trimming — otherwise it renders as a second body on top of the last candle.
+  candles = mergeTrailingPartialBar(candles, INTERVAL_MS[normalizedInterval] ?? 0);
 
   // 1D is a single session — whichever one the winning source actually reached.
   if (normalizedPeriod === '1D' && candles.length > 0 && !isCoarseInterval) {
