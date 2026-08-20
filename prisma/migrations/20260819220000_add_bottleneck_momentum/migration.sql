@@ -27,9 +27,10 @@ CREATE TABLE "BottleneckMomentum" (
     "tickersMissed" TEXT NOT NULL DEFAULT '[]',
     -- No DEFAULT CURRENT_TIMESTAMP on purpose. SQLite emits
     -- 'YYYY-MM-DD HH:MM:SS', not the ISO+00:00 canonical form this database was
-    -- normalised to; an out-of-band INSERT relying on the default would
+    -- normalised to, so an out-of-band INSERT relying on the default would
     -- reintroduce the mixed DateTime-storage bug class. The app always supplies
-    -- computedAt explicitly.
+    -- computedAt explicitly. (Kept free of semicolons: scripts/ensure-dev-db.js
+    -- splits this file on ';' with a naive regex.)
     "computedAt" DATETIME NOT NULL
 );
 

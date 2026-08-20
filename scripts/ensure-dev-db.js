@@ -55,6 +55,10 @@ async function main() {
       name: 'JobIdempotencyKey',
       migration: path.resolve(__dirname, '../prisma/migrations/20260311_add_job_idempotency/migration.sql'),
     },
+    {
+      name: 'BottleneckMomentum',
+      migration: path.resolve(__dirname, '../prisma/migrations/20260819220000_add_bottleneck_momentum/migration.sql'),
+    },
   ];
 
   const missing = [];
