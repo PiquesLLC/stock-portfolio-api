@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles, fetchCandles, TickerNotFoundError } from '../services/market.service';
+import { fetchPrices, fetchQuote, fetchFastQuote, searchTickers, fetchStockDetails, fetchIntradayCandles, fetchHourlyCandles, fetchDailyCandles, fetchCandles, fetchFullHistoryCandles, TickerNotFoundError } from '../services/market.service';
 import { getBenchmarkCandles } from '../utils/candle-cache';
 import { fetchMarketNews, fetchTickerNews } from '../services/news.service';
 import { getETFHoldings, getAssetAbout } from '../utils/yahoo-finance';
@@ -231,6 +231,30 @@ export async function getDailyCandles(req: Request, res: Response): Promise<void
   } catch (error: unknown) {
     console.error('[Market] getDailyCandles error:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to fetch daily data' });
+  }
+}
+
+/**
+ * Full daily history in the /details candle shape — for the MAX period only.
+ *
+ * Separate from /details because that endpoint loads on every stock page view
+ * and this payload is several times larger. Falls back to null rather than
+ * erroring: the caller keeps the 10-year series it already has, so MAX simply
+ * stays as it was rather than the page breaking.
+ */
+export async function getFullHistory(req: Request, res: Response): Promise<void> {
+  try {
+    const parsed = tickerParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+    const { ticker } = parsed.data;
+    const candles = await fetchFullHistoryCandles(ticker);
+    res.json({ ticker, candles });
+  } catch (error: unknown) {
+    console.error('[Market] getFullHistory error:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Failed to fetch full history' });
   }
 }
 

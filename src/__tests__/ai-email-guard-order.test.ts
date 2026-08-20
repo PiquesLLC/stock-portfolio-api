@@ -63,6 +63,11 @@ vi.mock('../controllers/market.controller', () => {
     getValueRadarHandler: ok,
     getRiskTemperatureHandler: ok,
     getCandles: ok,
+    // This mock is exhaustive, not partial: market.routes.ts reads every
+    // handler at import time, so a controller export missing here surfaces as
+    // `router.get(..., undefined)` and fails the whole suite file. Add new
+    // handlers here when you add them to the router.
+    getFullHistory: ok,
   };
 });
 

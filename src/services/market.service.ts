@@ -91,6 +91,78 @@ async function fetchStockDetailCandles(ticker: string): Promise<StockDetailsResp
   }
 }
 
+/**
+ * Full daily history in the same shape /details returns, back to the listing
+ * date rather than the 10 years fetchStockDetailCandles is fixed at.
+ *
+ * Exists because the MAX period must mean the same thing everywhere. The
+ * candlestick chart reaches the listing date, but the line chart and the
+ * headline "Max" return both read /details, so they stopped at 10 years — an
+ * AAPL page drew back to 1980 while the header beside it quoted a 2016-based
+ * +1,060%.
+ *
+ * Kept OFF /details deliberately: that endpoint loads on every stock page view,
+ * and this response is several times larger. It is requested only when a user
+ * actually selects MAX.
+ *
+ * DAILY, not weekly, even though 46 years of daily bars is far more than an
+ * 800px chart can resolve. Everything downstream — the moving averages, the
+ * Golden Cross badge — is defined in DAYS; handing it weekly bars would
+ * silently turn the 200-day MA into a 200-week one.
+ *
+ * period1=0 rather than range=max: Yahoo ignores interval=1d at range=max and
+ * answers with quarterly bars. See buildYahooChartUrl.
+ */
+export async function fetchFullHistoryCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
+  const upperTicker = ticker.toUpperCase();
+  const cacheKey = `full-history:${upperTicker}`;
+  const cached = yahooCache.get<StockDetailsResponse['candles']>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?period1=0&period2=${now}&interval=1d`;
+    const resp = await yahooGet(url);
+    const result = resp.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+
+    // A provider that quietly downgrades granularity would hand back quarterly
+    // bars that look like a valid daily series. Refuse rather than serve them.
+    const granularity = result.meta?.dataGranularity;
+    if (granularity && granularity !== '1d') {
+      console.warn(`[Market] ${upperTicker} full history came back at ${granularity}, not 1d — ignoring`);
+      return null;
+    }
+
+    const timestamps: number[] = result.timestamp;
+    const q = result.indicators.quote[0];
+    const closes: number[] = [];
+    const dates: string[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
+    const opens: number[] = [];
+    const volumes: number[] = [];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (q.close[i] != null) {
+        closes.push(q.close[i]);
+        dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
+        highs.push(q.high?.[i] ?? 0);
+        lows.push(q.low?.[i] ?? 0);
+        opens.push(q.open?.[i] ?? 0);
+        volumes.push(q.volume?.[i] ?? 0);
+      }
+    }
+    if (closes.length === 0) return null;
+
+    const candles: StockDetailsResponse['candles'] = { closes, dates, highs, lows, opens, volumes };
+    yahooCache.set(cacheKey, candles);
+    return candles;
+  } catch {
+    return null;
+  }
+}
+
 export interface IntradayCandle {
   time: string; // ISO timestamp
   open: number;
