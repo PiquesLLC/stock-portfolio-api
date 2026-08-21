@@ -184,3 +184,47 @@ describe('mergeTrailingPartialBar', () => {
     expect(mergeTrailingPartialBar(bars, 60_000)).toHaveLength(2);
   });
 });
+
+describe('full-history ticker guard — unauthenticated endpoint hardening', () => {
+  /**
+   * `/market/stock/:ticker/full-history` is UNAUTHENTICATED and returns ~1.1 MB
+   * for a long-lived ticker. `tickerParamSchema` is only
+   * `z.string().trim().min(1)` — no character class, no length cap — so the
+   * guard inside fetchFullHistoryCandles is the only thing bounding what
+   * reaches the outbound URL and the cache key.
+   *
+   * Mirrors that regex deliberately: change one and this fails, forcing a look.
+   */
+  const GUARD = /^[A-Z0-9.\-^]{1,12}$/;
+
+  it('accepts the ticker shapes the app actually uses', () => {
+    for (const t of ['AAPL', 'BRK.B', 'GEV', 'F', 'RDS-A', '^GSPC', 'ABCDEFGHIJKL']) {
+      expect(GUARD.test(t.toUpperCase()), `should accept ${JSON.stringify(t)}`).toBe(true);
+    }
+  });
+
+  it('rejects traversal, query, whitespace and control-character shapes', () => {
+    const rejects = [
+      '',
+      '../../etc/passwd',
+      'AAPL/../../v8/finance',
+      'AAPL?period1=0',
+      'AAPL#frag',
+      'AAPL SPY',
+      'evil.com\\@aapl',
+      'AAPL ',
+      'AAPL\n',
+      'AAPL\r\nX-Injected: 1',
+      'https://evil.example',
+    ];
+    for (const t of rejects) {
+      expect(GUARD.test(t.toUpperCase()), `should reject ${JSON.stringify(t)}`).toBe(false);
+    }
+  });
+
+  it('caps length so an oversized ticker cannot reach a URL or a cache key', () => {
+    expect(GUARD.test('A'.repeat(12))).toBe(true);
+    expect(GUARD.test('A'.repeat(13))).toBe(false);
+    expect(GUARD.test('A'.repeat(5000))).toBe(false);
+  });
+});

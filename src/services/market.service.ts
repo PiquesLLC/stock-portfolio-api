@@ -115,23 +115,44 @@ async function fetchStockDetailCandles(ticker: string): Promise<StockDetailsResp
  */
 export async function fetchFullHistoryCandles(ticker: string): Promise<StockDetailsResponse['candles']> {
   const upperTicker = ticker.toUpperCase();
+
+  // Shape guard before any upstream call. `tickerParamSchema` is only
+  // `z.string().trim().min(1)` — no character class, no length cap — so without
+  // this an unauthenticated caller can drive arbitrary strings into an outbound
+  // request and a cache key. encodeURIComponent already neutralises SSRF (it
+  // escapes / ? # :), so this is depth, plus it makes the negative cache below
+  // effective by bounding the key space.
+  if (!/^[A-Z0-9.\-^]{1,12}$/.test(upperTicker)) return null;
+
   const cacheKey = `full-history:${upperTicker}`;
+  // `!== undefined`, not truthiness: a cached MISS is stored as null and must
+  // short-circuit too, otherwise the negative cache does nothing.
   const cached = yahooCache.get<StockDetailsResponse['candles']>(cacheKey);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
+
+  // Cache misses as well as hits. This endpoint is unauthenticated and returns
+  // ~1.1 MB for a long-lived ticker; without negative caching every unknown
+  // symbol is a guaranteed uncached upstream fetch, so a caller cycling junk
+  // tickers burns the Yahoo quota and gets the Railway egress IP throttled —
+  // a failure this app has hit before, and one that degrades every user.
+  const miss = (): null => {
+    yahooCache.set(cacheKey, null, FULL_HISTORY_MISS_TTL_SECONDS);
+    return null;
+  };
 
   try {
     const now = Math.floor(Date.now() / 1000);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upperTicker)}?period1=0&period2=${now}&interval=1d`;
     const resp = await yahooGet(url);
     const result = resp.data?.chart?.result?.[0];
-    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return null;
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return miss();
 
     // A provider that quietly downgrades granularity would hand back quarterly
     // bars that look like a valid daily series. Refuse rather than serve them.
     const granularity = result.meta?.dataGranularity;
     if (granularity && granularity !== '1d') {
       console.warn(`[Market] ${upperTicker} full history came back at ${granularity}, not 1d — ignoring`);
-      return null;
+      return miss();
     }
 
     const timestamps: number[] = result.timestamp;
@@ -153,13 +174,15 @@ export async function fetchFullHistoryCandles(ticker: string): Promise<StockDeta
         volumes.push(q.volume?.[i] ?? 0);
       }
     }
-    if (closes.length === 0) return null;
+    if (closes.length === 0) return miss();
 
     const candles: StockDetailsResponse['candles'] = { closes, dates, highs, lows, opens, volumes };
     yahooCache.set(cacheKey, candles);
     return candles;
   } catch {
-    return null;
+    // Includes an upstream throttle. Caching the miss is what stops a throttle
+    // turning into a retry storm that deepens it.
+    return miss();
   }
 }
 
@@ -326,6 +349,13 @@ function appendFresherTail(primary: IntradayCandle[], fallback: IntradayCandle[]
 
 /** Sessions a "1W" chart shows, on every interval and from either source. */
 const WEEK_SESSIONS = 5;
+
+/**
+ * How long a failed full-history lookup is remembered. Short enough that a
+ * genuine provider blip self-heals within minutes, long enough that a caller
+ * cycling unknown tickers cannot use the endpoint as an upstream amplifier.
+ */
+const FULL_HISTORY_MISS_TTL_SECONDS = 600;
 
 /** Milliseconds each candle interval covers. */
 const INTERVAL_MS: Record<CandleInterval, number> = {
