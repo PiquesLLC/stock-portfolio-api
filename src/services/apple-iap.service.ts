@@ -135,6 +135,61 @@ export async function verifySignedNotification(signedPayload: string): Promise<a
 }
 
 /**
+ * H-1 — marker written into the existing `applePurchaseSource` column when Apple
+ * tells us a transaction was refunded or revoked.
+ *
+ * Why a marker rather than clearing the binding: `verifyAndActivatePlan` decides
+ * whether a purchase is valid by reading `revocationDate` off the JWS the CLIENT
+ * submits. That JWS was signed at purchase time, so it can never contain a
+ * refund that happened afterwards. The refund webhook used to null out
+ * `appleOriginalTransactionId` — which deleted the only thing standing between a
+ * refunded user and a replay of their saved receipt. Keeping the binding and
+ * flagging it means the replay is recognised and refused.
+ *
+ * The flag is cleared ONLY by a subsequent server-to-server notification from
+ * Apple (SUBSCRIBED / renewal), never by a client-submitted receipt — so a
+ * genuine re-subscription still works (Apple reuses originalTransactionId across
+ * resubscribes) while a replayed pre-refund receipt does not.
+ */
+const APPLE_SOURCE_REVOKED = 'app_store_revoked';
+
+/**
+ * The marker also carries WHEN the revocation happened, encoded as
+ * `app_store_revoked:<epochMs>` in the existing `applePurchaseSource` column
+ * (no schema change).
+ *
+ * The timestamp is load-bearing. Apple retries an unacknowledged server
+ * notification for up to three days, so a SUBSCRIBED or DID_RENEW generated
+ * BEFORE a refund can be delivered AFTER we processed the REFUND. Its
+ * signedTransactionInfo predates the refund, so it carries no revocationDate
+ * and still shows a future expiry — it passes every content check. Only
+ * comparing its purchase time against the revocation time can reject it.
+ */
+function markRevoked(revocationDate?: unknown): string {
+  // Prefer APPLE's revocation instant over our processing time. Stamping
+  // Date.now() pushes the recorded revocation later by the whole notification
+  // delivery delay, and the marker is compared against Apple's purchaseDate —
+  // so a delayed REFUND plus a prompt legitimate re-subscription would leave the
+  // new purchase looking OLDER than the revocation, refusing a paying customer
+  // and never clearing the marker.
+  const appleMs = Number(revocationDate);
+  const revokedAt = Number.isFinite(appleMs) && appleMs > 0 ? appleMs : Date.now();
+  return `${APPLE_SOURCE_REVOKED}:${revokedAt}`;
+}
+
+function isRevokedMarker(source: string | null | undefined): boolean {
+  return typeof source === 'string' && source.startsWith(APPLE_SOURCE_REVOKED);
+}
+
+/** Epoch ms of the revocation, or null when unknown (legacy un-timestamped marker). */
+function revokedAtMs(source: string | null | undefined): number | null {
+  if (!isRevokedMarker(source)) return null;
+  const raw = String(source).slice(APPLE_SOURCE_REVOKED.length + 1);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
  * Verify a transaction and activate the corresponding plan for a user.
  */
 export async function verifyAndActivatePlan(
@@ -178,10 +233,18 @@ export async function verifyAndActivatePlan(
     // If this originalTransactionId is already bound to a different user, reject.
     const existingOwner = await tx.user.findUnique({
       where: { appleOriginalTransactionId: originalTransactionId },
-      select: { id: true },
+      select: { id: true, applePurchaseSource: true },
     });
     if (existingOwner && existingOwner.id !== userId) {
       throw new Error('This Apple subscription is already linked to another account.');
+    }
+
+    // H-1: refuse a transaction Apple has already told us was refunded/revoked.
+    // The submitted JWS cannot show this — it predates the refund — so the
+    // server-side marker is the only signal. Without this check, "buy, refund,
+    // replay the saved receipt" restored paid access for the rest of the term.
+    if (existingOwner && isRevokedMarker(existingOwner.applePurchaseSource)) {
+      throw new Error('This Apple transaction has been refunded or revoked.');
     }
 
     await tx.user.update({
@@ -330,31 +393,258 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
       case 'SUBSCRIBED':
       case 'DID_CHANGE_RENEWAL_STATUS': {
         const plan = mapAppleProductToPlan(productId);
-        if (plan !== 'free') {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { plan, planExpiresAt: expiresDate },
-            select: { id: true },
-          });
-          console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
+        if (plan === 'free') break;
+
+        // Never restore access from a transaction Apple has revoked. The
+        // client-facing path (verifyAndActivatePlan) checks this; this one did
+        // not, so a revoked transaction arriving on any of these notifications
+        // would have re-granted the plan.
+        if (txn.revocationDate) {
+          console.warn(`[Apple IAP] ignoring ${notificationType} for revoked transaction (user ${user.id})`);
+          break;
         }
+
+        // Require a real future expiry. plan.middleware treats
+        // `planExpiresAt === null` as NEVER EXPIRING, so writing a null
+        // expiresDate straight through here would mint a permanent paid plan
+        // from a notification that carried no expiry. verifyAndActivatePlan
+        // guards exactly this case; this path was missing it.
+        if (!expiresDate || expiresDate.getTime() <= Date.now()) {
+          console.warn(`[Apple IAP] ignoring ${notificationType} with missing/past expiry (user ${user.id})`);
+          break;
+        }
+
+        // H-1: only a genuine purchase or renewal clears the revoked marker,
+        // and only when it provably happened AFTER the revocation.
+        //
+        // DID_CHANGE_RENEWAL_STATUS fires when the user toggles auto-renew in
+        // App Store settings — no purchase is involved — so it never clears the
+        // marker, though it may still refresh plan/expiry.
+        //
+        // For DID_RENEW / SUBSCRIBED we compare the transaction's purchase time
+        // against the recorded revocation time. Apple retries an unacknowledged
+        // notification for up to three days, so a SUBSCRIBED generated before a
+        // refund can arrive after it — carrying no revocationDate and a future
+        // expiry, i.e. passing every check above. Without this comparison such a
+        // straggler would restore the plan AND clear the marker, handing back a
+        // refunded subscription and re-opening the client replay.
+        const isPurchaseNotification = notificationType === 'DID_RENEW' || notificationType === 'SUBSCRIBED';
+        const currentlyRevoked = isRevokedMarker(user.applePurchaseSource);
+        const revokedAt = revokedAtMs(user.applePurchaseSource);
+        // Apple's JWS timestamps are epoch MILLISECONDS, same as expiresDate above.
+        const purchasedAtMs = txn.purchaseDate ? Number(txn.purchaseDate) : null;
+
+        // Fail CLOSED. If the row is marked revoked but we cannot establish
+        // WHEN (an un-timestamped marker, or a transaction with no purchaseDate),
+        // we cannot prove this notification post-dates the revocation — so we do
+        // not act on it. Being unable to restore a plan is recoverable; wrongly
+        // restoring a refunded one is not.
+        const supersedesRevocation = !currentlyRevoked
+          || (revokedAt !== null && purchasedAtMs !== null && purchasedAtMs > revokedAt);
+
+        if (currentlyRevoked && !supersedesRevocation) {
+          console.warn(
+            `[Apple IAP] ignoring stale ${notificationType} for user ${user.id} — purchase predates the revocation`,
+          );
+          break;
+        }
+
+        // INVARIANT 8 — entitlement must never move BACKWARD.
+        //
+        // Apple retries an unacknowledged notification for up to three days, so
+        // a renewal generated before a later one can be delivered after it.
+        // planExpiresAt was written unconditionally, so such a straggler
+        // shortened a subscription the user had already paid to extend. Only
+        // ever extend.
+        // Entitlement is (plan, expiry) — NOT expiry alone. An earlier version of
+        // this guard compared expiry only, which silently discarded a legitimate
+        // product change taking effect inside the current period: an upgrade
+        // carries the SAME expiresDate, so it looked stale. Because the dedup row
+        // is written before this handler runs, Apple's redelivery was skipped too
+        // and the upgrade was lost for good.
+        const currentExpiryMs = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : null;
+        const incomingExpiryMs = expiresDate.getTime();
+        const planChanged = plan !== user.plan;
+
+        // A strictly EARLIER expiry means this notification describes a term the
+        // user has already moved past — ignore it whatever plan it names, since
+        // applying it would shorten a live entitlement.
+        //
+        // KNOWN LIMITATION, and it is not self-healing. Apple applies an upgrade
+        // IMMEDIATELY with proration, so switching from a yearly plan to a
+        // monthly one produces a new transaction whose expiresDate is EARLIER
+        // than the yearly expiry we still hold. That notification is dropped
+        // here, and so is every subsequent monthly renewal, because each one is
+        // also earlier than the stale held expiry. The user stays on the old plan
+        // until the original expiry passes.
+        //
+        // The correct discriminator is notification/purchase ORDER, not expiry —
+        // but that needs a persisted "last applied purchase time" column, and
+        // `planStartedAt` cannot be reused for it because it is surfaced to users
+        // (social.controller.ts). Until that column exists this stays
+        // conservative: dropping a legitimate upgrade is recoverable (a client
+        // call to verifyAndActivatePlan writes plan/expiry unconditionally and
+        // self-corrects), whereas applying a stale downgrade silently removes
+        // paid access and is not.
+        const isStaleTerm = currentExpiryMs !== null && incomingExpiryMs < currentExpiryMs;
+        // Same expiry AND same plan: nothing to apply.
+        const isNoOp = currentExpiryMs !== null && incomingExpiryMs === currentExpiryMs && !planChanged;
+
+        if (isStaleTerm || isNoOp) {
+          console.warn(
+            `[Apple IAP] ignoring ${notificationType} for user ${user.id} — ${isStaleTerm ? 'it describes a superseded term' : 'no entitlement change'}`,
+          );
+          break;
+        }
+
+        const clearsRevokedMarker = isPurchaseNotification && supersedesRevocation;
+
+        // INVARIANT 7 — predicated write, so a concurrent notification cannot be
+        // clobbered. Both `currentlyRevoked` and the expiry comparison above are
+        // derived from the row read at the top of this handler; between that read
+        // and this write a REFUND for the same user can commit its revoked
+        // marker. An unconditional update would silently erase it (a plain lost
+        // update — these are two autocommit statements, not a transaction).
+        // Scoping the update to the value we branched on makes a stale write a
+        // no-op instead. The dedup key is per-notificationUUID and the job
+        // runner's in-flight guard keys on job name, so neither serialises two
+        // DIFFERENT notifications for one user.
+        const renewWrite = await prisma.user.updateMany({
+          where: {
+            id: user.id,
+            applePurchaseSource: user.applePurchaseSource ?? null,
+            // Monotonicity enforced by the DATABASE at write time, not by the
+            // in-memory snapshot read at the top of this handler.
+            //
+            // Two concurrent renewals both pass the in-memory check, because
+            // both compare against the same stale row — and they never contend
+            // on the applePurchaseSource predicate either, since the renewal
+            // branch only writes that column when clearing a revoked marker. So
+            // the OLDER renewal committed last and won, which is exactly the
+            // outcome the monotonicity guard exists to prevent. Predicating on
+            // the column actually being contended fixes it.
+            //
+            // `lte` rather than `lt`: an equal expiry is a legitimate in-period
+            // product change (an upgrade carries the same expiresDate).
+            OR: [
+              { planExpiresAt: null },
+              { planExpiresAt: { lte: expiresDate } },
+            ],
+          },
+          data: {
+            plan,
+            planExpiresAt: expiresDate,
+            ...(clearsRevokedMarker ? { applePurchaseSource: 'app_store' } : {}),
+          },
+        });
+        if (renewWrite.count === 0) {
+          // Distinguish a BENIGN supersession from real contention. If the row
+          // now holds a strictly later expiry, a newer notification already won
+          // and there is genuinely nothing to apply — retrying would just fail
+          // the same way until the job dead-letters.
+          const fresh = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { planExpiresAt: true },
+          });
+          const freshExpiryMs = fresh?.planExpiresAt ? new Date(fresh.planExpiresAt).getTime() : null;
+          if (freshExpiryMs !== null && freshExpiryMs > incomingExpiryMs) {
+            console.warn(
+              `[Apple IAP] ${notificationType} for user ${user.id} superseded by a newer entitlement — nothing to apply`,
+            );
+            break;
+          }
+          // THROW, do not swallow. The dedup row was inserted before this
+          // handler ran, so breaking out here would mark the notification
+          // processed and Apple's redelivery would be skipped — permanently
+          // losing the entitlement. Throwing lets the outer catch delete the
+          // dedup row so the retry re-reads fresh state and applies correctly.
+          // (Same pattern the Stripe transfer.reversed handler uses.) The
+          // message must avoid the phrases classifyAppleNotificationError treats
+          // as PERMANENT, or the job would dead-letter instead of retrying.
+          throw new Error(
+            `Apple ${notificationType} for user ${user.id}: row changed concurrently since it was read; will retry`,
+          );
+        }
+        console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
         break;
       }
 
       case 'EXPIRED':
       case 'REVOKE':
       case 'REFUND': {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            plan: 'free',
-            planExpiresAt: null,
-            appleOriginalTransactionId: null,
-            applePurchaseSource: null,
-          },
-          select: { id: true },
+        const revoked = notificationType === 'REFUND' || notificationType === 'REVOKE';
+
+        // REFUND/REVOKE: KEEP the binding and stamp a revoked marker. The
+        // receipt the user still holds looks perfectly valid (signed
+        // pre-refund, future expiry, no revocationDate), so only a server-side
+        // marker can refuse the replay — and clearing the binding would delete
+        // the very row that carries it.
+        //
+        // EXPIRED: CLEAR the binding, as before. An expired receipt is already
+        // refused by verifyAndActivatePlan's own expiry check, so no marker is
+        // needed — and retaining the binding actively breaks normal churn.
+        // Apple reuses originalTransactionId across resubscribes, so a retained
+        // binding means (a) the same Apple ID subscribing on a NEW Nala account
+        // is permanently refused with "already linked to another account", and
+        // worse (b) the resulting SUBSCRIBED notification resolves the user by
+        // that id and hands the plan to the ABANDONED account while the one
+        // that actually paid gets nothing.
+        // An EXPIRED straggler must NOT wipe an existing revoked marker.
+        // Apple retries an unacknowledged notification for up to three days, so
+        // the order can be: EXPIRED generated → delivery fails → user
+        // re-subscribes (same originalTransactionId) → refund → REFUND lands and
+        // stamps the marker → the old EXPIRED finally arrives. Nulling both
+        // fields there would delete the marker AND unbind the transaction,
+        // after which the saved pre-refund receipt replays cleanly from any
+        // account. Revoked rows therefore keep their binding and marker; only
+        // the plan is downgraded.
+        const alreadyRevoked = isRevokedMarker(user.applePurchaseSource);
+        const downgrade = { plan: 'free', planExpiresAt: null };
+
+        // INVARIANT 8 — a terminal notification for a SUPERSEDED term must not
+        // tear down a newer entitlement.
+        //
+        // Sequence: the subscription lapses, EXPIRED is generated, delivery
+        // fails, the user re-subscribes (Apple reuses originalTransactionId),
+        // and the old EXPIRED finally lands. It downgraded the live paid
+        // subscription AND nulled the binding — and because this handler
+        // resolves the user BY that binding, no future DID_RENEW could find
+        // them again, so it never self-healed.
+        //
+        // REFUND/REVOKE are exempt: those are authoritative about the
+        // transaction regardless of which term they name.
+        const incomingExpiryMs = expiresDate ? expiresDate.getTime() : null;
+        const heldExpiryMs = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : null;
+        if (!revoked && heldExpiryMs !== null && incomingExpiryMs !== null && heldExpiryMs > incomingExpiryMs) {
+          console.warn(
+            `[Apple IAP] ignoring stale ${notificationType} for user ${user.id} — it terminates a term older than the current entitlement`,
+          );
+          break;
+        }
+
+        // INVARIANT 7 — predicated write (see the renewal branch above). A
+        // concurrent REFUND committing its marker between our read and this
+        // write must not be erased by our stale `alreadyRevoked === false`.
+        const terminalWrite = await prisma.user.updateMany({
+          where: { id: user.id, applePurchaseSource: user.applePurchaseSource ?? null },
+          data: revoked
+            ? { ...downgrade, applePurchaseSource: markRevoked(txn.revocationDate) }
+            : alreadyRevoked
+              ? downgrade // keep the binding and the marker
+              : { ...downgrade, appleOriginalTransactionId: null, applePurchaseSource: null },
         });
-        console.log(`[Apple IAP] Downgraded user ${user.id} to free (${notificationType})`);
+        if (terminalWrite.count === 0) {
+          // Throw rather than swallow — see the renewal branch above. Breaking
+          // out would record the notification as processed and Apple's retry
+          // would be deduped away.
+          throw new Error(
+            `Apple ${notificationType} for user ${user.id}: row changed concurrently since it was read; will retry`,
+          );
+        }
+        const bindingNote = revoked
+          ? ', transaction marked revoked'
+          : alreadyRevoked ? ', revoked binding preserved' : ', binding released';
+        console.log(`[Apple IAP] Downgraded user ${user.id} to free (${notificationType}${bindingNote})`);
         break;
       }
 
