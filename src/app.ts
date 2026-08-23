@@ -7,8 +7,9 @@ import path from 'path';
 import fs from 'fs';
 import routes from './routes';
 import { config } from './config';
-import { apiLimiter } from './middleware/rateLimiter';
+import { apiLimiter, isViaCloudflare } from './middleware/rateLimiter';
 import { trackInFlightRequests } from './middleware/inflight';
+import { redactPii } from './utils/log-safe';
 import prisma from './utils/prisma';
 
 // Initialize Sentry before Express app (must be first)
@@ -24,17 +25,37 @@ if (config.sentryDsn) {
         delete event.request.headers['cookie'];
         delete event.request.headers['x-goog-api-key'];
       }
+      // M-13: request bodies were never scrubbed — a signup/login/reset payload
+      // captured on an exception would carry the email (and anything else the
+      // caller posted) into Sentry. Drop the body wholesale; the exception and
+      // its stack are what make an event actionable, not the payload.
+      if (event.request) {
+        delete event.request.data;
+        delete event.request.cookies;
+        if (typeof event.request.url === 'string') event.request.url = redactPii(event.request.url);
+        if (typeof event.request.query_string === 'string') {
+          event.request.query_string = redactPii(event.request.query_string);
+        }
+      }
+      // captureMessage() events carry their text here, not in exception.values.
+      if (typeof event.message === 'string') event.message = redactPii(event.message);
       // Strip API keys from exception stack frames and breadcrumb data
-      // that Axios may embed in error objects (config.url, request.path)
+      // that Axios may embed in error objects (config.url, request.path).
+      // Also redact email addresses and bearer/hex secrets centrally, so EVERY
+      // capture path is covered rather than each call site remembering to.
       if (event.exception?.values) {
         for (const ex of event.exception.values) {
           if (ex.value) {
-            ex.value = ex.value.replace(/[?&]key=[^&\s]+/gi, '?key=[REDACTED]');
+            ex.value = redactPii(ex.value.replace(/[?&]key=[^&\s]+/gi, '?key=[REDACTED]'));
           }
         }
       }
       if (event.breadcrumbs) {
         for (const bc of event.breadcrumbs) {
+          // The default console integration turns EVERY console.log/error into
+          // a breadcrumb, so this is the widest PII surface of the three — an
+          // un-redacted log line reaches Sentry attached to the next event.
+          if (typeof bc.message === 'string') bc.message = redactPii(bc.message);
           if (bc.data && typeof bc.data === 'object') {
             for (const key of Object.keys(bc.data)) {
               if (typeof bc.data[key] === 'string' && /[?&]key=[^&\s]+/i.test(bc.data[key])) {
@@ -221,6 +242,28 @@ app.use((req, res, next) => {
 });
 
 app.use(cookieParser());
+
+// H-3: optional origin lockdown. Inert unless BOTH the shared secret and the
+// enforce flag are set (see config/index.ts for the enablement order and why
+// this must not be switched on before native traffic is handled).
+//
+// Exemptions are the paths that legitimately reach the origin without passing
+// through Cloudflare: the platform healthcheck, and the provider webhooks, which
+// are called directly by Stripe/Apple/Plaid and carry their own signatures.
+const ORIGIN_LOCKDOWN_EXEMPT_PATHS = new Set([
+  '/health',
+  '/health/deep',
+  '/billing/webhook',
+  '/creator/webhooks/stripe',
+  '/billing/apple-webhook',
+  '/plaid/webhook',
+]);
+app.use((req, res, next) => {
+  if (!config.originLockdownEnforce || !config.cloudflareOriginSecret) return next();
+  if (ORIGIN_LOCKDOWN_EXEMPT_PATHS.has(req.path)) return next();
+  if (isViaCloudflare(req)) return next();
+  res.status(403).json({ error: 'Forbidden' });
+});
 
 // CSRF protection for cookie-authenticated mutations (POST, PUT, DELETE, PATCH).
 // Checks that the Origin header matches allowed origins for requests that rely on

@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as Sentry from '@sentry/node';
 import { requireAuth } from '../middleware/auth.middleware';
-import { config } from '../config';
+import { requirePlatformAdmin } from '../middleware/admin.middleware';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 import { v1LedgerCreate, isV1WalletFrozen } from '../services/v1-wallet-freeze';
@@ -19,19 +19,10 @@ import { pruneBackupsToKeep, BACKUP_DIR, DB_PATH } from '../services/backup.serv
 
 const router = Router();
 
-// Admin gate. Prod Jon is hardcoded as a guaranteed bypass so an empty
-// WAITLIST_ADMIN_USER_IDS env can never lock him out. Additional admins
-// (e.g. local-dev accounts) are granted via that env var.
-const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
 
-function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
-  const userId = req.user?.userId;
-  if (!userId || (!HARDCODED_ADMIN_IDS.includes(userId) && !config.waitlistAdminUserIds.includes(userId))) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  next();
-}
+// M-14: the local copy of this check (and its own HARDCODED_ADMIN_IDS list) now
+// lives in middleware/admin.middleware.ts. Same membership as before.
+const requireAdmin = requirePlatformAdmin;
 
 // POST /admin/set-plan { userId, plan }
 router.post('/set-plan', requireAuth, requireAdmin, async (req: AuthRequest, res: Response) => {
@@ -60,7 +51,10 @@ router.put('/user/:userId', requireAuth, requireAdmin, async (req: AuthRequest, 
   if (displayName) data.displayName = displayName;
   if (Object.keys(data).length === 0) { res.status(400).json({ error: 'Nothing to update' }); return; }
   const user = await prisma.user.update({ where: { id: req.params.userId }, data });
-  console.log(`[Admin] ${req.user!.userId} updated user ${req.params.userId}: ${JSON.stringify(data)}`);
+  // M-13: `data` holds client-supplied username/displayName. Raw JSON.stringify
+  // lets a crafted value inject newlines and forge a second log line (see
+  // utils/log-safe.ts for the threat model), so route it through logSafe.
+  console.log(`[Admin] ${req.user!.userId} updated user ${logSafe(req.params.userId)}: ${logSafe(JSON.stringify(data), 256)}`);
   res.json({ success: true, user: { id: user.id, username: user.username, displayName: user.displayName } });
 });
 
@@ -640,7 +634,9 @@ router.post('/creator/:userId/suspend', requireAuth, requireAdmin, async (req: A
       prisma.creator.update({ where: { userId }, data: { status: 'suspended' } }),
       prisma.creatorReport.updateMany({ where: { creatorUserId: userId, status: 'open' }, data: { status: 'reviewed' } }),
     ]);
-    console.log(`[Admin] ${req.user!.userId} suspended creator ${userId} (reason: ${String(req.body?.reason ?? 'n/a').slice(0, 200)})`);
+    // M-13: slice() bounds the length but leaves control characters intact, so a
+    // crafted `reason` could still forge a second log line. logSafe does both.
+    console.log(`[Admin] ${req.user!.userId} suspended creator ${logSafe(userId)} (reason: ${logSafe(req.body?.reason ?? 'n/a', 200)})`);
     res.json({ success: true, status: 'suspended' });
   } catch (e: unknown) {
     console.error('[Admin] creator suspend error:', e instanceof Error ? e.message : String(e));

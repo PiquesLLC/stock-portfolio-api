@@ -72,7 +72,10 @@ async function sendOAuthSession(
   res.cookie('authToken', loginResponse.token, accessOptions);
   res.cookie('refreshToken', loginResponse.refreshToken, refreshOptions);
   trackOAuthSuccess(provider);
-  console.log(`[OAuth] ${provider} login: userId=${user.id}, isNew=${isNewUser}, ip=${req.ip}`);
+  // M-13: the client IP is personal data and was being written to stdout on every
+  // OAuth login, where it persists in Railway logs well beyond the request. The
+  // userId is the identifier we actually need for triage; drop the IP.
+  console.log(`[OAuth] ${provider} login: userId=${user.id}, isNew=${isNewUser}`);
   const isAdmin = config.waitlistAdminUserIds.includes(loginResponse.user.id) ||
     (loginResponse.user.email && loginResponse.user.emailVerified ? config.waitlistAdminEmails.includes(loginResponse.user.email.toLowerCase()) : false);
   const isNative = isCapacitorRequest(req);
@@ -116,7 +119,7 @@ export async function googleCallbackHandler(req: Request, res: Response): Promis
       // Brand-new signup: persist nothing until the date-of-birth step at
       // /auth/oauth/complete passes (age gate).
       const signupToken = signOAuthSignupToken('google', profile);
-      console.log(`[OAuth] google signup pending DOB, ip=${req.ip}`);
+      console.log('[OAuth] google signup pending DOB');
       res.json({ requiresDateOfBirth: true, signupToken });
       return;
     }
@@ -184,7 +187,7 @@ export async function appleCallbackHandler(req: Request, res: Response): Promise
       // /auth/oauth/complete passes (age gate). Apple only sends the user's
       // name on this first authorization — carry it in the signup token.
       const signupToken = signOAuthSignupToken('apple', profile, appleUser);
-      console.log(`[OAuth] apple signup pending DOB, ip=${req.ip}`);
+      console.log('[OAuth] apple signup pending DOB');
       res.json({ requiresDateOfBirth: true, signupToken });
       return;
     }

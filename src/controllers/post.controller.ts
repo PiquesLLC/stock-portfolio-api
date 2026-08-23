@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import prisma from '../utils/prisma';
 import { createPostBodySchema, createCommentBodySchema } from '../validators/post.validators';
+import { respondWithError } from '../utils/http-error';
 import {
   createPost,
   getPost,
@@ -138,9 +139,8 @@ export async function createCommentHandler(req: AuthRequest, res: Response): Pro
 
     const comment = await createComment(userId, req.params.postId, parsed.data.content);
     res.status(201).json(comment);
-  } catch (error: any) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to create comment' });
+  } catch (error: unknown) {
+    respondWithError(res, error, 'Failed to create comment', 'Post:createComment');
   }
 }
 
@@ -181,9 +181,8 @@ export async function toggleLikeHandler(req: AuthRequest, res: Response): Promis
 
     const result = await toggleLike(userId, req.params.postId);
     res.json(result);
-  } catch (error: any) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to toggle like' });
+  } catch (error: unknown) {
+    respondWithError(res, error, 'Failed to toggle like', 'Post:toggleLike');
   }
 }
 

@@ -19,11 +19,18 @@ function authHeader() {
   return { Authorization: `Bearer ${generateTestToken(testUser)}` };
 }
 
-// Minimal buffer passing the handler's PNG magic-byte gate
-const PNG_BUFFER = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.alloc(16),
-]);
+// A real, decodable 1x1 PNG.
+//
+// This used to be the PNG magic bytes followed by 16 zero bytes — enough to pass
+// the magic-byte gate, but not an actual image. The handler now also reads the
+// image header to reject decompression bombs (L-7: the 10MB multer cap bounds
+// bytes, not pixels), and a fake buffer has no readable header, so it was
+// rejected with 400. Using a genuine PNG keeps these tests exercising the real
+// decode path rather than asserting against an input that could never occur.
+const PNG_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 const VISION_ROWS = [
   { rowNumber: 1, ticker: 'AAPL', shares: 10, averageCost: 150, confidence: 'high' as const },

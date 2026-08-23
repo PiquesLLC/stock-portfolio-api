@@ -2,6 +2,7 @@
 import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import crypto from 'crypto';
+import { redactPii } from '../utils/log-safe';
 import {
   loginWithPassword,
   setPassword,
@@ -72,7 +73,15 @@ function detachAuthSideEffect(work: Promise<unknown>, label: string): void {
     // the webhook handlers do) and log the full Error (stack). Without this, a real
     // Resend/DB outage would silently stop reset/verification emails with nothing
     // paging us.
-    console.error(`[auth:${label}] background task failed:`, err);
+    // M-13: keep the stack (this is the only signal for a Resend/DB outage) but
+    // strip the recipient address out of it — provider errors routinely embed
+    // the email being sent to, and this line goes to Railway stdout verbatim.
+    // Sentry gets the raw error object; beforeSend in app.ts redacts the
+    // exception value, the event message and breadcrumb messages centrally, and
+    // drops request bodies — so this does not rely on each call site
+    // remembering. (It is redaction, not a guarantee: a novel PII shape the
+    // regexes do not recognise would still pass through.)
+    console.error(`[auth:${label}] background task failed:`, redactPii(err instanceof Error ? (err.stack ?? err.message) : err));
     Sentry.captureException(err, { tags: { component: 'auth_detached', flow: label } });
   });
 }
@@ -547,11 +556,20 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
     const result = await resetPasswordWithCode(email, code, newPassword);
 
     if (!result.success) {
-      if (result.error === 'TOO_MANY_ATTEMPTS') {
-        res.status(429).json({ error: 'Too many reset attempts', remainingAttempts: 0 });
-        return;
-      }
-      res.status(400).json({ error: 'Invalid or expired reset code', remainingAttempts: result.remainingAttempts });
+      // L-2: every failure answers IDENTICALLY on this unauthenticated endpoint.
+      //
+      // Equalising "no such account" and "no active reset" in the service was
+      // not enough: an attacker can arm a real reset first (/auth/forgot-password
+      // is enumeration-safe but still issues an OTP only for real accounts),
+      // then read the DECREMENTING remainingAttempts to tell a real address from
+      // a fake one — 4, then 3, versus a constant. The 429-vs-400 split leaked
+      // the same fact, since only a real account with an armed reset can ever
+      // reach the attempt ceiling.
+      //
+      // Attempts are still counted and the ceiling still enforced server-side;
+      // the client is simply not told which state it is in. A legitimate user
+      // who exhausts their attempts requests a fresh code.
+      res.status(400).json({ error: 'Invalid or expired reset code' });
       return;
     }
 
@@ -972,7 +990,16 @@ export async function deleteAccountHandler(req: AuthRequest, res: Response): Pro
       await tx.userSettings?.deleteMany({ where: { userId: user.id } });
       await tx.consentRecord?.deleteMany({ where: { userId: user.id } });
       } catch (cleanupErr) {
+        // L-6: this was warn-only, so a partial failure left rows keyed to a
+        // deleted user with nothing surfacing it — while the privacy policy
+        // promises deletion is immediate and total. We still must not abort
+        // (the user row is going regardless, and a half-rollback is worse), but
+        // it has to page someone so the remnant can be swept manually.
         console.warn('[DeleteAccount] Extended cleanup partial failure (non-fatal):', cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr));
+        Sentry.captureException(cleanupErr, {
+          tags: { component: 'account_deletion', phase: 'extended_cleanup' },
+          extra: { userId: user.id },
+        });
       }
       // Finally, delete the user
       await tx.user.delete({ where: { id: user.id } });

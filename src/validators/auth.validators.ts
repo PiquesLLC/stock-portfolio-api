@@ -1,9 +1,15 @@
 import { z } from 'zod';
 
 // Shared password schema with strength requirements
+// L-3: cap the length. bcrypt only consumes the first 72 BYTES, so everything
+// past that is silently discarded — two passwords sharing a 72-byte prefix hash
+// identically. Accepting unbounded input therefore buys no security while
+// letting a caller post a multi-megabyte string through the hash path. 200 is
+// far above any real passphrase and well past the point bcrypt stops reading.
 const passwordSchema = z
   .string({ error: 'Password is required' })
   .min(8, 'Password must be at least 8 characters')
+  .max(200, 'Password must be at most 200 characters')
   .regex(/[A-Z]/, 'Password must include an uppercase letter')
   .regex(/[a-z]/, 'Password must include a lowercase letter')
   .regex(/[0-9]/, 'Password must include a number');
@@ -21,6 +27,11 @@ const RESERVED_USERNAMES = new Set([
   'goals', 'intelligence', 'leaderboard', 'users', 'social', 'transactions',
   'alerts', 'price-alerts', 'analyst', 'milestones', 'fundamentals', 'watchlists',
   'stock-follows', 'creator', 'referral', 'notifications', 'plaid', 'billing', 'waitlist',
+  // L-5: these three are mounted routers reserved in app.ts RESERVED_TOP_LEVEL_PATHS
+  // but were missing here, so they were registerable as usernames and would collide
+  // with the public profile space at nalaai.com/<username>. Keep this list in sync
+  // with RESERVED_TOP_LEVEL_PATHS in src/app.ts.
+  'portfolios', 'push', 'assets',
   // UI tab names / routes
   'profile', 'discover', 'feed', 'watch', 'pricing', 'macro',
   // Common reserved words
@@ -63,8 +74,11 @@ export const usernameSchema = z
   .refine((val) => !isReservedUsername(val), 'This username is not allowed');
 
 export const loginSchema = z.object({
-  username: z.string({ error: 'Username is required' }).min(1, 'Username is required'),
-  password: z.string({ error: 'Password is required' }).min(1, 'Password is required'),
+  username: z.string({ error: 'Username is required' }).min(1, 'Username is required').max(320),
+  // Deliberately looser than passwordSchema's 200: this validates an EXISTING
+  // credential, and rejecting at 200 would permanently lock out anyone who set a
+  // longer password before that cap existed. 1024 still bounds the request.
+  password: z.string({ error: 'Password is required' }).min(1, 'Password is required').max(1024),
 });
 
 // A5 — signup age gate. 13 matches the Terms of Service minimum; raise this one

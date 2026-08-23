@@ -15,4 +15,16 @@ nixpkgsArchive = "51ad838b03a05b1de6f9f2a0fffecee64a9788ee"
 # bypasses the strict check while still respecting the lockfile for
 # resolved versions.
 [phases.install]
-cmds = ["npm install --include=dev --no-audit --no-fund"]
+# M-1: `--no-audit` removed so known-vulnerable dependencies are printed in the
+# Railway build log. It is only a report — `npm audit` during install never fails
+# the build — but it restores the signal that would otherwise go unseen until
+# someone runs the audit by hand. (The 2026-08-23 review found 35 advisories in
+# the production tree, 17 high, with nothing surfacing them.)
+#
+# NOT changed here, deliberately: `npm install` → `npm ci`. `npm ci` is the
+# correct command (it fails loudly on lockfile drift instead of silently
+# re-resolving), but the comment above explains why it currently fails on
+# Railway's npm 10, and swapping it blind would break deploys. Fix the lockfile
+# generation first — regenerate with npm 10, or pin npm via `engines` — verify a
+# build, THEN switch. Until then this stays a known gap, not a silent one.
+cmds = ["npm install --include=dev --no-fund"]

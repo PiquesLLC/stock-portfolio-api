@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
+import { isOpsAdmin } from '../middleware/admin.middleware';
 import {
   getJobStats,
   resolveDeadLetterEntry,
@@ -13,15 +14,13 @@ import {
 } from '../services/job-runner.service';
 import { getSnapshotHealth } from '../services/snapshot.service';
 import { healSnapshot } from '../services/snapshot-heal.service';
-import { config } from '../config';
 
 const router = Router();
 
-function isAdmin(userId?: string): boolean {
-  if (!userId) return false;
-  return config.waitlistAdminUserIds.includes(userId) ||
-    config.creatorAdminUserIds.includes(userId);
-}
+// M-14: shared implementation — see middleware/admin.middleware.ts. This router
+// was the one that did NOT honour the hardcoded owner id; it now does, which is
+// the intent of that constant everywhere else it appears.
+const isAdmin = isOpsAdmin;
 
 // GET /admin/jobs/summary - Dashboard job summary per job
 router.get('/jobs/summary', requireAuth, async (req: Request, res: Response) => {

@@ -1360,8 +1360,17 @@ export async function resetPasswordWithCode(
     where: { email: normalizedEmail },
     select: { id: true },
   });
+  // L-2: these two branches used to answer differently — an unknown email
+  // returned remainingAttempts = MAX while a known email with no pending reset
+  // returned 0. Same status, same error code, but the number told an attacker
+  // whether the address had an account (and whether a reset was in flight).
+  // /auth/forgot-password is carefully enumeration-safe; this endpoint quietly
+  // reintroduced the oracle. Both "no such account" and "no active reset" are
+  // the same fact to the caller — nothing to attempt against — so both return
+  // the identical payload.
+  const noActiveReset = { success: false, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS, error: 'INVALID_OR_EXPIRED' as const };
   if (!user) {
-    return { success: false, remainingAttempts: PASSWORD_RESET_MAX_ATTEMPTS, error: 'INVALID_OR_EXPIRED' };
+    return noActiveReset;
   }
 
   const otp = await prisma.emailOtpCode.findFirst({
@@ -1369,7 +1378,7 @@ export async function resetPasswordWithCode(
     orderBy: { createdAt: 'desc' },
   });
   if (!otp) {
-    return { success: false, remainingAttempts: 0, error: 'INVALID_OR_EXPIRED' };
+    return noActiveReset;
   }
 
   const failedAttempts = await prisma.notificationAuditLog.count({

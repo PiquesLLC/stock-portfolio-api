@@ -25,7 +25,10 @@ export async function getYahooQuote(ticker: string): Promise<Quote> {
   try {
     // Use 1-minute interval with includePrePost=true to get extended hours data
     const response = await yahooGet(
-      `${YAHOO_BASE_URL}/${upperTicker}?interval=1m&range=1d&includePrePost=true`,
+      // L-1: encode the symbol into the path. Validation at the route layer
+      // already rejects URL metacharacters; this is the defence-in-depth that
+      // holds even for internal callers that bypass the validators.
+      `${YAHOO_BASE_URL}/${encodeURIComponent(upperTicker)}?interval=1m&range=1d&includePrePost=true`,
       5000
     );
 
@@ -1552,7 +1555,7 @@ export async function get52WeekRange(ticker: string): Promise<Week52Range | null
 
   try {
     const response = await yahooGet(
-      `${YAHOO_BASE_URL}/${upperTicker}?interval=1d&range=1y`
+      `${YAHOO_BASE_URL}/${encodeURIComponent(upperTicker)}?interval=1d&range=1y`
     );
 
     const result = response.data.chart.result?.[0];
@@ -1643,7 +1646,7 @@ export async function getAllTimeRange(ticker: string): Promise<AllTimeRange | nu
 
   try {
     const response = await yahooGet(
-      `${YAHOO_BASE_URL}/${upperTicker}?interval=1wk&range=max`,
+      `${YAHOO_BASE_URL}/${encodeURIComponent(upperTicker)}?interval=1wk&range=max`,
       15000
     );
 

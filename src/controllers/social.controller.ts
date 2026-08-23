@@ -16,6 +16,7 @@ import { reportUser } from '../services/report.service';
 import { reportUserBodySchema } from '../validators/report.validators';
 import { getProfileStats } from '../services/profile-stats.service';
 import { filterContent } from '../utils/content-filter';
+import { respondWithError } from '../utils/http-error';
 
 // IANA timezone validation — cache the allowed-list once at module load.
 // Falls back to try/catch with Intl.DateTimeFormat if supportedValuesOf isn't available.
@@ -662,9 +663,8 @@ export async function reportUserHandler(req: AuthRequest, res: Response): Promis
     const { reason, description, context } = parsed.data;
     const report = await reportUser(reporterUserId, reportedUserId, reason, description, context);
     res.status(201).json(report);
-  } catch (error: any) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to submit report' });
+  } catch (error: unknown) {
+    respondWithError(res, error, 'Failed to submit report', 'Social:reportUser');
   }
 }
 
