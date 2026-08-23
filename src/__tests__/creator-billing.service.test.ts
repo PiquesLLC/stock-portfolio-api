@@ -10,6 +10,7 @@ const {
   subscriptionsUpdateMock,
   invoicePaymentsListMock,
   paymentIntentsRetrieveMock,
+  sentryCaptureExceptionMock,
 } = vi.hoisted(() => ({
   checkoutCreateMock: vi.fn(),
   chargesRetrieveMock: vi.fn(),
@@ -19,6 +20,18 @@ const {
   subscriptionsUpdateMock: vi.fn(),
   invoicePaymentsListMock: vi.fn(),
   paymentIntentsRetrieveMock: vi.fn(),
+  sentryCaptureExceptionMock: vi.fn(),
+}));
+
+// Payout failures that cannot be repaired in-process must ALERT rather than
+// leave a lone console line, so the tests assert on the Sentry call.
+vi.mock('@sentry/node', () => ({
+  captureException: sentryCaptureExceptionMock,
+  captureMessage: vi.fn(),
+  setupExpressErrorHandler: vi.fn(),
+  init: vi.fn(),
+  close: vi.fn(async () => true),
+  flush: vi.fn(async () => true),
 }));
 
 vi.mock('stripe', () => {
@@ -1080,6 +1093,272 @@ describe('creator billing webhooks', () => {
     } finally {
       (config as any).creatorPayoutsEnabled = original;
     }
+  });
+
+  // ------------------------------------------------------------------
+  // H-2 — Stripe transfer outcome handling (double-pay guard)
+  // ------------------------------------------------------------------
+  // The wallet may only be credited back when we KNOW no money moved.
+  // Previously the transfer and the "mark completed" write shared one
+  // try/catch, so a failed bookkeeping write looked identical to a failed
+  // transfer: the payout was marked failed and the balance restored AFTER the
+  // money had left, letting the creator request it again and be paid twice.
+  // The Stripe idempotency key does not help — a retry is a new payout row with
+  // a new key, which Stripe treats as a distinct legitimate transfer.
+  describe('requestPayout — Stripe transfer outcome', () => {
+    function armPayout() {
+      (prismaMock as any).creator.findUnique.mockResolvedValue({
+        stripeConnectId: 'acct_123',
+        status: 'active',
+      });
+      (prismaMock as any).creatorPayout.count.mockResolvedValue(0);
+      // A single earning old enough to clear the reserve window, so
+      // getPayoutBalance() yields a positive available balance.
+      // NOTE: an earlier test in this file installs *throwing* implementations
+      // on these two mocks, and vi.clearAllMocks() clears calls but NOT
+      // implementations — so they must be re-armed explicitly here.
+      (prismaMock as any).creatorWalletLedger.findMany.mockResolvedValue([
+        { type: 'earning', amountCents: 10000, createdAt: new Date(Date.now() - 30 * 86400000) },
+      ]);
+      (prismaMock as any).creatorPayout.aggregate.mockResolvedValue({ _sum: { amountCents: null } });
+      (prismaMock as any).creatorPayout.create.mockResolvedValue({ id: 'payout_h2', amountCents: 10000 });
+      (prismaMock as any).creatorWalletLedger.create.mockResolvedValue({});
+      getPayoutBalanceFromLedgerMock.mockResolvedValue(10000);
+    }
+
+    /** Statuses passed to creatorPayout.update across the whole call. */
+    function statusesWritten(): unknown[] {
+      return (prismaMock as any).creatorPayout.update.mock.calls
+        .map((c: any[]) => c?.[0]?.data?.status)
+        .filter(Boolean);
+    }
+
+    function reversalLedgerWrites(): unknown[] {
+      return (prismaMock as any).creatorWalletLedger.create.mock.calls
+        .filter((c: any[]) => String(c?.[0]?.data?.description ?? '').startsWith('payout_reversal:'));
+    }
+
+    it('restores the wallet when Stripe positively REJECTS the transfer', async () => {
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('Insufficient funds'), { type: 'StripeInvalidRequestError' }),
+      );
+
+      await expect(requestPayout('creator_1')).rejects.toThrow('Payout transfer failed');
+
+      // No transfer exists, so reversing is correct.
+      expect(statusesWritten()).toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(1);
+    });
+
+    it('does NOT restore the wallet when the transfer outcome is AMBIGUOUS', async () => {
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' }),
+      );
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/being confirmed/i);
+
+      // Stripe may or may not have moved the money. Reversing here is the
+      // double-pay bug, so the ledger must be untouched and the payout parked.
+      expect(statusesWritten()).toContain('processing');
+      expect(statusesWritten()).not.toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('does NOT restore the wallet when the transfer SUCCEEDS but the completion write fails', async () => {
+      // This is the exact double-pay scenario. A transient SQLITE_BUSY on the
+      // "mark completed" write must never be mistaken for a failed transfer.
+      armPayout();
+      transfersCreateMock.mockResolvedValue({ id: 'tr_h2' });
+      (prismaMock as any).creatorPayout.update
+        .mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked')) // completion write
+        .mockResolvedValue({});                                             // park-as-processing
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/sent but confirmation failed/i);
+
+      expect(transfersCreateMock).toHaveBeenCalledTimes(1);
+      expect(statusesWritten()).not.toContain('failed');
+      expect(statusesWritten()).toContain('processing');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('treats an error with no recognisable Stripe type as ambiguous, not as a rejection', async () => {
+      // Guards the classifier's default branch: anything we cannot positively
+      // identify as "Stripe refused it" must fail safe (no reversal). Also
+      // covers a stubbed SDK where the error carries no `type` at all.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(new Error('something unexpected'));
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/being confirmed/i);
+
+      expect(statusesWritten()).not.toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('RESOLVES an ambiguous outcome by retrying under the same idempotency key', async () => {
+      // Stripe guarantees at-most-one transfer per key for 24h, so re-issuing
+      // returns the original transfer if one was created and creates it
+      // otherwise. Parking the payout instead would strand the creator's money:
+      // the ledger debit stands and the reconciliation service cannot recover
+      // it (it only scans payouts that already carry a stripeTransferId).
+      armPayout();
+      transfersCreateMock
+        .mockRejectedValueOnce(Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' }))
+        .mockResolvedValue({ id: 'tr_recovered' });
+
+      const result = await requestPayout('creator_1');
+
+      expect(result.payoutId).toBe('payout_h2');
+      expect(transfersCreateMock).toHaveBeenCalledTimes(2);
+      // Both calls must carry the SAME idempotency key, or the retry would be a
+      // second real transfer rather than a lookup of the first.
+      const keys = transfersCreateMock.mock.calls.map((c: any[]) => c?.[1]?.idempotencyKey);
+      expect(keys[0]).toBe('payout-payout_h2');
+      expect(keys[1]).toBe(keys[0]);
+      expect(statusesWritten()).toContain('completed');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('NEVER reverses once the first attempt was ambiguous, even if the retry looks like a hard rejection', async () => {
+      // The tempting inference — "Stripe refused the retry, so the key was
+      // never consumed, so no transfer exists" — is unsound. A 429 comes from
+      // Stripe's rate limiter BEFORE the idempotency key is consulted, and an
+      // auth/permission error can come from a key rotated between the two
+      // calls. Neither tells us anything about the first attempt. If the first
+      // attempt had in fact created the transfer, reversing here would credit
+      // the wallet for money already sent, and the creator's next request
+      // carries a new payoutId (hence a new idempotency key) that Stripe would
+      // honour as a second, distinct transfer.
+      armPayout();
+      transfersCreateMock
+        .mockRejectedValueOnce(Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' }))
+        .mockRejectedValue(Object.assign(new Error('Too many requests'), { type: 'StripeRateLimitError' }));
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/being confirmed/i);
+
+      expect(statusesWritten()).not.toContain('failed');
+      expect(statusesWritten()).toContain('processing');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('still reverses when the FIRST attempt is positively rejected (sound inference)', async () => {
+      // Here the error came from the very request that would have created the
+      // transfer, so "no transfer exists" genuinely follows.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('No such destination'), { type: 'StripeInvalidRequestError' }),
+      );
+
+      await expect(requestPayout('creator_1')).rejects.toThrow('Payout transfer failed');
+
+      expect(statusesWritten()).toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(1);
+      // One attempt only — a rejected first attempt is not retried.
+      expect(transfersCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('alerts instead of failing silently when the reversal itself throws', async () => {
+      // A failed reversal leaves the row `pending` with the ledger debited,
+      // which permanently blocks this creator from requesting payouts and which
+      // nothing in the codebase sweeps. It must never be silent.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('No such destination'), { type: 'StripeInvalidRequestError' }),
+      );
+      const originalTx = (prismaMock as any).$transaction;
+      (prismaMock as any).$transaction = vi.fn((arg: unknown) => {
+        if (Array.isArray(arg)) return Promise.reject(new Error('SQLITE_BUSY: database is locked'));
+        if (typeof arg === 'function') return (arg as any)(prismaMock);
+        return Promise.resolve(arg);
+      });
+
+      try {
+        // The reversal failure is swallowed rather than masking the user-facing
+        // error — but it is reported, and the message reflects that the balance
+        // could not be released (see the 503 case below).
+        await expect(requestPayout('creator_1')).rejects.toThrow(/could not be released/i);
+        expect(sentryCaptureExceptionMock).toHaveBeenCalled();
+        const tags = sentryCaptureExceptionMock.mock.calls.map((c: any[]) => c?.[1]?.tags?.outcome);
+        expect(tags).toContain('reversal_failed');
+      } finally {
+        (prismaMock as any).$transaction = originalTx;
+      }
+    });
+
+    it('does NOT treat StripeIdempotencyError as a rejection (a transfer may exist)', async () => {
+      // Stripe raises this when the key was used with different parameters —
+      // i.e. a prior request was accepted. Reversing on it would be a double-pay.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('Keys for idempotent requests can only be used with the same parameters'), {
+          type: 'StripeIdempotencyError',
+        }),
+      );
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/being confirmed/i);
+
+      expect(statusesWritten()).not.toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
+
+    it('does NOT reverse on a rate-limit error, and disables the SDK’s internal retries', async () => {
+      // stripe-node defaults maxNetworkRetries to 2 and retries on connection
+      // errors / 409 / 5xx, reusing the same Idempotency-Key. So without
+      // maxNetworkRetries:0 a single await could be three HTTP attempts, and the
+      // surfaced error would be the LAST one — a 429 raised by an edge rate
+      // limiter that never consults the idempotency store, and therefore says
+      // nothing about whether an earlier attempt created the transfer.
+      // Reversing on it would credit the wallet for money already sent.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('Too many requests'), { type: 'StripeRateLimitError' }),
+      );
+
+      await expect(requestPayout('creator_1')).rejects.toThrow(/being confirmed/i);
+
+      expect(statusesWritten()).not.toContain('failed');
+      expect(reversalLedgerWrites().length).toBe(0);
+      // Every attempt must opt out of the SDK's internal retry loop.
+      for (const call of transfersCreateMock.mock.calls) {
+        expect(call?.[1]?.maxNetworkRetries).toBe(0);
+      }
+    });
+
+    it('answers 503 (not "try again later") when the reversal itself failed', async () => {
+      // A failed reversal leaves the row `pending`, so every retry would fail
+      // with "Existing payout request is still pending". Telling the creator to
+      // try again would be actively misleading.
+      armPayout();
+      transfersCreateMock.mockRejectedValue(
+        Object.assign(new Error('No such destination'), { type: 'StripeInvalidRequestError' }),
+      );
+      const originalTx = (prismaMock as any).$transaction;
+      (prismaMock as any).$transaction = vi.fn((arg: unknown) => {
+        if (Array.isArray(arg)) return Promise.reject(new Error('SQLITE_BUSY: database is locked'));
+        if (typeof arg === 'function') return (arg as any)(prismaMock);
+        return Promise.resolve(arg);
+      });
+
+      try {
+        const err = await requestPayout('creator_1').catch((e: Error & { status?: number }) => e);
+        expect((err as Error & { status?: number }).status).toBe(503);
+        expect((err as Error).message).toMatch(/do not retry/i);
+      } finally {
+        (prismaMock as any).$transaction = originalTx;
+      }
+    });
+
+    it('marks the payout completed on the happy path', async () => {
+      armPayout();
+      transfersCreateMock.mockResolvedValue({ id: 'tr_ok' });
+
+      const result = await requestPayout('creator_1');
+
+      expect(result.payoutId).toBe('payout_h2');
+      expect(statusesWritten()).toContain('completed');
+      expect(reversalLedgerWrites().length).toBe(0);
+    });
   });
 
   it('handles subscription.updated before checkout.session.completed gracefully', async () => {
