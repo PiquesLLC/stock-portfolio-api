@@ -449,17 +449,47 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
           break;
         }
 
+        // INVARIANT 8 — entitlement must never move BACKWARD.
+        //
+        // Apple retries an unacknowledged notification for up to three days, so
+        // a renewal generated before a later one can be delivered after it.
+        // planExpiresAt was written unconditionally, so such a straggler
+        // shortened a subscription the user had already paid to extend. Only
+        // ever extend.
+        const currentExpiryMs = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : null;
+        if (currentExpiryMs !== null && expiresDate.getTime() <= currentExpiryMs) {
+          console.warn(
+            `[Apple IAP] ignoring stale ${notificationType} for user ${user.id} — its expiry is not later than the current entitlement`,
+          );
+          break;
+        }
+
         const clearsRevokedMarker = isPurchaseNotification && supersedesRevocation;
 
-        await prisma.user.update({
-          where: { id: user.id },
+        // INVARIANT 7 — predicated write, so a concurrent notification cannot be
+        // clobbered. Both `currentlyRevoked` and the expiry comparison above are
+        // derived from the row read at the top of this handler; between that read
+        // and this write a REFUND for the same user can commit its revoked
+        // marker. An unconditional update would silently erase it (a plain lost
+        // update — these are two autocommit statements, not a transaction).
+        // Scoping the update to the value we branched on makes a stale write a
+        // no-op instead. The dedup key is per-notificationUUID and the job
+        // runner's in-flight guard keys on job name, so neither serialises two
+        // DIFFERENT notifications for one user.
+        const renewWrite = await prisma.user.updateMany({
+          where: { id: user.id, applePurchaseSource: user.applePurchaseSource ?? null },
           data: {
             plan,
             planExpiresAt: expiresDate,
             ...(clearsRevokedMarker ? { applePurchaseSource: 'app_store' } : {}),
           },
-          select: { id: true },
         });
+        if (renewWrite.count === 0) {
+          console.warn(
+            `[Apple IAP] ${notificationType} for user ${user.id} skipped — row changed concurrently since it was read`,
+          );
+          break;
+        }
         console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
         break;
       }
@@ -496,15 +526,44 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
         const alreadyRevoked = isRevokedMarker(user.applePurchaseSource);
         const downgrade = { plan: 'free', planExpiresAt: null };
 
-        await prisma.user.update({
-          where: { id: user.id },
+        // INVARIANT 8 — a terminal notification for a SUPERSEDED term must not
+        // tear down a newer entitlement.
+        //
+        // Sequence: the subscription lapses, EXPIRED is generated, delivery
+        // fails, the user re-subscribes (Apple reuses originalTransactionId),
+        // and the old EXPIRED finally lands. It downgraded the live paid
+        // subscription AND nulled the binding — and because this handler
+        // resolves the user BY that binding, no future DID_RENEW could find
+        // them again, so it never self-healed.
+        //
+        // REFUND/REVOKE are exempt: those are authoritative about the
+        // transaction regardless of which term they name.
+        const incomingExpiryMs = expiresDate ? expiresDate.getTime() : null;
+        const heldExpiryMs = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : null;
+        if (!revoked && heldExpiryMs !== null && incomingExpiryMs !== null && heldExpiryMs > incomingExpiryMs) {
+          console.warn(
+            `[Apple IAP] ignoring stale ${notificationType} for user ${user.id} — it terminates a term older than the current entitlement`,
+          );
+          break;
+        }
+
+        // INVARIANT 7 — predicated write (see the renewal branch above). A
+        // concurrent REFUND committing its marker between our read and this
+        // write must not be erased by our stale `alreadyRevoked === false`.
+        const terminalWrite = await prisma.user.updateMany({
+          where: { id: user.id, applePurchaseSource: user.applePurchaseSource ?? null },
           data: revoked
             ? { ...downgrade, applePurchaseSource: markRevoked(txn.revocationDate) }
             : alreadyRevoked
               ? downgrade // keep the binding and the marker
               : { ...downgrade, appleOriginalTransactionId: null, applePurchaseSource: null },
-          select: { id: true },
         });
+        if (terminalWrite.count === 0) {
+          console.warn(
+            `[Apple IAP] ${notificationType} for user ${user.id} skipped — row changed concurrently since it was read`,
+          );
+          break;
+        }
         const bindingNote = revoked
           ? ', transaction marked revoked'
           : alreadyRevoked ? ', revoked binding preserved' : ', binding released';

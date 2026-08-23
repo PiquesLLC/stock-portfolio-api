@@ -58,15 +58,37 @@ function ensureShape(): void {
   p.user.findUnique ??= vi.fn();
   p.user.findFirst ??= vi.fn();
   p.user.update ??= vi.fn();
+  // Notification handlers write via updateMany with a predicate on the state
+  // they read, so a concurrent write cannot be clobbered (lost update).
+  p.user.updateMany ??= vi.fn();
   p.appleIAPWebhookEvent ??= {};
   p.appleIAPWebhookEvent.create ??= vi.fn();
   p.appleIAPWebhookEvent.deleteMany ??= vi.fn();
 }
 
-/** The last `data` object written by prisma.user.update. */
+/**
+ * The last `data` written to the user row, whichever write form was used.
+ * verifyAndActivatePlan writes through `update` inside a transaction;
+ * the notification handlers write through a predicated `updateMany`.
+ */
 function lastUserUpdate(): any {
-  const calls = (prismaMock as any).user.update.mock.calls;
+  const calls = [
+    ...(prismaMock as any).user.update.mock.calls,
+    ...(prismaMock as any).user.updateMany.mock.calls,
+  ];
   return calls.length ? calls[calls.length - 1][0].data : null;
+}
+
+/** The `where` predicate of the last notification write. */
+function lastUpdateWhere(): any {
+  const calls = (prismaMock as any).user.updateMany.mock.calls;
+  return calls.length ? calls[calls.length - 1][0].where : null;
+}
+
+/** Assert the user row was not written at all, by either form. */
+function expectNoUserWrite(): void {
+  expect((prismaMock as any).user.update).not.toHaveBeenCalled();
+  expect((prismaMock as any).user.updateMany).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
@@ -78,6 +100,7 @@ beforeEach(() => {
     return arg;
   });
   (prismaMock as any).user.update.mockResolvedValue({ id: 'user_1' });
+  (prismaMock as any).user.updateMany.mockResolvedValue({ count: 1 });
   (prismaMock as any).appleIAPWebhookEvent.create.mockResolvedValue({ id: 'evt_1' });
   (prismaMock as any).appleIAPWebhookEvent.deleteMany.mockResolvedValue({ count: 0 });
 });
@@ -122,7 +145,7 @@ describe('verifyAndActivatePlan', () => {
       .mockResolvedValueOnce({ id: 'user_1', applePurchaseSource: 'app_store_revoked:123' });
 
     await expect(verifyAndActivatePlan('user_1', 'jws')).rejects.toThrow(/refunded or revoked/i);
-    expect((prismaMock as any).user.update).not.toHaveBeenCalled();
+    expectNoUserWrite();
   });
 
   it('refuses a transaction Apple itself reports as revoked', async () => {
@@ -207,7 +230,7 @@ describe('Apple server notifications', () => {
 
     await handleAppleNotification('outer-jws');
 
-    expect((prismaMock as any).user.update).not.toHaveBeenCalled();
+    expectNoUserWrite();
   });
 
   it('honours a genuine SUBSCRIBED that postdates the revocation, clearing the marker', async () => {
@@ -245,7 +268,82 @@ describe('Apple server notifications', () => {
 
     await handleAppleNotification('outer-jws');
 
-    expect((prismaMock as any).user.update).not.toHaveBeenCalled();
+    expectNoUserWrite();
+  });
+
+  // ------------------------------------------------------------------
+  // Adversarial invariant findings — each FAILS before its fix.
+  // ------------------------------------------------------------------
+
+  it('INVARIANT 8: an older DID_RENEW must not move entitlement BACKWARD', async () => {
+    // Apple retries for up to 3 days, so a renewal generated before a later one
+    // can be delivered after it. The handler wrote planExpiresAt unconditionally,
+    // so the straggler shortened a subscription the user had already paid to
+    // extend.
+    const activeUntil = new Date(Date.now() + 60 * 24 * HOUR);
+    armNotification(
+      'DID_RENEW',
+      { expiresDate: Date.now() + 30 * 24 * HOUR, purchaseDate: Date.now() - HOUR },
+      { applePurchaseSource: 'app_store', plan: 'elite', planExpiresAt: activeUntil },
+    );
+
+    await handleAppleNotification('outer-jws');
+
+    expectNoUserWrite();
+  });
+
+  it('a NEWER DID_RENEW still extends entitlement', async () => {
+    const activeUntil = new Date(Date.now() + 10 * 24 * HOUR);
+    const newExpiry = Date.now() + 40 * 24 * HOUR;
+    armNotification(
+      'DID_RENEW',
+      { expiresDate: newExpiry, purchaseDate: Date.now() - HOUR },
+      { applePurchaseSource: 'app_store', plan: 'elite', planExpiresAt: activeUntil },
+    );
+
+    await handleAppleNotification('outer-jws');
+
+    expect(lastUserUpdate().planExpiresAt.getTime()).toBe(newExpiry);
+  });
+
+  it('INVARIANT 8: a stale EXPIRED must not downgrade a NEWER active subscription', async () => {
+    // Sequence: subscription lapses -> EXPIRED generated -> delivery fails ->
+    // user re-subscribes (Apple reuses the originalTransactionId) -> the old
+    // EXPIRED finally lands. It downgraded the live, paid subscription AND
+    // nulled the binding, after which no future DID_RENEW can even find the
+    // user (the handler resolves them by that id), so it never self-heals.
+    const activeUntil = new Date(Date.now() + 30 * 24 * HOUR);
+    armNotification(
+      'EXPIRED',
+      { expiresDate: Date.now() - HOUR, purchaseDate: Date.now() - 40 * 24 * HOUR },
+      { applePurchaseSource: 'app_store', plan: 'elite', planExpiresAt: activeUntil },
+    );
+
+    await handleAppleNotification('outer-jws');
+
+    expectNoUserWrite();
+  });
+
+  it('INVARIANT 7: the terminal write is PREDICATED on the state it read (no lost update)', async () => {
+    // Two notifications for one user race: both read the row before either
+    // writes. REFUND commits the revoked marker; the stale EXPIRED then commits
+    // on `alreadyRevoked === false` and nulls the marker AND the binding —
+    // reopening the exact replay the marker exists to stop. The dedup key is
+    // per-notification-UUID and the job-runner in-flight guard keys on job
+    // name, so neither serialises two DIFFERENT notifications for one user.
+    // The write must therefore be conditional on the value it branched on.
+    armNotification(
+      'EXPIRED',
+      { expiresDate: Date.now() - HOUR, purchaseDate: Date.now() - 40 * 24 * HOUR },
+      { applePurchaseSource: 'app_store', plan: 'elite', planExpiresAt: null },
+    );
+
+    await handleAppleNotification('outer-jws');
+
+    expect(lastUpdateWhere()).toMatchObject({
+      id: 'user_1',
+      applePurchaseSource: 'app_store',
+    });
   });
 
   it('EXPIRED does NOT wipe an existing revoked marker (straggler ordering)', async () => {
@@ -288,6 +386,6 @@ describe('Apple server notifications', () => {
 
     await handleAppleNotification('outer-jws');
 
-    expect((prismaMock as any).user.update).not.toHaveBeenCalled();
+    expectNoUserWrite();
   });
 });

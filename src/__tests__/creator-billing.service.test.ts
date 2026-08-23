@@ -220,6 +220,7 @@ function ensureCreatorMockShape(): void {
   p.creatorPayout.aggregate ??= vi.fn();
   p.creatorPayout.count ??= vi.fn();
   p.creatorPayout.create ??= vi.fn();
+  p.creatorPayout.findFirst ??= vi.fn();
 
   p.creator ??= {};
   p.creator.findUnique ??= vi.fn();
@@ -345,6 +346,50 @@ describe('creator billing webhooks', () => {
     checkoutCreateMock.mockResolvedValue({ url: 'https://checkout.stripe.test/cs_null' });
     const url = await createCreatorCheckoutSession('subscriber_1', 'creator_1');
     expect(url).toContain('checkout.stripe.test');
+  });
+
+  it('INVARIANT 1: a PARTIAL transfer reversal credits only the amount actually reversed', async () => {
+    // Stripe sets amount_reversed and leaves `reversed` false for a partial
+    // reversal. The handler credited payout.amountCents regardless, so a $1
+    // reversal on a $1,000 transfer restored $1,000 to the wallet — which the
+    // creator can then withdraw again. Net over-payment $999.
+    (prismaMock as any).creatorPayout.findFirst.mockResolvedValue({
+      id: 'payout_rev',
+      creatorUserId: 'creator_1',
+      amountCents: 100000,
+      status: 'completed',
+    });
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_partial_rev',
+      type: 'transfer.reversed',
+      data: { object: { id: 'tr_1', amount: 100000, amount_reversed: 100, reversed: false } },
+    } as any);
+
+    const credits = (prismaMock as any).creatorWalletLedger.create.mock.calls
+      .filter((c: any[]) => String(c?.[0]?.data?.description ?? '').startsWith('transfer_reversed:'));
+    expect(credits).toHaveLength(1);
+    expect(credits[0][0].data.amountCents).toBe(100);
+  });
+
+  it('a FULL transfer reversal still credits the whole payout', async () => {
+    (prismaMock as any).creatorPayout.findFirst.mockResolvedValue({
+      id: 'payout_rev_full',
+      creatorUserId: 'creator_1',
+      amountCents: 100000,
+      status: 'completed',
+    });
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_full_rev',
+      type: 'transfer.reversed',
+      data: { object: { id: 'tr_2', amount: 100000, amount_reversed: 100000, reversed: true } },
+    } as any);
+
+    const credits = (prismaMock as any).creatorWalletLedger.create.mock.calls
+      .filter((c: any[]) => String(c?.[0]?.data?.description ?? '').startsWith('transfer_reversed:'));
+    expect(credits).toHaveLength(1);
+    expect(credits[0][0].data.amountCents).toBe(100000);
   });
 
   it('ignores duplicate webhook event ids', async () => {
@@ -1346,6 +1391,53 @@ describe('creator billing webhooks', () => {
         expect((err as Error).message).toMatch(/do not retry/i);
       } finally {
         (prismaMock as any).$transaction = originalTx;
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // Adversarial invariant findings — each of these FAILS before its fix.
+    // ----------------------------------------------------------------
+
+    it('INVARIANT 1/4/6: refuses to pay out while V1_WALLET_FREEZE is active', async () => {
+      // With the freeze on, v1LedgerCreate returns `SELECT 1` instead of writing
+      // the offsetting `payout:<id>` debit (v1-wallet-freeze.ts). The payout
+      // completes, the ledger still shows the full balance, and because the
+      // pending-unique index only covers status='pending' the creator can
+      // immediately request again — a NEW payoutId, hence a NEW idempotency key,
+      // hence a second real transfer. Repeatable without limit.
+      //
+      // admin.routes.ts already refuses its manual ledger endpoint under the
+      // freeze for exactly this reason; the payout path was missed.
+      armPayout();
+      transfersCreateMock.mockResolvedValue({ id: 'tr_frozen' });
+      const original = process.env.V1_WALLET_FREEZE;
+      process.env.V1_WALLET_FREEZE = 'true';
+      try {
+        await expect(requestPayout('creator_1')).rejects.toThrow(/freeze/i);
+        // Must refuse BEFORE any money moves.
+        expect(transfersCreateMock).not.toHaveBeenCalled();
+        expect((prismaMock as any).creatorPayout.create).not.toHaveBeenCalled();
+      } finally {
+        if (original === undefined) delete process.env.V1_WALLET_FREEZE;
+        else process.env.V1_WALLET_FREEZE = original;
+      }
+    });
+
+    it('INVARIANT 5: refuses to pay out when the reconciliation path is disabled', async () => {
+      // requestPayout gates on creatorPayoutsEnabled; runCreatorStripeReconciliation
+      // early-returns on creatorMonetizationEnabled. Two uncoupled flags, so
+      // payouts-on + monetization-off is a reachable state in which a crash
+      // between the Stripe transfer and the DB write is detected by NOTHING.
+      // Paying out without a working reconciler is an unsafe combination.
+      armPayout();
+      transfersCreateMock.mockResolvedValue({ id: 'tr_norecon' });
+      const original = (config as any).creatorMonetizationEnabled;
+      (config as any).creatorMonetizationEnabled = false;
+      try {
+        await expect(requestPayout('creator_1')).rejects.toThrow(/reconcil/i);
+        expect(transfersCreateMock).not.toHaveBeenCalled();
+      } finally {
+        (config as any).creatorMonetizationEnabled = original;
       }
     });
 

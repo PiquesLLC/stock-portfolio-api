@@ -81,6 +81,22 @@ if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     }
   }
+
+  // RELEASE GATE: payouts require a working reconciliation path.
+  //
+  // These two flags encode an unsafe combination. requestPayout gates on
+  // CREATOR_PAYOUTS_ENABLED, but runCreatorStripeReconciliation early-returns on
+  // CREATOR_MONETIZATION_ENABLED — so payouts-on + monetization-off moves real
+  // money while the only detector of a crash between a successful Stripe
+  // transfer and the local write is switched off. That combination is refused at
+  // the payout call site too, but refusing it here means a misconfigured deploy
+  // fails immediately and visibly rather than at the first creator's payout.
+  if (process.env.CREATOR_PAYOUTS_ENABLED === 'true' && !creatorMonetizationEnabled) {
+    console.error('FATAL: CREATOR_PAYOUTS_ENABLED=true requires CREATOR_MONETIZATION_ENABLED=true.');
+    console.error('  Reconciliation is the only thing that detects a payout whose Stripe transfer');
+    console.error('  succeeded but whose local write did not. Refusing to start rather than pay out blind.');
+    process.exit(1);
+  }
 }
 
 // Validate MFA encryption key format at startup (must be 64-char hex = 32 bytes for AES-256)

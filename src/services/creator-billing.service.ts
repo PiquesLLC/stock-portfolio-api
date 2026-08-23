@@ -5,7 +5,7 @@ import { config } from '../config';
 import { Prisma } from '../generated/prisma/client';
 import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
-import { v1LedgerCreate } from './v1-wallet-freeze';
+import { v1LedgerCreate, isV1WalletFrozen } from './v1-wallet-freeze';
 import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 import { shadowWriteChargeRefunded } from '../v2/shadow-write/charge-refunded';
 import { shadowWriteChargeDisputeCreated } from '../v2/shadow-write/charge-dispute-created';
@@ -1291,6 +1291,33 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           bumpCounter('processed');
           return;
         }
+        // INVARIANT 1 — credit what Stripe ACTUALLY reversed, not the whole payout.
+        //
+        // A reversal can be partial: Stripe sets `amount_reversed` to the
+        // cumulative reversed total and leaves `reversed` false. Crediting
+        // `payout.amountCents` regardless meant a $1 reversal on a $1,000
+        // transfer restored $1,000 to the wallet, which the creator could then
+        // withdraw again — a $999 over-payment. `amount_reversed` was not read
+        // anywhere in the codebase.
+        //
+        // Clamped to the payout amount so a malformed or unexpected value can
+        // never credit MORE than was originally paid out.
+        const rawReversed = (transfer as { amount_reversed?: unknown }).amount_reversed;
+        const reversedCents = typeof rawReversed === 'number' && Number.isFinite(rawReversed) && rawReversed > 0
+          ? Math.min(Math.trunc(rawReversed), payout.amountCents)
+          : payout.amountCents; // absent/unusable → assume full, the prior behaviour
+        if (reversedCents < payout.amountCents) {
+          console.warn(
+            `[Creator Billing] PARTIAL reversal on ${transferId}: crediting ${reversedCents} of ${payout.amountCents}`,
+          );
+        }
+        // NOTE: `status: 'reversed'` is still set even for a partial reversal, so
+        // the idempotent skip above fires on any follow-up event for this
+        // transfer. That means successive partial reversals credit only the
+        // first — deliberately UNDER-crediting rather than risking a duplicate
+        // credit, since only over-crediting can breach the invariant. The
+        // divergence surfaces as a `reversedMismatch` in
+        // creator-stripe-reconciliation.service.ts.
         await prisma.$transaction([
           prisma.creatorPayout.update({
             where: { id: payout.id },
@@ -1300,7 +1327,7 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             data: {
               creatorUserId: payout.creatorUserId,
               type: 'earning',
-              amountCents: payout.amountCents,
+              amountCents: reversedCents,
               description: `transfer_reversed:${transferId}`,
             },
           }),
@@ -1547,6 +1574,47 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   // earnings continue to accrue in the ledger; only withdrawals are blocked.
   if (!config.creatorPayoutsEnabled) {
     const err = new Error('Payouts are temporarily paused for maintenance. Your earnings continue to accrue and will be available when payouts resume.');
+    (err as Error & { status?: number }).status = 503;
+    throw err;
+  }
+
+  // INVARIANT 1/4/6 — refuse to pay out while the v1 wallet is frozen.
+  //
+  // Under V1_WALLET_FREEZE, v1LedgerCreate returns a no-op `SELECT 1` instead of
+  // inserting the offsetting `payout:<id>` debit. The transfer still goes out,
+  // but the ledger — which is the ONLY balance source both getPayoutBalance and
+  // getPayoutBalanceFromLedger read — never records it. The creator's available
+  // balance is therefore unchanged, and because the pending-unique index only
+  // covers status='pending', a completed payout blocks nothing: they can request
+  // again immediately, get a fresh payoutId, hence a fresh idempotency key,
+  // hence a second real transfer. Repeatable without limit.
+  //
+  // admin.routes.ts already refuses its manual ledger endpoint under the freeze
+  // for exactly this reason, and its comment even notes the freeze affects
+  // "Stripe webhooks, payouts, etc." — this path was simply missed.
+  if (isV1WalletFrozen()) {
+    console.error(`[Creator Payout] FREEZE-BLOCKED payout request by ${userId}`);
+    const err = new Error(
+      'Payouts are paused while a wallet migration (V1_WALLET_FREEZE) is in progress. Your balance is unaffected and payouts resume when the migration completes.',
+    );
+    (err as Error & { status?: number }).status = 503;
+    throw err;
+  }
+
+  // INVARIANT 5 — refuse to pay out when the reconciliation path is disabled.
+  //
+  // requestPayout gates on creatorPayoutsEnabled, but
+  // runCreatorStripeReconciliation early-returns on creatorMonetizationEnabled.
+  // Two uncoupled flags, so payouts-on + monetization-off is reachable — and in
+  // that state a crash between a successful Stripe transfer and the local write
+  // is detected by nothing at all. Reconciliation availability must be at least
+  // as broad as payout availability; moving money without a working detector is
+  // not a state we should be able to enter.
+  if (!config.creatorMonetizationEnabled) {
+    console.error('[Creator Payout] BLOCKED: payouts enabled but reconciliation (CREATOR_MONETIZATION_ENABLED) is off');
+    const err = new Error(
+      'Payouts are unavailable: the reconciliation path is not enabled. This is a configuration error — CREATOR_PAYOUTS_ENABLED requires CREATOR_MONETIZATION_ENABLED.',
+    );
     (err as Error & { status?: number }).status = 503;
     throw err;
   }
