@@ -14,14 +14,23 @@ const existsSyncMock = vi.hoisted(() => vi.fn(() => true));
 const statSyncMock = vi.hoisted(() => vi.fn(() => ({ size: 0 })));
 
 vi.mock('@libsql/client', () => ({ createClient: createClientMock }));
-vi.mock('@sentry/node', () => ({ captureMessage: sentryCaptureMock }));
+// flush() as well as captureMessage: the self-heal restart path awaits a flush
+// before exiting, and a mock missing that export throws on access rather than
+// failing an assertion.
+vi.mock('@sentry/node', () => ({ captureMessage: sentryCaptureMock, flush: vi.fn(async () => true) }));
 vi.mock('../backup.service', () => ({
   DB_PATH: '/data/nala.db',
   getLastBackupStatus: () => null,
 }));
+// $disconnect/$connect/initSqlitePragmas are used only by the self-heal pool
+// reset, which NODE_ENV=test keeps switched off — so nothing here exercises
+// them. They are mocked anyway: a missing export on a vi.mock factory throws on
+// first access, so without these the first test that ever reaches that path
+// would die on the mock instead of reporting what the code did.
 vi.mock('../../utils/prisma', async () => ({
-  default: { $queryRawUnsafe: vi.fn() },
+  default: { $queryRawUnsafe: vi.fn(), $disconnect: vi.fn(), $connect: vi.fn() },
   RESOLVED_DB_FILE: '/data/nala.db',
+  initSqlitePragmas: vi.fn(),
 }));
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();

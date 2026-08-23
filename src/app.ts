@@ -8,6 +8,7 @@ import fs from 'fs';
 import routes from './routes';
 import { config } from './config';
 import { apiLimiter } from './middleware/rateLimiter';
+import { trackInFlightRequests } from './middleware/inflight';
 import prisma from './utils/prisma';
 
 // Initialize Sentry before Express app (must be first)
@@ -131,6 +132,11 @@ function injectMetaTags(html: string, ogTags: string): string {
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
+
+// Record every request in the in-flight registry BEFORE anything can reject or
+// stall it, so a request wedged behind the SQLite write lock is visible to the
+// write-lock watchdog no matter which layer it is stuck in.
+app.use(trackInFlightRequests);
 
 // Security headers (CSP, X-Frame-Options, etc.)
 app.use(helmet({

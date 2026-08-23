@@ -214,7 +214,7 @@ function safeStringify(obj: unknown): string {
 }
 
 // Track in-flight jobs to prevent overlapping runs of the same job
-const inFlightJobs = new Set<string>();
+const inFlightJobs = new Map<string, number>();
 const jobHandlerRegistry = new Map<string, RegisteredJobHandler>();
 
 interface JobAlertThreshold {
@@ -484,7 +484,7 @@ export async function runJob(options: JobOptions): Promise<void> {
     if (!acquired) return;
   }
 
-  inFlightJobs.add(name);
+  inFlightJobs.set(name, Date.now());
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -980,7 +980,7 @@ export async function pruneOldJobRuns(): Promise<number> {
 /**
  * Heal orphaned jobs — find all BackgroundJobRun records stuck as "running"
  * and mark them as failed. On startup, ALL running records are orphans because
- * the in-memory inFlightJobs Set was cleared on restart.
+ * the in-memory inFlightJobs Map was cleared on restart.
  *
  * Call once on startup, before any new jobs are scheduled.
  */
@@ -1056,4 +1056,20 @@ export function getJobRunnerAlertSummary(stats: JobStats[]) {
     criticalThreshold: DEFAULT_ALERT_THRESHOLD.critical * 100,
     severity: getAlertSeverity(failureRate),
   };
+}
+
+/**
+ * In-flight background jobs, oldest first, with how long each has been running.
+ *
+ * Exists for the write-lock watchdog. During the 2026-08-22 wedge every actor in
+ * the logs was a VICTIM failing to acquire the lock — the holder never named
+ * itself, and the alert carried nothing to identify it. A job that has been
+ * "running" for far longer than its usual duration while nothing can write is
+ * the prime suspect, so the alert now ships this list instead of leaving the
+ * next occurrence to log archaeology.
+ */
+export function getInFlightJobs(nowMs: number = Date.now()): Array<{ name: string; ageMs: number }> {
+  return Array.from(inFlightJobs.entries())
+    .map(([name, startedAt]) => ({ name, ageMs: nowMs - startedAt }))
+    .sort((a, b) => b.ageMs - a.ageMs);
 }

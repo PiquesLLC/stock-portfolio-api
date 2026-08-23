@@ -38,8 +38,15 @@ const prisma = new PrismaClient({ adapter });
 // busy_timeout makes writers wait up to 5s instead of immediately throwing SQLITE_BUSY.
 // Must be awaited before app.listen() and background jobs start.
 export async function initSqlitePragmas(): Promise<void> {
-  await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
+  // busy_timeout FIRST, and the order is load-bearing on one of the two callers.
+  // At boot it makes no difference — nothing is contending yet. On the write-lock
+  // watchdog's pool-reset path it does: the fresh connection starts at libsql's
+  // default busy_timeout of 0.0, so any statement issued before this one runs with
+  // zero tolerance for contention against a database that is, by definition on
+  // that path, already wedged. Setting it first removes the question rather than
+  // relying on journal_mode short-circuiting against an already-WAL file.
   await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 5000');
+  await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
   // Return freed pages to the OS so row deletes actually shrink the file. Only takes
   // effect after the first full VACUUM (the disk guard runs one when reclaiming); until
   // then it is inert, so setting it unconditionally on every connect is safe.

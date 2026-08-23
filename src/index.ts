@@ -43,7 +43,7 @@ import { refreshPoliticianRoster } from './services/politician.service';
 import { refreshProfileStats } from './services/profile-stats.service';
 import { refreshAllBillionaires, snapshotBillionaires } from './services/billionaire.service';
 import { backupDatabase } from './services/backup.service';
-import { startWalWatchdog } from './services/db-watchdog.service';
+import { startWalWatchdog, stopWalWatchdog } from './services/db-watchdog.service';
 import { scheduleDailyAtUTC } from './utils/daily-schedule';
 import { scheduleSnapshotRetention } from './services/snapshot-retention.service';
 import { cleanupStaleData } from './services/cleanup.service';
@@ -444,6 +444,10 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // billionaire refresh, leaderboard, anomaly detection, etc.) that keep
   // firing until process exit — moving them to a tracked registry is a
   // separate refactor.
+  // Stop the write-liveness probe FIRST: it is the one timer that can now exit
+  // the process itself, and a self-heal restart firing mid-shutdown would turn a
+  // clean SIGTERM into a spurious crash-restart.
+  stopWalWatchdog();
   stopQuoteRefresh();
   persistQuoteCache();
   // 2s ceiling on the prefetch teardown so a stuck network call can't
