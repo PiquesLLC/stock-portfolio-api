@@ -30,7 +30,8 @@ The work was split so that **a security fix never requires accepting an unrelate
 | PR | Contents | Gate |
 |----|----------|------|
 | **#26 security/hardening** | Validators, error handling, logging/PII, admin consolidation, the *unauthenticated* share-card leak, leaderboard integrity, AI cost gating, axios. No product decisions, no legal copy. | Normal review — mergeable immediately |
-| **#27 money path** | Stripe payout + Apple IAP only (4 files). | Operationally inert on merge (both flags false in prod). Invariant/state-machine review before either flag is ever enabled |
+| **#30 Stripe payout** | Payout path only, plus the boot-time release gate. | Operationally inert on merge (`CREATOR_PAYOUTS_ENABLED` false in prod). Ready for human review — has survived two independent adversarial passes untouched |
+| **#31 Apple IAP** | Apple entitlement handling only. | **Blocked.** `APPLE_IAP_ENABLED` stays false until the schema work below lands and a fresh adversarial pass is clean |
 | **#28 paywall behaviour** | Profile aggregate zeroing — the `$0.00` rendering | Product/design decision |
 | **#29 privacy policy** | Age-gate copy + IP-collection disclosure | Legal/business approval |
 
@@ -51,6 +52,60 @@ The failure mode is general: Git treats a multi-path pathspec atomically, so one
 The `WAITLIST_ADMIN_USER_IDS` fallback was written up as a live risk. Checking production showed it is **latent, not active** — the variable is set, and `CREATOR_ADMIN_USER_IDS` is empty, so both admin tiers resolve to a single account and the M-14 consolidation is a no-op in production. Likewise, `APPLE_IAP_ENABLED` and `CREATOR_PAYOUTS_ENABLED` are both unset, which means the entire money-path PR is inert on merge and materially lowers the immediate deployment risk.
 
 Neither fact was knowable from the code. Rating a config-dependent finding without reading the environment overstates it.
+
+## Architectural finding — the Apple handler is missing state, not conditionals
+
+**This is the most important conclusion in this document.** It is a design finding, not a bug list, and it is what justifies a schema change.
+
+Across seven remediation rounds, the Stripe payout path converged: it has now survived two independent adversarial passes untouched. The Apple IAP handler broke on **every single round**, and four of those defects were introduced by the fixes themselves:
+
+| Round | Apple defect introduced or missed |
+|-------|-----------------------------------|
+| 3 | Stale notification could clear the revoked marker |
+| 4 | `EXPIRED` still wiped a revoked marker unconditionally |
+| 5 | Expiry-only staleness guard discarded legitimate product changes |
+| 5 | Predicated write recorded a skipped notification as processed, losing it permanently |
+| 6 | Concurrency predicate used a column the renewal branch never writes, so it never engaged |
+
+Every one of those was an attempt to infer *ordering* from the notification payload. That is the error, and it is structural:
+
+**Apple notifications carry no usable ordering relative to what we have already applied.** Apple retries an unacknowledged notification for up to three days, reuses `originalTransactionId` across resubscribes, and — decisively — applies upgrades **immediately with proration**, so a legitimate yearly→monthly switch produces a transaction whose `expiresDate` is *earlier* than the term we currently hold.
+
+That single case proves the rule cannot exist:
+
+> `incomingExpiry < currentExpiry` can never be a sound global staleness test, because an immediate proration legitimately shortens the term.
+
+There is no comparison over `(plan, expiresDate)` that separates "stale straggler" from "legitimate immediate downgrade". Both look identical in the payload. The information needed to distinguish them is **not in the notification** — it is the order in which notifications were issued relative to the one we last applied, and we do not persist it.
+
+### The design rule this implies
+
+> An Apple notification must never mutate entitlement directly from its payload. It must first prove it is newer and authoritative relative to persisted state.
+
+That single rule subsumes renewals, stale expirations, refunds, proration and concurrency, and it replaces every heuristic accumulated above.
+
+### Minimum persisted state required
+
+The server must be able to answer two questions durably:
+
+1. **"Which Apple transaction/event is currently authoritative for this user?"** — a persisted latest-applied marker (signed date, or transaction id plus its ordering key), so any arriving notification can be compared against it atomically at write time rather than against an in-memory snapshot.
+2. **"Has this transaction been revoked?"** — the revoked-transaction record already identified as D6, keyed by `originalTransactionId` and outliving the `User` row.
+
+Note these are the same shape of problem, and both are currently worked around: (1) by comparing expiries, (2) by a marker stuffed into `applePurchaseSource`. `planStartedAt` cannot be reused for (1) — it is surfaced to users via `social.controller.ts`.
+
+**Recommendation: do not spend another round patching the current Apple code.** Add the state, then re-derive the handler against the design rule, then re-run the adversarial suite. The flag stays off until then.
+
+## Money-path invariants are TWO-SIDED
+
+A correction to how the invariants were framed, earned by a real defect.
+
+While fixing the partial-reversal bug I reasoned that under-crediting was the safe direction "because only over-crediting can breach *never paid twice*." That was wrong, and it shipped: marking a payout `reversed` on a partial made the idempotent skip swallow the follow-up event, so Stripe reversed the remaining balance out of the creator's account while the ledger had credited a fraction of it. I traded an invariant-1 violation for an invariant-2 one.
+
+Safety on a money path is not one-sided. Both halves are required:
+
+- **Never pay or credit MORE than is actually owed.** (Over-payment, duplicate credit.)
+- **Never strand or under-credit money that IS actually owed.** (Silent loss to the counterparty.)
+
+Any argument of the form "this errs on the safe side because it can only lose money, not create it" should be treated as a red flag — losing someone else's money is a violation, not a conservative default.
 
 ## Verification performed
 
