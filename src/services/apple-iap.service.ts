@@ -456,10 +456,29 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
         // planExpiresAt was written unconditionally, so such a straggler
         // shortened a subscription the user had already paid to extend. Only
         // ever extend.
+        // Entitlement is (plan, expiry) — NOT expiry alone. An earlier version of
+        // this guard compared expiry only, which silently discarded a legitimate
+        // product change taking effect inside the current period: an upgrade
+        // carries the SAME expiresDate, so it looked stale. Because the dedup row
+        // is written before this handler runs, Apple's redelivery was skipped too
+        // and the upgrade was lost for good.
         const currentExpiryMs = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : null;
-        if (currentExpiryMs !== null && expiresDate.getTime() <= currentExpiryMs) {
+        const incomingExpiryMs = expiresDate.getTime();
+        const planChanged = plan !== user.plan;
+
+        // A strictly EARLIER expiry means this notification describes a term the
+        // user has already moved past — ignore it whatever plan it names, since
+        // applying it would shorten a live entitlement. (Consequence, accepted: a
+        // genuine downgrade whose new period ends sooner is also ignored. That
+        // errs in the user's favour, leaves the paid term intact, and self-corrects
+        // on the next DID_RENEW.)
+        const isStaleTerm = currentExpiryMs !== null && incomingExpiryMs < currentExpiryMs;
+        // Same expiry AND same plan: nothing to apply.
+        const isNoOp = currentExpiryMs !== null && incomingExpiryMs === currentExpiryMs && !planChanged;
+
+        if (isStaleTerm || isNoOp) {
           console.warn(
-            `[Apple IAP] ignoring stale ${notificationType} for user ${user.id} — its expiry is not later than the current entitlement`,
+            `[Apple IAP] ignoring ${notificationType} for user ${user.id} — ${isStaleTerm ? 'it describes a superseded term' : 'no entitlement change'}`,
           );
           break;
         }
@@ -485,10 +504,17 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
           },
         });
         if (renewWrite.count === 0) {
-          console.warn(
-            `[Apple IAP] ${notificationType} for user ${user.id} skipped — row changed concurrently since it was read`,
+          // THROW, do not swallow. The dedup row was inserted before this
+          // handler ran, so breaking out here would mark the notification
+          // processed and Apple's redelivery would be skipped — permanently
+          // losing the entitlement. Throwing lets the outer catch delete the
+          // dedup row so the retry re-reads fresh state and applies correctly.
+          // (Same pattern the Stripe transfer.reversed handler uses.) The
+          // message must avoid the phrases classifyAppleNotificationError treats
+          // as PERMANENT, or the job would dead-letter instead of retrying.
+          throw new Error(
+            `Apple ${notificationType} for user ${user.id}: row changed concurrently since it was read; will retry`,
           );
-          break;
         }
         console.log(`[Apple IAP] Renewed/updated plan for user ${user.id}: ${plan}`);
         break;
@@ -559,10 +585,12 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
               : { ...downgrade, appleOriginalTransactionId: null, applePurchaseSource: null },
         });
         if (terminalWrite.count === 0) {
-          console.warn(
-            `[Apple IAP] ${notificationType} for user ${user.id} skipped — row changed concurrently since it was read`,
+          // Throw rather than swallow — see the renewal branch above. Breaking
+          // out would record the notification as processed and Apple's retry
+          // would be deduped away.
+          throw new Error(
+            `Apple ${notificationType} for user ${user.id}: row changed concurrently since it was read; will retry`,
           );
-          break;
         }
         const bindingNote = revoked
           ? ', transaction marked revoked'

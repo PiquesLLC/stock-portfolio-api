@@ -292,6 +292,43 @@ describe('Apple server notifications', () => {
     expectNoUserWrite();
   });
 
+  it('INVARIANT 8: a PRODUCT CHANGE at the same expiry must still apply', async () => {
+    // Regression on the staleness guard itself. Entitlement is (plan, expiry),
+    // not expiry alone. An upgrade that takes effect within the current period
+    // carries the SAME expiresDate, so an expiry-only comparison discarded it —
+    // and because the dedup row is written before the handler runs, Apple's
+    // redelivery is skipped too, losing the upgrade permanently.
+    const sameExpiry = Date.now() + 30 * 24 * HOUR;
+    armNotification(
+      'DID_RENEW',
+      { expiresDate: sameExpiry, purchaseDate: Date.now() - HOUR, productId: 'nala_elite_yearly' },
+      { applePurchaseSource: 'app_store', plan: 'pro', planExpiresAt: new Date(sameExpiry) },
+    );
+
+    await handleAppleNotification('outer-jws');
+
+    expect(lastUserUpdate()).toMatchObject({ plan: 'elite' });
+  });
+
+  it('INVARIANT 8: a predicate miss must NOT be recorded as processed', async () => {
+    // The predicated write protects against a lost update, but treating
+    // `count === 0` as success silently DROPPED the notification: the dedup row
+    // was already inserted, so Apple's retry is skipped and the entitlement is
+    // never applied. A concurrent benign transition (applePurchaseSource null ->
+    // 'app_store') is enough to trigger it. The miss must throw so the outer
+    // catch removes the dedup row and the notification is redelivered.
+    armNotification(
+      'DID_RENEW',
+      { expiresDate: Date.now() + 40 * 24 * HOUR, purchaseDate: Date.now() - HOUR },
+      { applePurchaseSource: 'app_store', plan: 'elite', planExpiresAt: new Date(Date.now() + 10 * 24 * HOUR) },
+    );
+    (prismaMock as any).user.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(handleAppleNotification('outer-jws')).rejects.toThrow(/concurrent/i);
+    // Dedup marker removed so Apple's redelivery is processed rather than skipped.
+    expect((prismaMock as any).appleIAPWebhookEvent.deleteMany).toHaveBeenCalled();
+  });
+
   it('a NEWER DID_RENEW still extends entitlement', async () => {
     const activeUntil = new Date(Date.now() + 10 * 24 * HOUR);
     const newExpiry = Date.now() + 40 * 24 * HOUR;
