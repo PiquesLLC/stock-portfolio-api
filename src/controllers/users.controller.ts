@@ -178,6 +178,13 @@ export async function getUserPortfolioHandler(req: AuthRequest, res: Response): 
               profitLossPercent: 0,
             }));
             portfolio.holdingsPaywalled = true;
+            // M-2: zeroing the per-holding rows left the ROLLUP intact — a
+            // non-subscriber still received exact totalAssets / netEquity /
+            // cashBalance / marginDebt / totalPL / dayChange, i.e. precisely the
+            // position value the paywall exists to sell. Strip the aggregates
+            // too, using the same helper the 'hidden'/'sectors' privacy modes
+            // already use (so the client renders a withheld state, not a lie).
+            zeroPortfolioFinancials(portfolio);
           } else {
             // Holdings are public but may have partial restrictions
             if (visibility.hideShareCount) {
