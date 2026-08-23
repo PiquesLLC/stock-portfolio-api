@@ -1,23 +1,15 @@
 import { Router, Response } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
+import { isOpsAdmin } from '../middleware/admin.middleware';
 import { AuthRequest } from '../types/auth';
 import { createEvents, getDashboard, AnalyticsEventInput } from '../services/analytics.service';
-import { config } from '../config';
 
 const router = Router();
 
 // ─── Admin guard ─────────────────────────────────────────────────────
-// Prod Jon hardcoded as guaranteed bypass; additional admins via env.
-// Matches the convention in admin.routes.ts + health.routes.ts. TODO:
-// extract to src/middleware/admin.middleware.ts once we have a fourth caller.
-const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
-
-function isAdmin(userId?: string): boolean {
-  if (!userId) return false;
-  return HARDCODED_ADMIN_IDS.includes(userId) ||
-    config.waitlistAdminUserIds.includes(userId) ||
-    config.creatorAdminUserIds.includes(userId);
-}
+// M-14: the TODO below has been done — the shared implementation now lives in
+// middleware/admin.middleware.ts. Membership is unchanged for this router.
+const isAdmin = isOpsAdmin;
 
 // ─── POST /analytics/events ──────────────────────────────────────────
 // Fire-and-forget telemetry ingestion. userId comes from JWT, not client.

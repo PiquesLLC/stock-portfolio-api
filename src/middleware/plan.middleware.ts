@@ -18,6 +18,34 @@ function normalizePlan(plan: string | null | undefined): PlanTier {
   return 'free';
 }
 
+/**
+ * M-10 — programmatic plan check for handlers that must BRANCH on plan rather
+ * than reject the whole request. `requirePlan` is the right tool when a route is
+ * wholly gated; this one is for a route that stays open to everyone but contains
+ * one paid-tier side effect (e.g. /portfolio/news serves the feed to all users
+ * but only generates the paid LLM summary for entitled ones).
+ *
+ * Reads the DB rather than trusting the JWT `plan` claim, for the same reason
+ * requirePlan does: a token minted before a downgrade would otherwise keep
+ * spending on a cancelled subscription for the rest of its 15-minute life.
+ */
+export async function userMeetsPlan(userId: string, requiredPlan: PlanTier): Promise<boolean> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plan: true, planExpiresAt: true },
+    });
+    let plan = normalizePlan(user?.plan);
+    if (user?.planExpiresAt && user.planExpiresAt < new Date()) plan = 'free';
+    return PLAN_LEVEL[plan] >= PLAN_LEVEL[requiredPlan];
+  } catch {
+    // Fail CLOSED: this gates paid spend, so an unreadable plan must not
+    // authorise the call.
+    console.error('[Billing] userMeetsPlan check failed — denying paid side effect');
+    return false;
+  }
+}
+
 export function requirePlan(requiredPlan: PlanTier) {
   return async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     try {

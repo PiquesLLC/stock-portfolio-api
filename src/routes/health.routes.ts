@@ -1,19 +1,10 @@
-import { Router, Response } from 'express';
+import { Router } from 'express';
 import { healthCheck, healthDeep, healthStatus, authMetrics, apiUsage, webhookMetrics, jobMetrics, providerMetrics } from '../controllers/health.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { config } from '../config';
-import { AuthRequest } from '../types/auth';
-
-// Prod Jon hardcoded as guaranteed bypass; additional admins via env.
-const HARDCODED_ADMIN_IDS = ['237198da-612e-411c-9ef8-f267c887a9f1'];
-function requireAdmin(req: AuthRequest, res: Response, next: Function): void {
-  const userId = req.user?.userId;
-  if (!userId || (!HARDCODED_ADMIN_IDS.includes(userId) && !config.waitlistAdminUserIds.includes(userId))) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  next();
-}
+import { requirePlatformAdmin } from '../middleware/admin.middleware';
+// M-14: shared implementation — see middleware/admin.middleware.ts. Same
+// membership as the copy this replaced.
+const requireAdmin = requirePlatformAdmin;
 
 const router = Router();
 

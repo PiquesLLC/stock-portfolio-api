@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth';
 import { blockUser, unblockUser, getBlockedUsers } from '../services/block.service';
+import { respondWithError } from '../utils/http-error';
 
 // POST /social/block/:userId
 export async function blockUserHandler(req: AuthRequest, res: Response): Promise<void> {
@@ -14,9 +15,8 @@ export async function blockUserHandler(req: AuthRequest, res: Response): Promise
     const { userId: blockedId } = req.params;
     await blockUser(blockerId, blockedId);
     res.json({ ok: true });
-  } catch (error: any) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to block user' });
+  } catch (error: unknown) {
+    respondWithError(res, error, 'Failed to block user', 'Block:blockUser');
   }
 }
 

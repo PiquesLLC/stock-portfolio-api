@@ -9,17 +9,20 @@ export const watchlistIdTickerParamSchema = z.object({
   ticker: z.string().trim().min(1),
 });
 
+// L-4: SQLite does not constrain a Prisma `String`, so an unbounded free-text
+// field is stored and re-served at whatever size the client sends. Cap every
+// one of them. `color` is a CSS colour token, not prose — 32 is generous.
 export const createWatchlistSchema = z.object({
-  name: z.string().trim().min(1),
-  description: z.string().optional(),
-  color: z.string().optional(),
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(500).optional(),
+  color: z.string().max(32).optional(),
 });
 
 export const updateWatchlistSchema = z
   .object({
-    name: z.string().trim().min(1).optional(),
-    description: z.string().optional(),
-    color: z.string().optional(),
+    name: z.string().trim().min(1).max(100).optional(),
+    description: z.string().max(500).optional(),
+    color: z.string().max(32).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, 'At least one field must be provided');
 

@@ -1,4 +1,5 @@
 ﻿import { Response } from 'express';
+import sharp from 'sharp';
 import {
   getPortfolio,
   upsertHolding,
@@ -2439,6 +2440,31 @@ export async function importPortfolioScreenshotHandler(req: AuthRequest, res: Re
     const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
     if (!isPng && !isJpeg && !isWebp) {
       res.status(400).json({ error: 'Invalid image file. Only PNG, JPEG, and WebP are supported.' });
+      return;
+    }
+
+    // L-7: the 10MB multer cap bounds BYTES, not PIXELS. A heavily-compressed
+    // image can declare enormous dimensions in its header and expand to
+    // gigabytes of RGBA the moment sharp or Tesseract decodes it — a classic
+    // decompression bomb, and this handler holds the buffer in memory and then
+    // hands it to two separate decoders. metadata() reads only the header, so
+    // this rejects the geometry before anything allocates it.
+    const MAX_IMAGE_DIMENSION = 20000;   // px per side
+    const MAX_IMAGE_PIXELS = 40_000_000; // ~40MP, far above any real screenshot
+    try {
+      const meta = await sharp(buf).metadata();
+      const width = meta.width ?? 0;
+      const height = meta.height ?? 0;
+      if (
+        width <= 0 || height <= 0 ||
+        width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION ||
+        width * height > MAX_IMAGE_PIXELS
+      ) {
+        res.status(400).json({ error: 'Image dimensions are too large. Please upload a normal screenshot.' });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: 'Could not read that image. Please upload a PNG, JPEG, or WebP screenshot.' });
       return;
     }
 

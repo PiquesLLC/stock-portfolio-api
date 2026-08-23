@@ -150,6 +150,66 @@ describe('getLeaderboard 1D cost-basis anchor (money-bug guard)', () => {
 });
 
 // --------------------------------------------------------------------------
+// 1b. `verified` reflects real brokerage linkage (M-4)
+// --------------------------------------------------------------------------
+// `verified` used to be hardcoded `true` for every row, so a hand-typed
+// portfolio was published to API consumers as brokerage-verified. It now means
+// "every open position came from a linked brokerage via Plaid".
+//
+// Note `basis` is a DIFFERENT field ('verified' | 'none' = was a return
+// computable) and is deliberately untouched by this — see the service comment.
+describe('getLeaderboard verified flag', () => {
+  it('marks a hand-typed portfolio as NOT verified', async () => {
+    setupPrisma({
+      users: [userRow()],
+      holdings: [holdingRow({ source: 'manual' })],
+      settings: [{ userId: 'u1', cashBalance: 0, marginDebt: 0 }],
+    });
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['AAPL', quote(110, 100)]])));
+
+    const res = await getLeaderboard('1D', 'world');
+
+    expect(res.entries[0].verified).toBe(false);
+    // The unrelated `basis` field still reports that a return was computable.
+    expect(res.entries[0].basis).toBe('verified');
+  });
+
+  it('marks a fully Plaid-linked portfolio as verified', async () => {
+    setupPrisma({
+      users: [userRow()],
+      holdings: [holdingRow({ source: 'plaid' })],
+      settings: [{ userId: 'u1', cashBalance: 0, marginDebt: 0 }],
+    });
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([['AAPL', quote(110, 100)]])));
+
+    const res = await getLeaderboard('1D', 'world');
+
+    expect(res.entries[0].verified).toBe(true);
+  });
+
+  it('does NOT mark a mixed manual + linked portfolio as verified', async () => {
+    setupPrisma({
+      users: [userRow()],
+      holdings: [
+        holdingRow({ ticker: 'AAPL', source: 'plaid' }),
+        holdingRow({ ticker: 'MSFT', source: 'manual' }),
+      ],
+      settings: [{ userId: 'u1', cashBalance: 0, marginDebt: 0 }],
+    });
+    fetchPricesMock.mockResolvedValue(pricesResult(new Map([
+      ['AAPL', quote(110, 100)],
+      ['MSFT', quote(110, 100)],
+    ])));
+
+    const res = await getLeaderboard('1D', 'world');
+
+    // The manual row is exactly the one a user could fabricate, so the whole
+    // portfolio fails verification.
+    expect(res.entries[0].verified).toBe(false);
+  });
+});
+
+// --------------------------------------------------------------------------
 // 2. Ranking order + basis:'none' fallback
 // --------------------------------------------------------------------------
 describe('getLeaderboard ranking order', () => {

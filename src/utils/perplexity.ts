@@ -51,7 +51,9 @@ export async function callPerplexity(
   // Platform-wide spend backstop (M6) — throws if the rolling-24h budget is
   // exhausted or AI is hard-disabled. Covers every caller, including the direct
   // callPerplexity in yahoo-finance ETF fallback.
-  await assertAiBudget(options?.feature);
+  // M-11: pass the caller so the guard can enforce a per-user hourly ceiling,
+  // not just the platform-wide daily cap.
+  await assertAiBudget(options?.feature, options?.userId);
 
   const startMs = Date.now();
   const model = options?.model || 'sonar-pro';

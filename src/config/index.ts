@@ -169,6 +169,12 @@ export const config = {
   aiSpendBreakerEnabled: process.env.AI_SPEND_BREAKER_ENABLED !== 'false', // default ON
   aiDailyCostCapUsd: numEnv(process.env.AI_DAILY_COST_CAP_USD, 100),
   aiDailyCallCap: numEnv(process.env.AI_DAILY_CALL_CAP, 10000),
+  // M-11: per-user hourly ceiling. The daily caps above are platform-wide and
+  // do nothing to stop ONE account consuming the entire budget — the per-user
+  // rate limiter allows 10/min, i.e. ~600/hour, which is far more AI than any
+  // legitimate session needs. 120/hour leaves generous headroom for a heavy
+  // user while capping a single abusive account's damage. 0 disables.
+  aiUserHourlyCallCap: numEnv(process.env.AI_USER_HOURLY_CALL_CAP, 120),
   aiHardDisabled: process.env.AI_DISABLED === 'true', // emergency kill switch
 
   // MFA
@@ -226,6 +232,26 @@ export const config = {
   // otherwise legitimate traffic loses its per-client key. See
   // docs/H4-origin-lockdown.md.
   cloudflareOriginSecret: process.env.CLOUDFLARE_ORIGIN_SECRET || '',
+
+  // H-3 origin lockdown ENFORCEMENT (default OFF — see docs note below).
+  //
+  // `cloudflareOriginSecret` above only decides whether CF-Connecting-IP is
+  // trusted for rate-limit keying. It does not stop anyone reaching the Railway
+  // origin directly and skipping Cloudflare's WAF, bot management and DDoS
+  // absorption entirely. Setting ORIGIN_LOCKDOWN_ENFORCE=true additionally
+  // REJECTS requests that did not arrive through Cloudflare.
+  //
+  // ⚠️ DO NOT ENABLE YET. The Capacitor native app talks to the Railway origin
+  // directly and carries no CF header, so turning this on today would lock out
+  // every iOS/Android user. Prerequisites, in order:
+  //   1. Route native traffic through the Cloudflare hostname, OR ship a native
+  //      build that sends its own shared secret, and
+  //   2. verify /health still answers (Railway's healthcheck hits the origin
+  //      directly — it is exempted below, but confirm before flipping), then
+  //   3. set ORIGIN_LOCKDOWN_ENFORCE=true.
+  // Provider webhooks are exempt: they call the origin directly by design and
+  // authenticate with their own signatures.
+  originLockdownEnforce: process.env.ORIGIN_LOCKDOWN_ENFORCE === 'true',
   testerFeatureAccessUsernames: (process.env.TESTER_FEATURE_ACCESS_USERNAMES || '')
     .split(',')
     .map((u) => u.trim().toLowerCase())

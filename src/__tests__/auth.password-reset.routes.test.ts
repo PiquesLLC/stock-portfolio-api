@@ -89,7 +89,15 @@ describe('Password reset routes', () => {
       expect(res.body.message).toContain('Password reset');
     });
 
-    it('returns 400 for invalid/expired code', async () => {
+    // L-2 — this endpoint is unauthenticated, so EVERY failure must be
+    // indistinguishable. It previously answered 400 + a decrementing
+    // `remainingAttempts` for a bad code but 429 for the ceiling, and only a
+    // real account with an armed reset can ever reach the ceiling. An attacker
+    // could therefore arm a reset via /auth/forgot-password (itself
+    // enumeration-safe) and then read the response to confirm the address
+    // exists. Attempts are still counted and capped server-side; the client is
+    // just no longer told which state it is in.
+    it('returns an identical 400 for an invalid code, leaking no attempt count', async () => {
       vi.spyOn(authService, 'resetPasswordWithCode').mockResolvedValue({
         success: false,
         remainingAttempts: 2,
@@ -101,10 +109,11 @@ describe('Password reset routes', () => {
         .send({ email: TEST_EMAIL, code: '111111', newPassword: 'StrongPass123' });
 
       expect(res.status).toBe(400);
-      expect(res.body.remainingAttempts).toBe(2);
+      expect(res.body.error).toBe('Invalid or expired reset code');
+      expect(res.body.remainingAttempts).toBeUndefined();
     });
 
-    it('returns 429 for too many attempts', async () => {
+    it('returns the SAME 400 when the attempt ceiling is hit (no 429 oracle)', async () => {
       vi.spyOn(authService, 'resetPasswordWithCode').mockResolvedValue({
         success: false,
         remainingAttempts: 0,
@@ -115,7 +124,11 @@ describe('Password reset routes', () => {
         .post('/auth/reset-password')
         .send({ email: TEST_EMAIL, code: '111111', newPassword: 'StrongPass123' });
 
-      expect(res.status).toBe(429);
+      // Byte-for-byte identical to the invalid-code response above — that is
+      // the whole point. A different status here would re-open the oracle.
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Invalid or expired reset code');
+      expect(res.body.remainingAttempts).toBeUndefined();
     });
   });
 });

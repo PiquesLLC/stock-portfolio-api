@@ -334,6 +334,13 @@ async function getPerformanceShareCardData(userId: string, periodInput: string, 
       displayName: true,
       profilePublic: true,
       holdingsVisibility: true,
+      // M-2: needed for the creator-paywall check below.
+      creator: {
+        select: {
+          status: true,
+          visibility: { select: { showHoldings: true } },
+        },
+      },
     },
   });
 
@@ -341,6 +348,15 @@ async function getPerformanceShareCardData(userId: string, periodInput: string, 
 
   // Don't generate performance cards for users who hide their holdings
   if (user.holdingsVisibility !== 'all') return null;
+
+  // M-2: this route (`GET /social/:userId/performance-card`) is UNAUTHENTICATED
+  // and rate-limited only. It previously checked profile visibility but not the
+  // creator paywall at all, so anyone could render a paying creator's exact net
+  // equity and period return as a PNG — the paywalled number, with no session.
+  // `showHoldings === true` means "holdings are paywalled" (same convention as
+  // users.controller.ts). There is no viewer identity here to check entitlement
+  // against, so a paywalled creator simply gets no card.
+  if (user.creator?.status === 'active' && user.creator.visibility?.showHoldings) return null;
 
   // 'AUTO' resolves to the same history-aware window the profile stat uses
   // (resolveAutoWindow), so a shared performance card and the profile it links to

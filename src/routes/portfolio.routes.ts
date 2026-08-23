@@ -27,7 +27,7 @@ import { getSummaryHandler } from '../controllers/settings.controller';
 import { heavyReadLimiter, mutationLimiter, aiLimiter } from '../middleware/rateLimiter';
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 import { AuthRequest } from '../types/auth';
-import { requirePlan } from '../middleware/plan.middleware';
+import { requirePlan, userMeetsPlan } from '../middleware/plan.middleware';
 import multer from 'multer';
 
 const router = Router();
@@ -64,7 +64,15 @@ router.get('/news', heavyReadLimiter, aiLimiter, requireAuth, async (req: AuthRe
     const portfolioId = req.query.portfolioId as string | undefined;
     const data = await fetchPortfolioNews(userId, limit, portfolioId);
     // Generate AI summary in parallel (non-blocking — returns null if AI unavailable)
-    const includeSummary = req.query.summary !== '0';
+    //
+    // M-10: this defaulted to ON for every authenticated caller, so each free-tier
+    // news load triggered a paid LLM call. Every comparable AI surface in the app
+    // (market ask, ai-events, nala-score, insights, deep research) is behind
+    // requirePlan; this one was not. The news feed itself stays free — only the
+    // model-generated summary is gated. Change SUMMARY_MIN_PLAN to 'pro' or
+    // 'free' if the product decision is to use it as an upgrade hook.
+    const SUMMARY_MIN_PLAN = 'premium' as const;
+    const includeSummary = req.query.summary !== '0' && await userMeetsPlan(userId, SUMMARY_MIN_PLAN);
     if (includeSummary) {
       try {
         const summary = await generateMacroSummary(userId, portfolioId);

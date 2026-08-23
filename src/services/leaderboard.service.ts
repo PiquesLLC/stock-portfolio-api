@@ -113,7 +113,10 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
   const [allHoldings, allSettings] = await Promise.all([
     prisma.holding.findMany({
       where: { userId: { in: userIds } },
-      select: { userId: true, ticker: true, shares: true, averageCost: true, createdAt: true },
+      // M-4: `source` distinguishes a brokerage-synced position ('plaid', written
+      // by plaid-sync.service.ts) from a hand-typed one ('manual'). It is the only
+      // real verification signal we have, and the leaderboard was ignoring it.
+      select: { userId: true, ticker: true, shares: true, averageCost: true, createdAt: true, source: true },
     }),
     prisma.userSettings.findMany({
       where: { userId: { in: userIds } },
@@ -204,6 +207,24 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
     const cashBalance = userSettings?.cashBalance ?? 0;
     const marginDebt = userSettings?.marginDebt ?? 0;
 
+    // M-4: `verified` was the literal `true` on every row, which asserted that a
+    // hand-typed portfolio had been checked against a brokerage. It had not. The
+    // web UI already stopped rendering the badge for exactly this reason (see
+    // LeaderboardPage.tsx), but the API kept publishing the claim to the native
+    // app and any other consumer.
+    //
+    // Derive it honestly: verified only when the portfolio has at least one open
+    // position and EVERY open position came from a linked brokerage via Plaid
+    // (`source === 'plaid'`, written by plaid-sync.service.ts). A mixed
+    // manual/linked portfolio is not verified — the manual rows are precisely
+    // the ones a user could fabricate.
+    //
+    // NOTE: this is deliberately separate from `basis`, which is an unrelated
+    // field meaning "was a return computable at all" ('verified' = yes, 'none' =
+    // no priced holdings). Same word, different question — do not merge them.
+    const openPositions = userHoldings.filter(h => h.shares > 0);
+    const brokerageVerified = openPositions.length > 0 && openPositions.every(h => h.source === 'plaid');
+
     const snapshotCount = await prisma.portfolioSnapshot.count({
       where: { userId: user.id },
     });
@@ -213,7 +234,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         userId: user.id, username: user.username, displayName: user.displayName,
         region: user.region ?? null, window,
         returnPct: null, returnDollar: null, twrPct: null,
-        verified: true, basis: 'none', sinceStart, isNew,
+        verified: brokerageVerified, basis: 'none', sinceStart, isNew,
         flagged: false, suspicious: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
         startDateUsed: null, endDateUsed: null,
@@ -265,7 +286,7 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
         userId: user.id, username: user.username, displayName: user.displayName,
         region: user.region ?? null, window,
         returnPct: null, returnDollar: null, twrPct: null,
-        verified: true, basis: 'none', sinceStart, isNew,
+        verified: brokerageVerified, basis: 'none', sinceStart, isNew,
         flagged: false, suspicious: false, flagReason: null,
         trackingStartAt: user.trackingStartAt.toISOString(), snapshotCount,
         startDateUsed: null, endDateUsed: null,
@@ -383,7 +404,8 @@ export async function getLeaderboard(window: LeaderboardWindow, region: Leaderbo
       returnPct,
       returnDollar,
       twrPct,
-      verified: true,
+      verified: brokerageVerified,
+      // Unchanged meaning: a return WAS computable for this row.
       basis: 'verified',
       sinceStart,
       isNew,
