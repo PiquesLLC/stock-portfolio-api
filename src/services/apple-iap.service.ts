@@ -468,10 +468,24 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
 
         // A strictly EARLIER expiry means this notification describes a term the
         // user has already moved past — ignore it whatever plan it names, since
-        // applying it would shorten a live entitlement. (Consequence, accepted: a
-        // genuine downgrade whose new period ends sooner is also ignored. That
-        // errs in the user's favour, leaves the paid term intact, and self-corrects
-        // on the next DID_RENEW.)
+        // applying it would shorten a live entitlement.
+        //
+        // KNOWN LIMITATION, and it is not self-healing. Apple applies an upgrade
+        // IMMEDIATELY with proration, so switching from a yearly plan to a
+        // monthly one produces a new transaction whose expiresDate is EARLIER
+        // than the yearly expiry we still hold. That notification is dropped
+        // here, and so is every subsequent monthly renewal, because each one is
+        // also earlier than the stale held expiry. The user stays on the old plan
+        // until the original expiry passes.
+        //
+        // The correct discriminator is notification/purchase ORDER, not expiry —
+        // but that needs a persisted "last applied purchase time" column, and
+        // `planStartedAt` cannot be reused for it because it is surfaced to users
+        // (social.controller.ts). Until that column exists this stays
+        // conservative: dropping a legitimate upgrade is recoverable (a client
+        // call to verifyAndActivatePlan writes plan/expiry unconditionally and
+        // self-corrects), whereas applying a stale downgrade silently removes
+        // paid access and is not.
         const isStaleTerm = currentExpiryMs !== null && incomingExpiryMs < currentExpiryMs;
         // Same expiry AND same plan: nothing to apply.
         const isNoOp = currentExpiryMs !== null && incomingExpiryMs === currentExpiryMs && !planChanged;
@@ -496,7 +510,27 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
         // runner's in-flight guard keys on job name, so neither serialises two
         // DIFFERENT notifications for one user.
         const renewWrite = await prisma.user.updateMany({
-          where: { id: user.id, applePurchaseSource: user.applePurchaseSource ?? null },
+          where: {
+            id: user.id,
+            applePurchaseSource: user.applePurchaseSource ?? null,
+            // Monotonicity enforced by the DATABASE at write time, not by the
+            // in-memory snapshot read at the top of this handler.
+            //
+            // Two concurrent renewals both pass the in-memory check, because
+            // both compare against the same stale row — and they never contend
+            // on the applePurchaseSource predicate either, since the renewal
+            // branch only writes that column when clearing a revoked marker. So
+            // the OLDER renewal committed last and won, which is exactly the
+            // outcome the monotonicity guard exists to prevent. Predicating on
+            // the column actually being contended fixes it.
+            //
+            // `lte` rather than `lt`: an equal expiry is a legitimate in-period
+            // product change (an upgrade carries the same expiresDate).
+            OR: [
+              { planExpiresAt: null },
+              { planExpiresAt: { lte: expiresDate } },
+            ],
+          },
           data: {
             plan,
             planExpiresAt: expiresDate,
@@ -504,6 +538,21 @@ async function processAppleNotification(signedPayload: string): Promise<void> {
           },
         });
         if (renewWrite.count === 0) {
+          // Distinguish a BENIGN supersession from real contention. If the row
+          // now holds a strictly later expiry, a newer notification already won
+          // and there is genuinely nothing to apply — retrying would just fail
+          // the same way until the job dead-letters.
+          const fresh = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { planExpiresAt: true },
+          });
+          const freshExpiryMs = fresh?.planExpiresAt ? new Date(fresh.planExpiresAt).getTime() : null;
+          if (freshExpiryMs !== null && freshExpiryMs > incomingExpiryMs) {
+            console.warn(
+              `[Apple IAP] ${notificationType} for user ${user.id} superseded by a newer entitlement — nothing to apply`,
+            );
+            break;
+          }
           // THROW, do not swallow. The dedup row was inserted before this
           // handler ran, so breaking out here would mark the notification
           // processed and Apple's redelivery would be skipped — permanently

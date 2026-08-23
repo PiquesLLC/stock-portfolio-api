@@ -101,6 +101,10 @@ beforeEach(() => {
   });
   (prismaMock as any).user.update.mockResolvedValue({ id: 'user_1' });
   (prismaMock as any).user.updateMany.mockResolvedValue({ count: 1 });
+  // Base default for the post-miss re-read. Re-armed per test because
+  // clearAllMocks() clears calls but not implementations; a prior test's
+  // "superseded" row would otherwise leak in and suppress an expected throw.
+  (prismaMock as any).user.findUnique.mockResolvedValue(null);
   (prismaMock as any).appleIAPWebhookEvent.create.mockResolvedValue({ id: 'evt_1' });
   (prismaMock as any).appleIAPWebhookEvent.deleteMany.mockResolvedValue({ count: 0 });
 });
@@ -308,6 +312,35 @@ describe('Apple server notifications', () => {
     await handleAppleNotification('outer-jws');
 
     expect(lastUserUpdate()).toMatchObject({ plan: 'elite' });
+  });
+
+  it('INVARIANT 8: an older renewal cannot overwrite a newer one committed concurrently', async () => {
+    // Two renewals race. Both read the row before either writes, so the
+    // in-memory monotonicity check compares against a stale snapshot and BOTH
+    // pass it. The predicate added for concurrency used applePurchaseSource —
+    // the one column the renewal branch does not write in the common path — so
+    // two renewals never contended on it and the older one committed last and
+    // won. The write must be predicated on the column actually contended
+    // (planExpiresAt), so the database enforces monotonicity at write time.
+    const E0 = new Date(Date.now() + 10 * 24 * HOUR); // held when both read
+    const E1 = Date.now() + 30 * 24 * HOUR;           // the OLDER notification
+    const E2 = new Date(Date.now() + 300 * 24 * HOUR); // committed by the newer one
+
+    armNotification(
+      'DID_RENEW',
+      { expiresDate: E1, purchaseDate: Date.now() - HOUR },
+      { applePurchaseSource: 'app_store', plan: 'pro', planExpiresAt: E0 },
+    );
+    // The row already holds the newer entitlement by the time we write.
+    (prismaMock as any).user.updateMany.mockResolvedValue({ count: 0 });
+    (prismaMock as any).user.findUnique.mockResolvedValue({
+      plan: 'elite', planExpiresAt: E2, applePurchaseSource: 'app_store',
+    });
+
+    // A benign supersession must NOT throw — there is nothing to retry.
+    await handleAppleNotification('outer-jws');
+
+    expect(JSON.stringify(lastUpdateWhere())).toContain('planExpiresAt');
   });
 
   it('INVARIANT 8: a predicate miss must NOT be recorded as processed', async () => {

@@ -256,6 +256,10 @@ describe('creator billing webhooks', () => {
     (prismaMock as any).creatorSubscriptionEvent.create.mockResolvedValue({});
     (prismaMock as any).creatorWalletLedger.findFirst.mockResolvedValue(null);
     (prismaMock as any).creatorWalletLedger.create.mockResolvedValue({});
+    // Re-arm per test: clearAllMocks() clears CALLS but not implementations, so
+    // a prior test's prior-credit fixture would otherwise leak in and skew the
+    // reversal delta calculation.
+    (prismaMock as any).creatorWalletLedger.findMany.mockResolvedValue([]);
     (prismaMock as any).creatorPayout.updateMany.mockResolvedValue({ count: 1 });
     (prismaMock as any).creatorPayout.update.mockResolvedValue({});
     (prismaMock as any).creatorPayout.create.mockResolvedValue({ id: 'payout_1', amountCents: 8000 });
@@ -370,6 +374,43 @@ describe('creator billing webhooks', () => {
       .filter((c: any[]) => String(c?.[0]?.data?.description ?? '').startsWith('transfer_reversed:'));
     expect(credits).toHaveLength(1);
     expect(credits[0][0].data.amountCents).toBe(100);
+  });
+
+  it('INVARIANT 2: a STAGED reversal credits the full amount across both events', async () => {
+    // Marking the payout 'reversed' on a PARTIAL made the status-based
+    // idempotent skip swallow every later event for that transfer. Stripe then
+    // reverses the remaining $999 and takes it from the creator's Connect
+    // account, but our ledger credited them $1 — a silent $999 loss. The
+    // reconciler cannot see it either: once Stripe's `reversed` flips true both
+    // sides report "reversed" and agree.
+    (prismaMock as any).creatorPayout.findFirst.mockResolvedValue({
+      id: 'payout_staged',
+      creatorUserId: 'creator_1',
+      amountCents: 100000,
+      status: 'completed',
+    });
+    // No prior reversal credits yet.
+    (prismaMock as any).creatorWalletLedger.findMany.mockResolvedValue([]);
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_staged_1',
+      type: 'transfer.reversed',
+      data: { object: { id: 'tr_staged', amount: 100000, amount_reversed: 100, reversed: false } },
+    } as any);
+
+    // Second event completes the reversal; $1 has already been credited.
+    (prismaMock as any).creatorWalletLedger.findMany.mockResolvedValue([{ amountCents: 100 }]);
+
+    await handleCreatorWebhookEvent({
+      id: 'evt_staged_2',
+      type: 'transfer.reversed',
+      data: { object: { id: 'tr_staged', amount: 100000, amount_reversed: 100000, reversed: true } },
+    } as any);
+
+    const credited = (prismaMock as any).creatorWalletLedger.create.mock.calls
+      .filter((c: any[]) => String(c?.[0]?.data?.description ?? '').startsWith('transfer_reversed:tr_staged'))
+      .reduce((sum: number, c: any[]) => sum + c[0].data.amountCents, 0);
+    expect(credited).toBe(100000);
   });
 
   it('a FULL transfer reversal still credits the whole payout', async () => {

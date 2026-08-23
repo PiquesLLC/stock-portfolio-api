@@ -1311,24 +1311,52 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
             `[Creator Billing] PARTIAL reversal on ${transferId}: crediting ${reversedCents} of ${payout.amountCents}`,
           );
         }
-        // NOTE: `status: 'reversed'` is still set even for a partial reversal, so
-        // the idempotent skip above fires on any follow-up event for this
-        // transfer. That means successive partial reversals credit only the
-        // first — deliberately UNDER-crediting rather than risking a duplicate
-        // credit, since only over-crediting can breach the invariant. The
-        // divergence surfaces as a `reversedMismatch` in
-        // creator-stripe-reconciliation.service.ts.
+        // `amount_reversed` is CUMULATIVE, so credit only the slice not yet
+        // credited, and reach the terminal 'reversed' status ONLY once the
+        // reversal is actually complete.
+        //
+        // Marking the payout 'reversed' on a PARTIAL was wrong in the dangerous
+        // direction: the status-based idempotent skip above then swallowed every
+        // later event for the transfer. Stripe would go on to reverse the
+        // remaining balance out of the creator's Connect account while our ledger
+        // had credited only the first slice — a silent loss to the CREATOR, which
+        // is invariant 2, not the over-payment I was guarding against.
+        //
+        // Reconciliation could not catch it either: once Stripe's `reversed`
+        // flips true, both sides report "reversed" and agree, so the mismatch
+        // exists only in the window between the two events and the daily scan can
+        // miss it entirely.
+        const priorCredits = await prisma.creatorWalletLedger.findMany({
+          where: {
+            creatorUserId: payout.creatorUserId,
+            description: { startsWith: `transfer_reversed:${transferId}` },
+          },
+          select: { amountCents: true },
+        });
+        const alreadyCredited = priorCredits.reduce((sum, row) => sum + Math.abs(row.amountCents), 0);
+        const deltaCents = Math.max(0, reversedCents - alreadyCredited);
+        if (deltaCents === 0) {
+          // Everything Stripe has reversed so far is already credited.
+          bumpCounter('processed');
+          return;
+        }
+        const fullyReversed = transfer.reversed === true || reversedCents >= payout.amountCents;
         await prisma.$transaction([
           prisma.creatorPayout.update({
             where: { id: payout.id },
-            data: { status: 'reversed' },
+            // Stay 'completed' while the reversal is partial, so a later event
+            // is still processed rather than skipped as already-terminal.
+            data: { status: fullyReversed ? 'reversed' : 'completed' },
           }),
           v1LedgerCreate(prisma,{
             data: {
               creatorUserId: payout.creatorUserId,
               type: 'earning',
-              amountCents: reversedCents,
-              description: `transfer_reversed:${transferId}`,
+              amountCents: deltaCents,
+              // Cumulative figure in the key, so successive partials are distinct
+              // rows while the unique(creatorUserId, description) index still
+              // blocks a duplicate credit for the same cumulative total.
+              description: `transfer_reversed:${transferId}:${reversedCents}`,
             },
           }),
         ]);
@@ -1337,7 +1365,9 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           stripeTransferId: transferId,
           stripeEventId: event.id,
           creatorUserId: payout.creatorUserId,
-          amountCents: payout.amountCents,
+          // The amount actually credited, not the original payout — otherwise v1
+          // and v2 disagree by the un-reversed remainder for the same event.
+          amountCents: deltaCents,
           effectiveAt: typeof event.created === 'number'
             ? new Date(event.created * 1000)
             : new Date(),
@@ -1351,7 +1381,9 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           eventType: event.type,
           stripeTransferId: transferId,
           payoutId: payout.id,
-          restoredCents: payout.amountCents,
+          // What was actually restored this event; logging the full payout made
+          // the operator's log claim $1,000 was returned when $1 was.
+          restoredCents: deltaCents,
         });
         return;
       }
