@@ -433,6 +433,26 @@ describe('creator billing webhooks', () => {
     expect(credits[0][0].data.amountCents).toBe(100000);
   });
 
+  it('F-2: payout.paid / payout.failed touch NO payout row', async () => {
+    // These describe a Connect BANK payout (po_…), not the platform->Connect
+    // transfer a CreatorPayout row models (tr_…), and stripePayoutId is never
+    // written to the row — so the old updateMany could only ever match zero
+    // rows. Pinned as an explicit no-op, because if it ever DID match,
+    // payout.failed would set a terminal status with no ledger credit and
+    // transfer.reversed would then skip the real reversal as already-reflected.
+    for (const type of ['payout.paid', 'payout.failed']) {
+      await handleCreatorWebhookEvent({
+        id: `evt_${type.replace('.', '_')}`,
+        type,
+        data: { object: { id: 'po_bank_payout_1' } },
+      } as any);
+    }
+
+    expect((prismaMock as any).creatorPayout.updateMany).not.toHaveBeenCalled();
+    expect((prismaMock as any).creatorPayout.update).not.toHaveBeenCalled();
+    expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
+  });
+
   it('ignores duplicate webhook event ids', async () => {
     (prismaMock as any).creatorWebhookEvent.create.mockRejectedValue({ code: 'P2002' });
     const fx = fixtureFactory('dup');
@@ -860,19 +880,25 @@ describe('creator billing webhooks', () => {
     expect(Math.max(0, balance)).toBe(0);
   });
 
-  it('updates payout by stripePayoutId for payout.paid and payout.failed', async () => {
+  it('payout.paid / payout.failed are acknowledged but touch NO payout row (F-2)', async () => {
+    // This test previously asserted the shape of an updateMany that could never
+    // match: `stripePayoutId` is never written to a CreatorPayout row anywhere
+    // in production (it appears in src/ only as a test fixture), and
+    // `stripeTransferId` holds a `tr_…` id which cannot equal the `po_…` id
+    // these events carry. It was asserting the mechanics of an unreachable
+    // query, which is why the dead-ness went unnoticed.
+    //
+    // Left live it was a trap: if anyone started populating stripePayoutId,
+    // payout.failed would set a terminal status with no ledger credit, and
+    // transfer.reversed treats 'failed' as already-reflected — so a genuine
+    // reversal afterwards would be silently dropped. Now an explicit no-op.
     const fx = fixtureFactory('payout');
     await handleCreatorWebhookEvent(fx.event.payoutPaid('evt_payout_paid_1'));
-    expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
-      data: { status: 'completed', paidAt: expect.any(Date) },
-    });
-
     await handleCreatorWebhookEvent(fx.event.payoutFailed('evt_payout_failed_1'));
-    expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
-      data: { status: 'failed' },
-    });
+
+    expect((prismaMock as any).creatorPayout.updateMany).not.toHaveBeenCalled();
+    expect((prismaMock as any).creatorPayout.update).not.toHaveBeenCalled();
+    expect((prismaMock as any).creatorWalletLedger.create).not.toHaveBeenCalled();
   });
 
   it('handles out-of-order invoice events (payment_failed before paid) and still credits exactly once', async () => {
@@ -957,9 +983,11 @@ describe('creator billing webhooks', () => {
     expect(failedUpdates.length).toBe(1);
     expect(paidLedgerByEvent.length).toBe(2); // creator share + platform fee once
     expect(refundLedgerByEvent.length).toBe(2); // refund + platform refund once
+    // F-2: payout.* events no longer write to CreatorPayout at all — they
+    // describe a Connect bank payout, not the transfer this row models.
     expect((prismaMock as any).creatorPayout.updateMany.mock.calls.filter(
       (c: any[]) => c?.[0]?.where?.OR?.[0]?.stripePayoutId === fx.ids.stripePayoutId
-    ).length).toBe(1);
+    ).length).toBe(0);
   });
 
   // ── Out-of-order / lifecycle tests ──────────────────────────────
@@ -1057,17 +1085,16 @@ describe('creator billing webhooks', () => {
     );
   });
 
-  it('handles orphaned payout.paid without throwing when no DB record exists', async () => {
+  it('handles payout.paid for an unknown payout without throwing (F-2)', async () => {
+    // The original name and comment ("updateMany with count 0 is a no-op")
+    // recorded that this query matched nothing — which was true for EVERY
+    // payout.paid event, not just orphaned ones. Now the no-op is explicit
+    // rather than an accident of a filter that can never match.
     const fx = fixtureFactory('orphan_payout');
-    (prismaMock as any).creatorPayout.updateMany.mockResolvedValue({ count: 0 });
 
     await handleCreatorWebhookEvent(fx.event.payoutPaid('evt_orphan_payout'));
 
-    // Should not throw — updateMany with count 0 is a no-op
-    expect((prismaMock as any).creatorPayout.updateMany).toHaveBeenCalledWith({
-      where: { OR: [{ stripePayoutId: fx.ids.stripePayoutId }, { stripeTransferId: fx.ids.stripePayoutId }] },
-      data: { status: 'completed', paidAt: expect.any(Date) },
-    });
+    expect((prismaMock as any).creatorPayout.updateMany).not.toHaveBeenCalled();
   });
 
   it('processes invoice.paid after charge.refunded and credits independently', async () => {
@@ -1480,6 +1507,20 @@ describe('creator billing webhooks', () => {
       } finally {
         (config as any).creatorMonetizationEnabled = original;
       }
+    });
+
+    it('F-1: the transfer carries a transfer_group so a crash is recoverable', async () => {
+      // transfers.list cannot filter on metadata and there is no
+      // transfers.search, so transfer_group is the ONLY durable handle
+      // reconciliation can use to ask "did Stripe ever receive this payout?"
+      // after a process crash. If this key changes, recovery silently finds
+      // nothing — hence the exact-value assertion.
+      armPayout();
+      transfersCreateMock.mockResolvedValue({ id: 'tr_group' });
+
+      await requestPayout('creator_1');
+
+      expect(transfersCreateMock.mock.calls[0][0].transfer_group).toBe('payout_payout_h2');
     });
 
     it('marks the payout completed on the happy path', async () => {

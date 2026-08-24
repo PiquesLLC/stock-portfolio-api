@@ -1227,34 +1227,32 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
       }
 
-      case 'payout.paid': {
-        const payout = event.data.object as Stripe.Payout;
-        await prisma.creatorPayout.updateMany({
-          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
-          data: {
-            status: 'completed',
-            paidAt: new Date(),
-          },
-        });
-        bumpCounter('processed');
-        logCreatorBilling({
-          outcome: 'processed',
-          eventId: event.id,
-          eventType: event.type,
-          stripePayoutId: payout.id,
-        });
-        return;
-      }
-
+      case 'payout.paid':
       case 'payout.failed': {
+        // F-2 — EXPLICIT NO-OP. These previously issued an updateMany that could
+        // never match a row, which is worse than doing nothing: it read as
+        // working code and silently updated zero rows.
+        //
+        // Why it cannot match. `payout.*` events describe a Connect account's
+        // BANK payout (a `po_…` object). A CreatorPayout row models the platform
+        // -> Connect TRANSFER (`tr_…`). The old filter was
+        // `stripePayoutId = po_… OR stripeTransferId = po_…`, but
+        // `stripePayoutId` is never written to the row anywhere in this service
+        // (its only occurrences are log fields), and `stripeTransferId` holds a
+        // `tr_…` id, which cannot equal a `po_…` id.
+        //
+        // Why leaving it "harmlessly dead" was NOT safe. If anyone later starts
+        // populating `stripePayoutId`, `payout.failed` becomes live — and it set
+        // `status = 'failed'` with no ledger credit and no status guard. Since
+        // `transfer.reversed` treats `failed` as already-reflected and returns
+        // early, a genuine reversal arriving afterwards would be silently
+        // dropped and the creator never credited. A dead handler plus a
+        // terminal-status skip compose into a live invariant-2 violation.
+        //
+        // If Connect bank payouts ever need tracking, model them on their own
+        // row rather than reusing CreatorPayout, whose status vocabulary means
+        // "the transfer", not "the bank payout".
         const payout = event.data.object as Stripe.Payout;
-        await prisma.creatorPayout.updateMany({
-          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
-          data: {
-            status: 'failed',
-          },
-        });
-        bumpCounter('payoutFailed');
         bumpCounter('processed');
         logCreatorBilling({
           outcome: 'processed',
@@ -1747,6 +1745,15 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     destination: creator.stripeConnectId!,
     description: `Nala creator payout ${result.payoutId}`,
     metadata: { payoutId: result.payoutId, creatorUserId: userId },
+    // F-1 recovery key. If this process dies between the payout transaction
+    // committing and this call returning, the ONLY way to learn whether Stripe
+    // received the transfer is to ask Stripe — and `transfers.list` cannot
+    // filter on metadata (verified against the installed SDK: TransferListParams
+    // exposes created / destination / transfer_group / pagination only, and
+    // there is no transfers.search). `transfer_group` IS a first-class list
+    // filter, so it is what makes the stranded-payout recovery in
+    // creator-stripe-reconciliation.service.ts an exact lookup rather than a scan.
+    transfer_group: payoutTransferGroup(result.payoutId),
   }, {
     // CRITICAL: scoped to payoutId. Stripe guarantees at-most-one transfer per
     // key for 24h, which is what makes the retry above safe.
@@ -1896,6 +1903,16 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   }
 
   return result;
+}
+
+/**
+ * Stripe `transfer_group` for a payout — the durable handle that lets
+ * reconciliation ask "did Stripe ever receive this payout?" after a crash.
+ * Shared with creator-stripe-reconciliation.service.ts; both sides must agree
+ * on this exact string or recovery silently finds nothing.
+ */
+export function payoutTransferGroup(payoutId: string): string {
+  return `payout_${payoutId}`;
 }
 
 /**

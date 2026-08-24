@@ -1,6 +1,8 @@
 import Stripe from 'stripe';
 import prisma from '../utils/prisma';
 import { config } from '../config';
+import { payoutTransferGroup } from './creator-billing.service';
+import { v1LedgerCreate, isV1WalletFrozen } from './v1-wallet-freeze';
 
 // Lookback covers settlement-tail and webhook-retry slack. 48h was chosen
 // because Stripe transfer `created` timestamps and our local `updatedAt`
@@ -58,6 +60,8 @@ export type CreatorStripeReconciliationReport = {
     missingTransfers: MissingTransfer[];
     amountMismatches: AmountMismatch[];
     reversedMismatches: ReversedMismatch[];
+    /** F-1: payouts stranded 'pending' with no transfer id, and how each resolved. */
+    strandedPending: StrandedOutcome[];
   };
   charges: {
     balanceTxnsChecked: number;
@@ -246,6 +250,9 @@ function buildReportPayload(report: CreatorStripeReconciliationReport): string {
       missingTransfers: report.transfers.missingTransfers.slice(0, REPORT_ARRAY_CAP),
       amountMismatches: report.transfers.amountMismatches.slice(0, REPORT_ARRAY_CAP),
       reversedMismatches: report.transfers.reversedMismatches.slice(0, REPORT_ARRAY_CAP),
+      strandedPendingCount: report.transfers.strandedPending.length,
+      strandedPendingUnresolved: report.transfers.strandedPending.filter((s) => s.resolution === 'ambiguous').length,
+      strandedPending: report.transfers.strandedPending.slice(0, REPORT_ARRAY_CAP),
     },
     charges: {
       balanceTxnsChecked: report.charges.balanceTxnsChecked,
@@ -253,6 +260,115 @@ function buildReportPayload(report: CreatorStripeReconciliationReport): string {
       chargeDrift: report.charges.chargeDrift.slice(0, REPORT_ARRAY_CAP * 2),
     },
   });
+}
+
+/**
+ * F-1 — recover payouts stranded by a process crash.
+ *
+ * requestPayout commits the payout row ('pending') and its `payout:<id>` ledger
+ * debit in ONE transaction, then calls Stripe. A crash in that window leaves:
+ * status 'pending', stripeTransferId null, ledger debited, and possibly no
+ * transfer at all. Nothing saw it — the transfer scan above only loads rows
+ * WHERE stripeTransferId IS NOT NULL, the ghost scan needs a Stripe-side
+ * transfer, and process death runs no catch block so no alert fires. Worse, the
+ * pending row blocks every future payout for that creator via the partial
+ * unique index, and the balance is reduced twice over (once by the ledger
+ * debit, once by the pending-payout subtraction in getPayoutBalance).
+ *
+ * Recovery lives here rather than in requestPayout: that path has converged and
+ * should not be reopened. We NEVER issue a transfer from reconciliation — the
+ * only actions are "adopt what Stripe already did" or "give the money back".
+ */
+const STRANDED_PENDING_MIN_AGE_MS = 30 * 60 * 1000;
+
+type StrandedOutcome = {
+  payoutId: string;
+  creatorUserId: string;
+  amountCents: number;
+  resolution: 'adopted' | 'released' | 'ambiguous';
+  detail: string;
+};
+
+async function recoverStrandedPendingPayouts(stripe: Stripe): Promise<StrandedOutcome[]> {
+  const cutoff = new Date(Date.now() - STRANDED_PENDING_MIN_AGE_MS);
+  const stranded = await prisma.creatorPayout.findMany({
+    where: { status: 'pending', stripeTransferId: null, createdAt: { lt: cutoff } },
+    select: { id: true, creatorUserId: true, amountCents: true, createdAt: true },
+  });
+  if (stranded.length === 0) return [];
+
+  const outcomes: StrandedOutcome[] = [];
+
+  for (const payout of stranded) {
+    const base = { payoutId: payout.id, creatorUserId: payout.creatorUserId, amountCents: payout.amountCents };
+
+    // Ask Stripe whether it ever received this payout. transfer_group is an
+    // exact, indexed filter — metadata is NOT filterable on transfers.list and
+    // there is no transfers.search, so this is the only reliable handle.
+    let transfers: Stripe.Transfer[];
+    try {
+      const res = await stripe.transfers.list({
+        transfer_group: payoutTransferGroup(payout.id),
+        limit: 2,
+      });
+      transfers = res.data ?? [];
+    } catch (err) {
+      outcomes.push({ ...base, resolution: 'ambiguous', detail: `stripe lookup failed: ${(err as Error).message}` });
+      continue;
+    }
+
+    if (transfers.length === 1) {
+      // Stripe DID receive it — the crash happened after acceptance. Adopt the
+      // transfer id so the row rejoins normal reconciliation. No credit: the
+      // money moved and the debit standing is correct.
+      const transfer = transfers[0];
+      await prisma.creatorPayout.update({
+        where: { id: payout.id },
+        data: { stripeTransferId: transfer.id, status: 'completed', paidAt: new Date() },
+      });
+      outcomes.push({ ...base, resolution: 'adopted', detail: `adopted ${transfer.id}` });
+      continue;
+    }
+
+    if (transfers.length > 1) {
+      // Should be impossible under one transfer_group; never guess with money.
+      outcomes.push({ ...base, resolution: 'ambiguous', detail: `${transfers.length} transfers share this group` });
+      continue;
+    }
+
+    // Stripe has no transfer for this payout, and the row is older than any
+    // in-flight request, so no money moved. Give the balance back and free the
+    // pending slot. Releasing to 'failed' (rather than deleting) frees the
+    // partial unique index while keeping the audit row.
+    if (isV1WalletFrozen()) {
+      // The compensating credit would silently no-op under the freeze, marking
+      // the payout failed while returning nothing. Leave it for a human.
+      outcomes.push({ ...base, resolution: 'ambiguous', detail: 'V1_WALLET_FREEZE active — cannot credit' });
+      continue;
+    }
+
+    try {
+      await prisma.$transaction([
+        prisma.creatorPayout.update({
+          where: { id: payout.id },
+          data: { status: 'failed' },
+        }),
+        v1LedgerCreate(prisma, {
+          data: {
+            creatorUserId: payout.creatorUserId,
+            type: 'earning',
+            amountCents: payout.amountCents,
+            description: `payout_reversal:${payout.id}`,
+          },
+        }),
+      ]);
+      outcomes.push({ ...base, resolution: 'released', detail: 'no Stripe transfer exists; balance restored' });
+    } catch (err) {
+      outcomes.push({ ...base, resolution: 'ambiguous', detail: `release failed: ${(err as Error).message}` });
+    }
+  }
+
+  return outcomes;
 }
 
 export async function runCreatorStripeReconciliation(): Promise<CreatorStripeReconciliationReport | null> {
@@ -275,6 +391,10 @@ export async function runCreatorStripeReconciliation(): Promise<CreatorStripeRec
     listChargeBalanceTransactions(stripe, sinceUnix),
   ]);
 
+  // F-1: resolve crash-stranded payouts BEFORE the normal scan, so any row we
+  // adopt a transfer id for is reconciled in the same run rather than a day later.
+  const strandedPending = await recoverStrandedPendingPayouts(stripe);
+
   const transferResult = await reconcileTransfers(stripeTransfers, lookbackStart);
   const chargeResult = await reconcileCharges(balanceTxns);
 
@@ -283,6 +403,7 @@ export async function runCreatorStripeReconciliation(): Promise<CreatorStripeRec
     windowHours: LOOKBACK_WINDOW_HOURS,
     transfers: {
       stripeCount: stripeTransfers.length,
+      strandedPending,
       ...transferResult,
     },
     charges: {
@@ -297,7 +418,11 @@ export async function runCreatorStripeReconciliation(): Promise<CreatorStripeRec
   // legitimately produce missing_pair entries. The other charge-drift kinds
   // (amount_mismatch) ARE critical. Filter accordingly.
   const criticalChargeDrift = report.charges.chargeDrift.filter((d) => d.kind !== 'missing_pair');
+  // An 'adopted' or 'released' stranded payout was RESOLVED by this run, but it
+  // still means a process died mid-payout — surface it. An 'ambiguous' one is
+  // unresolved and needs a human.
   const hasIssues =
+    report.transfers.strandedPending.length > 0 ||
     report.transfers.ghostTransfers.length > 0 ||
     report.transfers.missingTransfers.length > 0 ||
     report.transfers.amountMismatches.length > 0 ||
