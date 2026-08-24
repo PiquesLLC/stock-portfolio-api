@@ -968,6 +968,15 @@ model CreatorPayout {
   status           String   @default("pending") // pending | processing | completed | failed | reversed
   stripeTransferId String?
   stripePayoutId   String?
+  // Cumulative cents Stripe reports reversed for this payout's transfer.
+  // Persisted rather than reconstructed from ledger descriptions, because
+  // reconstruction requires a read OUTSIDE the write transaction: two
+  // concurrent transfer.reversed events (distinct event ids, so webhook dedup
+  // does not help) both computed their delta from the same snapshot and both
+  // inserted, over-crediting the creator. This column is advanced by a
+  // compare-and-swap in the same transaction as the ledger credit, so only one
+  // handler can advance it from a given observed value.
+  reversedAmountCents Int   @default(0)
   paidAt           DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

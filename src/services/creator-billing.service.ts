@@ -1,10 +1,11 @@
 import Stripe from 'stripe';
+import * as Sentry from '@sentry/node';
 import prisma from '../utils/prisma';
 import { config } from '../config';
 import { Prisma } from '../generated/prisma/client';
 import { getPayoutBalanceFromLedger } from './creator.service';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
-import { v1LedgerCreate } from './v1-wallet-freeze';
+import { v1LedgerCreate, isV1WalletFrozen } from './v1-wallet-freeze';
 import { shadowWriteInvoicePaid } from '../v2/shadow-write/invoice-paid';
 import { shadowWriteChargeRefunded } from '../v2/shadow-write/charge-refunded';
 import { shadowWriteChargeDisputeCreated } from '../v2/shadow-write/charge-dispute-created';
@@ -1226,34 +1227,32 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         return;
       }
 
-      case 'payout.paid': {
-        const payout = event.data.object as Stripe.Payout;
-        await prisma.creatorPayout.updateMany({
-          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
-          data: {
-            status: 'completed',
-            paidAt: new Date(),
-          },
-        });
-        bumpCounter('processed');
-        logCreatorBilling({
-          outcome: 'processed',
-          eventId: event.id,
-          eventType: event.type,
-          stripePayoutId: payout.id,
-        });
-        return;
-      }
-
+      case 'payout.paid':
       case 'payout.failed': {
+        // F-2 — EXPLICIT NO-OP. These previously issued an updateMany that could
+        // never match a row, which is worse than doing nothing: it read as
+        // working code and silently updated zero rows.
+        //
+        // Why it cannot match. `payout.*` events describe a Connect account's
+        // BANK payout (a `po_…` object). A CreatorPayout row models the platform
+        // -> Connect TRANSFER (`tr_…`). The old filter was
+        // `stripePayoutId = po_… OR stripeTransferId = po_…`, but
+        // `stripePayoutId` is never written to the row anywhere in this service
+        // (its only occurrences are log fields), and `stripeTransferId` holds a
+        // `tr_…` id, which cannot equal a `po_…` id.
+        //
+        // Why leaving it "harmlessly dead" was NOT safe. If anyone later starts
+        // populating `stripePayoutId`, `payout.failed` becomes live — and it set
+        // `status = 'failed'` with no ledger credit and no status guard. Since
+        // `transfer.reversed` treats `failed` as already-reflected and returns
+        // early, a genuine reversal arriving afterwards would be silently
+        // dropped and the creator never credited. A dead handler plus a
+        // terminal-status skip compose into a live invariant-2 violation.
+        //
+        // If Connect bank payouts ever need tracking, model them on their own
+        // row rather than reusing CreatorPayout, whose status vocabulary means
+        // "the transfer", not "the bank payout".
         const payout = event.data.object as Stripe.Payout;
-        await prisma.creatorPayout.updateMany({
-          where: { OR: [{ stripePayoutId: payout.id }, { stripeTransferId: payout.id }] },
-          data: {
-            status: 'failed',
-          },
-        });
-        bumpCounter('payoutFailed');
         bumpCounter('processed');
         logCreatorBilling({
           outcome: 'processed',
@@ -1274,7 +1273,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const transferId = transfer.id;
         const payout = await prisma.creatorPayout.findFirst({
           where: { stripeTransferId: transferId },
-          select: { id: true, creatorUserId: true, amountCents: true, status: true },
+          select: {
+            id: true, creatorUserId: true, amountCents: true, status: true,
+            // The value the compare-and-swap below is predicated on.
+            reversedAmountCents: true,
+          },
         });
         if (!payout) {
           // Reversal arrived before requestPayout finished writing stripeTransferId
@@ -1290,26 +1293,104 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           bumpCounter('processed');
           return;
         }
-        await prisma.$transaction([
-          prisma.creatorPayout.update({
-            where: { id: payout.id },
-            data: { status: 'reversed' },
-          }),
-          v1LedgerCreate(prisma,{
+        // INVARIANT 1 — credit what Stripe ACTUALLY reversed, not the whole payout.
+        //
+        // A reversal can be partial: Stripe sets `amount_reversed` to the
+        // cumulative reversed total and leaves `reversed` false. Crediting
+        // `payout.amountCents` regardless meant a $1 reversal on a $1,000
+        // transfer restored $1,000 to the wallet, which the creator could then
+        // withdraw again — a $999 over-payment. `amount_reversed` was not read
+        // anywhere in the codebase.
+        //
+        // Clamped to the payout amount so a malformed or unexpected value can
+        // never credit MORE than was originally paid out.
+        const rawReversed = (transfer as { amount_reversed?: unknown }).amount_reversed;
+        const reversedCents = typeof rawReversed === 'number' && Number.isFinite(rawReversed) && rawReversed > 0
+          ? Math.min(Math.trunc(rawReversed), payout.amountCents)
+          : payout.amountCents; // absent/unusable → assume full, the prior behaviour
+        if (reversedCents < payout.amountCents) {
+          console.warn(
+            `[Creator Billing] PARTIAL reversal on ${transferId}: crediting ${reversedCents} of ${payout.amountCents}`,
+          );
+        }
+        // `amount_reversed` is CUMULATIVE, so credit only the slice not yet
+        // credited, and reach the terminal 'reversed' status ONLY once the
+        // reversal is actually complete.
+        //
+        // Marking the payout 'reversed' on a PARTIAL was wrong in the dangerous
+        // direction: the status-based idempotent skip above then swallowed every
+        // later event for the transfer. Stripe would go on to reverse the
+        // remaining balance out of the creator's Connect account while our ledger
+        // had credited only the first slice — a silent loss to the CREATOR, which
+        // is invariant 2, not the over-payment I was guarding against.
+        //
+        // Reconciliation could not catch it either: once Stripe's `reversed`
+        // flips true, both sides report "reversed" and agree, so the mismatch
+        // exists only in the window between the two events and the daily scan can
+        // miss it entirely.
+        // The credit owed is (cumulative reversed) − (already credited), and that
+        // subtraction must be SERIALISED, not merely correct in isolation.
+        //
+        // Reconstructing "already credited" by reading ledger rows before the
+        // transaction was correct under ordering and wrong under concurrency:
+        // two legitimate reversal events for one transfer carry distinct Stripe
+        // event ids (so webhook dedup does not apply), both observed the same
+        // state, and both inserted — their descriptions carrying different
+        // cumulative figures, so the unique index did not collide either. A
+        // $1,000 reversal credited $1,100.
+        //
+        // The cumulative total is now persisted on the payout and advanced by a
+        // COMPARE-AND-SWAP inside the same transaction as the credit, so exactly
+        // one handler may advance it from any given observed value.
+        const observedReversed = payout.reversedAmountCents ?? 0;
+        const deltaCents = Math.max(0, reversedCents - observedReversed);
+        if (deltaCents === 0) {
+          // Everything Stripe has reversed so far is already credited.
+          bumpCounter('processed');
+          return;
+        }
+        const fullyReversed = transfer.reversed === true || reversedCents >= payout.amountCents;
+
+        await prisma.$transaction(async (tx) => {
+          const advanced = await tx.creatorPayout.updateMany({
+            // CAS: matches only while the total is still what we read.
+            where: { id: payout.id, reversedAmountCents: observedReversed },
+            data: {
+              reversedAmountCents: reversedCents,
+              // Stay 'completed' while the reversal is partial, so a later event
+              // is still processed rather than skipped as already-terminal.
+              status: fullyReversed ? 'reversed' : 'completed',
+            },
+          });
+          if (advanced.count === 0) {
+            // Another event advanced it between our read and this write. Throw so
+            // the whole transaction rolls back (including this CAS) and the outer
+            // catch clears the webhook dedup marker — Stripe's retry then re-reads
+            // and credits the correct remainder. Never credit from a stale total.
+            throw new Error(
+              `transfer.reversed for ${transferId}: cumulative total advanced concurrently; will retry`,
+            );
+          }
+          await v1LedgerCreate(tx, {
             data: {
               creatorUserId: payout.creatorUserId,
               type: 'earning',
-              amountCents: payout.amountCents,
-              description: `transfer_reversed:${transferId}`,
+              amountCents: deltaCents,
+              // Cumulative figure in the key so successive partials are distinct
+              // rows, with the unique(creatorUserId, description) index as a
+              // second line of defence behind the CAS.
+              description: `transfer_reversed:${transferId}:${reversedCents}`,
             },
-          }),
-        ]);
+          });
+        });
         // v2 shadow-write: G5c transfer.reversed. Same scheme as MIG-1.
         void shadowWriteTransferReversed({
           stripeTransferId: transferId,
           stripeEventId: event.id,
           creatorUserId: payout.creatorUserId,
-          amountCents: payout.amountCents,
+          // The amount actually credited, not the original payout — otherwise v1
+          // and v2 disagree by the un-reversed remainder for the same event.
+          amountCents: deltaCents,
           effectiveAt: typeof event.created === 'number'
             ? new Date(event.created * 1000)
             : new Date(),
@@ -1323,7 +1404,9 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
           eventType: event.type,
           stripeTransferId: transferId,
           payoutId: payout.id,
-          restoredCents: payout.amountCents,
+          // What was actually restored this event; logging the full payout made
+          // the operator's log claim $1,000 was returned when $1 was.
+          restoredCents: deltaCents,
         });
         return;
       }
@@ -1549,6 +1632,47 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     (err as Error & { status?: number }).status = 503;
     throw err;
   }
+
+  // INVARIANT 1/4/6 — refuse to pay out while the v1 wallet is frozen.
+  //
+  // Under V1_WALLET_FREEZE, v1LedgerCreate returns a no-op `SELECT 1` instead of
+  // inserting the offsetting `payout:<id>` debit. The transfer still goes out,
+  // but the ledger — which is the ONLY balance source both getPayoutBalance and
+  // getPayoutBalanceFromLedger read — never records it. The creator's available
+  // balance is therefore unchanged, and because the pending-unique index only
+  // covers status='pending', a completed payout blocks nothing: they can request
+  // again immediately, get a fresh payoutId, hence a fresh idempotency key,
+  // hence a second real transfer. Repeatable without limit.
+  //
+  // admin.routes.ts already refuses its manual ledger endpoint under the freeze
+  // for exactly this reason, and its comment even notes the freeze affects
+  // "Stripe webhooks, payouts, etc." — this path was simply missed.
+  if (isV1WalletFrozen()) {
+    console.error(`[Creator Payout] FREEZE-BLOCKED payout request by ${userId}`);
+    const err = new Error(
+      'Payouts are paused while a wallet migration (V1_WALLET_FREEZE) is in progress. Your balance is unaffected and payouts resume when the migration completes.',
+    );
+    (err as Error & { status?: number }).status = 503;
+    throw err;
+  }
+
+  // INVARIANT 5 — refuse to pay out when the reconciliation path is disabled.
+  //
+  // requestPayout gates on creatorPayoutsEnabled, but
+  // runCreatorStripeReconciliation early-returns on creatorMonetizationEnabled.
+  // Two uncoupled flags, so payouts-on + monetization-off is reachable — and in
+  // that state a crash between a successful Stripe transfer and the local write
+  // is detected by nothing at all. Reconciliation availability must be at least
+  // as broad as payout availability; moving money without a working detector is
+  // not a state we should be able to enter.
+  if (!config.creatorMonetizationEnabled) {
+    console.error('[Creator Payout] BLOCKED: payouts enabled but reconciliation (CREATOR_MONETIZATION_ENABLED) is off');
+    const err = new Error(
+      'Payouts are unavailable: the reconciliation path is not enabled. This is a configuration error — CREATOR_PAYOUTS_ENABLED requires CREATOR_MONETIZATION_ENABLED.',
+    );
+    (err as Error & { status?: number }).status = 503;
+    throw err;
+  }
   const creator = await prisma.creator.findUnique({
     where: { userId },
     select: { stripeConnectId: true, status: true },
@@ -1619,17 +1743,151 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
   // letting the user re-trigger a second transfer for the same wallet
   // balance. With the key, any retry returns the original transfer object
   // — Stripe guarantees at-most-one transfer per idempotencyKey for 24h.
+  // H-2 — the transfer and the bookkeeping are now SEPARATE phases.
+  //
+  // They used to share one try/catch, so a failure of the local "mark completed"
+  // write was indistinguishable from a failed transfer: the catch marked the
+  // payout `failed` and credited the wallet back — after the money had already
+  // left. The creator could then request payout again and be paid twice. The
+  // idempotency key does not prevent that: the retry is a NEW payout row with a
+  // NEW id, so it carries a different key and Stripe treats it as a distinct,
+  // legitimate transfer.
+  //
+  // Rule from here on: the wallet is only ever restored when we KNOW no money
+  // moved.
+  //
+  // On an AMBIGUOUS failure we RESOLVE the ambiguity rather than parking it.
+  // Re-issuing the transfer under the same idempotency key is exactly-once by
+  // construction: Stripe returns the ORIGINAL transfer if one was created, and
+  // creates it if not. Simply parking the payout instead would strand the
+  // creator's money — the ledger debit stands, and
+  // creator-stripe-reconciliation.service.ts cannot recover it (it only scans
+  // payouts that already carry a stripeTransferId, and it is a read-only
+  // reporter that writes no ledger or payout rows).
+  const issueTransfer = () => getStripeClient().transfers.create({
+    amount: result.amountCents,
+    currency: 'usd',
+    destination: creator.stripeConnectId!,
+    description: `Nala creator payout ${result.payoutId}`,
+    metadata: { payoutId: result.payoutId, creatorUserId: userId },
+    // F-1 recovery key. If this process dies between the payout transaction
+    // committing and this call returning, the ONLY way to learn whether Stripe
+    // received the transfer is to ask Stripe — and `transfers.list` cannot
+    // filter on metadata (verified against the installed SDK: TransferListParams
+    // exposes created / destination / transfer_group / pagination only, and
+    // there is no transfers.search). `transfer_group` IS a first-class list
+    // filter, so it is what makes the stranded-payout recovery in
+    // creator-stripe-reconciliation.service.ts an exact lookup rather than a scan.
+    transfer_group: payoutTransferGroup(result.payoutId),
+  }, {
+    // CRITICAL: scoped to payoutId. Stripe guarantees at-most-one transfer per
+    // key for 24h, which is what makes the retry above safe.
+    idempotencyKey: `payout-${result.payoutId}`,
+    // Disable the SDK's INTERNAL retries for this call specifically.
+    //
+    // stripe-node defaults maxNetworkRetries to 2, and it retries on connection
+    // errors, 409 and 5xx, reusing the same Idempotency-Key. That means one
+    // `await` could be up to three HTTP attempts and the error we catch is the
+    // LAST one — so "the error came from the request that would have created the
+    // transfer" is false. Attempt #1 could create the transfer, the response be
+    // lost, and attempt #2 return a 429 (Stripe's rate limiter sits ahead of the
+    // idempotency store, so it does not replay the stored 201). Classifying that
+    // 429 as "nothing was created" would reverse the wallet on money already
+    // sent — the double-pay again.
+    //
+    // With retries off, one call is one request — with ONE documented
+    // exception: `_shouldRetry` short-circuits on ECONNRESET/EPIPE at
+    // numRetries === 0 BEFORE it checks the retry budget
+    // (RequestSender.js:145-149, HttpClient.js:30), so those two codes still get
+    // a single unconditional internal retry. That is tolerable precisely
+    // because the classification below was narrowed: every outcome of that
+    // second attempt except StripeInvalidRequestError is treated as ambiguous
+    // and never reverses, and a same-key replay of a request that DID create
+    // the transfer is served the stored success response rather than a 400.
+    //
+    // Recovery otherwise belongs to our own explicit same-key retry, whose
+    // outcome we handle deliberately.
+    maxNetworkRetries: 0,
+  });
+
+  let transferId: string;
   try {
-    const stripe = getStripeClient();
-    const transfer = await stripe.transfers.create({
-      amount: result.amountCents,
-      currency: 'usd',
-      destination: creator.stripeConnectId!,
-      description: `Nala creator payout ${result.payoutId}`,
-      metadata: { payoutId: result.payoutId, creatorUserId: userId },
-    }, {
-      idempotencyKey: `payout-${result.payoutId}`,
-    });
+    transferId = (await issueTransfer()).id;
+  } catch (err) {
+    if (!isDefiniteStripeRejection(err)) {
+      // Stripe may or may not have created the transfer. Ask again under the
+      // same key to find out.
+      console.warn(
+        `[Creator Payout] ambiguous transfer outcome for ${result.payoutId}, retrying under the same idempotency key:`,
+        (err as Error).message,
+      );
+      try {
+        transferId = (await issueTransfer()).id;
+        console.warn(`[Creator Payout] resolved ${result.payoutId} on idempotent retry (transfer=${transferId})`);
+      } catch (retryErr) {
+        // DELIBERATELY no reversal on this path, whatever the error looks like.
+        //
+        // It is tempting to treat a "definite rejection" here as proof the key
+        // was never consumed — but that inference is unsound. Stripe raises a
+        // 429 from its rate limiter BEFORE consulting the idempotency key, and
+        // an auth/permission error can come from a key rotated between the two
+        // calls. Neither says anything about whether the FIRST attempt created
+        // the transfer. Reversing on them would credit the wallet for money
+        // that had already been sent, and the creator's next request carries a
+        // new payoutId — hence a new idempotency key — which Stripe would
+        // honour as a second, distinct transfer.
+        //
+        // Only the FIRST attempt's rejection is sound evidence (see the else
+        // branch below): there the error came from the very request that would
+        // have created the transfer.
+        //
+        // So: unresolved. The ledger debit MUST stand, and the creator's money
+        // is held until a human settles it. Stranded funds are recoverable;
+        // a double payment is not.
+        console.error(
+          `[Creator Payout] UNRESOLVED transfer for ${result.payoutId} — creator funds held pending manual reconciliation:`,
+          (retryErr as Error).message,
+        );
+        bumpCounter('payoutFailed');
+        Sentry.captureException(retryErr, {
+          level: 'fatal',
+          tags: { component: 'creator_payout', outcome: 'unresolved_transfer' },
+          extra: { payoutId: result.payoutId, creatorUserId: userId, amountCents: result.amountCents },
+        });
+        await prisma.creatorPayout.update({
+          where: { id: result.payoutId },
+          data: { status: 'processing' },
+        }).catch((updateErr) => {
+          // Leaves the row 'pending', which blocks this creator's future payout
+          // requests. That is the safe direction, but it is silent — alert too.
+          console.error(`[Creator Payout] could not park ${result.payoutId} as processing:`, (updateErr as Error).message);
+          Sentry.captureException(updateErr, {
+            level: 'fatal',
+            tags: { component: 'creator_payout', outcome: 'park_failed' },
+            extra: { payoutId: result.payoutId, creatorUserId: userId },
+          });
+        });
+        throw payoutError('Payout is being confirmed with our payment provider. Do not retry — we will follow up.', 503);
+      }
+    } else {
+      // Stripe positively rejected the FIRST attempt (bad params, insufficient
+      // balance, auth/permission, rate limit). The error came from the same
+      // request that would have created the transfer, so no transfer exists and
+      // restoring the wallet is safe.
+      console.error(`[Creator Payout] Stripe rejected transfer for ${result.payoutId}:`, (err as Error).message);
+      const reversed = await reverseOrHold(result.payoutId, userId, result.amountCents);
+      // If the reversal itself failed the payout row is still `pending`, which
+      // permanently blocks this creator — so "please try again later" would be
+      // actively misleading: every retry now fails with "Existing payout request
+      // is still pending". Say it needs us instead.
+      throw reversed
+        ? payoutError('Payout transfer failed — please try again later', 400)
+        : payoutError('Payout could not be completed and your balance could not be released automatically. We have been alerted and will resolve this — please do not retry.', 503);
+    }
+  }
+
+  // Money HAS moved. Nothing below may reverse the ledger.
+  try {
     // Transfers are instant — mark as completed immediately. Capture the
     // paidAt so the shadow-write writes the SAME effective timestamp v1's
     // CreatorPayout row carries — keeps v1 and v2 reporting aligned on
@@ -1637,11 +1895,10 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     const paidAt = new Date();
     await prisma.creatorPayout.update({
       where: { id: result.payoutId },
-      data: { stripeTransferId: transfer.id, status: 'completed', paidAt },
+      data: { stripeTransferId: transferId, status: 'completed', paidAt },
     });
     // v2 shadow-write: G5a payout requested. Fires AFTER the Stripe transfer
-    // succeeded so v2 only mirrors finalized v1 state. If Stripe failed, the
-    // catch path below fires the G5b shadow-write instead.
+    // succeeded so v2 only mirrors finalized v1 state.
     void shadowWritePayoutRequested({
       payoutId: result.payoutId,
       creatorUserId: userId,
@@ -1650,36 +1907,159 @@ export async function requestPayout(userId: string): Promise<{ payoutId: string;
     }).catch((err) => {
       console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
     });
-  } catch (err) {
-    console.error(`[Creator Payout] Stripe transfer failed for ${result.payoutId}:`, (err as Error).message);
-    // Mark payout as failed AND reverse the ledger entry so balance is restored
-    await prisma.$transaction([
-      prisma.creatorPayout.update({
-        where: { id: result.payoutId },
-        data: { status: 'failed' },
-      }),
-      v1LedgerCreate(prisma,{
-        data: {
-          creatorUserId: userId,
-          type: 'earning',
-          amountCents: result.amountCents,
-          description: `payout_reversal:${result.payoutId}`,
-        },
-      }),
-    ]);
-    // v2 shadow-write: G5b payout failed (restore).
-    void shadowWritePayoutFailed({
-      payoutId: result.payoutId,
-      creatorUserId: userId,
-      amountCents: result.amountCents,
-      effectiveAt: new Date(),
-    }).catch((err) => {
-      console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+  } catch (bookkeepingErr) {
+    // The transfer succeeded but we failed to record it. This is the exact case
+    // that used to trigger a wallet reversal and enable the double-pay. Record
+    // what we can and surface loudly; never restore the balance.
+    console.error(
+      `[Creator Payout] PAID BUT UNRECORDED ${result.payoutId} (stripeTransferId=${transferId}):`,
+      (bookkeepingErr as Error).message,
+    );
+    Sentry.captureException(bookkeepingErr, {
+      level: 'fatal',
+      tags: { component: 'creator_payout', outcome: 'paid_but_unrecorded' },
+      extra: { payoutId: result.payoutId, creatorUserId: userId, stripeTransferId: transferId },
     });
-    throw new Error('Payout transfer failed — please try again later');
+    await prisma.creatorPayout.update({
+      where: { id: result.payoutId },
+      data: { status: 'processing', stripeTransferId: transferId },
+    }).catch(() => { /* already logged and reported above; nothing more to do */ });
+    throw payoutError('Payout was sent but confirmation failed — we will reconcile it shortly.', 503);
   }
 
   return result;
+}
+
+/**
+ * Stripe `transfer_group` for a payout — the durable handle that lets
+ * reconciliation ask "did Stripe ever receive this payout?" after a crash.
+ * Shared with creator-stripe-reconciliation.service.ts; both sides must agree
+ * on this exact string or recovery silently finds nothing.
+ */
+export function payoutTransferGroup(payoutId: string): string {
+  return `payout_${payoutId}`;
+}
+
+/**
+ * Error carrying an explicit HTTP status. `creator.controller.ts` defaults to
+ * 400 otherwise, which would report "your request was bad" for outcomes where
+ * money may well have moved.
+ */
+function payoutError(message: string, status: number): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
+
+/**
+ * Reverse a payout, and if the reversal itself fails, make sure somebody hears
+ * about it.
+ *
+ * A bare `await reversePayout(...)` was a silent trap: its `$transaction` can
+ * throw (SQLITE_BUSY is a live failure mode on this database), and when it does
+ * the payout row stays `pending` with the ledger still debited. `requestPayout`
+ * refuses to start while a `pending` row exists — enforced both in code and by
+ * the `creator_payout_pending_unique` partial index — so that creator can never
+ * request a payout again, and nothing in this codebase sweeps the state: the
+ * reconciliation service only looks at payouts that already carry a
+ * `stripeTransferId`, and the payout webhooks key on ids this row does not have.
+ *
+ * We cannot repair it from here, so the requirement is that it never fails
+ * quietly.
+ */
+async function reverseOrHold(payoutId: string, creatorUserId: string, amountCents: number): Promise<boolean> {
+  try {
+    await reversePayout(payoutId, creatorUserId, amountCents);
+    return true;
+  } catch (reversalErr) {
+    console.error(
+      `[Creator Payout] REVERSAL FAILED for ${payoutId} — row left pending, creator is now blocked from requesting payouts:`,
+      (reversalErr as Error).message,
+    );
+    bumpCounter('payoutFailed');
+    Sentry.captureException(reversalErr, {
+      level: 'fatal',
+      tags: { component: 'creator_payout', outcome: 'reversal_failed' },
+      extra: { payoutId, creatorUserId, amountCents },
+    });
+    return false;
+  }
+}
+
+/**
+ * Restore a creator's wallet after a payout that provably never sent money.
+ * ONLY call this when Stripe positively rejected the transfer — calling it on
+ * an ambiguous or successful outcome is the double-pay bug (H-2). Prefer
+ * `reverseOrHold`, which reports a failed reversal.
+ */
+async function reversePayout(payoutId: string, creatorUserId: string, amountCents: number): Promise<void> {
+  await prisma.$transaction([
+    prisma.creatorPayout.update({
+      where: { id: payoutId },
+      data: { status: 'failed' },
+    }),
+    v1LedgerCreate(prisma, {
+      data: {
+        creatorUserId,
+        type: 'earning',
+        amountCents,
+        description: `payout_reversal:${payoutId}`,
+      },
+    }),
+  ]);
+  // v2 shadow-write: G5b payout failed (restore).
+  void shadowWritePayoutFailed({
+    payoutId,
+    creatorUserId,
+    amountCents,
+    effectiveAt: new Date(),
+  }).catch((err) => {
+    console.warn(`[v2-shadow] unexpected leak from shadow-write: ${(err as Error).message}`);
+  });
+}
+
+/**
+ * H-2 — did Stripe positively REJECT the request, meaning no transfer exists?
+ *
+ * Only these outcomes are safe to treat as "no money moved" and therefore safe
+ * to reverse the wallet for. Connection errors, generic API errors and anything
+ * unrecognised are ambiguous by definition: the request may have been processed
+ * before the failure surfaced on our side.
+ */
+function isDefiniteStripeRejection(err: unknown): boolean {
+  // Read `.type` rather than `err instanceof Stripe.errors.StripeError`.
+  // instanceof would be a liability in the one place we cannot afford one: if
+  // `Stripe.errors` is ever undefined (a mocked//stubbed SDK, a bundler that
+  // drops the statics), `x instanceof undefined` THROWS — inside the error
+  // handler on the money path. Duck-typing degrades to "ambiguous", which is
+  // the safe direction: no wallet reversal.
+  const type = (err as { type?: unknown } | null | undefined)?.type;
+  if (typeof type !== 'string') return false;
+  switch (type) {
+    case 'StripeInvalidRequestError':
+      // The ONLY error we treat as proof that no transfer exists.
+      //
+      // Stripe never auto-retries a 400, and a replayed identical request under
+      // the same idempotency key returns the stored success response rather than
+      // a 400 — so seeing this means the request was refused on its own terms.
+      //
+      // Auth, permission and rate-limit errors were previously in this list and
+      // are NOT safe: a 429 comes from an edge rate limiter that never consults
+      // the idempotency store, and an auth failure can come from a key rotated
+      // between attempts. Neither tells us whether an earlier attempt created
+      // the transfer, so both must fall through to "ambiguous".
+      return true;
+    default:
+      // StripeConnectionError, StripeAPIError, StripeUnknownError, …
+      //
+      // StripeIdempotencyError belongs HERE, not above. Stripe raises it when
+      // the key was already used with DIFFERENT parameters — which means a
+      // prior request under `payout-${payoutId}` was accepted and a transfer
+      // may well exist. Classifying it as a definite rejection would reverse
+      // the wallet on a payout that had already been sent: the exact double-pay
+      // this function exists to prevent. (Elsewhere in this file the same error
+      // type is treated as transient/retryable, which is consistent with it
+      // being ambiguous rather than a refusal.)
+      return false;
+  }
 }
 
 type LedgerType = 'earning' | 'platform_fee' | 'refund' | 'payout';
