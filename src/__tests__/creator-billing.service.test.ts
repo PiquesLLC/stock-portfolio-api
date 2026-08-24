@@ -96,6 +96,7 @@ vi.mock('../config', () => ({
 
 import {
   createCreatorCheckoutSession,
+  getPayoutBalance,
   handleCreatorWebhookEvent,
   requestPayout,
 } from '../services/creator-billing.service';
@@ -1728,5 +1729,88 @@ describe('creator billing webhooks', () => {
     await handleCreatorWebhookEvent(fx.event.accountUpdated('evt_acct_unknown', 'acct_connect_unknown', true, true));
 
     expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A pending payout is represented in the ledger from the moment it exists:
+ * requestPayout writes the CreatorPayout row and its `payout:<id>` debit inside
+ * one serializable transaction, and it is the only writer of payout rows in the
+ * codebase. The ledger balance therefore already excludes a pending payout, so
+ * subtracting the pending aggregate on top of it removes the same money twice.
+ *
+ * This never mis-sized a payout: requestPayout refuses to run while a pending
+ * payout exists (the pendingCount guard plus the creator_payout_pending_unique
+ * partial index), so the pending aggregate is provably 0 on that path. The
+ * damage is confined to the balance a creator is shown while one is in flight.
+ */
+describe('getPayoutBalance — a pending payout is subtracted exactly once', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const aged = () => new Date(Date.now() - 30 * DAY_MS);   // outside the 14-day reserve
+  const recent = () => new Date(Date.now() - 1 * DAY_MS);  // inside it
+
+  /**
+   * A payout-shaped client that is deliberately NOT the module's prisma
+   * instance, so getPayoutBalance sums these rows itself instead of delegating
+   * to the mocked getPayoutBalanceFromLedger. That keeps the `payout:` debit
+   * visibly part of the balance under test.
+   */
+  function ledgerClient(
+    rows: Array<{ type: string; amountCents: number; createdAt: Date; description?: string }>,
+    pendingSumCents: number | null,
+  ) {
+    return {
+      creatorWalletLedger: { findMany: vi.fn(async () => rows) },
+      creatorPayout: { aggregate: vi.fn(async () => ({ _sum: { amountCents: pendingSumCents } })) },
+    } as any;
+  }
+
+  it('does not deduct a pending payout again on top of its ledger debit', async () => {
+    const client = ledgerClient(
+      [
+        { type: 'earning', amountCents: 10000, createdAt: aged() },
+        { type: 'payout', amountCents: 4000, createdAt: recent(), description: 'payout:payout_1' },
+      ],
+      4000, // the very same payout, still pending
+    );
+
+    const { availableCents } = await getPayoutBalance('creator_1', client);
+
+    // 10000 earned − 4000 already debited = 6000.
+    // Subtracting the pending aggregate a second time would leave 2000.
+    expect(availableCents).toBe(6000);
+  });
+
+  it('holds on the default client path, where the balance arrives pre-netted', async () => {
+    getPayoutBalanceFromLedgerMock.mockResolvedValue(6000); // already net of the debit
+    const p = prismaMock as any;
+    p.creatorWalletLedger ??= {};
+    p.creatorWalletLedger.findMany = vi.fn(async () => [
+      { type: 'earning', amountCents: 10000, createdAt: aged() },
+    ]);
+    p.creatorPayout ??= {};
+    p.creatorPayout.aggregate = vi.fn(async () => ({ _sum: { amountCents: 4000 } }));
+
+    const { availableCents } = await getPayoutBalance('creator_1');
+
+    expect(availableCents).toBe(6000);
+  });
+
+  it('still withholds the 14-day rolling reserve', async () => {
+    // Guards the fix against over-correcting into "subtract nothing".
+    const client = ledgerClient(
+      [
+        { type: 'earning', amountCents: 10000, createdAt: aged() },
+        { type: 'earning', amountCents: 5000, createdAt: recent() },
+        { type: 'payout', amountCents: 4000, createdAt: recent(), description: 'payout:payout_1' },
+      ],
+      4000,
+    );
+
+    const { availableCents, reservedCents } = await getPayoutBalance('creator_1', client);
+
+    // balance 11000 − reserve 5000 = 6000, with the pending 4000 not re-subtracted.
+    expect(reservedCents).toBe(5000);
+    expect(availableCents).toBe(6000);
   });
 });
