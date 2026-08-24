@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-19T00:00:00Z",
+  "generatedAt": "2026-08-24T00:00:00Z",
   "entries": [
     {
       "id": "lng-cheniere-export-monopoly",
@@ -13,7 +13,7 @@
         "WMB"
       ],
       "thesisShort": "Cheniere is the largest US LNG exporter, with Corpus Christi Stage 3 more than 98% complete and full-year 2026 adjusted EBITDA guidance raised for a second consecutive quarter to $7.9-8.4B.",
-      "thesisLong": "Cheniere Energy is the largest US LNG exporter and the second-largest LNG operator globally, running Sabine Pass in Louisiana and Corpus Christi in Texas. The build phase that defined the last three years is now nearly finished: Corpus Christi Stage 3 was more than 98% complete as of Q2 2026, with Train 7 nearing initial LNG production and substantial completion expected ahead of schedule.\n\nThat completion is showing up in the numbers. Q2 2026 adjusted EBITDA was approximately $1.8 billion on a 20% year-over-year increase in exported LNG volumes, and Cheniere raised full-year 2026 guidance for the second consecutive quarter — adjusted EBITDA to $7.9-8.4 billion and distributable cash flow to $5.3-5.8 billion. Production guidance was tightened to 53-54 million tons as the Stage 3 ramp and improved facility reliability cut downtime.\n\nThe bottleneck is regulatory and capital intensity: a greenfield LNG terminal takes four to six years and $10-20 billion, which is why already-permitted brownfield expansion is the scarce asset. Cheniere is advancing the Sabine Pass Expansion under a roughly $4.7 billion EPC contract with Bechtel, with Phase I expected to add more than 6 million tons per annum and FID targeted within the next twelve to eighteen months.\n\nThe commercial model is largely take-or-pay at fixed fees plus a Henry Hub-linked variable, which insulates EBITDA from spot volatility while leaving uncontracted volumes exposed to European TTF and Asian JKM pricing. The risk sits at the other end of the decade: a potential global oversupply window as Qatari and remaining US capacity lands faster than demand absorbs it.",
+      "thesisLong": "Cheniere Energy is the largest US LNG exporter and the second-largest LNG operator globally, running Sabine Pass in Louisiana and Corpus Christi in Texas. The build phase that defined the last three years is now in its final mile: Trains 1 through 4 reached substantial completion in 2025, Trains 5 and 6 followed in March and June 2026, and FERC has cleared Cheniere to introduce gas into Train 7, the last of the seven midscale units, with substantial completion expected in the fall of 2026.\n\nThat completion is showing up in the numbers. Q2 2026 adjusted EBITDA was approximately $1.8 billion on a 20% year-over-year increase in exported LNG volumes, and Cheniere raised full-year 2026 guidance for the second consecutive quarter — adjusted EBITDA to $7.9-8.4 billion and distributable cash flow to $5.3-5.8 billion. Production guidance was tightened to 53-54 million tons as the Stage 3 ramp and improved facility reliability cut downtime.\n\nThe bottleneck is regulatory and capital intensity: a greenfield LNG terminal takes four to six years and $10-20 billion, which is why already-permitted brownfield expansion is the scarce asset. Cheniere is advancing the Sabine Pass Expansion under a roughly $4.7 billion EPC contract with Bechtel, with Phase I expected to add more than 6 million tons per annum and FID targeted within the next twelve to eighteen months.\n\nThe commercial model is largely take-or-pay at fixed fees plus a Henry Hub-linked variable, which insulates EBITDA from spot volatility while leaving uncontracted volumes exposed to European TTF and Asian JKM pricing. The risk sits at the other end of the decade: a potential global oversupply window as Qatari and remaining US capacity lands faster than demand absorbs it.",
       "chokepointMetrics": [
         {
           "label": "2026 adjusted EBITDA guidance",
@@ -25,7 +25,7 @@
         },
         {
           "label": "Corpus Christi Stage 3 completion",
-          "value": ">98%, Train 7 nearing initial LNG production (Q2 2026)"
+          "value": "Trains 1-6 substantially complete (T5 March 2026, T6 June 2026); FERC cleared gas introduction into Train 7, substantial completion expected fall 2026"
         },
         {
           "label": "2026 LNG production guidance",
@@ -37,9 +37,9 @@
         }
       ],
       "catalysts": [
-        "Corpus Christi Stage 3 substantial completion, expected ahead of schedule",
+        "Train 7 substantial completion in fall 2026, closing out the seven-train Stage 3 build",
         "Sabine Pass Expansion Phase I FID targeted within 12-18 months (~$4.7B Bechtel EPC, >6 mtpa)",
-        "Golden Pass and Plaquemines volumes lifting overall US export capacity utilization",
+        "Golden Pass starting its first two trains (1.4 Bcf/d) during 2026, and Plaquemines cleared by DOE in March 2026 to export a further 0.5 Bcf/d",
         "Asian buyers re-contracting expiring 2010s-era LNG contracts"
       ],
       "risks": [
@@ -49,7 +49,7 @@
         "Hurricane season disruption to Gulf Coast operations"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "lng-cqp-sabine-pass-mlp",
@@ -84,10 +84,15 @@
         {
           "label": "Expansion FID timing",
           "value": "Targeted within 12-18 months (as of Q2 2026)"
+        },
+        {
+          "label": "Long-lead equipment",
+          "value": "Baker Hughes awarded liquefaction equipment for Sabine Pass Train 7 through Bechtel (Q2 2026)"
         }
       ],
       "catalysts": [
         "Sabine Pass Expansion Phase I FID targeted within 12-18 months",
+        "Long-lead liquefaction equipment for Train 7 already awarded through Bechtel, de-risking the expansion schedule",
         "Variable distribution upside from uncontracted margin",
         "Parent-level 2026 guidance raised twice, supporting terminal-level throughput",
         "European winter restocking pulling additional US cargoes"
@@ -99,7 +104,7 @@
         "Spot LNG margin compression in a 2027-28 oversupply window"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "refining-mpc-coastal-scale",
@@ -134,13 +139,18 @@
         {
           "label": "California capacity removed",
           "value": "~17% of West Coast capacity (PSX Wilmington 2025 + VLO Benicia, idled April 2026)"
+        },
+        {
+          "label": "US diesel crack spread",
+          "value": "All-time high of $102.20 intraday on 17 August 2026, holding near $100 the following day"
         }
       ],
       "catalysts": [
-        "PADD 5 crack spreads holding after the Benicia idle completed in April 2026",
-        "Gulf Coast system already running at 100% into peak demand season",
-        "MPLX distribution growth funding parent cash returns",
-        "Renewable diesel margin recovery at Martinez"
+        "Record US diesel crack spreads in August 2026, with analysts expecting margins to stay elevated through much of 2H 2026",
+        "90,000 bpd distillate hydrotreater under construction at Galveston Bay",
+        "Garyville project adding 10,000 bpd of export-premium gasoline by end-2027",
+        "Record Q2 2026 distillate exports into Latin American and European demand",
+        "MPLX distribution growth funding parent cash returns"
       ],
       "risks": [
         "Gasoline demand plateau as EV penetration accelerates",
@@ -149,7 +159,7 @@
         "Crude differentials narrowing on OPEC+ unwind"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "refining-psx-mid-cycle",
@@ -163,7 +173,7 @@
         "DINO"
       ],
       "thesisShort": "Phillips 66 ran 96% crude utilization in Q2 2026 as realized refining margins more than doubled sequentially to $24.08 per barrel, while Elliott continues to press for a midstream separation the company is resisting.",
-      "thesisLong": "Phillips 66 shut its Wilmington refinery in Los Angeles (~139,000 bpd) in late 2025, removing a structurally challenged West Coast asset and concentrating throughput on its more profitable Gulf Coast and Mid-Continent system. Q2 2026 showed what that concentration is worth in a tight market: adjusted earnings of $9.41 per share, up 295% year over year, on adjusted earnings of $3.79 billion and net income of $3.8 billion. Worldwide realized refining margins jumped to $24.08 per barrel from $10.11 in Q1, with 96% crude utilization, 86% clean product yield and 98% market capture.\n\nThe governance question is unresolved and now runs the other way from the original activist thesis. Elliott Management continues to press for separating midstream and to criticise the lack of visible synergies between segments, specifically questioning the strategy of growing midstream through acquisitions rather than fixing core refining. Phillips 66 has leaned into midstream growth regardless. Investors tracking this entry should treat the separation as contested rather than pending.\n\nThe refining system spans facilities across the US and Europe, including Bayway, Sweeny, Lake Charles and Borger. The Rodeo Renewable Energy Complex gives PSX a position in low-carbon fuels, and the CPChem joint venture with Chevron plus Marketing & Specialties diversify away from pure refining beta.\n\nRisks centre on the direction of the activist campaign, RIN and LCFS volatility hitting renewable diesel margins, European refining performance, and West Coast gasoline demand decline.",
+      "thesisLong": "Phillips 66 shut its Wilmington refinery in Los Angeles (~139,000 bpd) in late 2025, removing a structurally challenged West Coast asset and concentrating throughput on its more profitable Gulf Coast and Mid-Continent system. Q2 2026 showed what that concentration is worth in a tight market: adjusted earnings of $9.41 per share, up 295% year over year, on adjusted earnings of $3.79 billion and net income of $3.8 billion. Worldwide realized refining margins jumped to $24.08 per barrel from $10.11 in Q1, with 96% crude utilization, 86% clean product yield and 98% market capture.\n\nThe governance question is now contested from inside the boardroom rather than from outside it. Elliott Management, holding 19.25 million shares worth roughly $3.25 billion, took its case to a proxy contest that ended in a split vote: of the four contested seats, Phillips 66 and Elliott each claimed two, giving Elliott a voice in board decisions without control of them. CEO Mark Lashier has publicly pushed back on the spin-off plan, arguing the midstream and refining businesses complement each other, and the company continues to grow midstream regardless. Readers tracking this entry should treat the separation as contested rather than pending — the campaign has a seat at the table, not a mandate.\n\nThe refining system spans facilities across the US and Europe, including Bayway, Sweeny, Lake Charles and Borger. The Rodeo Renewable Energy Complex gives PSX a position in low-carbon fuels, and the CPChem joint venture with Chevron plus Marketing & Specialties diversify away from pure refining beta.\n\nRisks centre on the direction of the activist campaign, RIN and LCFS volatility hitting renewable diesel margins, European refining performance, and West Coast gasoline demand decline.",
       "chokepointMetrics": [
         {
           "label": "Q2 2026 realized refining margin",
@@ -183,23 +193,28 @@
         },
         {
           "label": "Midstream separation",
-          "value": "Contested — Elliott pressing, company leaning into midstream growth (2026)"
+          "value": "Contested — proxy contest ended in a split vote, two of four contested board seats to each side (2026)"
+        },
+        {
+          "label": "Elliott position",
+          "value": "19.25 million shares, ~$3.25B (2026)"
         }
       ],
       "catalysts": [
-        "Resolution of the Elliott campaign over midstream separation",
+        "Elliott holding two board seats and continuing to press for a midstream sale from inside the board",
+        "Record US diesel crack spreads in August 2026 lifting the concentrated Gulf Coast and Mid-Continent system",
         "Sustained PADD 5 tightness following the California closures",
         "Rodeo renewable diesel margin recovery",
         "CPChem ethylene cycle recovery"
       ],
       "risks": [
-        "Activist campaign and company strategy currently pointing in opposite directions",
+        "Activist campaign and company strategy still pointing in opposite directions from inside the same board",
         "California renewable fuels regulation tightening margins",
         "European refining segment performance",
         "Gasoline demand decline accelerating on the West Coast"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "refining-vlo-throughput-king",
@@ -234,9 +249,14 @@
         {
           "label": "Combined California closures",
           "value": "~17% of West Coast capacity removed (PSX Wilmington + VLO Benicia)"
+        },
+        {
+          "label": "US diesel crack spread",
+          "value": "All-time high of $102.20 intraday on 17 August 2026, holding near $100 the following day"
         }
       ],
       "catalysts": [
+        "Record US diesel crack spreads in August 2026, with margins expected to stay elevated through much of 2H 2026",
         "PADD 5 crack premium persisting after the April 2026 Benicia shutdown",
         "SAF demand from EU ReFuelEU and US tax credits",
         "Diamond Green Diesel margin recovery",
@@ -249,7 +269,7 @@
         "Brent-WTI spread compression hurting export economics"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "midstream-enb-cross-border-mainline",
@@ -262,8 +282,8 @@
         "KMI",
         "WMB"
       ],
-      "thesisShort": "Enbridge's Mainline moves roughly 3 million bpd of Western Canadian crude to US refiners; the company reaffirmed 2026 guidance at Q2 and grew its secured capital backlog to $41B.",
-      "thesisLong": "Enbridge operates the largest crude oil pipeline system in North America. The Mainline transports approximately 3 million barrels per day of Western Canadian crude to US Midwest and Gulf Coast refiners, and with the Trans Mountain Expansion in service and filling, it remains the backbone of cross-border heavy oil flows.\n\nQ2 2026 adjusted EBITDA was C$4,776 million against C$4,644 million a year earlier, with distributable cash flow of C$2,948 million, and management reaffirmed full-year 2026 guidance on the back of constructive rate cases and strong recontracting. The forward book is where the story has moved: the secured capital backlog grew to $41 billion, the company secured up to C$20 billion of new projects for 2026-2027, and it frames roughly C$50 billion of organic growth opportunity through 2030.\n\nThe project list is diversifying the business away from the Canadian liquids core. Blackcomb — the 2.5 bcf/d Permian-to-Agua Dulce line in which Enbridge participates through the WPC joint venture alongside WhiteWater, MPLX and Targa — began commissioning with full in-service expected in Q4 2026. The Enbridge Houston Oil Terminal entered service, the C$1 billion Wisconsin Line 5 relocation was sanctioned, and Enbridge signed an exclusive option to acquire the TTC Connector, linking its Tres Palacios storage to Freeport LNG.\n\nRisks are regulatory and macro: Line 5 continues to face tribal and state opposition, Western Canadian differentials widen if upstream supply outpaces takeaway, and higher long rates compress the multiple on a dividend-led equity.",
+      "thesisShort": "Enbridge's Mainline moves roughly 3 million bpd of Western Canadian crude to US refiners; the company reaffirmed 2026 guidance at Q2 and grew its secured capital backlog to C$41B.",
+      "thesisLong": "Enbridge operates the largest crude oil pipeline system in North America. The Mainline transports approximately 3 million barrels per day of Western Canadian crude to US Midwest and Gulf Coast refiners, and with the Trans Mountain Expansion in service and filling, it remains the backbone of cross-border heavy oil flows.\n\nQ2 2026 adjusted EBITDA was C$4,776 million against C$4,644 million a year earlier, with distributable cash flow of C$2,948 million, and management reaffirmed full-year 2026 guidance on the back of constructive rate cases and strong recontracting. The forward book is where the story has moved: the secured capital backlog grew to C$41 billion, the company secured up to C$20 billion of new projects for 2026-2027, and it frames roughly C$50 billion of organic growth opportunity through 2030.\n\nThe project list is diversifying the business away from the Canadian liquids core, and the Gulf Coast gas build is where it is concentrated. Blackcomb — the 2.5 bcf/d, roughly 365-mile Permian-to-Agua Dulce line owned 70% by the WPC joint venture alongside Targa at 17.5% and MPLX at 12.5% — is in commissioning, with start-up expected in October 2026 and volumes ramping through the second half. On 31 July 2026 the Whistler joint venture, in which Enbridge holds 19%, sanctioned Bay Runner Twin: up to 2.6 bcf/d from Agua Dulce to Rio Grande LNG under long-term take-or-pay agreements, in service by 2030. The Enbridge Houston Oil Terminal entered service, the roughly US$1 billion Wisconsin Line 5 relocation is under construction with service expected in early 2027, and Enbridge signed an exclusive option to acquire the TTC Connector, linking its Tres Palacios storage to Freeport LNG.\n\nRisks are regulatory and macro: Line 5 continues to face tribal and state opposition, Western Canadian differentials widen if upstream supply outpaces takeaway, and higher long rates compress the multiple on a dividend-led equity.",
       "chokepointMetrics": [
         {
           "label": "Mainline capacity",
@@ -275,7 +295,7 @@
         },
         {
           "label": "Secured capital backlog",
-          "value": "$41B (Q2 2026)"
+          "value": "C$41B (Q2 2026)"
         },
         {
           "label": "New projects secured for 2026-27",
@@ -283,12 +303,17 @@
         },
         {
           "label": "Blackcomb Pipeline",
-          "value": "2.5 bcf/d, commissioning started, full in-service expected Q4 2026"
+          "value": "2.5 bcf/d Permian-to-Agua Dulce; commissioning under way, start-up expected October 2026 with ramp through 2H 2026 (WPC 70% / Targa 17.5% / MPLX 12.5%)"
+        },
+        {
+          "label": "Bay Runner Twin",
+          "value": "Sanctioned 31 July 2026 by the Whistler JV (Enbridge 19%); up to 2.6 bcf/d Agua Dulce to Rio Grande LNG under long-term take-or-pay, in service by 2030"
         }
       ],
       "catalysts": [
-        "Blackcomb Pipeline reaching full in-service in Q4 2026",
-        "C$1B Wisconsin Line 5 relocation project sanctioned and proceeding",
+        "Blackcomb Pipeline starting up in October 2026 and ramping through the second half",
+        "Bay Runner Twin adding up to 2.6 bcf/d of contracted Rio Grande LNG feedgas capacity by 2030",
+        "US$1B Wisconsin Line 5 relocation under construction, in service expected early 2027",
         "TTC Connector option linking Tres Palacios storage to Freeport LNG",
         "Converting the ~C$50B organic opportunity set into secured backlog"
       ],
@@ -299,7 +324,7 @@
         "Higher long rates compressing the multiple on a dividend-led equity"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "midstream-epd-ngl-toll-road",
@@ -313,7 +338,7 @@
         "WMB"
       ],
       "thesisShort": "Enterprise runs the largest US NGL system; Q2 2026 set a record $2.8B of EBITDA as the Neches River terminal's second phase entered service in May 2026 and lifted LPG exports by 141 MBPD.",
-      "thesisLong": "Enterprise Products Partners is the largest US NGL pipeline and processing company, with an integrated system spanning Permian and Eagle Ford gathering, Mont Belvieu fractionation — the world's largest NGL hub — and Houston Ship Channel export terminals.\n\nQ2 2026 set a record at $2.8 billion of EBITDA, driven by acute global demand for US energy through April and May that pulled volumes across crude, LPG and ethane channels. The Bahia Y-grade NGL pipeline, placed in service in Q4 2025, is now operating alongside Shin Oak at 86% of capacity — the system is filling rather than waiting for barrels.\n\nExport capacity is the growth engine and it arrived early. The second phase of the Neches River terminal was placed in service in May 2026, lifting LPG export volumes by 141 MBPD, and the marine terminal expansion is commissioning ahead of its original schedule to meet international demand. Ethane export volumes rose 15 MBPD at Morgan's Point and Neches River. That positions Enterprise to supply the ethane crackers in Asia and Europe that increasingly run on US-sourced feedstock.\n\nThe capital cycle has not turned down as cleanly as previously framed. 2026 gross capex is now $2.9-3.4 billion after asset sale proceeds with roughly $600 million of sustaining capex, and 2026 growth capex expectations have risen by more than $700 million since the start of the year, with 2027 growth capex near $3 billion. Harvest mode is being pushed out, not cancelled.\n\nRisks include global petrochemical demand softness, MLP K-1 friction, ethane price weakness on US oversupply, and Houston Ship Channel weather disruption.",
+      "thesisLong": "Enterprise Products Partners is the largest US NGL pipeline and processing company, with an integrated system spanning Permian and Eagle Ford gathering, Mont Belvieu fractionation — the world's largest NGL hub — and Houston Ship Channel export terminals.\n\nQ2 2026 set a record at $2.8 billion of EBITDA, driven by acute global demand for US energy through April and May that pulled volumes across crude, LPG and ethane channels. The Bahia Y-grade NGL pipeline, placed in service in Q4 2025, is now operating alongside Shin Oak at 86% of capacity — the system is filling rather than waiting for barrels.\n\nExport capacity is the growth engine, it arrived early, and it filled immediately. The second phase of the Neches River ethane and propane terminal in Orange County, Texas was placed in service in May 2026, lifting LPG export volumes by 141 MBPD — and by mid-June the terminal was already moving 329 Mb/d of ethane against a 300 Mb/d nameplate, running above its rated capacity within weeks of start-up. The marine terminal expansion is commissioning ahead of its original schedule to meet international demand. That positions Enterprise to supply the ethane crackers in Asia and Europe that increasingly run on US-sourced feedstock.\n\nThe capital cycle has not turned down as cleanly as previously framed. 2026 gross capex is now $2.9-3.4 billion after asset sale proceeds with roughly $600 million of sustaining capex, and 2026 growth capex expectations have risen by more than $700 million since the start of the year, with 2027 growth capex near $3 billion. Harvest mode is being pushed out, not cancelled.\n\nRisks include global petrochemical demand softness, MLP K-1 friction, ethane price weakness on US oversupply, and Houston Ship Channel weather disruption.",
       "chokepointMetrics": [
         {
           "label": "Q2 2026 EBITDA",
@@ -328,16 +353,20 @@
           "value": "In service May 2026; LPG export volumes +141 MBPD"
         },
         {
-          "label": "Ethane export volumes",
-          "value": "+15 MBPD at Morgan’s Point and Neches River (Q2 2026)"
+          "label": "Neches River ethane throughput",
+          "value": "329 Mb/d exported by mid-June 2026, above the terminal's 300 Mb/d nameplate"
         },
         {
           "label": "2026 gross capex",
           "value": "$2.9-3.4B after asset sale proceeds; 2027 growth capex ~$3B"
+        },
+        {
+          "label": "Major growth projects in flight",
+          "value": "~$6.5B scheduled for completion by the end of Q1 2029"
         }
       ],
       "catalysts": [
-        "Neches River marine terminal expansion commissioning ahead of schedule",
+        "Neches River already exporting above nameplate, with the marine terminal expansion commissioning ahead of schedule",
         "Asian and European ethane cracker offtake contracts",
         "Permian processing plants ramping into fee-based EBITDA",
         "Distribution growth as the capital cycle turns down into 2027"
@@ -349,7 +378,7 @@
         "Ethane price weakness on US oversupply"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "midstream-wmb-transco-gas-superhighway",
@@ -363,7 +392,7 @@
         "OKE"
       ],
       "thesisShort": "Williams' Transco is the largest-volume US natural gas pipeline, and the company raised 2026 adjusted EBITDA guidance to $8.3-8.5B while lifting its long-term growth target to an 11%-plus CAGR through 2030.",
-      "thesisLong": "Williams owns and operates Transco, the largest-volume natural gas pipeline in the United States, spanning more than 10,000 miles from South Texas to New York City. Transco is the spine connecting Gulf Coast LNG export demand, Northeast city-gate utility demand, and Marcellus and Haynesville production.\n\nQ2 2026 adjusted EBITDA was $1.92 billion, up 6% year over year, with year-to-date EBITDA up 10%. Management raised full-year 2026 adjusted EBITDA guidance by $200 million at the midpoint to $8.3-8.5 billion, from a prior $8.05-8.35 billion, and lifted the long-term EBITDA growth target to an 11%-plus compound annual rate through 2030 — a rare structural raise for a large-cap pipeline.\n\nThe growth is organic rather than acquired, which is the more important point for a bottleneck thesis. Management specifically framed Southeast Supply Enhancement and Power Express as expansions on Transco that require no M&A: Williams already owns the right-of-way, so incremental capacity comes from compression and looping on an existing corridor rather than from siting a new line. That is the asset that cannot be replicated, and it points directly at data center load in Virginia and the Carolinas alongside Gulf Coast LNG feedgas.\n\nRisks include FERC tolling reform pressure on legacy Transco rates, Northeast pipeline siting opposition, execution on a multi-year expansion backlog, and Permian gas oversupply weighing on basis. The C-corp structure (no K-1) remains an advantage versus the MLP midstream names for institutional holders.",
+      "thesisLong": "Williams owns and operates Transco, the largest-volume natural gas pipeline in the United States, spanning more than 10,000 miles from South Texas to New York City. Transco is the spine connecting Gulf Coast LNG export demand, Northeast city-gate utility demand, and Marcellus and Haynesville production.\n\nQ2 2026 adjusted EBITDA was $1.92 billion, up 6% year over year, with year-to-date EBITDA up 10%. Management raised full-year 2026 adjusted EBITDA guidance by $200 million at the midpoint to $8.3-8.5 billion, from a prior $8.05-8.35 billion, and lifted the long-term EBITDA growth target to an 11%-plus compound annual rate through 2030 — a rare structural raise for a large-cap pipeline.\n\nThe growth is organic rather than acquired, which is the more important point for a bottleneck thesis. Williams already owns the right-of-way, so incremental capacity comes from compression and looping on an existing corridor rather than from siting a new line. Southeast Supply Enhancement is the clearest case: FERC's 29 January 2026 order authorised roughly 55 miles of new large-diameter pipe plus substantial compressor station upgrades, delivering up to 1.6 million dekatherms per day of incremental firm transportation into Southeast markets at an estimated $1.53 billion — and as of mid-2026 sections were tracking to enter service earlier than originally scheduled. Power Express would carry a further ~950 MMcf/d to markets north of Station 165 in Pittsylvania County, Virginia. That right-of-way is the asset that cannot be replicated, and it points directly at data center load in Virginia and the Carolinas alongside Gulf Coast LNG feedgas.\n\nRisks include FERC tolling reform pressure on legacy Transco rates, Northeast pipeline siting opposition, execution on a multi-year expansion backlog, and Permian gas oversupply weighing on basis. The C-corp structure (no K-1) remains an advantage versus the MLP midstream names for institutional holders.",
       "chokepointMetrics": [
         {
           "label": "Transco scale",
@@ -382,13 +411,17 @@
           "value": "11%-plus CAGR through 2030 (raised, Q2 2026)"
         },
         {
-          "label": "Key organic expansions",
-          "value": "Southeast Supply Enhancement and Power Express — Transco expansions requiring no M&A"
+          "label": "Southeast Supply Enhancement",
+          "value": "FERC order 29 January 2026: ~55 miles of new large-diameter pipe plus compression, up to 1.6 million Dth/d incremental firm capacity, ~$1.53B cost"
+        },
+        {
+          "label": "Power Express",
+          "value": "Proposed ~950 MMcf/d to markets north of Transco Station 165 in Pittsylvania County, Virginia"
         }
       ],
       "catalysts": [
-        "Southeast Supply Enhancement progressing through construction",
-        "Power Express expansion on the existing Transco corridor",
+        "Southeast Supply Enhancement sections tracking to enter service earlier than originally scheduled",
+        "Power Express adding ~950 MMcf/d on the existing Transco corridor into Virginia data center load",
         "Data center demand pulling Transco capacity in Virginia and the Carolinas",
         "Gulf Coast LNG feedgas contracts as new liquefaction trains commission"
       ],
@@ -399,7 +432,7 @@
         "Construction cost inflation on multi-year projects"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "oilfield-slb-international-offshore",
@@ -413,7 +446,7 @@
         "RIG"
       ],
       "thesisShort": "SLB is the global leader in high-end international and offshore services, but Q2 2026 showed the Middle East disruption biting: revenue of $8.97B grew sequentially even as international revenue fell 6% year over year.",
-      "thesisLong": "SLB is the global leader in oilfield services, with roughly 30% of the high-end international and offshore drilling and reservoir technology market — about double its nearest competitor. Its dominance in subsurface complexity makes it the preferred partner for national oil companies including Saudi Aramco, Petrobras, ADNOC and Equinor.\n\nQ2 2026 is where the thesis and the tape diverged. Revenue of $8.97 billion rose 3% sequentially and 5% year over year, with EPS of $0.52, and sequential growth was broad-based across North America, Latin America, Europe and Africa, and Asia. But that growth had to more than offset a 13% sequential revenue decline in the Middle East caused by persistent conflict-related disruption. On a year-over-year basis, international revenue fell 6% and North American revenue fell 1%.\n\nThe structural case is unchanged and still ahead: deepwater activity in Brazil's pre-salt, Guyana's Stabroek Block, Suriname's Block 58 and Namibia's Orange Basin is at multi-decade highs, and SLB's subsea, reservoir and digital technology command the highest premiums on exactly those complex projects. The ChampionX acquisition and the Delfi digital platform further diversify away from pure rig-count beta.\n\nThe honest read on 2026 is that the Middle East disruption is not a rounding error — it is the single largest swing factor in the near-term numbers, and it is geopolitical rather than commercial, which makes it hard to underwrite either direction. Brazil and Namibia FID timing and the pace of the OPEC+ unwind are the other variables.",
+      "thesisLong": "SLB is the global leader in oilfield services, with roughly 30% of the high-end international and offshore drilling and reservoir technology market — about double its nearest competitor. Its dominance in subsurface complexity makes it the preferred partner for national oil companies including Saudi Aramco, Petrobras, ADNOC and Equinor.\n\nQ2 2026 is where the thesis and the tape diverged. Revenue of $8.97 billion rose 3% sequentially and 5% year over year, with EPS of $0.52, and sequential growth was broad-based across North America, Latin America, Europe and Africa, and Asia. But that growth had to more than offset a 13% sequential revenue decline in the Middle East caused by persistent conflict-related disruption. On a year-over-year basis, international revenue fell 6% and North American revenue fell 1%.\n\nThe structural case is unchanged and still ahead: deepwater activity in Brazil's pre-salt, Guyana's Stabroek Block, Suriname's Block 58 and Namibia's Orange Basin is at multi-decade highs, and SLB's subsea, reservoir and digital technology command the highest premiums on exactly those complex projects. The ChampionX acquisition and the Delfi digital platform further diversify away from pure rig-count beta.\n\nThe honest read on 2026 is that the Middle East disruption is not a rounding error — it is the single largest swing factor in the near-term numbers, and it is geopolitical rather than commercial, which makes it hard to underwrite either direction. The mechanism is specific: a force majeure declaration in Qatar, production shut-ins in Iraq, and security-driven demobilization of offshore operations across the region. A gradual recovery is now unfolding — activity has been restored and is strengthening in the UAE and Qatar, and national oil companies are seeking solutions deployable at scale to bring back wells shuttered during the conflict — but mid-August 2026 brought stalled ceasefire talks and renewed Strait of Hormuz concerns, so the recovery is directional rather than secured. Brazil and Namibia FID timing and the pace of the OPEC+ unwind are the other variables.",
       "chokepointMetrics": [
         {
           "label": "International/offshore market share",
@@ -437,19 +470,21 @@
         }
       ],
       "catalysts": [
+        "Gradual Middle East recovery unfolding in Q3 2026, with activity restored and strengthening in the UAE and Qatar",
+        "National oil companies seeking at-scale solutions to restore wells shut in during the conflict",
         "Brazil and Namibia deepwater FIDs progressing",
-        "Middle East activity normalizing once conflict-related disruption eases",
         "ChampionX integration synergies",
         "Digital revenue mix expansion at higher margin"
       ],
       "risks": [
-        "Persistent conflict-related disruption in the Middle East, the largest near-term swing factor",
+        "Renewed escalation risk — stalled ceasefire talks and a mooted naval blockade revived Strait of Hormuz supply concerns in mid-August 2026",
+        "Force majeure in Qatar and production shut-ins in Iraq showing how quickly regional revenue can be demobilized",
         "OPEC+ unwind triggering global E&P capex cuts",
         "Brazil political risk affecting Petrobras programmes",
         "International revenue still declining year over year"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "oilfield-hal-permian-completions",
@@ -483,23 +518,24 @@
         },
         {
           "label": "Middle East / Asia",
-          "value": "Declining on conflict-related disruption (Q2 2026)"
+          "value": "Declined on conflict-related disruption in Q2 2026; gradual recovery reported for Q3 2026"
         }
       ],
       "catalysts": [
+        "Gradual Middle East recovery unfolding in Q3 2026 as regional activity restarts",
         "Zeus electric frac fleet deployment at premium pricing",
         "International revenue growth offsetting North American softness",
         "Latin America completions activity (Argentina Vaca Muerta)",
         "Service intensity per well rising even where rig counts are flat"
       ],
       "risks": [
-        "Middle East and Asia disruption persisting",
+        "Renewed Middle East escalation — stalled ceasefire talks and Strait of Hormuz supply concerns resurfaced in mid-August 2026",
         "Pricing concessions from Tier 1 customers",
         "North American rig activity rolling over",
         "Electric fleet conversion cannibalizing legacy diesel margins"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "oilfield-bkr-lng-turbomachinery",
@@ -513,7 +549,7 @@
         "GEV"
       ],
       "thesisShort": "Baker Hughes' Industrial & Energy Technology segment supplies the turbomachinery at the heart of LNG liquefaction; record Q2 2026 IET orders of $7.1B doubled year over year at a 2.2x book-to-bill.",
-      "thesisLong": "Baker Hughes runs two distinct businesses: Oilfield Services & Equipment (OFSE) and Industrial & Energy Technology (IET), the turbomachinery, compressor and emissions franchise inherited from GE Oil & Gas. IET is what makes Baker Hughes structurally different from SLB and Halliburton — it supplies the aeroderivative gas turbines and centrifugal compressors that sit at the heart of LNG liquefaction trains.\n\nQ2 2026 was a record on the order line. Total orders reached $10.5 billion, up 49% year over year, with IET orders of $7.1 billion — double the prior year — at a 2.2x book-to-bill that lifted remaining performance obligations 19% to $37.1 billion. LNG equipment orders alone were $1.8 billion across three large projects, including liquefaction equipment for Cheniere's Sabine Pass Train 7 awarded through Bechtel, plus a boil-off gas re-liquefaction unit and fleet-wide gas turbine upgrades.\n\nThe second leg is newer and is why this entry is no longer purely an LNG story. Power Systems orders totalled $2.6 billion including 2.7 gigawatts of power generation, and management is targeting Horizon 2 IET orders above $45 billion — the same data center and grid demand that shows up in the GE Vernova and Eaton entries, arriving through a different supplier.\n\nOFSE revenue was $3.45 billion, up 7% sequentially, on total quarterly revenue of $6.7 billion, with 2026 revenue forecast around $27.35 billion and the Chart Industries integration under way. The backlog provides good visibility into 2027. Risks remain LNG project deferrals, IET margin volatility from lumpy order timing, and competition from Mitsubishi Heavy Industries and Siemens Energy in turbomachinery.",
+      "thesisLong": "Baker Hughes runs two distinct businesses: Oilfield Services & Equipment (OFSE) and Industrial & Energy Technology (IET), the turbomachinery, compressor and emissions franchise inherited from GE Oil & Gas. IET is what makes Baker Hughes structurally different from SLB and Halliburton — it supplies the aeroderivative gas turbines and centrifugal compressors that sit at the heart of LNG liquefaction trains.\n\nQ2 2026 was a record on the order line. Total orders reached $10.5 billion, up 49% year over year, with IET orders of $7.1 billion — double the prior year — at a 2.2x book-to-bill that lifted remaining performance obligations 19% to $37.1 billion. LNG equipment orders alone were $1.8 billion across three large projects, including liquefaction equipment for Cheniere's Sabine Pass Train 7 awarded through Bechtel, plus a boil-off gas re-liquefaction unit and fleet-wide gas turbine upgrades. A Venture Global award added six LNG blocks — twelve liquefaction modules, each built around two single mixed-refrigerant units and their compression trains, using Baker Hughes centrifugal compressor technology.\n\nThe second leg is newer and is why this entry is no longer purely an LNG story. Power Systems orders totalled $2.6 billion including 2.7 gigawatts of power generation, and management is targeting Horizon 2 IET orders above $45 billion — the same data center and grid demand that shows up in the GE Vernova and Eaton entries, arriving through a different supplier.\n\nOFSE revenue was $3.45 billion, up 7% sequentially, on total quarterly revenue of $6.7 billion, with 2026 revenue forecast around $27.35 billion. The all-cash Chart Industries acquisition has closed, and integration is now being measured against a $325 million cost synergy target and a stated aim of returning net debt to adjusted EBITDA to 1.0-1.5x within twenty-four months of closing. The backlog provides good visibility into 2027. Risks remain LNG project deferrals, IET margin volatility from lumpy order timing, and competition from Mitsubishi Heavy Industries and Siemens Energy in turbomachinery.",
       "chokepointMetrics": [
         {
           "label": "Q2 2026 IET orders",
@@ -534,22 +570,28 @@
         {
           "label": "Power Systems orders",
           "value": "$2.6B incl. 2.7 GW of power generation (Q2 2026)"
+        },
+        {
+          "label": "Chart Industries acquisition",
+          "value": "All-cash deal closed; $325M targeted cost synergies, net debt/adjusted EBITDA of 1.0-1.5x targeted within 24 months of close"
         }
       ],
       "catalysts": [
-        "Horizon 2 IET orders targeted above $45B",
+        "Horizon 2 (2026-2028) IET orders outlook raised above $45B",
+        "Venture Global award for six LNG blocks — twelve liquefaction modules and related compression trains",
         "Power Systems orders scaling with data center and grid demand",
-        "Chart Industries integration",
+        "Chart Industries integration against a $325M cost synergy target",
         "Backlog providing visibility into 2027"
       ],
       "risks": [
         "LNG project deferrals on capex inflation",
         "IET margin volatility from lumpy order timing",
         "Mitsubishi Heavy Industries and Siemens Energy competition in turbomachinery",
+        "Chart integration and deleveraging execution against the 1.0-1.5x net debt target",
         "OFSE exposure to the same Middle East disruption hitting peers"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "ep-fang-permian-pure-play",
@@ -563,7 +605,7 @@
         "OXY"
       ],
       "thesisShort": "Diamondback is the largest pure-play Permian operator and crossed one million BOE per day for the first time in Q2 2026, raising full-year oil guidance to 522+ MBO/d while holding capex at about $3.9 billion.",
-      "thesisLong": "Diamondback closed the $26 billion Endeavor Energy Resources acquisition in late 2024, doubling its Permian inventory and creating the largest pure-play operator in the basin.\n\nQ2 2026 was a milestone quarter. Oil production averaged 525 MBO/d, at the top of guidance, and total production of 1,018 MBOE/d pushed average output above one million BOE per day for the first time in company history. Management raised full-year guidance to 522-plus MBO/d and 1,000-plus MBOE/d while holding the cash capital budget at approximately $3.9 billion — the combination that matters most in this business, since production upside without capex upside is what free cash flow is made of.\n\nThe cash generation followed. Q2 net cash from operating activities was $3.6 billion with $2.3 billion of free cash flow, and per-share net cash from operations, free cash flow and oil production grew 49%, 81% and 21% respectively against Q2 2024. Q3 2026 cash capex is guided to $950-1,050 million.\n\nCapital return discipline remains the core of the equity story: a base-plus-variable dividend, with the variable portion scaling to oil prices, complemented by buybacks. Diamondback's break-even sits near the bottom of the US E&P cohort, which is what allows the variable component to survive a soft strip.\n\nRisks include Permian inventory quality degradation over time, sustained low oil prices pressuring the variable dividend, Waha basis blowouts from Permian gas takeaway constraints, and regulatory friction on water disposal and flaring.",
+      "thesisLong": "Diamondback closed the $26 billion Endeavor Energy Resources acquisition in late 2024, doubling its Permian inventory and creating the largest pure-play operator in the basin.\n\nQ2 2026 was a milestone quarter. Oil production averaged 525 MBO/d, at the top of guidance, and total production of 1,018 MBOE/d pushed average output above one million BOE per day for the first time in company history. Management raised full-year guidance to 522-plus MBO/d and 1,000-plus MBOE/d while holding the cash capital budget at approximately $3.9 billion — the combination that matters most in this business, since production upside without capex upside is what free cash flow is made of.\n\nThe cash generation followed. Q2 net cash from operating activities was $3.6 billion with $2.3 billion of free cash flow, and per-share net cash from operations, free cash flow and oil production grew 49%, 81% and 21% respectively against Q2 2024. Q3 2026 cash capex is guided to $950-1,050 million.\n\nCapital return discipline remains the core of the equity story: a base-plus-variable dividend, with the variable portion scaling to oil prices, complemented by buybacks. Diamondback's break-even sits near the bottom of the US E&P cohort, which is what allows the variable component to survive a soft strip.\n\nThe gas side of the basin has been the swing variable, and it has moved. Q2 2026 gas realizations were pressured to -$2.15 per Mcf by Permian takeaway constraints, with Waha approaching -$10 per Mcf during maintenance — but the basis turned positive in July as new takeaway capacity began coming online, and Waha cash traded around $2.10 on 14 August 2026 in a $1.80-$2.23 weekly range. The pipeline build that shows up in the Enbridge entry is what relieved it, which is the sort of cross-layer dependency this section exists to make visible.\n\nRisks include Permian inventory quality degradation over time, sustained low oil prices pressuring the variable dividend, renewed Waha volatility around maintenance windows, and regulatory friction on water disposal and flaring.",
       "chokepointMetrics": [
         {
           "label": "Q2 2026 production",
@@ -584,22 +626,31 @@
         {
           "label": "Q3 2026 cash capex guidance",
           "value": "$950-1,050M"
+        },
+        {
+          "label": "Waha gas basis",
+          "value": "Q2 2026 gas realizations -$2.15/Mcf; Waha turned positive in July as new takeaway came online and traded ~$2.10 cash on 14 August 2026"
+        },
+        {
+          "label": "Production costs",
+          "value": "$25.09 per BOE (2026)"
         }
       ],
       "catalysts": [
         "Full-year guidance raised to 522+ MBO/d with capex held at ~$3.9B",
+        "Second-half 2026 output forecast to grow a further 6-7%",
+        "Permian gas takeaway additions having flipped Waha back to positive pricing since July 2026",
         "Variable dividend scaling with oil prices",
-        "Barnett/Woodford de-risking opening additional inventory",
-        "Permian gas takeaway expansion narrowing Waha basis"
+        "Barnett/Woodford de-risking opening additional inventory"
       ],
       "risks": [
         "Sustained low WTI pressuring the variable dividend",
-        "Waha basis blowout from Permian gas oversupply",
+        "Waha basis still volatile — prices approached -$10/Mcf during Q2 2026 maintenance before recovering",
         "Long-term inventory quality degradation as Tier 1 depletes",
         "Permian regulatory friction (water disposal, flaring)"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "ep-eog-multi-basin-execution",
@@ -634,10 +685,19 @@
         {
           "label": "Cash operating costs",
           "value": "$10.57 per Boe (Q2 2026)"
+        },
+        {
+          "label": "Ohio Utica position",
+          "value": "1.1 million net acres; five rigs and three completion crews running through year-end 2026"
+        },
+        {
+          "label": "Gas price diversification",
+          "value": "Sales agreements linked to Brent, Japan Korea Marker and Henry Hub, with flexibility to source contract volumes from several basins"
         }
       ],
       "catalysts": [
         "Utica activity levels now more than triple pre-acquisition rates",
+        "Gas sales indexed to Brent and JKM rather than Henry Hub alone, diluting Appalachian basis exposure",
         "Utica and Dorado gas volumes into LNG and data center demand",
         "Further well-cost reduction below $600 per foot",
         "Continued high return of capital ($1.8B returned in Q2 2026)"
@@ -649,7 +709,7 @@
         "Capital intensity of maintaining growth across a larger asset base"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "uranium-leu-haleu-fuel-cycle",
@@ -662,8 +722,8 @@
         "DNN",
         "URA"
       ],
-      "thesisShort": "Centrus is the only US producer of High-Assay Low-Enriched Uranium, and it has now converted the $900M DOE award into a commercial build — signing an EPC contract with Fluor and growing contingent enrichment backlog to $3.0 billion.",
-      "thesisLong": "Centrus Energy operates the only US-licensed cascade producing High-Assay Low-Enriched Uranium (HALEU) — the 5-20% U-235 fuel required by the next generation of advanced reactors, including TerraPower Natrium, X-energy Xe-100, Kairos KP-FHR, Oklo Aurora and BWXT TRISO microreactors. The American Centrifuge Plant in Piketon, Ohio produced the nation's first HALEU under DOE contract.\n\nThe $900 million DOE HALEU enrichment award, signed in mid-2026, has since moved from award to execution. It carries options exercisable at DOE's discretion for up to an additional $170 million of HALEU production and delivery, and Centrus entered an EPC contract with Fluor in February 2026 for the commercial expansion and deployment of both LEU and HALEU production capability at Piketon. Contingent LEU and HALEU enrichment backlog has grown to $3.0 billion, and the company signed a first-of-a-kind large-scale commercial HALEU supply agreement that potentially includes prepayments.\n\nThe operational tells point the same direction. Piketon hiring guidance was raised to more than 175 net new employees for the full year, up from a prior goal of 100, and the first new centrifuge at Oak Ridge, Tennessee is expected to be complete by year-end 2026. Q2 2026 revenue was $176.1 million against $154.5 million a year earlier, with GAAP net income of $16.8 million and non-GAAP adjusted net income of $38.7 million.\n\nBeyond HALEU, Centrus is the largest US-based supplier of Low-Enriched Uranium for existing light-water reactors. The Russia uranium ban phases out US imports of Russian enriched uranium, which historically supplied roughly 20% of US needs through TENEX — a forced re-shoring that creates a multi-decade Western enrichment shortage.\n\nWhere this differs from the nuclear utility plays: Centrus is the bottleneck at the enrichment step. Without HALEU, no advanced reactor design reaches commercial operation. Risks remain heavy — dependence on DOE contract options, advanced reactor timelines slipping, Urenco USA HALEU plans, and the capital required for commercial-scale expansion.",
+      "thesisShort": "Centrus is the only US producer of High-Assay Low-Enriched Uranium, and it has now converted the $900M DOE award into a commercial build — total backlog reached $4.5B extending to 2040, with a definitive X-energy supply contract signed in August 2026.",
+      "thesisLong": "Centrus Energy operates the only US-licensed cascade producing High-Assay Low-Enriched Uranium (HALEU) — the 5-20% U-235 fuel required by the next generation of advanced reactors, including TerraPower Natrium, X-energy Xe-100, Kairos KP-FHR, Oklo Aurora and BWXT TRISO microreactors. The American Centrifuge Plant in Piketon, Ohio produced the nation's first HALEU under DOE contract.\n\nThe $900 million DOE HALEU enrichment award, signed in mid-2026, has since moved from award to execution. It carries options exercisable at DOE's discretion for up to an additional $170 million of HALEU production and delivery, and Centrus entered an EPC contract with Fluor in February 2026 for the commercial expansion and deployment of both LEU and HALEU production capability at Piketon, with commercial production expected to commence in 2029.\n\nThe order book is the clearest evidence the commercial phase is real. Total backlog reached $4.5 billion at 30 June 2026, up roughly $600 million in the quarter and now extending to 2040. Of that, the LEU segment carries about $3.7 billion — including $3.0 billion of contingent LEU and HALEU commitments supporting potential construction at Piketon, of which $2.4 billion sits under definitive agreements — with Technical Solutions holding the remaining $0.8 billion. On 6 August 2026 the first-of-a-kind commercial agreement took definitive form: Centrus signed a contract to supply X-energy with LEU and HALEU enrichment services, with deliveries from the American Centrifuge Plant beginning in 2030. Nearly two metric tons of HALEU UF6 have been produced for the government under the current operations contract.\n\nThe counterweight sits in the other segment. The FY 2027 DOE budget proposal does not include further funding for operating the HALEU cascade under the Technical Solutions contract — the government programme that produced the nation's first HALEU is not assured of continued funding even as the commercial book grows.\n\nThe operational tells point the same direction. Piketon hiring guidance was raised to more than 175 net new employees for the full year, up from a prior goal of 100, and the first new centrifuge at Oak Ridge, Tennessee is expected to be complete by year-end 2026. Q2 2026 revenue was $176.1 million against $154.5 million a year earlier, with GAAP net income of $16.8 million and non-GAAP adjusted net income of $38.7 million.\n\nBeyond HALEU, Centrus is the largest US-based supplier of Low-Enriched Uranium for existing light-water reactors. The Russia uranium ban phases out US imports of Russian enriched uranium, which historically supplied roughly 20% of US needs through TENEX — a forced re-shoring that creates a multi-decade Western enrichment shortage.\n\nWhere this differs from the nuclear utility plays: Centrus is the bottleneck at the enrichment step. Without HALEU, no advanced reactor design reaches commercial operation. Risks remain heavy — dependence on DOE contract options, advanced reactor timelines slipping, Urenco USA HALEU plans, and the capital required for commercial-scale expansion.",
       "chokepointMetrics": [
         {
           "label": "US-licensed HALEU producers",
@@ -674,33 +734,42 @@
           "value": "$900M, plus DOE options for up to $170M more (2026)"
         },
         {
-          "label": "Contingent LEU + HALEU enrichment backlog",
-          "value": "$3.0B (Q2 2026)"
+          "label": "Total backlog",
+          "value": "$4.5B at 30 June 2026, extending to 2040 — up ~$600M in the quarter"
+        },
+        {
+          "label": "Backlog composition",
+          "value": "LEU segment ~$3.7B, including $3.0B of contingent LEU and HALEU commitments ($2.4B under definitive agreements); Technical Solutions ~$0.8B"
+        },
+        {
+          "label": "HALEU produced to date",
+          "value": "Nearly 2 metric tons of HALEU UF6 for the government under the current operations contract (as of Q2 2026)"
         },
         {
           "label": "Piketon commercial expansion",
-          "value": "EPC contract signed with Fluor, February 2026"
+          "value": "EPC contract signed with Fluor, February 2026; commercial production expected to commence in 2029"
         },
         {
           "label": "Q2 2026 revenue",
-          "value": "$176.1M, vs $154.5M a year earlier"
+          "value": "$176.1M, +14% vs $154.5M a year earlier"
         }
       ],
       "catalysts": [
-        "Piketon commercial LEU and HALEU expansion under the Fluor EPC contract",
+        "X-energy definitive contract signed 6 August 2026 for LEU and HALEU enrichment services, with deliveries from Piketon beginning in 2030",
+        "Piketon commercial LEU and HALEU expansion under the Fluor EPC contract, targeting commercial production in 2029",
         "First new Oak Ridge centrifuge expected complete by year-end 2026",
         "Piketon hiring raised to more than 175 net new employees for 2026",
-        "First-of-a-kind large-scale commercial HALEU supply agreement, potentially with prepayments",
         "Russia uranium ban phaseout re-shoring Western enrichment demand"
       ],
       "risks": [
+        "FY 2027 DOE budget proposal contains no further funding for operating the HALEU cascade under the current Technical Solutions contract",
         "Execution risk on the commercial cascade transition",
-        "Advanced reactor commercialization timelines slipping",
+        "Advanced reactor commercialization timelines slipping against a 2030 first-delivery schedule",
         "Urenco USA breaking the HALEU monopoly",
         "Capital requirements for commercial-scale expansion"
       ],
       "featured": true,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "solar-fslr-domestic-module-monopoly",
@@ -714,7 +783,7 @@
         "SHLS"
       ],
       "thesisShort": "First Solar is the only US-headquartered solar module manufacturer at scale, running a roughly 57% gross margin in Q2 2026 on a 45.1 GW contracted backlog — though the backlog has drawn down from 50.1 GW at year-end 2025.",
-      "thesisLong": "First Solar is the largest US-headquartered solar module manufacturer and the only major Tier 1 player using cadmium telluride thin-film rather than silicon, with domestic capacity across Ohio, Alabama and Louisiana and a sixth US facility — a finishing plant in South Carolina — expected in the second half of 2026.\n\nQ2 2026 was profitable and orderly: net sales of approximately $1.06 billion, net income up 24% to $423 million, and gross margin expanding to about 57%. The company surpassed 100 gigawatts of cumulative module sales and reaffirmed full-year 2026 net sales guidance of $4.9-5.2 billion.\n\nThe backlog is the number to watch, and it is going the wrong way. Contracted backlog stood at 45.1 GW worth roughly $13.6 billion as of 30 June 2026, down from 50.1 GW at year-end 2025: First Solar sold 7.6 GW in the period but booked only 2.8 GW of new orders, with minimal de-bookings. A manufacturer shipping faster than it books is drawing down its forward visibility, and that is the honest counterweight to a 57% gross margin. The remaining backlog does extend through 2030.\n\nOne policy mechanic changed materially. Q2 2026 included no Section 45X tax credit discounts, reflecting a management decision not to sell tax credits in 2026 — so the tax-credit-transfer monetization route that previously converted 45X into near-term cash is not being used this year.\n\nThe bottleneck thesis remains policy-locked: domestic content adders and 45X credits create a cost position Chinese imports cannot match while the subsidies stand. Risks are the flip side — 45X repeal or modification, overseas facility underutilization, tariff whiplash, and utility-scale project cancellations.",
+      "thesisLong": "First Solar is the largest US-headquartered solar module manufacturer and the only major Tier 1 player using cadmium telluride thin-film rather than silicon, with domestic capacity across Ohio, Alabama and Louisiana and a sixth US facility — a finishing plant in South Carolina — expected in the second half of 2026.\n\nQ2 2026 was profitable and orderly: net sales of approximately $1.06 billion, net income up 24% to $423 million, and gross margin expanding to about 57%. The company surpassed 100 gigawatts of cumulative module sales and reaffirmed full-year 2026 net sales guidance of $4.9-5.2 billion.\n\nThe backlog is the number to watch, and it is going the wrong way. Contracted backlog stood at 45.1 GW worth roughly $13.6 billion as of 30 June 2026, down from 50.1 GW at year-end 2025: First Solar sold 7.6 GW in the period but booked only 2.8 GW of new orders, with minimal de-bookings. A manufacturer shipping faster than it books is drawing down its forward visibility, and that is the honest counterweight to a 57% gross margin. The remaining backlog does extend through 2030, and 41 of the 45.1 GW carry at least some domestic content requirement.\n\nThe reason for the booking slowdown is identifiable rather than mysterious, which matters for reading it. Management attributes it to customers delaying decisions pending clarity on Section 232 tariff policy — a decision that could land in August, September or later. That makes the drawdown a timing question tied to a specific pending ruling rather than evidence of lost competitive position, though a slip pushes the resolution further out.\n\nOne policy mechanic changed materially. Q2 2026 included no Section 45X tax credit discounts, reflecting a management decision not to sell tax credits in 2026 — so the tax-credit-transfer monetization route that previously converted 45X into near-term cash is not being used this year. The quarter did include an $89 million tariff recovery under the International Emergency Economic Powers Act, while higher non-recoverable domestic freight costs are expected to pressure second-half margins.\n\nThe bottleneck thesis remains policy-locked: domestic content adders and 45X credits create a cost position Chinese imports cannot match while the subsidies stand. Risks are the flip side — 45X repeal or modification, overseas facility underutilization, tariff whiplash, and utility-scale project cancellations.",
       "chokepointMetrics": [
         {
           "label": "Contracted backlog",
@@ -735,22 +804,31 @@
         {
           "label": "Section 45X monetization",
           "value": "No tax credit sales planned in 2026 (management decision)"
+        },
+        {
+          "label": "Domestic content requirement in backlog",
+          "value": "41 of the 45.1 GW booked require at least some domestic content (30 June 2026)"
+        },
+        {
+          "label": "Section 232 decision",
+          "value": "Pending as of Q2 2026 — customers delaying booking decisions until the tariff outcome is known"
         }
       ],
       "catalysts": [
+        "Section 232 tariff clarity potentially releasing the bookings customers have been deferring",
         "South Carolina finishing facility opening in 2H 2026",
         "Backlog contracted through 2030 at fixed pricing",
-        "Domestic content adder driving utility-scale demand",
-        "Cumulative module sales past 100 GW"
+        "Domestic content adder driving utility-scale demand, with 41 of 45.1 GW booked carrying a domestic content requirement"
       ],
       "risks": [
         "Backlog drawing down — 2.8 GW booked against 7.6 GW sold in Q2 2026",
+        "Customers deferring bookings pending the Section 232 tariff decision, which may slip beyond 2026",
+        "Higher non-recoverable domestic freight costs pressuring second-half 2026 margins",
         "Section 45X repeal or modification",
-        "Tariff and trade policy whiplash on Southeast Asia imports",
         "Utility-scale project cancellations in a high-rate environment"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "inverters-enph-microinverter-recovery",
@@ -764,7 +842,7 @@
         "FSLR"
       ],
       "thesisShort": "Enphase leads the US residential microinverter market, but the Section 25D residential credit has expired and US sell-through fell 34% year over year — Q2 2026 growth came from Europe, where revenue rose about 35%.",
-      "thesisLong": "Enphase Energy is the dominant US residential solar microinverter manufacturer, sharing a duopoly with SolarEdge. Its microinverter architecture — one inverter per panel — is preferred for safety, reliability and module-level monitoring versus the optimizer-plus-string approach.\n\nThe policy backdrop has changed decisively, and it is the single most important fact in this entry. The Section 25D residential tax credit has expired. US residential sell-through was down 34% year over year in Q2 2026 under the combination of high interest rates and that expiration, and analysts forecast an 18% drop in US residential installations for 2026. The prior framing of this entry — a cyclical trough with the IRA underwriting recovery — no longer holds: the subsidy that underwrote residential demand is gone.\n\nWhat is working is geographic. Q2 2026 revenue was $291.9 million, up 3% sequentially, with US revenue down roughly 3% sequentially and European revenue up about 35%. The company shipped 1.59 million microinverters and 113.8 megawatt-hours of batteries and generated $25.9 million of free cash flow — profitable through the downturn, but growing outside its home market.\n\nThe storage attach rate remains the structural offset. Time-of-use rate proliferation and grid reliability concerns push residential customers toward solar-plus-storage economics that do not depend on a federal credit, and battery megawatt-hours are the line where that shows up.\n\nRisks are substantial: further US residential contraction post-25D, competition from Tesla's integrated ecosystem, lower-cost Chinese inverter brands entering via channel partners, and tariff pressure on margins.",
+      "thesisLong": "Enphase Energy is the dominant US residential solar microinverter manufacturer, sharing a duopoly with SolarEdge. Its microinverter architecture — one inverter per panel — is preferred for safety, reliability and module-level monitoring versus the optimizer-plus-string approach.\n\nThe policy backdrop has changed decisively, and it is the single most important fact in this entry. The Section 25D residential clean energy credit — worth 30% of installation cost — expired on 31 December 2025 under the One Big Beautiful Bill Act. US residential sell-through was down 34% year over year in Q2 2026 under the combination of high interest rates and that expiration, and SEIA with Wood Mackenzie forecast an 18% drop in US residential installations for 2026, with Enphase itself guiding to roughly a 22% decline and Sunrun to 25%. The prior framing of this entry — a cyclical trough with the IRA underwriting recovery — no longer holds: the subsidy that underwrote residential demand is gone.\n\nWhat is working is geographic. Q2 2026 revenue was $291.9 million, up 3% sequentially, with US revenue down roughly 3% sequentially and European revenue up about 35%. The company shipped 1.59 million microinverters and 113.8 megawatt-hours of batteries and generated $25.9 million of free cash flow — profitable through the downturn, but growing outside its home market.\n\nThe storage attach rate remains the structural offset. Time-of-use rate proliferation and grid reliability concerns push residential customers toward solar-plus-storage economics that do not depend on a federal credit, and battery megawatt-hours are the line where that shows up.\n\nRisks are substantial: further US residential contraction post-25D, competition from Tesla's integrated ecosystem, lower-cost Chinese inverter brands entering via channel partners, and tariff pressure on margins.",
       "chokepointMetrics": [
         {
           "label": "US residential sell-through",
@@ -772,7 +850,7 @@
         },
         {
           "label": "Section 25D residential credit",
-          "value": "Expired — no longer supporting US residential demand"
+          "value": "Expired 31 December 2025 under the OBBBA — no longer supporting US residential demand"
         },
         {
           "label": "Q2 2026 revenue",
@@ -784,7 +862,7 @@
         },
         {
           "label": "2026 US residential installations",
-          "value": "Forecast to fall ~18% (analyst consensus)"
+          "value": "Forecast to fall ~18% (SEIA / Wood Mackenzie); Enphase itself guiding to roughly -22%"
         }
       ],
       "catalysts": [
@@ -794,13 +872,13 @@
         "Commercial and small distributed-generation products less exposed to residential policy"
       ],
       "risks": [
-        "Section 25D expiration removing the federal support underpinning US residential demand",
-        "US residential installations forecast down ~18% in 2026",
+        "Section 25D expired 31 December 2025 under the OBBBA, removing the 30% federal credit that underpinned US residential demand",
+        "US residential installations forecast down ~18% in 2026 (SEIA / Wood Mackenzie), with Enphase guiding to roughly -22%",
         "Tesla integrated solar-plus-storage bundles taking share",
         "Chinese inverter brands entering the US and compressing pricing"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "inverters-sedg-manufacturing-pivot",
@@ -814,7 +892,7 @@
         "NXT"
       ],
       "thesisShort": "SolarEdge returned to non-GAAP operating profit in Q2 2026 for the first time in nearly three years, on $346M of revenue and a Nexis ramp that exceeded $60M of three-phase shipments in Europe.",
-      "thesisLong": "SolarEdge is the second pillar of the residential inverter duopoly, pairing string inverters with module-level power optimizers. The company entered a deep crisis across 2024-2025 on European inventory destocking, residential rate pressure and a since-divested e-mobility misstep.\n\nQ2 2026 is the first quarter that substantiates the turnaround rather than describing it. Revenue was $346 million, up 20% year over year, non-GAAP gross margin expanded to 28.6%, and the company posted non-GAAP operating income of $10.2 million — its first non-GAAP operating profit in nearly three years. For a company whose entire bear case was cash burn, crossing back into operating profitability is the milestone that matters.\n\nNexis, the next-generation inverter family, is carrying it. Three-phase Nexis shipments exceeded $60 million in Europe during the quarter, and retrofit upsell activity generated more than $20 million, driven by homeowner demand for storage additions in the Netherlands and the DACH region. A US volume rollout is planned for the second half of 2026, supported by approvals across major financing platforms including TPO and prepaid PPA products — which matters more than usual now that the US residential market has lost the Section 25D credit and third-party ownership structures carry more of the demand.\n\nGuidance tempers the enthusiasm. Q3 2026 revenue is guided to $310-340 million with non-GAAP gross margin of 22-26% and operating expenses of $86-91 million — a sequential step down at both the revenue and margin line, with management noting the range excludes any significant pull-forward.\n\nRisks remain execution-shaped: US Nexis adoption against Enphase, Tesla ecosystem displacement, and sustaining profitability through a guided-down quarter.",
+      "thesisLong": "SolarEdge is the second pillar of the residential inverter duopoly, pairing string inverters with module-level power optimizers. The company entered a deep crisis across 2024-2025 on European inventory destocking, residential rate pressure and a since-divested e-mobility misstep.\n\nQ2 2026 is the first quarter that substantiates the turnaround rather than describing it. Revenue was $346 million, up 20% year over year, non-GAAP gross margin expanded to 28.6%, and the company posted non-GAAP operating income of $10.2 million — its first non-GAAP operating profit in nearly three years. For a company whose entire bear case was cash burn, crossing back into operating profitability is the milestone that matters.\n\nNexis, the next-generation inverter family, is carrying it. Three-phase Nexis shipments exceeded $60 million in Europe during the quarter, and retrofit upsell activity generated more than $20 million, driven by homeowner demand for storage additions in the Netherlands and the DACH region. A US volume rollout is planned for the second half of 2026, supported by approvals across major financing platforms including TPO and prepaid PPA products — which matters more than usual now that the US residential market has lost the Section 25D credit, which expired on 31 December 2025 and third-party ownership structures carry more of the demand.\n\nGuidance tempers the enthusiasm. Q3 2026 revenue is guided to $310-340 million with non-GAAP gross margin of 22-26% and operating expenses of $86-91 million — a sequential step down at both the revenue and margin line, with management noting the range excludes any significant pull-forward.\n\nRisks remain execution-shaped: US Nexis adoption against Enphase, Tesla ecosystem displacement, and sustaining profitability through a guided-down quarter.",
       "chokepointMetrics": [
         {
           "label": "Q2 2026 revenue",
@@ -835,22 +913,27 @@
         {
           "label": "Q3 2026 guidance",
           "value": "$310-340M revenue, 22-26% non-GAAP gross margin"
+        },
+        {
+          "label": "US residential market backdrop",
+          "value": "Section 25D expired 31 December 2025; SolarEdge guiding to roughly a 20% US decline in 2026"
         }
       ],
       "catalysts": [
         "US volume rollout of the Nexis platform in 2H 2026",
         "Nexis approvals across TPO and prepaid PPA financing platforms",
         "Retrofit storage upsell in the Netherlands and DACH region",
-        "Sustaining non-GAAP operating profitability beyond the first quarter of it"
+        "Sustaining non-GAAP operating profitability beyond the first quarter of it",
+        "FEOC-compliant domestic battery production lines as compliance requirements tighten"
       ],
       "risks": [
         "Q3 2026 guided down sequentially on both revenue and gross margin",
-        "US residential market contraction after the Section 25D expiration",
+        "US residential market contraction after the Section 25D expiration on 31 December 2025, with SolarEdge guiding to roughly -20%",
         "Nexis adoption in the US against Enphase",
         "Tesla ecosystem displacement in residential storage"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "coal-btu-met-coal-centurion",
@@ -863,12 +946,12 @@
         "AMR",
         "ARLP"
       ],
-      "thesisShort": "Peabody is pivoting to Australian metallurgical coal via Centurion, but the ramp is still incomplete: Q2 2026 adjusted EBITDA fell to $24 million and the mine is working through a roof-control zone.",
-      "thesisLong": "Peabody Energy is the largest US coal producer by revenue, with operations in the Powder River Basin, Illinois Basin and Australia. The strategy is a decisive pivot away from secularly declining US thermal coal toward seaborne metallurgical coal via the Centurion mine, an Australian premium hard coking coal asset.\n\nQ2 2026 shows the cost of executing that pivot mid-stream. Revenue rose to $1,003.2 million from $890.1 million a year earlier, but Peabody reported a net loss attributable to common stockholders of $90.6 million, or $0.74 per diluted share, against a $27.6 million loss a year earlier. Adjusted EBITDA fell to $24 million from $93.3 million. The seaborne thermal segment carried the quarter with more than $52 million of adjusted EBITDA at a 23% margin on 3.0 million tons shipped at $52-57 per ton of cost.\n\nCenturion remains the swing factor and it is not resolved. The mine cleared its shield-alignment problem but is still working through a roof-control zone, with 1.5 to 2 million tons of second-half 2026 sales targeted as production improves. Seaborne metallurgical shipments of 1.9-2.1 million tons carry costs of $130-140 per ton. Management expects a stronger second half as Centurion ramps and US thermal volumes recover — which is the same expectation that has been deferred through several quarters.\n\nThe demand-side case is intact. Premium hard coking coal bid at $241 per wet metric tonne for near-term August 2026 delivery, and Chinese steelmakers account for roughly 45% of premium HCC spot transactions, so the benchmark is set largely by a single buyer bloc. Indian and Southeast Asian steel demand is the growth vector; Chinese demand is the volatility.",
+      "thesisShort": "Peabody is pivoting to Australian metallurgical coal via Centurion, where the longwall issues that hit Q2 2026 have largely been resolved — but the 2026 sales target is now 2.5 Mt with the next longwall move pushed into early 2027.",
+      "thesisLong": "Peabody Energy is the largest US coal producer by revenue, with operations in the Powder River Basin, Illinois Basin and Australia. The strategy is a decisive pivot away from secularly declining US thermal coal toward seaborne metallurgical coal via the Centurion mine, an Australian premium hard coking coal asset.\n\nQ2 2026 shows the cost of executing that pivot mid-stream. Revenue rose to $1,003.2 million from $890.1 million a year earlier, but Peabody reported a net loss attributable to common stockholders of $90.6 million, or $0.74 per diluted share, against a $27.6 million loss a year earlier. Adjusted EBITDA fell to $24 million from $93.3 million. The seaborne thermal segment carried the quarter with more than $52 million of adjusted EBITDA at a 23% margin on 3.0 million tons shipped at $52-57 per ton of cost.\n\nCenturion remains the swing factor and it is not resolved. The picture improved materially over the summer. At an 11 August 2026 investor tour of the mine, Peabody said the shield racking caused by the slow start and roof-control issues is fully addressed, with production increasing through July and early August and operations on pace for third-quarter targets; the remaining roof-control work is limited to a rock faulting zone spanning about 20% of the longwall face. The trade-off is schedule: the 2026 Centurion sales target is now 2.5 million tons, and the next longwall move has shifted into early 2027. Seaborne metallurgical shipments of 1.9-2.1 million tons carry costs of $130-140 per ton. Management expects a stronger second half as Centurion ramps and US thermal volumes recover — which is the same expectation that has been deferred through several quarters.\n\nThe demand-side case is intact. Pricing has softened, though. Premium hard coking coal assessed around $214.90 per wet metric tonne FOB Australia on 7 August 2026, about 10% below the 10 July level, after a July that averaged $233.08 in a $226-242 range. Chinese steelmakers account for roughly 45% of premium HCC spot transactions, so the benchmark is set largely by a single buyer bloc. Indian and Southeast Asian steel demand is the growth vector; Chinese demand is the volatility.\n\nOne further development belongs in the record: a securities class action has been filed against Peabody alleging investor harm in connection with Centurion, with a lead plaintiff deadline in late August 2026. The litigation is at its earliest stage and no findings have been made.",
       "chokepointMetrics": [
         {
           "label": "Premium hard coking coal",
-          "value": "$241/wmt bid for near-term August 2026 delivery"
+          "value": "~$214.90/wmt FOB Australia at 7 August 2026, down about 10% from 10 July; July 2026 averaged $233.08 in a $226-242 range"
         },
         {
           "label": "Q2 2026 adjusted EBITDA",
@@ -880,7 +963,11 @@
         },
         {
           "label": "Centurion status",
-          "value": "Shield-alignment resolved; still working a roof-control zone (Q2 2026)"
+          "value": "Shield racking fully addressed; roof control now limited to a rock faulting zone spanning ~20% of the longwall face, being worked through in Q3 2026"
+        },
+        {
+          "label": "Centurion 2026 sales target",
+          "value": "2.5 million tons, with the next longwall move shifted into early 2027"
         },
         {
           "label": "Seaborne met cost",
@@ -888,19 +975,21 @@
         }
       ],
       "catalysts": [
-        "Centurion targeting 1.5-2.0 million tons of second-half 2026 sales",
-        "Stronger 2H 2026 expected as Centurion ramps and US thermal volumes recover",
-        "Premium HCC bid at $241/wmt for near-term delivery",
-        "Indian and Southeast Asian steel demand growth"
+        "Centurion targeting 2.5 million tons of 2026 sales, with production rising through July and early August and on pace for Q3 targets",
+        "Mechanical and roof-control issues that stalled the ramp substantially resolved as of the 11 August 2026 mine tour",
+        "Indian and Southeast Asian steel demand growth",
+        "US thermal volumes recovering into the second half"
       ],
       "risks": [
-        "Centurion still working through a roof-control zone after the shield-alignment fix",
+        "Securities class action filed over Centurion disclosures, with an August 2026 lead plaintiff deadline",
+        "Next longwall move pushed into early 2027, deferring the full-rate ramp again",
+        "Premium HCC prices softening — down roughly 10% between 10 July and 7 August 2026",
         "Adjusted EBITDA down roughly three-quarters year over year in Q2 2026",
         "Chinese steelmakers set ~45% of premium HCC spot transactions — concentrated price risk",
         "Competing Australian met coal supply additions"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "grid-nee-utility-renewables-platform",
@@ -914,7 +1003,7 @@
         "ETN"
       ],
       "thesisShort": "NextEra pairs Florida Power & Light with the largest US renewables developer, holds a record 35.1 GW Energy Resources backlog, and in May 2026 agreed an all-stock combination with Dominion Energy valued at roughly $67 billion.",
-      "thesisLong": "NextEra Energy is the parent of two complementary platforms: Florida Power & Light, the largest US regulated electric utility by retail sales, and NextEra Energy Resources, the largest developer of wind, solar and battery storage in North America.\n\nThe defining 2026 development is structural rather than operational. On 18 May 2026, NextEra and Dominion Energy agreed to combine in an all-stock transaction, with Dominion shareholders receiving 0.8138 NextEra shares per Dominion share, leaving NextEra and Dominion holders with roughly 74.5% and 25.5% of the combined company. The deal values Dominion at approximately $66.8 billion and would create a combined enterprise of roughly $420 billion — described by both companies as the world's largest regulated electric utility business. Regulatory applications were filed on 15 July 2026 with the Virginia SCC, the North Carolina Utilities Commission, the South Carolina PSC, FERC and the NRC. Everything else in this entry is now subject to that approval process.\n\nThe underlying businesses continue to compound. Q2 2026 adjusted earnings were $1.15 per share, and the Energy Resources backlog reached a record 35.1 gigawatts after adding 3.6 GW during the quarter, including 2 GW of battery storage. The standalone and co-located storage pipeline exceeds 110 gigawatts.\n\nFlorida is where the AI demand lands. FPL raised its large-load expectation to 8 gigawatts by 2032, up from 6 gigawatts, with 21 gigawatts of interest on the table and 12 gigawatts in advanced talks. FPL net income rose 11% to $1.41 billion and the utility added more than 90,000 customers in the quarter.\n\nRisks now include merger approval and integration risk across five regulators, alongside federal subsidy modification affecting Energy Resources economics, rate sensitivity in a dividend-led equity, and Florida hurricane exposure.",
+      "thesisLong": "NextEra Energy is the parent of two complementary platforms: Florida Power & Light, the largest US regulated electric utility by retail sales, and NextEra Energy Resources, the largest developer of wind, solar and battery storage in North America.\n\nThe defining 2026 development is structural rather than operational. On 18 May 2026, NextEra and Dominion Energy agreed to combine in an all-stock transaction, with Dominion shareholders receiving 0.8138 NextEra shares per Dominion share, leaving NextEra and Dominion holders with roughly 74.5% and 25.5% of the combined company. The deal values Dominion at approximately $66.8 billion and would create a combined enterprise of roughly $420 billion — described by both companies as the world's largest regulated electric utility business. Regulatory applications were filed on 15 July 2026 with the Virginia SCC, the North Carolina Utilities Commission, the South Carolina PSC, FERC and the NRC, accompanied by a proposal for $2.25 billion of aggregate customer rate credits allocated by usage and payable over the two years following closing. The procedural calendar is now set: South Carolina intervention closes on 10 September 2026, Virginia evidentiary hearings begin on 17 November 2026, the South Carolina hearing follows on 8 December 2026 against a 29 January 2027 final order deadline, and the parties expect to close in the second half of 2027. Everything else in this entry is subject to that process.\n\nThe underlying businesses continue to compound. Q2 2026 adjusted earnings were $1.15 per share, and the Energy Resources backlog reached a record 35.1 gigawatts after adding 3.6 GW during the quarter, including 2 GW of battery storage. The standalone and co-located storage pipeline exceeds 110 gigawatts.\n\nFlorida is where the AI demand lands. FPL raised its large-load expectation to 8 gigawatts by 2032, up from 6 gigawatts, with 21 gigawatts of interest on the table and 12 gigawatts in advanced talks. FPL net income rose 11% to $1.41 billion and the utility added more than 90,000 customers in the quarter.\n\nRisks now include merger approval and integration risk across five regulators, alongside federal subsidy modification affecting Energy Resources economics, rate sensitivity in a dividend-led equity, and Florida hurricane exposure.",
       "chokepointMetrics": [
         {
           "label": "Dominion Energy combination",
@@ -922,7 +1011,7 @@
         },
         {
           "label": "Merger regulatory filings",
-          "value": "Submitted 15 July 2026 to Virginia SCC, NCUC, South Carolina PSC, FERC and NRC"
+          "value": "Filed 15 July 2026 with the Virginia SCC, NCUC, South Carolina PSC, FERC and NRC; Virginia evidentiary hearings begin 17 November 2026, South Carolina hearing 8 December 2026"
         },
         {
           "label": "Energy Resources backlog",
@@ -935,22 +1024,31 @@
         {
           "label": "Battery storage pipeline",
           "value": ">110 GW"
+        },
+        {
+          "label": "Merger close timing",
+          "value": "Expected in the second half of 2027; South Carolina final order deadline 29 January 2027"
+        },
+        {
+          "label": "Proposed customer rate credits",
+          "value": "$2.25B aggregate, allocated by usage and payable over two years following closing"
         }
       ],
       "catalysts": [
-        "Dominion Energy merger approvals across five regulators",
+        "Virginia evidentiary hearings opening 17 November 2026 and the South Carolina hearing on 8 December 2026",
+        "$2.25B of proposed customer rate credits supporting the regulatory case",
         "FPL large-load target raised to 8 GW by 2032",
         "Energy Resources backlog compounding past 35.1 GW",
         "Battery storage pipeline converting into contracted backlog"
       ],
       "risks": [
-        "Dominion merger approval and integration risk across five regulatory bodies",
+        "Merger approval risk across five regulatory bodies on a timetable running into 2027, with closing expected only in 2H 2027",
         "Federal subsidy modification hurting Energy Resources project economics",
         "Higher long rates compressing a dividend-led utility multiple",
         "Florida hurricane exposure on the FPL footprint"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "grid-etn-electrical-bottleneck",
@@ -963,8 +1061,8 @@
         "GEV",
         "PWR"
       ],
-      "thesisShort": "Eaton sits at the tightest point in the grid build: total electrical backlog rose 43% year over year in Q2 2026 while large power transformer lead times run about 128 weeks and the largest high-voltage units stretch toward four years.",
-      "thesisLong": "Eaton is one of the most direct industrial beneficiaries of electrification, and the constraint it sits on is physical rather than commercial.\n\nQ2 2026 quantified the demand. Total electrical backlog was up 43% year over year, total company backlog at the end of June was up 33% against June 2025, and the twelve-month rolling average of Electrical Americas orders rose 41% organically. Data center organic revenue grew 65% against an underlying market rate of about 23%, and data center orders rose roughly 240% year over year. Eaton raised organic growth guidance alongside the print.\n\nThe acute bottleneck is transformers. Power transformer lead times run around 128 weeks in 2026, generator step-up transformers around 144 weeks, and Wood Mackenzie's 2026 read puts substation units above 160 weeks — roughly three years — with the largest high-voltage units reaching up to four. The root cause is upstream of the transformer builders: Cleveland-Cliffs is the sole domestic producer of the grain-oriented electrical steel every transformer core requires, and only ten to twelve manufacturers worldwide make high-grade GOES. Switchgear is similarly constrained.\n\nEaton is adding capacity against it, including a $340 million three-phase transformer facility in Jonesville, South Carolina, with production and hiring beginning in 2027. That timing is the point: even a committed capacity response arrives years after the order.\n\nThis entry deliberately overlaps with the AI sector's power infrastructure layer. The angle here is the broader grid bottleneck affecting every energy capacity addition — utility-scale solar and wind, transmission upgrades, industrial electrification — not only AI data centers. The announced US data center pipeline of 307 gigawatts is roughly fifteen years of construction at the 2025 build rate, and most of Eaton's data center backlog delivers in 2028 and beyond.\n\nRisks include order normalization after the 2025-26 surge, copper and steel cost inflation, and competition from Hitachi Energy, Siemens Energy and GE Vernova.",
+      "thesisShort": "Eaton sits at the tightest point in the grid build: total electrical backlog rose 43% year over year in Q2 2026, against transformer lead times of roughly 128 weeks and specialized high-voltage orders stretching toward four years.",
+      "thesisLong": "Eaton is one of the most direct industrial beneficiaries of electrification, and the constraint it sits on is physical rather than commercial.\n\nQ2 2026 quantified the demand. Total electrical backlog was up 43% year over year, total company backlog at the end of June was up 33% against June 2025, and the twelve-month rolling average of Electrical Americas orders rose 41% organically. Data center organic revenue grew 65% against an underlying market rate of about 23%, and data center orders rose roughly 240% year over year. Eaton raised organic growth guidance alongside the print.\n\nThe acute bottleneck is transformers. Wood Mackenzie’s transformer supply survey puts power transformer lead times at roughly 128 weeks and generator step-up units at about 144 weeks — near two and a half years — with some specialized orders extending to four. The same work models a national supply deficit of about 30% for power transformers, narrowing below 10% only by 2030, against demand growth since 2019 of 274% for GSUs and 116% for substation power transformers. The root cause is upstream of the transformer builders: Cleveland-Cliffs is the sole domestic producer of the grain-oriented electrical steel every transformer core requires, only ten to twelve manufacturers worldwide make high-grade GOES, and GOES prices have risen nearly 100% since January 2020. Switchgear is similarly constrained.\n\nEaton is adding capacity against it, including a $340 million three-phase transformer facility in Jonesville, South Carolina, with production and hiring beginning in 2027. That timing is the point: even a committed capacity response arrives years after the order.\n\nThis entry deliberately overlaps with the AI sector's power infrastructure layer. The angle here is the broader grid bottleneck affecting every energy capacity addition — utility-scale solar and wind, transmission upgrades, industrial electrification — not only AI data centers. The announced US data center pipeline of 307 gigawatts is roughly fifteen years of construction at the 2025 build rate, and most of Eaton's data center backlog delivers in 2028 and beyond.\n\nRisks include order normalization after the 2025-26 surge, copper and steel cost inflation, and competition from Hitachi Energy, Siemens Energy and GE Vernova.",
       "chokepointMetrics": [
         {
           "label": "Total electrical backlog",
@@ -976,15 +1074,19 @@
         },
         {
           "label": "Large power transformer lead times",
-          "value": "~128 weeks in 2026; GSUs ~144 weeks; substation units >160 weeks"
+          "value": "~128 weeks for power transformers and ~144 weeks for GSUs per Wood Mackenzie’s transformer supply survey, with some specialized orders extending to four years"
         },
         {
           "label": "Grain-oriented electrical steel",
-          "value": "Cleveland-Cliffs is the sole US producer; 10-12 high-grade GOES makers worldwide"
+          "value": "Cleveland-Cliffs is the sole US producer; 10-12 high-grade GOES makers worldwide; GOES prices up nearly 100% since January 2020"
         },
         {
           "label": "Eaton capacity response",
           "value": "$340M three-phase transformer plant in Jonesville, SC — production begins 2027"
+        },
+        {
+          "label": "Modelled supply deficit",
+          "value": "Wood Mackenzie models a ~30% national power transformer deficit, narrowing below 10% only by 2030"
         }
       ],
       "catalysts": [
@@ -995,12 +1097,12 @@
       ],
       "risks": [
         "Data center order normalization after the 2025-26 surge",
-        "Grain-oriented electrical steel supply gating any capacity response",
+        "Grain-oriented electrical steel supply gating any capacity response, with GOES prices up nearly 100% since January 2020",
         "Copper and steel cost inflation compressing margins",
         "Hitachi Energy, Siemens Energy and GE Vernova competing for transformer share"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     }
   ]
 }
