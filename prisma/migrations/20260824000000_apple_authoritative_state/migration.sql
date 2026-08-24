@@ -51,7 +51,6 @@ CREATE TABLE "AppleSubscription" (
     "autoRenewProductId" TEXT,
     "appAccountToken" TEXT,
     "currentTransactionId" TEXT,
-    "requestedGeneration" INTEGER NOT NULL DEFAULT 0,
     "appliedGeneration" INTEGER NOT NULL DEFAULT 0,
     "lastReconciledAt" DATETIME,
     "snapshotSignedDate" DATETIME,

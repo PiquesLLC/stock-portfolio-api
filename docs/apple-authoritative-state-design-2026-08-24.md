@@ -25,6 +25,13 @@ reflect current state, and directs you to Get All Subscription Statuses for curr
   (§6); **`environment` persisted everywhere and Sandbox isolated from Production
   entitlement** (§7); revocation gains `revocationType`/`revocationPercentage` (§8); billing
   predicates renamed and split (§9); `appAccountToken` designed in (§10).
+- **r3 persistence correction (schema review, #33)** — the requested-generation
+  anchor moved from `AppleSubscription.requestedGeneration` to
+  `AppleReconciliation.targetGeneration`. The frozen intake flow bumps a generation
+  *before* reconciliation, but `AppleSubscription` requires `productId`/`plan`/`status`,
+  which exist only once Apple HAS been reconciled — so on first contact intake had no
+  row to anchor to, and no honest way to make one. Authority model unchanged; this
+  removes a contradiction between it and the schema. See §6.
 - **r3 corrections (freeze review)** — `mayAppleCollect` now includes `grace`;
   `REFUND_PRORATED` settled rather than deferred; `REFUND_REVERSED` reclassified in §4 as
   *not* a negative fact; retention wording softened now that `appAccountToken` is persisted.
@@ -179,8 +186,8 @@ model AppleSubscription {
   // the projection must be recomputed.
   currentTransactionId  String?
 
-  // Serialization state — section 6. Integers, not timestamps.
-  requestedGeneration   Int       @default(0)
+  // The generation whose reconciliation produced this snapshot. The REQUESTED
+  // counter lives on AppleReconciliation, not here — see section 6.
   appliedGeneration     Int       @default(0)
 
   // Observability / audit ONLY. Never an ordering input.
@@ -200,6 +207,11 @@ model AppleReconciliation {
   environment           String
   originalTransactionId String
 
+  /// The AUTHORITATIVE requested-generation anchor (section 6). It lives here
+  /// because this row can exist on first contact, before any reconciled
+  /// subscription does. Rows are NEVER deleted, even when done: the counter is
+  /// monotonic per (environment, originalTransactionId), and deleting a finished
+  /// row would reset it to 1 and let a stale in-flight worker's CAS match.
   targetGeneration      Int
   reconcileState        String    // pending | running | failed | done
   attemptCount          Int       @default(0)
@@ -260,21 +272,44 @@ The mechanism is a **persisted generation**:
 
 ```
 intake (same transaction as the AppleNotification write):
-    requestedGeneration += 1              → say 42
-    AppleReconciliation.targetGeneration = 42
+    upsert AppleReconciliation on (environment, originalTransactionId):
+        no row   → targetGeneration = 1
+        existing → targetGeneration += 1, reconcileState = 'pending'
 
 worker:
-    claim lease; read targetGeneration G
+    claim the lease; capture targetGeneration as G
     call Get All Subscription Statuses
 
-    UPDATE AppleSubscription
-       SET <snapshot>, appliedGeneration = G, lastReconciledAt = now()
-     WHERE environment = ? AND originalTransactionId = ?
-       AND requestedGeneration = G          ← the CAS
+    one DB transaction:
+        UPDATE AppleReconciliation
+           SET reconcileState = 'done'
+         WHERE environment = ? AND originalTransactionId = ?
+           AND targetGeneration = G                       ← the CAS
+           AND leaseOwner = ?                             ← and we still hold it
 
-    count == 0  → a newer notification bumped the generation while we were in flight.
-                  Discard this snapshot entirely and requeue; the newer generation wins.
+        count == 0 → a newer notification bumped the generation, or the lease was
+                     reclaimed, while we were in flight. Discard this snapshot
+                     entirely; the newer generation reconciles.
+
+        count == 1 → upsert the AppleSubscription snapshot,
+                     appliedGeneration = G, lastReconciledAt = now()
 ```
+
+**Why the anchor lives on `AppleReconciliation` and not on the subscription.** Apple can send
+the first notification for a subscription before any reconciled snapshot exists — a server
+notification is independent of the client activation flow. `AppleSubscription` requires
+`productId`, `plan` and `status` (now CHECK-constrained) precisely because a row there means
+*Apple has been reconciled*. Anchoring the requested counter on that table would leave intake
+three bad options on first contact: trust the notification payload (breaks the authority
+model), invent placeholder values (destroys the meaning of the snapshot), or defer row
+creation until reconciliation (leaving the first reconciliation with nothing to CAS against).
+`AppleReconciliation` has the right identity — `(environment, originalTransactionId)` — and
+can exist before a reconciled subscription does, so it carries the counter and the subscription
+row simply does not exist until Apple has actually been consulted.
+
+One consequence is load-bearing: **`AppleReconciliation` rows are never deleted**, including
+when `done`. `targetGeneration` is monotonic per subscription; deleting a finished row would
+reset it to 1 and let a stale in-flight worker's CAS match a fresh generation.
 
 This is the Apple equivalent of the F-3 payout fix: persist the serialization state you
 actually rely on, and compare it inside the same statement that writes. `lastReconciledAt` and
