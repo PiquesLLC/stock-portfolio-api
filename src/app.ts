@@ -377,14 +377,15 @@ app.get('/privacy', (req, res) => {
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:720px;margin:0 auto;padding:2rem 1rem;color:#333;line-height:1.7}
 h1{color:#00c805;font-size:1.6rem}h2{margin-top:2rem;font-size:1.1rem}ul{padding-left:1.2rem}a{color:#00c805}
 .meta{color:#888;font-size:.85rem;margin-bottom:2rem}</style></head><body>
-<h1>Privacy Policy</h1><p class="meta">Last updated: February 15, 2026 &middot; Piques LLC</p>
+<h1>Privacy Policy</h1><p class="meta">Last updated: August 23, 2026 &middot; Piques LLC</p>
 
 <h2>1. Information We Collect</h2>
 <p>We collect information you provide directly:</p>
 <ul><li><strong>Account info</strong>: username, display name, email address</li>
 <li><strong>Portfolio data</strong>: stock holdings, shares, cost basis (entered manually or via CSV import)</li>
 <li><strong>Linked brokerage data</strong>: via Plaid — account names, types, and last 4 digits only. We never see your brokerage login credentials.</li>
-<li><strong>Usage data</strong>: pages viewed, features used, device/browser type</li></ul>
+<li><strong>Usage data</strong>: pages viewed, features used, device/browser type</li>
+<li><strong>Security data</strong>: IP address and device information recorded on sign-in and other security-sensitive events, used to detect abuse and unauthorised access</li></ul>
 
 <h2>2. How We Use Your Data</h2>
 <ul><li>Display your portfolio, charts, and analytics</li>
@@ -418,7 +419,8 @@ h1{color:#00c805;font-size:1.6rem}h2{margin-top:2rem;font-size:1.1rem}ul{padding
 <li>All connections use HTTPS with TLS 1.2+ and HSTS</li></ul>
 
 <h2>8. Children's Privacy</h2>
-<p>Nala is not intended for users under 18. We do not knowingly collect data from children.</p>
+<p>You must be at least 13 years old to create a Nala account. We ask for your date of birth at sign-up and refuse registration below that age. We do not knowingly collect personal information from anyone under 13 &mdash; if you believe a child under 13 has created an account, email <a href="mailto:privacy@nalaai.com">privacy@nalaai.com</a> and we will delete it and their data.</p>
+<p>Nala is a portfolio tracking and education tool, not a brokerage. It does not execute trades or hold funds.</p>
 
 <h2>9. Changes to This Policy</h2>
 <p>We may update this policy periodically. Continued use of the app after changes constitutes acceptance.</p>
