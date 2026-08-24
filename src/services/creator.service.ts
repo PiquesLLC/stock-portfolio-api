@@ -498,7 +498,7 @@ export async function getCreatorDashboard(userId: string): Promise<{
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const [activeSubscribers, churnedLast30, ledger, recentEvents, rawPayoutBalance, pendingPayoutAgg] = await Promise.all([
+  const [activeSubscribers, churnedLast30, ledger, recentEvents, rawPayoutBalance] = await Promise.all([
     prisma.creatorSubscription.count({
       where: { creatorUserId: userId, status: 'active' },
     }),
@@ -521,19 +521,17 @@ export async function getCreatorDashboard(userId: string): Promise<{
       take: 25,
     }),
     getPayoutBalanceFromLedger(userId),
-    prisma.creatorPayout.aggregate({
-      where: { creatorUserId: userId, status: 'pending' },
-      _sum: { amountCents: true },
-    }),
   ]);
 
-  // Subtract reserved (last 14 days of earnings only, not refunds) and pending payouts
+  // Subtract reserved earnings only (last 14 days, not refunds).
   const reserveCutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const reservedCents = ledger
     .filter(e => e.createdAt > reserveCutoff && e.type === 'earning')
     .reduce((sum, e) => sum + Math.abs(e.amountCents), 0);
-  const pendingCents = pendingPayoutAgg._sum.amountCents ?? 0;
-  const payoutBalanceCents = Math.max(0, rawPayoutBalance - reservedCents - pendingCents);
+  // Pending payouts are already netted out: rawPayoutBalance comes from the
+  // ledger, which carries a `payout:<id>` debit written in the same transaction
+  // that created the pending row. Subtracting them again double-counted.
+  const payoutBalanceCents = Math.max(0, rawPayoutBalance - reservedCents);
 
   const mrr = activeSubscribers * creator.pricingCents;
   const churnDenominator = activeSubscribers + churnedLast30;

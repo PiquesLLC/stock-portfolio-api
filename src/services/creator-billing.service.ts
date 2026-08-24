@@ -1602,22 +1602,23 @@ export async function getPayoutBalance(
   userId: string,
   client: PayoutPrismaClient = prisma
 ): Promise<{ availableCents: number; reservedCents: number }> {
-  const [entries, balance, pendingPayoutAgg] = await Promise.all([
+  const [entries, balance] = await Promise.all([
     client.creatorWalletLedger.findMany({
       where: { creatorUserId: userId },
       select: { type: true, amountCents: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
     getLedgerBalanceFromClient(userId, client),
-    client.creatorPayout.aggregate({
-      where: { creatorUserId: userId, status: 'pending' },
-      _sum: { amountCents: true },
-    }),
   ]);
   const reservedCents = computeReservedBalanceCents(entries);
-  const pendingCents = pendingPayoutAgg._sum.amountCents ?? 0;
+  // Pending payouts are deliberately NOT subtracted here. requestPayout commits
+  // the CreatorPayout row and its `payout:<id>` ledger debit in the same
+  // serializable transaction, and it is the only writer of payout rows, so
+  // `balance` already excludes anything pending. Subtracting the pending
+  // aggregate as well removed the same money twice and understated the
+  // creator's withdrawable balance for as long as a payout was in flight.
   return {
-    availableCents: Math.max(0, balance - reservedCents - pendingCents),
+    availableCents: Math.max(0, balance - reservedCents),
     reservedCents,
   };
 }

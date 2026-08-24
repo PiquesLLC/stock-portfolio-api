@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __mockPrisma as prismaMock } from '../utils/prisma';
 import {
   applyAsCreator,
+  getCreatorDashboard,
   getEntitlement,
   getLockedContent,
   resolveAccessLevel,
@@ -236,5 +237,43 @@ describe('creator service', () => {
       expect(result.missing).toContain('connect_stripe');
       expect((prismaMock as any).creator.update).not.toHaveBeenCalled();
     });
+  });
+});
+
+/** The dashboard repeats the same balance formula, so it repeats the same bug. */
+describe('getCreatorDashboard — payoutBalanceCents subtracts a pending payout once', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ensureCreatorMockShape();
+  });
+
+  it('does not re-subtract a pending payout the ledger has already debited', async () => {
+    const p = prismaMock as any;
+    p.creator.findUnique.mockResolvedValue({ id: 'c1', pricingCents: 500, status: 'active' });
+    p.creatorSubscription.count.mockResolvedValue(0);
+
+    const aged = new Date(Date.now() - 30 * DAY_MS); // outside the 14-day reserve
+    p.creatorWalletLedger ??= {};
+    // Two different reads hit this mock: the dashboard's earning/refund slice and
+    // getPayoutBalanceFromLedger's full-ledger sum. Route on the where clause so
+    // the payout debit reaches only the balance calculation, as in production.
+    p.creatorWalletLedger.findMany = vi.fn(async ({ where }: any) => {
+      const rows = [
+        { type: 'earning', amountCents: 10000, createdAt: aged, description: null },
+        { type: 'payout', amountCents: 4000, createdAt: aged, description: 'payout:payout_1' },
+      ];
+      return where?.type ? rows.filter((r) => r.type === 'earning' || r.type === 'refund') : rows;
+    });
+    p.creatorSubscriptionEvent ??= {};
+    p.creatorSubscriptionEvent.findMany = vi.fn(async () => []);
+    p.creatorPayout ??= {};
+    p.creatorPayout.aggregate = vi.fn(async () => ({ _sum: { amountCents: 4000 } }));
+
+    const dash = await getCreatorDashboard('creator_1');
+
+    // 10000 earned − 4000 already debited = 6000, not 2000.
+    expect(dash.payoutBalanceCents).toBe(6000);
   });
 });
