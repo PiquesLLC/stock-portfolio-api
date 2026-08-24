@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-19T00:00:00Z",
+  "generatedAt": "2026-08-24T00:00:00Z",
   "entries": [
     {
       "id": "lly-tirzepatide-franchise",
@@ -210,7 +210,7 @@
       "relatedTickers": [
         "DHR",
         "TMO",
-        "SRT"
+        "SRTOY"
       ],
       "thesisShort": "Repligen sells the bags, filters and Protein A resins every biologics facility consumes by the kilogram; Q2 2026 organic growth accelerated to 13% with margins up 460 basis points and guidance raised.",
       "thesisLong": "Repligen sells the consumables that biologics manufacturing burns through continuously — single-use bags and assemblies, filtration systems, chromatography hardware and Protein A affinity resins. Every monoclonal antibody, ADC and cell therapy facility buys them repeatedly, which makes this a recurring toll on the entire biologics build-out rather than a capital-equipment cycle.\n\nQ2 2026 showed the bioprocessing recovery accelerating rather than merely continuing. Revenue was $204 million, up 12% as reported and 13% organically, with the CEO noting sequential acceleration and continued market outperformance. Profitability moved faster than revenue: adjusted income from operations reached $34 million against $22 million a year earlier, non-GAAP adjusted EPS was $0.54 versus $0.37, and margins expanded 460 basis points. The company raised full-year organic revenue and EPS guidance.\n\nMargin expansion at that pace in a consumables business is the signal worth isolating, because it indicates volume leverage on installed capacity rather than price — the pattern that appears when customers move from destocking back to normal consumption.\n\nThe demand vectors ahead are the ADC manufacturing build-out, which is filtration- and resin-intensive; process intensification driven by very large-volume products; cell and gene therapy commercial launches; and the biosimilar wave reaching the US.\n\nThe competitive risk is structural: Sartorius, Cytiva and Thermo Fisher all bundle consumables with equipment and can price the attach aggressively. CDMO destocking cycles and China biopharma exposure under BIOSECURE-type rules are the other exposures.",
@@ -248,7 +248,7 @@
         "China biopharma exposure under BIOSECURE-type rules"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19"
+      "lastUpdated": "2026-08-24"
     },
     {
       "id": "wst-glp1-elastomers",
