@@ -31,7 +31,8 @@ CREATE TABLE "AppleTransaction" (
     "reversedAt" DATETIME,
     "reversedByUUID" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "AppleTransaction_environment_check" CHECK ("environment" IN ('Production', 'Sandbox'))
 );
 
 -- CreateTable
@@ -56,7 +57,9 @@ CREATE TABLE "AppleSubscription" (
     "snapshotSignedDate" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "AppleSubscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    CONSTRAINT "AppleSubscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "AppleSubscription_environment_check" CHECK ("environment" IN ('Production', 'Sandbox')),
+    CONSTRAINT "AppleSubscription_status_check" CHECK ("status" IN ('active', 'expired', 'billing_retry', 'grace', 'revoked'))
 );
 
 -- CreateTable
@@ -72,7 +75,9 @@ CREATE TABLE "AppleReconciliation" (
     "leaseOwner" TEXT,
     "leaseExpiresAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "AppleReconciliation_environment_check" CHECK ("environment" IN ('Production', 'Sandbox')),
+    CONSTRAINT "AppleReconciliation_reconcileState_check" CHECK ("reconcileState" IN ('pending', 'running', 'failed', 'done'))
 );
 
 -- CreateTable
@@ -88,7 +93,8 @@ CREATE TABLE "AppleNotification" (
     "outcome" TEXT NOT NULL,
     "reason" TEXT,
     "receivedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "appliedAt" DATETIME
+    "appliedAt" DATETIME,
+    CONSTRAINT "AppleNotification_environment_check" CHECK ("environment" IN ('Production', 'Sandbox'))
 );
 
 -- CreateIndex
@@ -127,6 +133,19 @@ CREATE INDEX "AppleNotification_environment_originalTransactionId_idx" ON "Apple
 -- CreateIndex
 CREATE INDEX "AppleNotification_outcome_idx" ON "AppleNotification"("outcome");
 
+
+-- CHECK constraints above are the reason this index can be trusted.
+--
+-- The predicate below matches exact string values. Without a domain constraint
+-- on "environment" and "status", a typo or a mapper defect ('billingRetry',
+-- 'production') would place a row OUTSIDE the predicate, and the second
+-- rail-blocking row for that user would be accepted — silently defeating the
+-- backstop this index exists to be. Prisma cannot express CHECK constraints, so
+-- they live in this migration; doc comments on the models point here.
+--
+-- Deliberately NOT constrained: notificationType, subtype, revocationType and
+-- similar Apple-controlled fields. Apple can add enum values at any time, and a
+-- CHECK there would turn a new Apple value into an intake failure.
 -- Partial unique index: at most one BLOCKING Production billing rail per user.
 --
 -- Prisma's @@unique does not support WHERE clauses, so this is enforced at the

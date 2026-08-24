@@ -1204,6 +1204,8 @@ model AppleIAPWebhookEvent {
 /// cannot erase it, and a purchase belonging to another transaction or
 /// subscription group cannot clear it. A revocation of transaction X does NOT
 /// revoke transaction Y merely because they share an originalTransactionId.
+/// DB-level CHECK: environment IN ('Production', 'Sandbox').
+/// Enforced by migration 20260824000000_apple_authoritative_state; Prisma cannot express CHECK constraints.
 model AppleTransaction {
   id                    String    @id @default(uuid())
   environment           String    // 'Production' | 'Sandbox'
@@ -1250,6 +1252,12 @@ model AppleTransaction {
 /// WHERE clauses. It enforces one blocking Production billing rail per user
 /// while still allowing a tester to hold a Sandbox subscription alongside a
 /// real one.
+/// DB-level CHECKs: environment IN ('Production', 'Sandbox') and status IN
+/// ('active', 'expired', 'billing_retry', 'grace', 'revoked'). These are what
+/// make apple_subscription_rail_unique trustworthy: that index matches exact
+/// strings, so an unconstrained typo ('billingRetry', 'production') would fall
+/// OUTSIDE its predicate and let a second rail-blocking row through, defeating
+/// the backstop entirely. Enforced by migration 20260824000000_apple_authoritative_state.
 model AppleSubscription {
   id                    String    @id @default(uuid())
   environment           String
@@ -1306,6 +1314,9 @@ model AppleSubscription {
 /// in-memory debounce, so a process restart neither loses nor duplicates
 /// pending work. A global rate limiter is still required separately: coalescing
 /// does nothing for a burst across many distinct subscribers.
+/// DB-level CHECKs: environment IN ('Production', 'Sandbox') and reconcileState
+/// IN ('pending', 'running', 'failed', 'done') — an invalid queue state would
+/// strand durable work. Enforced by migration 20260824000000_apple_authoritative_state.
 model AppleReconciliation {
   id                    String    @id @default(uuid())
   environment           String
@@ -1337,6 +1348,8 @@ model AppleReconciliation {
 ///
 /// notificationUUID is globally unique: it is Apple's own UUID and does not
 /// collide across environments, unlike transaction identifiers.
+/// DB-level CHECK: environment IN ('Production', 'Sandbox').
+/// Enforced by migration 20260824000000_apple_authoritative_state.
 model AppleNotification {
   id                    String    @id @default(uuid())
   environment           String
