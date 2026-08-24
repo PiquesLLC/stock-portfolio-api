@@ -1,7 +1,10 @@
 # Apple IAP — authoritative-state design
 
-**Status:** design, revision 3. Not implemented. `APPLE_IAP_ENABLED` stays false until this
-lands and the adversarial suite is re-run against the re-derived handler.
+**Status: FROZEN** at revision 3 (2026-08-24), plus the document corrections listed below.
+Not implemented. `APPLE_IAP_ENABLED` stays **false through the entire implementation**.
+
+The authority model is frozen — no further architecture revisions. From here the question is
+whether the code faithfully implements this document, not whether the model is right.
 
 **Design rule:**
 
@@ -22,6 +25,10 @@ reflect current state, and directs you to Get All Subscription Statuses for curr
   (§6); **`environment` persisted everywhere and Sandbox isolated from Production
   entitlement** (§7); revocation gains `revocationType`/`revocationPercentage` (§8); billing
   predicates renamed and split (§9); `appAccountToken` designed in (§10).
+- **r3 corrections (freeze review)** — `mayAppleCollect` now includes `grace`;
+  `REFUND_PRORATED` settled rather than deferred; `REFUND_REVERSED` reclassified in §4 as
+  *not* a negative fact; retention wording softened now that `appAccountToken` is persisted.
+  Document only — no architecture change.
 
 ---
 
@@ -66,7 +73,7 @@ Apple POST
    │
    ├─ ONE transaction:
    │     persist AppleNotification
-   │     apply transaction-scoped NEGATIVE fact if present (revocation / reversal)
+   │     persist transaction fact if present (revocation / reversal) — never a grant
    │     bump AppleSubscription.requestedGeneration
    │     upsert AppleReconciliation (coalescing key: environment + originalTransactionId)
    │
@@ -84,10 +91,18 @@ Deliberately failing the webhook to make Apple resend is unsound in both environ
 Production it burns one of five retries, and **Sandbox does not retry at all**, so a transient
 API blip would silently lose the event entirely.
 
-**What may be applied at intake.** Transaction-scoped *negative* facts — a refund, a
-revocation, a reversal — are monotonic and safety-preserving: applying one can only remove
-entitlement, and reconciliation later restores the truth. Everything that *grants* or
-*extends* entitlement waits for reconciliation.
+**What may be applied at intake.** Only the transaction *fact* — never a grant.
+
+| Event | Persist at intake | May remove access | May grant access |
+|---|---|---|---|
+| `REFUND`, `REVOKE` | yes, after verified JWS + per-transaction CAS | yes, conservatively | no |
+| `REFUND_REVERSED` | yes, after verified JWS + per-transaction CAS | no | **no — restoration only after reconciliation** |
+
+`REFUND_REVERSED` is **not** a negative fact: it undoes a refund and can eventually restore
+entitlement. Recording it at intake is safe; acting on it is not. A refund or revocation is
+monotonic and safety-preserving — applying it can only remove access, and reconciliation
+later restores the truth — which is why it alone may take effect before reconciliation.
+Every grant and every restoration comes from reconciliation, without exception.
 
 **Rate limiting.** Apple documents Get All Subscription Statuses at 50 requests/sec per app in
 Production and 10% of that — 5/sec — in Sandbox; a 429 carries `Retry-After`. Two mechanisms,
@@ -302,11 +317,24 @@ identity-scoped rule (revision 1) would let one historical refund permanently po
 subscription — D6 inverted.
 
 `revocationType` distinguishes `REFUND_FULL`, `REFUND_PRORATED` and `FAMILY_REVOKE`, with
-`revocationPercentage` recording how much was refunded. Entitlement still follows the
-**reconciled subscription status**; these fields inform accounting and the narrower question
-of whether *this transaction* may back an entitlement. The exact treatment of
-`REFUND_PRORATED` should be confirmed against Apple's documentation at implementation rather
-than guessed here.
+`revocationPercentage` recording how much was refunded — for an auto-renewable subscription
+that percentage is based on the remaining subscription time.
+
+**All three are treated identically for entitlement**, following Apple's guidance to treat a
+prorated refund like a full refund and then act on the current subscription status:
+
+```
+REFUND_FULL | REFUND_PRORATED | FAMILY_REVOKE
+    → mark that transaction revoked
+    → that transaction can no longer back entitlement
+    → reconcile the subscription
+    → a different, current, valid transaction may still provide entitlement
+```
+
+This is the transaction-scoped rule doing exactly what it was designed for: a prorated refund
+on historical transaction X does not poison renewal Y, it only stops X being used as the
+entitlement source. `revocationPercentage` is retained for accounting, not for the entitlement
+decision, which remains the reconciled status.
 
 **Ordering rule for revocation writes.** Every write to a transaction's revocation state —
 revoke *and* reverse — must pass that transaction's `lastAppliedSignedDate` CAS. Without it a
@@ -324,8 +352,13 @@ back an entitlement; and grants come from reconciliation, not the payload.
 | Predicate | True when | Answers |
 |---|---|---|
 | `isEntitled` | `active` (through `expiresAt`) or `grace` (through `gracePeriodExpiresAt`) | Does this person get paid access right now? |
-| `mayAppleCollect` | `billing_retry`, or `active` with `autoRenewStatus = true` | Could Apple still charge them? |
+| `mayAppleCollect` | `grace`, `billing_retry`, or `active` with `autoRenewStatus = true` | Could Apple still charge them? |
 | `blocksOtherBillingRail` | `active`, `grace`, or `billing_retry` | Should another billing rail be allowed right now? |
+
+`grace` counts toward `mayAppleCollect`: the billing grace period is the *start* of billing
+retry, Apple continues attempting collection throughout it, and StoreKit's `isInBillingRetry`
+stays true during grace. A user in grace is therefore both entitled **and** still being
+charged — the one state where all three predicates are true at once.
 
 `blocksOtherBillingRail` is deliberately the widest and is the one the Stripe path consults.
 The naive rule `if (!isEntitled) otherRailAllowed` is what these three exist to prevent: a user
@@ -420,10 +453,15 @@ term held (failure G).
 5. **Unrecoverable:** users whose link was already nulled by a past `EXPIRED` cannot be
    reconstructed from our data. This population is empty in practice — Apple IAP has never been
    enabled in production.
-6. GDPR: `AppleTransaction` deliberately survives account deletion. It holds an Apple
-   transaction id, an optional opaque token, and timestamps — no user id, no personal data —
-   retained for fraud prevention. This must be reflected in the deletion-completeness work
-   rather than silently contradicting it.
+6. **Retention and deletion.** `AppleTransaction` deliberately survives account deletion,
+   holding an Apple transaction id, an optional `appAccountToken`, and timestamps, with no
+   `User` FK. Do **not** treat it as categorically non-personal: Apple defines
+   `appAccountToken` precisely to associate a transaction with a customer account, so for as
+   long as any mapping to a user exists it is at minimum a pseudonymous account-linked
+   identifier. Retention of the revocation fact is justified for fraud prevention; the
+   deletion-completeness work must state that justification and decide explicitly whether
+   `appAccountToken` is cleared on erasure while the revocation fact is kept. This is a
+   privacy/legal wording question, not an architecture one.
 
 ## 15. Decisions taken (Jon, 2026-08-24, checked against Apple's documentation)
 
@@ -460,7 +498,9 @@ term held (failure G).
 - stale `REFUND` arriving after `REFUND_REVERSED` → refused by the per-transaction signedDate CAS
 - refund in group A, purchase in group B → group B granted, group A revocation intact
 - account deleted and re-registered → revocation still refuses replay of that transaction
-- `REFUND_PRORATED` → recorded with percentage; entitlement follows reconciled status
+- `REFUND_PRORATED` → that transaction revoked exactly like a full refund; a different,
+  current, valid transaction still provides entitlement
+- `REFUND_REVERSED` recorded at intake → **no** entitlement change until reconciliation runs
 
 **Lifecycle**
 - stale `EXPIRED` after `DID_RENEW` → entitlement intact
@@ -469,5 +509,6 @@ term held (failure G).
 - DOWNGRADE, and no-subtype → current plan unchanged
 - `DID_CHANGE_RENEWAL_STATUS` (auto-renew off) → `plan`/`planExpiresAt` unchanged, **and the
   rail stays blocked**
-- `DID_FAIL_TO_RENEW` GRACE_PERIOD → entitled through `gracePeriodExpiresAt`
+- `DID_FAIL_TO_RENEW` GRACE_PERIOD → entitled through `gracePeriodExpiresAt`, **and
+  `mayAppleCollect` is true** (all three predicates true at once)
 - `billing_retry` → not entitled, **Stripe signup still blocked**
