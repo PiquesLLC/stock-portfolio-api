@@ -168,6 +168,7 @@ model User {
   // Apple IAP
   appleOriginalTransactionId  String?   @unique
   applePurchaseSource         String?   // 'app_store'
+  appleSubscriptions          AppleSubscription[]
 
   // Dismissed dividends (user opted out of YTD entries they didn't actually receive)
   dismissedDividends         DismissedDividend[]
@@ -1178,6 +1179,213 @@ model AppleIAPWebhookEvent {
   type            String
   processedAt     DateTime @default(now())
 }
+
+// ─── Apple IAP authoritative state ───────────────────────────────────
+//
+// Implements docs/apple-authoritative-state-design-2026-08-24.md (FROZEN).
+//
+// Entitlement is a PROJECTION of these tables, never written directly by a
+// notification handler. A notification is a trigger to reconcile; Apple's
+// Get All Subscription Statuses is the authority.
+//
+// AppleIAPWebhookEvent above is intentionally left in place. AppleNotification
+// supersedes it in the frozen design, but swapping them changes handler
+// behaviour, so that happens in a later step. This migration is additive only.
+//
+// Identities are composite on `environment`: Apple's transactionId and
+// originalTransactionId are unique only WITHIN an environment, and TestFlight
+// purchases run against Sandbox. Assuming one namespace across both is how a
+// Sandbox purchase grants real paid access (design failure mode H).
+
+/// Immutable per-transaction facts, including revocation.
+///
+/// This table is the D6 revocation store. Revocation is a property of a
+/// TRANSACTION, not of a user: it carries no User FK, so account deletion
+/// cannot erase it, and a purchase belonging to another transaction or
+/// subscription group cannot clear it. A revocation of transaction X does NOT
+/// revoke transaction Y merely because they share an originalTransactionId.
+/// DB-level CHECK: environment IN ('Production', 'Sandbox').
+/// Enforced by migration 20260824000000_apple_authoritative_state; Prisma cannot express CHECK constraints.
+model AppleTransaction {
+  id                    String    @id @default(uuid())
+  environment           String    // 'Production' | 'Sandbox'
+  transactionId         String
+  originalTransactionId String
+  productId             String
+  purchaseDate          DateTime
+  expiresDate           DateTime?
+  type                  String?
+  appAccountToken       String?
+
+  /// Per-transaction ordering cursor. Apple's documented signedDate comparison
+  /// is scoped to a single transactionId, so this is too. It is NOT a
+  /// subscription-wide clock and must never be compared across transactions.
+  lastAppliedSignedDate DateTime
+
+  revokedAt             DateTime? // Apple's revocationDate, never our clock
+  revocationReason      Int?
+  revocationType        String?   // REFUND_FULL | REFUND_PRORATED | FAMILY_REVOKE
+  revocationPercentage  Int?      // accounting only; not an entitlement input
+  revokedSource         String?   // 'notification' | 'server_api'
+  reversedAt            DateTime? // REFUND_REVERSED
+  reversedByUUID        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([environment, transactionId])
+  @@index([environment, originalTransactionId])
+  @@index([revokedAt])
+  @@index([appAccountToken])
+}
+
+/// The current reconciled snapshot for one subscription.
+///
+/// Created on first contact and NEVER unlinked by a lifecycle event: expiry is
+/// a status, not an erasure. Nulling the link is what made every later
+/// notification unresolvable (design failure mode B).
+///
+/// A partial unique index `apple_subscription_rail_unique` on (userId) WHERE
+/// environment = 'Production' AND status IN ('active','grace','billing_retry')
+/// is enforced at the DB level by migration
+/// 20260824000000_apple_authoritative_state. Prisma's @@unique does not support
+/// WHERE clauses. It enforces one blocking Production billing rail per user
+/// while still allowing a tester to hold a Sandbox subscription alongside a
+/// real one.
+/// DB-level CHECKs: environment IN ('Production', 'Sandbox') and status IN
+/// ('active', 'expired', 'billing_retry', 'grace', 'revoked'). These are what
+/// make apple_subscription_rail_unique trustworthy: that index matches exact
+/// strings, so an unconstrained typo ('billingRetry', 'production') would fall
+/// OUTSIDE its predicate and let a second rail-blocking row through, defeating
+/// the backstop entirely. Enforced by migration 20260824000000_apple_authoritative_state.
+model AppleSubscription {
+  id                    String    @id @default(uuid())
+  environment           String
+  originalTransactionId String
+  userId                String?
+  user                  User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  productId             String
+  subscriptionGroupId   String?
+  plan                  String
+
+  /// active | expired | billing_retry | grace | revoked.
+  /// Map from the app-store-server-library enum at the boundary; never
+  /// hardcode Apple's numeric status codes.
+  status                String
+
+  expiresAt             DateTime?
+  gracePeriodExpiresAt  DateTime?
+  autoRenewStatus       Boolean?
+  autoRenewProductId    String?
+  appAccountToken       String?
+
+  /// The transaction entitlement is projected FROM. If it is later revoked,
+  /// the projection must be recomputed.
+  currentTransactionId  String?
+
+  /// The generation whose reconciliation produced this snapshot.
+  ///
+  /// The REQUESTED counter deliberately does NOT live here. Apple can send the
+  /// first notification for a subscription before any reconciled snapshot
+  /// exists, and productId/plan/status are NOT NULL precisely because a row in
+  /// this table means "Apple has been reconciled". Anchoring the counter here
+  /// would force intake either to trust the notification payload or to invent a
+  /// placeholder snapshot — both of which break the authority model.
+  /// AppleReconciliation.targetGeneration is the authoritative requested
+  /// counter; a worker CASes on it and only then writes this row.
+  ///
+  /// Integers, not timestamps: lastReconciledAt is our own clock stamped at
+  /// completion, so a slow reconciliation finishing last would look newest and
+  /// clobber fresher data.
+  appliedGeneration     Int       @default(0)
+
+  /// Observability and audit ONLY. Never read by a decision.
+  lastReconciledAt      DateTime?
+  snapshotSignedDate    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([environment, originalTransactionId])
+  @@index([userId])
+  @@index([status])
+}
+
+/// Durable reconciliation work item.
+///
+/// Apple's webhook delivery is not our work queue: intake returns HTTP 200 once
+/// the notification is durably recorded, and we retry our own job afterwards.
+/// Failing the webhook to force a resend is unsound — Production burns one of
+/// five retries and Sandbox does not retry at all.
+///
+/// Coalescing is enforced by the unique constraint below rather than an
+/// in-memory debounce, so a process restart neither loses nor duplicates
+/// pending work. A global rate limiter is still required separately: coalescing
+/// does nothing for a burst across many distinct subscribers.
+/// targetGeneration is the AUTHORITATIVE requested-generation anchor for this
+/// subscription — see AppleSubscription.appliedGeneration. It lives here because
+/// this row can exist on first contact, before any reconciled subscription does.
+///
+/// Rows are NEVER deleted, even when done. targetGeneration is monotonic per
+/// (environment, originalTransactionId); deleting a finished row would reset the
+/// counter to 1 and let a stale in-flight worker's CAS match a fresh generation.
+///
+/// DB-level CHECKs: environment IN ('Production', 'Sandbox') and reconcileState
+/// IN ('pending', 'running', 'failed', 'done') — an invalid queue state would
+/// strand durable work. Enforced by migration 20260824000000_apple_authoritative_state.
+model AppleReconciliation {
+  id                    String    @id @default(uuid())
+  environment           String
+  originalTransactionId String
+
+  targetGeneration      Int
+  reconcileState        String    // pending | running | failed | done
+  attemptCount          Int       @default(0)
+  nextAttemptAt         DateTime
+  lastError             String?
+
+  /// Lease, so a worker that dies mid-flight does not strand a row in
+  /// `running` forever. The worker's CAS includes leaseOwner, so a reclaimed
+  /// lease cannot be completed by the previous owner.
+  leaseOwner            String?
+  leaseExpiresAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([environment, originalTransactionId])
+  @@index([reconcileState, nextAttemptAt])
+}
+
+/// Audit of every notification and what we did with it.
+///
+/// Rows are NEVER deleted, including on failure — deleting the marker on error
+/// is what let a half-applied notification be re-applied after newer state had
+/// landed (design failure mode E). Retries update outcome in place.
+///
+/// notificationUUID is globally unique: it is Apple's own UUID and does not
+/// collide across environments, unlike transaction identifiers.
+/// DB-level CHECK: environment IN ('Production', 'Sandbox').
+/// Enforced by migration 20260824000000_apple_authoritative_state.
+model AppleNotification {
+  id                    String    @id @default(uuid())
+  environment           String
+  notificationUUID      String    @unique
+  notificationType      String
+  subtype               String?
+  signedDate            DateTime
+  originalTransactionId String?
+  transactionId         String?
+  outcome               String    // accepted | superseded | ignored | revoked_block | failed
+  reason                String?
+  receivedAt            DateTime  @default(now())
+  appliedAt             DateTime?
+
+  @@index([environment, originalTransactionId])
+  @@index([outcome])
+}
+
 
 // ─── Screener Universe ───────────────────────────────────────────────
 // Master list of tickers eligible for the Screener tab. Decoupled from the
