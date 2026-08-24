@@ -1273,7 +1273,11 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         const transferId = transfer.id;
         const payout = await prisma.creatorPayout.findFirst({
           where: { stripeTransferId: transferId },
-          select: { id: true, creatorUserId: true, amountCents: true, status: true },
+          select: {
+            id: true, creatorUserId: true, amountCents: true, status: true,
+            // The value the compare-and-swap below is predicated on.
+            reversedAmountCents: true,
+          },
         });
         if (!payout) {
           // Reversal arrived before requestPayout finished writing stripeTransferId
@@ -1324,40 +1328,61 @@ export async function handleCreatorWebhookEvent(event: Stripe.Event): Promise<vo
         // flips true, both sides report "reversed" and agree, so the mismatch
         // exists only in the window between the two events and the daily scan can
         // miss it entirely.
-        const priorCredits = await prisma.creatorWalletLedger.findMany({
-          where: {
-            creatorUserId: payout.creatorUserId,
-            description: { startsWith: `transfer_reversed:${transferId}` },
-          },
-          select: { amountCents: true },
-        });
-        const alreadyCredited = priorCredits.reduce((sum, row) => sum + Math.abs(row.amountCents), 0);
-        const deltaCents = Math.max(0, reversedCents - alreadyCredited);
+        // The credit owed is (cumulative reversed) − (already credited), and that
+        // subtraction must be SERIALISED, not merely correct in isolation.
+        //
+        // Reconstructing "already credited" by reading ledger rows before the
+        // transaction was correct under ordering and wrong under concurrency:
+        // two legitimate reversal events for one transfer carry distinct Stripe
+        // event ids (so webhook dedup does not apply), both observed the same
+        // state, and both inserted — their descriptions carrying different
+        // cumulative figures, so the unique index did not collide either. A
+        // $1,000 reversal credited $1,100.
+        //
+        // The cumulative total is now persisted on the payout and advanced by a
+        // COMPARE-AND-SWAP inside the same transaction as the credit, so exactly
+        // one handler may advance it from any given observed value.
+        const observedReversed = payout.reversedAmountCents ?? 0;
+        const deltaCents = Math.max(0, reversedCents - observedReversed);
         if (deltaCents === 0) {
           // Everything Stripe has reversed so far is already credited.
           bumpCounter('processed');
           return;
         }
         const fullyReversed = transfer.reversed === true || reversedCents >= payout.amountCents;
-        await prisma.$transaction([
-          prisma.creatorPayout.update({
-            where: { id: payout.id },
-            // Stay 'completed' while the reversal is partial, so a later event
-            // is still processed rather than skipped as already-terminal.
-            data: { status: fullyReversed ? 'reversed' : 'completed' },
-          }),
-          v1LedgerCreate(prisma,{
+
+        await prisma.$transaction(async (tx) => {
+          const advanced = await tx.creatorPayout.updateMany({
+            // CAS: matches only while the total is still what we read.
+            where: { id: payout.id, reversedAmountCents: observedReversed },
+            data: {
+              reversedAmountCents: reversedCents,
+              // Stay 'completed' while the reversal is partial, so a later event
+              // is still processed rather than skipped as already-terminal.
+              status: fullyReversed ? 'reversed' : 'completed',
+            },
+          });
+          if (advanced.count === 0) {
+            // Another event advanced it between our read and this write. Throw so
+            // the whole transaction rolls back (including this CAS) and the outer
+            // catch clears the webhook dedup marker — Stripe's retry then re-reads
+            // and credits the correct remainder. Never credit from a stale total.
+            throw new Error(
+              `transfer.reversed for ${transferId}: cumulative total advanced concurrently; will retry`,
+            );
+          }
+          await v1LedgerCreate(tx, {
             data: {
               creatorUserId: payout.creatorUserId,
               type: 'earning',
               amountCents: deltaCents,
-              // Cumulative figure in the key, so successive partials are distinct
-              // rows while the unique(creatorUserId, description) index still
-              // blocks a duplicate credit for the same cumulative total.
+              // Cumulative figure in the key so successive partials are distinct
+              // rows, with the unique(creatorUserId, description) index as a
+              // second line of defence behind the CAS.
               description: `transfer_reversed:${transferId}:${reversedCents}`,
             },
-          }),
-        ]);
+          });
+        });
         // v2 shadow-write: G5c transfer.reversed. Same scheme as MIG-1.
         void shadowWriteTransferReversed({
           stripeTransferId: transferId,

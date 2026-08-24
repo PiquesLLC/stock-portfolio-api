@@ -44,9 +44,10 @@ transition below is judged on its ledger effect, not its status.
 | `pending` | reconciler, aged >30min, Stripe **has** a transfer | money moved | adopt id, `status=completed`, `paidAt` | none | `completed` | yes | 2,5 |
 | `pending` | reconciler, aged, Stripe has **no** transfer | no money moved | `status=failed` (same tx as credit) | `payout_reversal:<id>` credit | `failed` | yes; frees pending slot | 2,5 |
 | `pending` | reconciler, lookup errors / >1 match / freeze on | **unknown** | none — never guesses | none | `pending` | alerts (report marks unresolved) | 1,3 |
-| `completed` | `transfer.reversed`, partial | `amount_reversed < amount` | status stays `completed` | credit = delta not yet credited | `completed` | yes (cumulative key) | 1,2 |
-| `completed` | `transfer.reversed`, full | `reversed = true` | `status=reversed` | credit = remaining delta | `reversed` | yes | 1,2 |
+| `completed` | `transfer.reversed`, partial | `amount_reversed < amount` | **CAS** `reversedAmountCents: observed → incoming`; status stays `completed` | credit = incoming − observed, same tx | `completed` | yes | 1,2 |
+| `completed` | `transfer.reversed`, full | `reversed = true` | **CAS** as above; `status=reversed` | credit = remaining delta, same tx | `reversed` | yes | 1,2 |
 | `completed` | duplicate `transfer.reversed` | same cumulative figure | none — delta is 0 | none | unchanged | yes | 4,6 |
+| `completed` | **concurrent** `transfer.reversed`, CAS loses | total advanced by a peer | none — tx rolls back | none | unchanged | yes — throws, dedup marker cleared, Stripe retries | 1 |
 | `reversed`/`failed` | any later `transfer.reversed` | any | none — terminal skip | none | unchanged | yes | 4 |
 | any | `transfer.reversed`, no local row | transfer exists | none — **throws** so Stripe retries | none | unchanged | yes | 2 |
 | any | `payout.paid` / `payout.failed` | Connect bank payout | **explicit no-op** — cannot apply (F-2) | none | unchanged | yes (tested) | — |
@@ -60,6 +61,7 @@ actually shipped and fixed — which is why they are asserted, not assumed.
 - ambiguous outcome → `failed` + credit
 - rate-limit / auth / permission error treated as "no transfer exists"
 - partial reversal → terminal status (swallows the remainder, costing the creator)
+- two concurrent reversal events each crediting from the same observed total (**over-credit**)
 - two `pending` rows for one creator
 - payout proceeding while `V1_WALLET_FREEZE` is on (debit silently no-ops)
 - payout proceeding while reconciliation is disabled
@@ -155,6 +157,40 @@ now assert nothing is written.
 **Deliberately not made functional.** Connect bank payouts, if ever tracked,
 need their own row: `CreatorPayout`'s status vocabulary means "the transfer", not
 "the bank payout", and overloading it is what created the trap.
+
+### F-3 — concurrent cumulative reversals over-credited (found in human review)
+
+Found by reviewing the diff against this model, *after* the model had been
+written — so the model was necessary but not sufficient.
+
+`amount_reversed` is cumulative, so the credit owed is (incoming − already
+credited). "Already credited" was reconstructed by reading ledger rows **before**
+the write transaction. Two legitimate reversal events for one transfer carry
+**distinct Stripe event ids**, so webhook dedup does not apply; both observed the
+same state; and because their ledger descriptions carried different cumulative
+figures, the `unique(creatorUserId, description)` index did not collide either.
+
+    A: amount_reversed = 100      reads credited 0  → credits 100
+    B: amount_reversed = 100000   reads credited 0  → credits 100000
+    total credited 100100 for a 100000 reversal — invariant 1 violated
+
+SQLite serialising writes does not help: the dangerous read happens outside the
+transaction, and the two inserts are genuinely distinct rows.
+
+**Fix.** The cumulative total is now persisted on `CreatorPayout.reversedAmountCents`
+and advanced by a **compare-and-swap inside the same transaction as the credit**:
+`WHERE id = ? AND reversedAmountCents = <observed>`. Exactly one handler may
+advance from a given observed value; the loser throws, which rolls back its CAS
+and clears the webhook dedup marker so Stripe's retry re-reads and credits the
+correct remainder.
+
+This is the same lesson the Apple work produced, arriving independently:
+**persist the external state you depend on rather than reconstructing it.** The
+reconstruction was not merely awkward — it was unserialisable.
+
+*Class of bug:* correct under ordering, wrong under concurrency. Worth checking
+explicitly for, since the staged-reversal test proved the ordered case and passed
+throughout.
 
 ---
 

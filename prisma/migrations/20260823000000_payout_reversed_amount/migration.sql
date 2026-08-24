@@ -1,0 +1,21 @@
+-- Cumulative reversed total per payout, advanced by compare-and-swap.
+--
+-- Why this column exists. `transfer.reversed` carries a CUMULATIVE
+-- `amount_reversed`, so the credit owed is (incoming - already credited).
+-- That "already credited" figure used to be reconstructed by reading
+-- CreatorWalletLedger rows BEFORE the write transaction. Two concurrent
+-- reversal events for one transfer — legitimate, with distinct Stripe event
+-- ids, so webhook dedup does not apply — therefore both observed the same
+-- state and both inserted a credit. Their ledger descriptions carried
+-- different cumulative figures, so the unique(creatorUserId, description)
+-- index did not collide either. Result: a $1,000 reversal credited $1,100.
+--
+-- Persisting the external state makes the advance a compare-and-swap in the
+-- same transaction as the credit, so exactly one handler may move the total
+-- from any given observed value. The loser throws, which clears the webhook
+-- dedup marker so Stripe's retry re-reads and computes the correct remainder.
+--
+-- Backfill: DEFAULT 0 is correct for every existing row. Creator payouts have
+-- never been enabled in production (CREATOR_PAYOUTS_ENABLED=false), so no row
+-- has a reversal to account for.
+ALTER TABLE "CreatorPayout" ADD COLUMN "reversedAmountCents" INTEGER NOT NULL DEFAULT 0;
