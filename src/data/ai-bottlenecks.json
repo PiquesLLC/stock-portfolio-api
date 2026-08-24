@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-19T00:00:00Z",
+  "generatedAt": "2026-08-24T00:00:00Z",
   "entries": [
     {
       "id": "nvda-accelerated-compute",
@@ -558,7 +558,7 @@
       "primaryTicker": "AMKR",
       "relatedTickers": [
         "TSM",
-        "ASE",
+        "ASX",
         "GFS"
       ],
       "thesisShort": "Amkor is the only US-listed advanced packaging OSAT and now holds a ten-year advanced packaging agreement with TSMC in Arizona plus an NVIDIA packaging and test program — the package-side bottleneck for AI accelerators.",
@@ -597,7 +597,7 @@
         "Capex absorption if AI packaging demand softens"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-24",
       "sector": "AI"
     },
     {
