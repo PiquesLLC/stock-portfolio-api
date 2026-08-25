@@ -6,7 +6,7 @@ import prisma from '../utils/prisma';
  * Implements the queue half of docs/apple-authoritative-state-design-2026-08-24.md
  * (FROZEN). This module deliberately contains NO Apple API calls, NO entitlement
  * projection and NO webhook handling; it is the concurrency substrate those will
- * later sit on. APPLE_IAP_ENABLED is irrelevant here because nothing invokes it yet.
+ * later sit on.
  *
  * THE INVARIANT THIS MODULE EXISTS TO ENFORCE
  *
@@ -16,19 +16,25 @@ import prisma from '../utils/prisma';
  *
  * WHY THE SHAPE OF THIS API IS WHAT IT IS
  *
- * Every state transition below is a SINGLE SQL statement whose WHERE clause
- * carries the precondition. None of them read a value, await, and then write it
- * back — that pattern is exactly how the payout path lost updates (finding F-3),
- * and it is the failure mode this queue is most likely to reintroduce.
+ * Every state transition below is a SINGLE SQL statement whose WHERE clause (or
+ * CASE expression) carries the precondition. None of them read a value, await,
+ * and then write it back — that pattern is how the payout path lost updates
+ * (finding F-3), and it is the failure mode this queue is most likely to
+ * reintroduce.
  *
  * `completeReconciliation` takes the snapshot write as a CALLBACK rather than
- * returning "you may now write". That is not stylistic: it makes the dangerous
- * shape unrepresentable. A caller cannot mark the job done in one transaction
- * and write the snapshot in another, because there is no API that marks it done
- * on its own. A crash between those two commits would otherwise leave a
- * subscription permanently unreconciled at a generation the CAS can never accept
- * again — invisible to schema-level testing, and unrecoverable without manual
- * repair.
+ * returning "you may now write". The PUBLIC SERVICE API therefore exposes no
+ * standalone completion operation: a caller cannot mark the job done in one
+ * transaction and write the snapshot in another. A crash between those two
+ * commits would otherwise leave a subscription permanently unreconciled at a
+ * generation the CAS can never accept again — invisible to schema-level testing,
+ * and unrecoverable without manual repair.
+ *
+ * (The raw CAS statement is exported under a __TEST_ONLY_ name so the
+ * real-engine test can exercise the exact SQL. That is a testing seam, not a
+ * supported way to complete a job, and it is the reason this comment says "the
+ * public API does not expose" rather than the stronger claim that the unsafe
+ * split is unrepresentable.)
  */
 
 /** Column domains, mirrored from the DB CHECK constraints. */
@@ -46,7 +52,11 @@ export interface QueueKey {
 /** Default lease length. A worker that dies holding one is reclaimable after this. */
 export const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 
-/** Retry backoff, capped. Index is attemptCount. */
+/**
+ * Retry backoff by attempt number. Index 0 is unused: a failure always produces
+ * at least attempt 1. Evaluated in SQL against the row's CURRENT attemptCount,
+ * never against a value the worker captured before its await.
+ */
 const BACKOFF_MS = [0, 30_000, 2 * 60_000, 10 * 60_000, 30 * 60_000, 60 * 60_000];
 export function backoffForAttempt(attemptCount: number): number {
   return BACKOFF_MS[Math.min(Math.max(attemptCount, 0), BACKOFF_MS.length - 1)];
@@ -56,25 +66,17 @@ export function backoffForAttempt(attemptCount: number): number {
  * INTAKE — atomically create-or-advance the work item.
  *
  * One statement. SQLite's UPSERT increments in place, so two concurrent intakes
- * cannot lose an increment and cannot create a duplicate row: the unique index
- * on (environment, originalTransactionId) is what the ON CONFLICT targets.
+ * cannot lose an increment and cannot create a duplicate row.
  *
- * Two things it deliberately does NOT do:
+ * It never resets targetGeneration: the counter is monotonic per subscription for
+ * the lifetime of the row, which is why these rows are never deleted — recycling
+ * the numbering would let a stale in-flight worker's CAS match a fresh generation.
  *
- *  - It never resets targetGeneration. The counter is monotonic per subscription
- *    for the lifetime of the row, which is why these rows are never deleted:
- *    recycling the numbering would let a stale in-flight worker's CAS match a
- *    fresh generation.
- *
- *  - It does not knock a 'running' job back to 'pending'. Doing so would let a
- *    second worker claim while the first is still calling Apple — correct under
- *    the CAS, but a wasted API call against a rate-limited endpoint. The
- *    in-flight worker will fail its CAS and release the job itself.
- *
- * attemptCount/nextAttemptAt ARE reset: a new notification is new work, and a
- * job previously parked on a long backoff should not stay parked.
+ * It does not knock a 'running' job back to 'pending'. Doing so would let a second
+ * worker claim while the first is still calling a rate-limited Apple endpoint. The
+ * in-flight worker releases the job itself once its CAS fails.
  */
-export const ENQUEUE_SQL = `
+export const __TEST_ONLY_ENQUEUE_SQL = `
 INSERT INTO "AppleReconciliation" (
   "id", "environment", "originalTransactionId", "targetGeneration",
   "reconcileState", "attemptCount", "nextAttemptAt", "createdAt", "updatedAt"
@@ -96,8 +98,8 @@ export async function enqueueReconciliation(
 ): Promise<void> {
   const iso = now.toISOString();
   await client.$executeRawUnsafe(
-    ENQUEUE_SQL,
-    cryptoRandomId(),
+    __TEST_ONLY_ENQUEUE_SQL,
+    globalThis.crypto.randomUUID(),
     key.environment,
     key.originalTransactionId,
     iso, // nextAttemptAt — immediately eligible
@@ -110,12 +112,10 @@ export async function enqueueReconciliation(
  * CLAIM — take the lease on one eligible job.
  *
  * Eligible means: due, and either not running, or running under a lease that has
- * expired (its worker died). The precondition lives entirely in the WHERE clause,
- * so two workers racing for the same row produce one winner and one zero-row
- * update; the loser simply moves on. Claiming by id after selecting candidates is
- * safe for the same reason — the UPDATE, not the SELECT, decides.
+ * expired. The precondition lives entirely in the WHERE clause, so two workers
+ * racing produce one winner and one zero-row update.
  */
-export const CLAIM_SQL = `
+export const __TEST_ONLY_CLAIM_SQL = `
 UPDATE "AppleReconciliation" SET
   "reconcileState"  = 'running',
   "leaseOwner"      = ?,
@@ -133,17 +133,31 @@ export interface ClaimedJob {
   originalTransactionId: string;
   /** The generation this worker is responsible for. Captured AT CLAIM TIME. */
   generation: number;
-  leaseOwner: string;
+  /**
+   * FENCING TOKEN — unique to THIS acquisition, not to the worker.
+   *
+   * A worker identity is NOT sufficient. If the same identity reclaims a lease
+   * it previously lost to expiry, a stalled request from the earlier lease would
+   * still satisfy `leaseOwner = me` and could commit over the newer lease. The
+   * token is minted per acquisition so the earlier lease's value can never match
+   * again.
+   */
+  leaseToken: string;
+  /** Human-facing worker identity, for logs. Never used by a CAS. */
+  workerId: string;
   attemptCount: number;
 }
 
 /**
- * Claim returns the generation observed after the claim succeeded. The worker
- * carries that number and must present it back at completion; anything that
- * advanced it in the meantime invalidates the work.
+ * Mint a fencing token. The worker label is retained as a prefix purely so logs
+ * and stuck-lease inspection stay readable; the uniqueness comes from the uuid.
  */
+export function mintLeaseToken(workerId: string): string {
+  return `${workerId}:${globalThis.crypto.randomUUID()}`;
+}
+
 export async function claimReconciliationJob(
-  leaseOwner: string,
+  workerId: string,
   opts: { leaseMs?: number; now?: Date; limit?: number } = {},
 ): Promise<ClaimedJob | null> {
   const now = opts.now ?? new Date();
@@ -166,8 +180,9 @@ export async function claimReconciliationJob(
   });
 
   for (const { id } of candidates) {
+    const leaseToken = mintLeaseToken(workerId);
     const won = await prisma.$executeRawUnsafe(
-      CLAIM_SQL, leaseOwner, leaseUntil, nowIso, id, nowIso, nowIso,
+      __TEST_ONLY_CLAIM_SQL, leaseToken, leaseUntil, nowIso, id, nowIso, nowIso,
     );
     if (won !== 1) continue; // someone else claimed it between SELECT and UPDATE
 
@@ -178,16 +193,17 @@ export async function claimReconciliationJob(
         targetGeneration: true, leaseOwner: true, attemptCount: true,
       },
     });
-    // Read back under our own lease. If the row vanished (it should not — these
-    // rows are never deleted) or the lease is not ours, treat it as not claimed.
-    if (!row || row.leaseOwner !== leaseOwner) continue;
+    // Read back under our own token. If it is not ours, another worker took the
+    // row in the interval and we must not treat it as claimed.
+    if (!row || row.leaseOwner !== leaseToken) continue;
 
     return {
       id: row.id,
       environment: row.environment as AppleEnvironment,
       originalTransactionId: row.originalTransactionId,
       generation: row.targetGeneration,
-      leaseOwner,
+      leaseToken,
+      workerId,
       attemptCount: row.attemptCount,
     };
   }
@@ -195,33 +211,33 @@ export async function claimReconciliationJob(
 }
 
 /**
- * COMPLETE — the CAS and the snapshot write, in ONE transaction.
+ * The reason a completion was rejected is NOT distinguished by the CAS: one
+ * statement tests generation, lease and state together, and a zero-row result
+ * does not say which predicate missed. Reporting a specific cause here would be
+ * telemetry we cannot substantiate, so the reason is simply 'stale'.
  *
- * The CAS predicate carries BOTH halves of the invariant:
- *   targetGeneration = G   → no newer notification arrived
- *   leaseOwner       = me  → the lease was not reclaimed
- *
- * If it matches nothing, the transaction throws and rolls back, so `writeSnapshot`
- * cannot have persisted anything — the whole point. The job is then released back
- * to 'pending' so the newer generation is picked up.
- *
- * There is deliberately no exported way to mark a job done without supplying the
- * snapshot write.
+ * `observed` is a best-effort post-hoc read for operators. It is diagnostic only
+ * — it is taken AFTER the rollback, so it can itself be out of date, and nothing
+ * may branch on it.
  */
+export type StaleObservation = 'generation-advanced' | 'lease-lost' | 'not-running' | 'unknown';
+
 export class StaleWorkError extends Error {
-  constructor(readonly reason: 'generation-advanced' | 'lease-lost') {
-    super(`reconciliation work is stale: ${reason}`);
+  constructor() {
+    super('reconciliation work is stale');
     this.name = 'StaleWorkError';
   }
 }
 
 /**
  * The CAS. Both halves of the invariant are in the WHERE clause, so the engine
- * decides — there is no read, no await, and no write-back of a value we observed
- * earlier. Exported so the real-engine test exercises THIS statement rather than
- * a re-implementation of it.
+ * decides — no read, no await, no write-back of a previously observed value.
+ *
+ * Exported ONLY so the real-engine test exercises this exact statement. It is not
+ * a supported completion path: using it directly reintroduces the split-commit
+ * hazard the callback API exists to prevent.
  */
-export const COMPLETE_CAS_SQL = `
+export const __TEST_ONLY_COMPLETE_CAS_SQL = `
 UPDATE "AppleReconciliation" SET
   "reconcileState"  = 'done',
   "leaseOwner"      = NULL,
@@ -235,16 +251,16 @@ WHERE "id" = ?
 `.trim();
 
 export async function completeReconciliation(
-  job: Pick<ClaimedJob, 'id' | 'generation' | 'leaseOwner'>,
+  job: Pick<ClaimedJob, 'id' | 'generation' | 'leaseToken'>,
   writeSnapshot: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<void>,
   now: Date = new Date(),
-): Promise<{ committed: boolean; reason?: StaleWorkError['reason'] }> {
+): Promise<{ committed: boolean; observed?: StaleObservation }> {
   try {
     await prisma.$transaction(async (tx) => {
       const won = await tx.$executeRawUnsafe(
-        COMPLETE_CAS_SQL, now.toISOString(), job.id, job.generation, job.leaseOwner,
+        __TEST_ONLY_COMPLETE_CAS_SQL, now.toISOString(), job.id, job.generation, job.leaseToken,
       );
-      if (won === 0) throw new StaleWorkError('generation-advanced');
+      if (won === 0) throw new StaleWorkError();
 
       // Same transaction. If this throws, the 'done' transition rolls back with
       // it and the job stays claimable — never one without the other.
@@ -253,54 +269,104 @@ export async function completeReconciliation(
     return { committed: true };
   } catch (err) {
     if (err instanceof StaleWorkError) {
+      const observed = await observeStaleCause(job);
       await releaseReconciliation(job, now);
-      return { committed: false, reason: err.reason };
+      return { committed: false, observed };
     }
     throw err;
   }
 }
 
+/** Diagnostic only — see StaleObservation. Never used for a decision. */
+async function observeStaleCause(
+  job: Pick<ClaimedJob, 'id' | 'generation' | 'leaseToken'>,
+): Promise<StaleObservation> {
+  const row = await prisma.appleReconciliation.findUnique({
+    where: { id: job.id },
+    select: { targetGeneration: true, leaseOwner: true, reconcileState: true },
+  });
+  if (!row) return 'unknown';
+  if (row.targetGeneration !== job.generation) return 'generation-advanced';
+  if (row.leaseOwner !== job.leaseToken) return 'lease-lost';
+  if (row.reconcileState !== 'running') return 'not-running';
+  return 'unknown';
+}
+
 /**
- * Release a job this worker can no longer finish, so the newer generation is
- * picked up promptly. Guarded on lease ownership so a worker whose lease was
- * reclaimed cannot disturb the new owner.
+ * Release a job this worker can no longer finish. Guarded on the fencing token,
+ * so a worker whose lease was reclaimed cannot disturb the new owner.
  */
 export async function releaseReconciliation(
-  job: Pick<ClaimedJob, 'id' | 'leaseOwner'>,
+  job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
   now: Date = new Date(),
 ): Promise<void> {
   await prisma.appleReconciliation.updateMany({
-    where: { id: job.id, leaseOwner: job.leaseOwner },
+    where: { id: job.id, leaseOwner: job.leaseToken },
     data: { reconcileState: 'pending', leaseOwner: null, leaseExpiresAt: null, nextAttemptAt: now, updatedAt: now },
   });
 }
 
 /**
- * Record a failed attempt and back off. Guarded on lease ownership for the same
- * reason as release. attemptCount is incremented in the statement, not read and
- * written back.
+ * FAILURE — generation-aware, in one statement.
+ *
+ * A stale worker must not be able to punish a newer generation. Because intake
+ * deliberately leaves a running job running, a G=1 worker can still be in flight
+ * when G=2 arrives and resets attemptCount/nextAttemptAt. If failure blindly
+ * marked the ROW failed and installed a backoff, that stale worker would park the
+ * brand-new G=2 for up to the maximum delay — undoing the very promise intake
+ * makes, and doing it across an await.
+ *
+ * So the statement branches on whether the generation is still ours:
+ *   still ours  -> failed, attemptCount + 1, backoff, record the error
+ *   superseded  -> pending, attemptCount 0, due now, no error recorded
+ * and releases the lease either way.
+ *
+ * The backoff is chosen by CASE over the row's CURRENT attemptCount, not over the
+ * value this worker captured before its await.
  */
+export const __TEST_ONLY_FAIL_SQL = `
+UPDATE "AppleReconciliation" SET
+  "reconcileState"  = CASE WHEN "targetGeneration" = ? THEN 'failed' ELSE 'pending' END,
+  "attemptCount"    = CASE WHEN "targetGeneration" = ? THEN "attemptCount" + 1 ELSE 0 END,
+  "lastError"       = CASE WHEN "targetGeneration" = ? THEN ? ELSE NULL END,
+  "nextAttemptAt"   = CASE
+                        WHEN "targetGeneration" <> ? THEN ?
+                        WHEN "attemptCount" + 1 <= 1 THEN ?
+                        WHEN "attemptCount" + 1 = 2 THEN ?
+                        WHEN "attemptCount" + 1 = 3 THEN ?
+                        WHEN "attemptCount" + 1 = 4 THEN ?
+                        ELSE ?
+                      END,
+  "leaseOwner"      = NULL,
+  "leaseExpiresAt"  = NULL,
+  "updatedAt"       = ?
+WHERE "id" = ?
+  AND "leaseOwner" = ?
+  AND "reconcileState" = 'running'
+`.trim();
+
 export async function failReconciliation(
-  job: Pick<ClaimedJob, 'id' | 'leaseOwner' | 'attemptCount'>,
+  job: Pick<ClaimedJob, 'id' | 'leaseToken' | 'generation'>,
   error: string,
   now: Date = new Date(),
 ): Promise<void> {
-  const delay = backoffForAttempt(job.attemptCount + 1);
-  await prisma.appleReconciliation.updateMany({
-    where: { id: job.id, leaseOwner: job.leaseOwner },
-    data: {
-      reconcileState: 'failed',
-      attemptCount: { increment: 1 },
-      nextAttemptAt: new Date(now.getTime() + delay),
-      lastError: error.slice(0, 500),
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      updatedAt: now,
-    },
-  });
-}
-
-/** uuid without pulling a dependency into this module's surface. */
-function cryptoRandomId(): string {
-  return globalThis.crypto.randomUUID();
+  const iso = now.toISOString();
+  const after = (ms: number) => new Date(now.getTime() + ms).toISOString();
+  await prisma.$executeRawUnsafe(
+    __TEST_ONLY_FAIL_SQL,
+    job.generation,                 // reconcileState CASE
+    job.generation,                 // attemptCount CASE
+    job.generation,                 // lastError CASE
+    error.slice(0, 500),
+    job.generation,                 // nextAttemptAt: superseded?
+    iso,                            //   -> due immediately
+    after(BACKOFF_MS[1]),
+    after(BACKOFF_MS[2]),
+    after(BACKOFF_MS[3]),
+    after(BACKOFF_MS[4]),
+    after(BACKOFF_MS[5]),
+    iso,                            // updatedAt
+    job.id,
+    job.leaseToken,
+  );
 }
