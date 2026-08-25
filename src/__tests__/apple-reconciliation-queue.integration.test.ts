@@ -60,6 +60,11 @@ describe('apple reconciliation queue — generation + lease (real libsql engine)
       Number((await db.execute({ sql, args: args as never })).rowsAffected),
     $queryRawUnsafe: async <T,>(sql: string, ...args: unknown[]) =>
       (await db.execute({ sql, args: args as never })).rows as T[],
+    $transaction: async <T,>(fn: (tx: QueueClient) => Promise<T>): Promise<T> => {
+      await db.execute('BEGIN');
+      try { const out = await fn(adapter); await db.execute('COMMIT'); return out; }
+      catch (err) { await db.execute('ROLLBACK'); throw err; }
+    },
   };
 
   const row = async () => {
