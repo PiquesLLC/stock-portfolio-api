@@ -57,6 +57,7 @@ import {
 } from './services/apple-reconciliation-worker';
 import {
   stopAppleWorkerThenDisconnect,
+  runCriticalStartup,
   APPLE_WORKER_STOP_BUDGET_MS,
 } from './services/apple-worker-lifecycle';
 
@@ -569,19 +570,29 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
  *   3. app.listen       only once both have succeeded.
  *
  * Fail-closed: if either step throws, the server never begins listening.
+ *
+ * Returns true only when both steps completed AND shutdown had not begun.
+ * False means SIGTERM arrived while startup was awaiting, so the caller must
+ * not listen: startup does not get to resume past a shutdown already underway.
  */
-async function startCriticalServices(): Promise<void> {
-  // Must run before any DB operations — concurrent reads + write queuing.
-  await initSqlitePragmas();
-
-  // Only now is the database safe for the worker to touch.
-  appleWorker = startAppleWorker();
-  if (appleWorker) {
-    console.log(
-      `[boot] apple reconciliation worker started (singleton=${appleWorker.singletonMode}) ` +
-      `id=${appleWorker.workerId}`,
-    );
-  }
+async function startCriticalServices(): Promise<boolean> {
+  const outcome = await runCriticalStartup({
+    // Must run before any DB operations — concurrent reads + write queuing.
+    initDb: () => initSqlitePragmas(),
+    // Only reached once the database is safe for the worker to touch, and
+    // only if shutdown has not begun while initialisation was awaiting.
+    startWorker: () => {
+      appleWorker = startAppleWorker();
+      if (appleWorker) {
+        console.log(
+          `[boot] apple reconciliation worker started (singleton=${appleWorker.singletonMode}) ` +
+          `id=${appleWorker.workerId}`,
+        );
+      }
+    },
+    isShuttingDown: () => isShuttingDown,
+  });
+  return outcome === 'started';
 }
 
 /**
@@ -591,13 +602,25 @@ async function startCriticalServices(): Promise<void> {
 let server: import('http').Server | undefined;
 
 void (async () => {
+  let shouldListen: boolean;
   try {
-    await startCriticalServices();
+    shouldListen = await startCriticalServices();
   } catch (err) {
+    // A rejection caused BY the shutdown that just disconnected Prisma is not
+    // a startup failure. Treating it as fatal would turn an ordinary deploy
+    // into a crash-looking one.
+    if (isShuttingDown) return;
     const detail = err instanceof Error ? err.message : String(err);
     console.error(`[FATAL] critical startup failed, refusing to listen: ${detail}`);
     console.error('[FATAL] Serving traffic before SQLite pragmas are set, or while an operator believes Apple reconciliation is running, is worse than a failed deploy.');
     process.exit(1);
+    return;
+  }
+
+  // SIGTERM may have arrived while startup was awaiting. Startup must not
+  // resume past a shutdown that has already begun.
+  if (!shouldListen || isShuttingDown) {
+    console.log('[boot] startup cancelled by shutdown; not listening');
     return;
   }
 

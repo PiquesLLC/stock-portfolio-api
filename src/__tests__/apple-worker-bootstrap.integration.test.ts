@@ -4,6 +4,7 @@ import path from 'path';
 import {
   stopAppleWorkerThenDisconnect,
   APPLE_WORKER_STOP_BUDGET_MS,
+  runCriticalStartup,
 } from '../services/apple-worker-lifecycle';
 import {
   startAppleWorker,
@@ -224,8 +225,10 @@ describe('startup ordering: SQLite pragmas before the worker, both before listen
     // The worker can claim a reconciliation job immediately, and that is database
     // work. Starting it before busy_timeout and WAL are established exposes it to
     // exactly the SQLITE_BUSY class this codebase has spent a long time on.
-    const pragmas = idx.indexOf('await initSqlitePragmas();');
-    const worker = idx.indexOf('appleWorker = startAppleWorker();');
+    // Now expressed as ordered fields of the runCriticalStartup call; the
+    // ORDER itself is enforced by that primitive and tested directly above.
+    const pragmas = idx.indexOf('initDb: () => initSqlitePragmas()');
+    const worker = idx.indexOf('startWorker: () => {');
     expect(pragmas).toBeGreaterThan(-1);
     expect(worker).toBeGreaterThan(-1);
     expect(pragmas).toBeLessThan(worker);
@@ -239,7 +242,7 @@ describe('startup ordering: SQLite pragmas before the worker, both before listen
 
   it('the pragma call is not left behind inside the listen callback', () => {
     // Two call sites would make the ordering ambiguous again.
-    expect(idx.split('await initSqlitePragmas();').length - 1).toBe(1);
+    expect(idx.split('initSqlitePragmas()').length - 1).toBe(1);
   });
 
   it('both steps sit inside one fail-closed bootstrap', () => {
@@ -297,5 +300,110 @@ describe('public /health/deep must not leak subscriber identifiers', () => {
       appTs.indexOf('ORIGIN_LOCKDOWN_EXEMPT_PATHS') + 400,
     );
     expect(exempt).toContain('/health/deep');
+  });
+});
+
+describe('startup cancellation: shutdown during initialisation', () => {
+  it('SIGTERM while pragmas are pending: worker NEVER starts, server NEVER listens', async () => {
+    // The exact race: initialisation is awaiting when shutdown begins. When it
+    // resolves, startup must not resume.
+    let shuttingDown = false;
+    let workerStarted = false;
+    let releaseInit!: () => void;
+    const init = new Promise<void>((r) => { releaseInit = r; });
+
+    const startup = runCriticalStartup({
+      initDb: () => init,
+      startWorker: () => { workerStarted = true; },
+      isShuttingDown: () => shuttingDown,
+    });
+
+    shuttingDown = true;      // SIGTERM lands mid-initialisation
+    releaseInit();            // pragmas finish afterwards
+    const outcome = await startup;
+
+    expect(outcome).toBe('cancelled');
+    expect(workerStarted).toBe(false);   // and therefore the server never listens
+  });
+
+  it('a rejection CAUSED BY shutdown is cancellation, not a fatal startup failure', async () => {
+    // Shutdown disconnects Prisma; initialisation then rejects. Treating that as
+    // fatal would turn an ordinary deploy into a crash-looking one.
+    let shuttingDown = false;
+    let workerStarted = false;
+    let failInit!: (e: Error) => void;
+    const init = new Promise<void>((_res, rej) => { failInit = rej; });
+
+    const startup = runCriticalStartup({
+      initDb: () => init,
+      startWorker: () => { workerStarted = true; },
+      isShuttingDown: () => shuttingDown,
+    });
+
+    shuttingDown = true;
+    failInit(new Error('Prisma client was disconnected'));
+
+    await expect(startup).resolves.toBe('cancelled');
+    expect(workerStarted).toBe(false);
+  });
+
+  it('a rejection at any OTHER time still throws, so the fatal path survives', async () => {
+    await expect(runCriticalStartup({
+      initDb: async () => { throw new Error('pragmas genuinely failed'); },
+      startWorker: () => { throw new Error('must not be reached'); },
+      isShuttingDown: () => false,
+    })).rejects.toThrow(/pragmas genuinely failed/);
+  });
+
+  it('refuses to start at all when shutdown began before initialisation', async () => {
+    let workerStarted = false;
+    const outcome = await runCriticalStartup({
+      initDb: async () => { throw new Error('must not be reached'); },
+      startWorker: () => { workerStarted = true; },
+      isShuttingDown: () => true,
+    });
+    expect(outcome).toBe('cancelled');
+    expect(workerStarted).toBe(false);
+  });
+
+  it('shutdown beginning AFTER the worker starts still prevents listening', async () => {
+    let shuttingDown = false;
+    let workerStarted = false;
+    const outcome = await runCriticalStartup({
+      initDb: async () => { /* fast */ },
+      startWorker: () => { workerStarted = true; shuttingDown = true; },
+      isShuttingDown: () => shuttingDown,
+    });
+    expect(workerStarted).toBe(true);
+    // The worker is running, but shutdown will stop it — the server must not listen.
+    expect(outcome).toBe('cancelled');
+  });
+
+  it('the normal path still starts everything', async () => {
+    const seen: string[] = [];
+    const outcome = await runCriticalStartup({
+      initDb: async () => { seen.push('db'); },
+      startWorker: () => { seen.push('worker'); },
+      isShuttingDown: () => false,
+    });
+    expect(outcome).toBe('started');
+    expect(seen).toEqual(['db', 'worker']);   // and in that order
+  });
+
+  it('index.ts honours cancellation instead of listening anyway', () => {
+    const idx = fs.readFileSync(IDX, 'utf8');
+    expect(idx).toContain('runCriticalStartup({');
+    expect(idx).toContain('isShuttingDown: () => isShuttingDown');
+    expect(idx).toContain('startup cancelled by shutdown');
+    // The cancellation check must precede listening.
+    const cancel = idx.indexOf('if (!shouldListen || isShuttingDown) {');
+    const listen = idx.indexOf('server = app.listen(');
+    expect(cancel).toBeGreaterThan(-1);
+    expect(listen).toBeGreaterThan(cancel);
+    // ...and a shutdown-caused rejection must not reach the fatal exit.
+    const swallow = idx.indexOf('if (isShuttingDown) return;', idx.indexOf('} catch (err) {'));
+    const fatal = idx.indexOf('[FATAL] critical startup failed');
+    expect(swallow).toBeGreaterThan(-1);
+    expect(fatal).toBeGreaterThan(swallow);
   });
 });
