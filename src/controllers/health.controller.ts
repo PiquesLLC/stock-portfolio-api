@@ -11,6 +11,7 @@ import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount, isDbBrownout } from '../services/job-runner.service';
 import { getWalWatchdogState } from '../services/db-watchdog.service';
 import { getLastBackupStatus } from '../services/backup.service';
+import { getAppleWorkerStatus } from '../services/apple-reconciliation-worker';
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
   const response: {
@@ -100,6 +101,33 @@ export async function healthDeep(_req: Request, res: Response): Promise<void> {
     totalMs: Date.now() - startedAt,
   };
   if (error) body.error = error;
+
+  // Apple reconciliation worker, surfaced through the EXISTING deep-health
+  // endpoint rather than a new admin route: an operator asking whether
+  // reconciliation is running should not need a second place to look.
+  // Counters and identifiers only — no JWS, no payloads, no credentials.
+  const appleWorker = getAppleWorkerStatus();
+  body.appleWorker = {
+    enabled: appleWorker.enabled,
+    running: appleWorker.running,
+    stopping: appleWorker.stopping,
+    singletonMode: appleWorker.singletonMode,
+    workerId: appleWorker.workerId,
+    startedAt: appleWorker.startedAt,
+    lastLoopAt: appleWorker.lastLoopAt,
+    lastOutcome: appleWorker.lastOutcome,
+    currentJob: appleWorker.currentJob,
+    counts: {
+      processed: appleWorker.processedCount,
+      committed: appleWorker.committedCount,
+      stale: appleWorker.staleCount,
+      failed: appleWorker.failedCount,
+      rateLimited: appleWorker.rateLimitedCount,
+      parked: appleWorker.parkedCount,
+      deferred: appleWorker.deferredCount,
+      idle: appleWorker.idleCount,
+    },
+  };
 
   if (fs.existsSync('/data')) {
     const stats = fs.statfsSync('/data');

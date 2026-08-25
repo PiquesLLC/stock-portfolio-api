@@ -6,6 +6,7 @@
   },
   "deploy": {
     "startCommand": "bash scripts/start.sh",
+    "drainingSeconds": 40,
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

@@ -51,6 +51,14 @@ import { runDiskGuard } from './services/disk-guard.service';
 import * as Sentry from '@sentry/node';
 import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
 import { scheduleOffsiteBackups } from './services/offsite-backup.service';
+import {
+  startAppleWorker,
+  type AppleWorkerHandle,
+} from './services/apple-reconciliation-worker';
+import {
+  stopAppleWorkerThenDisconnect,
+  APPLE_WORKER_STOP_BUDGET_MS,
+} from './services/apple-worker-lifecycle';
 
 function assertSingleReplicaRefreshRotationSafety(): void {
   const replicaCountRaw = process.env.RAILWAY_REPLICA_COUNT;
@@ -431,6 +439,25 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('stale_data_cleanup', cleanupStaleData);
 }
 
+/**
+ * Apple reconciliation worker handle, retained so central shutdown can stop it.
+ * Null when APPLE_RECONCILIATION_WORKER_ENABLED is not true — the disabled path
+ * constructs nothing, requires no credentials, and claims no work.
+ */
+let appleWorker: AppleWorkerHandle | null = null;
+
+
+/**
+ * Hard shutdown deadline.
+ *
+ * Raised from 8s because the Apple worker may legitimately hold a pass for up to
+ * its 15s transport timeout. This is only meaningful because railway.json now
+ * sets an explicit draining period ABOVE it — Railway's documented default is
+ * 0s, so without that setting the platform would SIGKILL long before this fires
+ * and the extra budget would be fiction.
+ */
+const SHUTDOWN_HARD_DEADLINE_MS = 30_000;
+
 let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
@@ -459,14 +486,15 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   // Hard deadline: if any step below hangs (long-poll holding
   // server.close open, Sentry stuck on a slow upstream, libsql worker
-  // stalled in $disconnect), exit anyway before Railway's ~10s SIGKILL
-  // grace expires. Use process.stderr.write so the warning actually
-  // flushes to Railway's pipe before exit.
+  // stalled in $disconnect), exit anyway before Railway SIGKILLs us. The
+  // budget must exceed the Apple worker stop budget above, and railway.json
+  // sets a draining period above THIS. Use process.stderr.write so the warning
+  // actually flushes to Railway's pipe before exit.
   const hardExitTimer = setTimeout(() => {
     process.stderr.write('[Shutdown] hard-deadline reached; forcing exit\n', () =>
       process.exit(0),
     );
-  }, 8000);
+  }, SHUTDOWN_HARD_DEADLINE_MS);
   hardExitTimer.unref();
 
   // NOTE: we used to take a SQLite backup here, but reviewer flagged
@@ -475,10 +503,22 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // The daily-cron backup + documented pre-cutover manual snapshot
   // cover the freshness story without the shutdown-path fragility.
 
-  // Disconnect Prisma. Await so the pool teardown completes before
-  // Sentry.flush — otherwise a Sentry flush in-flight while Prisma
-  // shuts down its libsql worker can race.
-  await prisma.$disconnect().catch(() => undefined);
+  // Stop the Apple reconciliation worker BEFORE Prisma disconnects, then
+  // disconnect. One call so the ORDER is a tested unit rather than an
+  // assertion: the in-flight reconciliation pass still needs the database, so
+  // disconnecting first would fail a pass that was moments from committing.
+  //
+  // Await so the pool teardown completes before Sentry.flush — otherwise a
+  // Sentry flush in-flight while Prisma shuts down its libsql worker can race.
+  {
+    const worker = appleWorker;
+    appleWorker = null;
+    await stopAppleWorkerThenDisconnect(
+      worker,
+      () => prisma.$disconnect().catch(() => undefined),
+      { budgetMs: APPLE_WORKER_STOP_BUDGET_MS },
+    );
+  }
 
   // Flush Sentry so any captureMessage/Exception posted in the seconds
   // before SIGTERM is not dropped. 2s budget sits comfortably inside
@@ -497,6 +537,32 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
     // Railway's log pipe before process.exit.
     process.stdout.write('[Shutdown] Complete\n', () => process.exit(0));
   });
+}
+
+/**
+ * Start the Apple reconciliation worker, or refuse to boot.
+ *
+ * Deliberately BEFORE app.listen: if the worker is explicitly enabled and cannot
+ * start — unsupported singleton topology, missing Apple credentials — the API
+ * must not come up serving traffic while an operator believes reconciliation is
+ * running. A loud failed deploy is the cheaper failure.
+ *
+ * When the flag is not true this does nothing at all: no credentials are read,
+ * no transport is constructed, no work is claimed, and boot is unaffected.
+ */
+try {
+  appleWorker = startAppleWorker();
+  if (appleWorker) {
+    console.log(
+      `[boot] apple reconciliation worker started (singleton=${appleWorker.singletonMode}) ` +
+      `id=${appleWorker.workerId}`,
+    );
+  }
+} catch (err) {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.error(`[FATAL] APPLE_RECONCILIATION_WORKER_ENABLED is true but the worker could not start: ${detail}`);
+  console.error('[FATAL] Refusing to boot. Serving traffic while an operator believes Apple reconciliation is running is worse than a failed deploy.');
+  process.exit(1);
 }
 
 const server = app.listen(config.port, async () => {
