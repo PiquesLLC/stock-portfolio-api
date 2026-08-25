@@ -152,14 +152,14 @@ describe('index.ts wiring', () => {
     expect(idx).toContain('process.exit(1)');
     // The fatal path must be attached to the worker start, not somewhere else.
     const start = idx.indexOf('appleWorker = startAppleWorker();');
-    const fatal = idx.indexOf('[FATAL] APPLE_RECONCILIATION_WORKER_ENABLED');
+    const fatal = idx.indexOf('[FATAL] critical startup failed, refusing to listen');
     expect(start).toBeGreaterThan(-1);
     expect(fatal).toBeGreaterThan(start);
   });
 
   it('starts the worker BEFORE the server begins listening', () => {
     const start = idx.indexOf('appleWorker = startAppleWorker();');
-    const listen = idx.indexOf('const server = app.listen(');
+    const listen = idx.indexOf('server = app.listen(');
     expect(start).toBeGreaterThan(-1);
     expect(listen).toBeGreaterThan(start);
   });
@@ -214,5 +214,88 @@ describe('boot behaviour of the production entrypoint', () => {
     expect(s.workerId).toBeNull();
     // index.ts turns this into process.exit(1); the state must not claim health.
     expect(s.lastLoopAt).toBeNull();
+  });
+});
+
+describe('startup ordering: SQLite pragmas before the worker, both before listen', () => {
+  const idx = fs.readFileSync(IDX, 'utf8');
+
+  it('runs initSqlitePragmas BEFORE starting the worker', () => {
+    // The worker can claim a reconciliation job immediately, and that is database
+    // work. Starting it before busy_timeout and WAL are established exposes it to
+    // exactly the SQLITE_BUSY class this codebase has spent a long time on.
+    const pragmas = idx.indexOf('await initSqlitePragmas();');
+    const worker = idx.indexOf('appleWorker = startAppleWorker();');
+    expect(pragmas).toBeGreaterThan(-1);
+    expect(worker).toBeGreaterThan(-1);
+    expect(pragmas).toBeLessThan(worker);
+  });
+
+  it('starts listening only AFTER both have completed', () => {
+    const worker = idx.indexOf('appleWorker = startAppleWorker();');
+    const listen = idx.indexOf('server = app.listen(');
+    expect(listen).toBeGreaterThan(worker);
+  });
+
+  it('the pragma call is not left behind inside the listen callback', () => {
+    // Two call sites would make the ordering ambiguous again.
+    expect(idx.split('await initSqlitePragmas();').length - 1).toBe(1);
+  });
+
+  it('both steps sit inside one fail-closed bootstrap', () => {
+    expect(idx).toContain('async function startCriticalServices()');
+    expect(idx).toContain('await startCriticalServices();');
+    const boot = idx.indexOf('await startCriticalServices();');
+    const fatal = idx.indexOf('[FATAL] critical startup failed, refusing to listen');
+    const listen = idx.indexOf('server = app.listen(');
+    expect(fatal).toBeGreaterThan(boot);
+    expect(listen).toBeGreaterThan(fatal);   // the fatal path precedes listening
+    expect(idx).toContain('process.exit(1);');
+  });
+
+  it('shutdown tolerates SIGTERM arriving before the server ever listened', () => {
+    expect(idx).toContain('server never listened');
+    expect(idx).toMatch(/let server: import\('http'\)\.Server \| undefined;/);
+  });
+});
+
+describe('public /health/deep must not leak subscriber identifiers', () => {
+  const health = fs.readFileSync(
+    path.join(__dirname, '..', 'controllers', 'health.controller.ts'), 'utf8',
+  );
+  const block = health.slice(
+    health.indexOf('body.appleWorker = {'),
+    health.indexOf('body.appleWorker = {') + 900,
+  );
+
+  it('does NOT expose currentJob, which carries a live originalTransactionId', () => {
+    // /health/deep is unauthenticated and is listed in ORIGIN_LOCKDOWN_EXEMPT_PATHS,
+    // so anything here is world-readable. currentJob names a real subscriber.
+    expect(block).not.toContain('currentJob: appleWorker.currentJob');
+    expect(block).not.toContain('originalTransactionId');
+  });
+
+  it('does NOT expose workerId, which embeds deployment and replica identity', () => {
+    expect(block).not.toContain('workerId: appleWorker.workerId');
+  });
+
+  it('DOES expose a boolean so operators can still see work in flight', () => {
+    expect(block).toContain('hasCurrentJob: appleWorker.currentJob !== null');
+  });
+
+  it('keeps the aggregate operational state that is safe to publish', () => {
+    for (const field of ['enabled', 'running', 'stopping', 'singletonMode', 'lastOutcome', 'counts']) {
+      expect(block, field).toContain(field);
+    }
+  });
+
+  it('the route really is public, which is why this matters', () => {
+    const appTs = fs.readFileSync(path.join(__dirname, '..', 'app.ts'), 'utf8');
+    expect(appTs).toContain("'/health/deep'");
+    const exempt = appTs.slice(
+      appTs.indexOf('ORIGIN_LOCKDOWN_EXEMPT_PATHS'),
+      appTs.indexOf('ORIGIN_LOCKDOWN_EXEMPT_PATHS') + 400,
+    );
+    expect(exempt).toContain('/health/deep');
   });
 });

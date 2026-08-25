@@ -105,18 +105,28 @@ export async function healthDeep(_req: Request, res: Response): Promise<void> {
   // Apple reconciliation worker, surfaced through the EXISTING deep-health
   // endpoint rather than a new admin route: an operator asking whether
   // reconciliation is running should not need a second place to look.
-  // Counters and identifiers only — no JWS, no payloads, no credentials.
+  //
+  // THIS ROUTE IS PUBLIC. It carries no auth and is listed in
+  // ORIGIN_LOCKDOWN_EXEMPT_PATHS so the platform healthcheck can reach it, so
+  // nothing customer-identifying may appear here. In particular:
+  //
+  //   currentJob  carries a live originalTransactionId — an internal billing
+  //               identifier for a real subscriber. Only a boolean is exposed.
+  //   workerId    embeds deployment/replica ids and a boot uuid; it is internal
+  //               topology detail with no operational value to the public.
+  //
+  // If the exact in-flight subscription is ever needed for debugging, it belongs
+  // behind the existing admin-authenticated diagnostics, not here.
   const appleWorker = getAppleWorkerStatus();
   body.appleWorker = {
     enabled: appleWorker.enabled,
     running: appleWorker.running,
     stopping: appleWorker.stopping,
     singletonMode: appleWorker.singletonMode,
-    workerId: appleWorker.workerId,
     startedAt: appleWorker.startedAt,
     lastLoopAt: appleWorker.lastLoopAt,
     lastOutcome: appleWorker.lastOutcome,
-    currentJob: appleWorker.currentJob,
+    hasCurrentJob: appleWorker.currentJob !== null,
     counts: {
       processed: appleWorker.processedCount,
       committed: appleWorker.committedCount,

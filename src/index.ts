@@ -529,6 +529,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // server.close can resolve in finite time. server.closeAllConnections
   // is available since Node 18.2. Long-poll clients holding active
   // request scope still gate close — that's the hardExitTimer's job.
+  // startCriticalServices may still have been running when SIGTERM arrived, in
+  // which case there is no server to close.
+  if (!server) {
+    process.stdout.write('[Shutdown] Complete (server never listened)\n', () => process.exit(0));
+    return;
+  }
   if (typeof server.closeAllConnections === 'function') {
     server.closeAllConnections();
   }
@@ -550,7 +556,25 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
  * When the flag is not true this does nothing at all: no credentials are read,
  * no transport is constructed, no work is claimed, and boot is unaffected.
  */
-try {
+/**
+ * Critical startup, in a fixed order:
+ *
+ *   1. SQLite pragmas   busy_timeout + WAL must be established before ANY
+ *                       database work. prisma.ts states this must be awaited
+ *                       before app.listen and background jobs start.
+ *   2. Apple worker     it can claim a reconciliation job immediately, and that
+ *                       is database work — starting it before the pragmas were
+ *                       set would expose it to exactly the SQLITE_BUSY class
+ *                       this codebase has spent a long time hardening against.
+ *   3. app.listen       only once both have succeeded.
+ *
+ * Fail-closed: if either step throws, the server never begins listening.
+ */
+async function startCriticalServices(): Promise<void> {
+  // Must run before any DB operations — concurrent reads + write queuing.
+  await initSqlitePragmas();
+
+  // Only now is the database safe for the worker to touch.
   appleWorker = startAppleWorker();
   if (appleWorker) {
     console.log(
@@ -558,14 +582,29 @@ try {
       `id=${appleWorker.workerId}`,
     );
   }
-} catch (err) {
-  const detail = err instanceof Error ? err.message : String(err);
-  console.error(`[FATAL] APPLE_RECONCILIATION_WORKER_ENABLED is true but the worker could not start: ${detail}`);
-  console.error('[FATAL] Refusing to boot. Serving traffic while an operator believes Apple reconciliation is running is worse than a failed deploy.');
-  process.exit(1);
 }
 
-const server = app.listen(config.port, async () => {
+/**
+ * Assigned only after startCriticalServices resolves. shutdown() guards on it,
+ * because SIGTERM can arrive while startup is still in progress.
+ */
+let server: import('http').Server | undefined;
+
+void (async () => {
+  try {
+    await startCriticalServices();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[FATAL] critical startup failed, refusing to listen: ${detail}`);
+    console.error('[FATAL] Serving traffic before SQLite pragmas are set, or while an operator believes Apple reconciliation is running, is worse than a failed deploy.');
+    process.exit(1);
+    return;
+  }
+
+  // NOTE: the callback body below is intentionally left at its original
+  // indentation. Re-indenting ~680 lines to match the new nesting would bury
+  // this change in whitespace churn for no behavioural gain.
+  server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
   // Deploy fingerprint — grep prod logs for "[boot] commit=" to confirm which commit
@@ -573,8 +612,6 @@ const server = app.listen(config.port, async () => {
   // API-only deploy (UI unchanged) be verified unambiguously instead of guessing.
   console.log(`[boot] commit=${(process.env.RAILWAY_GIT_COMMIT_SHA || 'local').slice(0, 7)} branch=${process.env.RAILWAY_GIT_BRANCH || 'n/a'} at ${new Date().toISOString()}`);
 
-  // Must run before any DB operations — enables concurrent reads + write queuing
-  await initSqlitePragmas();
 
   // Single-row table backing GET /health/deep's write probe. Raw SQL (not a
   // Prisma model) so it needs no migration and can't collide with one.
@@ -695,7 +732,7 @@ const server = app.listen(config.port, async () => {
   } catch (_error) {
     if (config.nodeEnv === 'production') {
       console.error('[Init] Billing deploy safety check failed — exiting:', _error instanceof Error ? _error.message : _error);
-      server.close(() => process.exit(1));
+      server?.close(() => process.exit(1));
       return;
     }
     console.warn('[Init] Billing deploy safety check failed (non-fatal in dev)');
@@ -1252,6 +1289,7 @@ const server = app.listen(config.port, async () => {
   // disaster-recovery independence from Railway's own backup infra.
   scheduleOffsiteBackups();
 });
+})();
 
 process.on('SIGTERM', () => {
   shutdown('SIGTERM').catch(err => {
