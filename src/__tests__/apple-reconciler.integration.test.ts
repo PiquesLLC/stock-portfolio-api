@@ -5,6 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import {
   __TEST_ONLY_ENQUEUE_SQL,
+  claimReconciliationJob,
+  deferReconciliation,
   type QueueClient,
   type AppleEnvironment,
 } from '../services/apple-reconciliation-queue.service';
@@ -26,6 +28,7 @@ import {
 import {
   getAppleRateLimiter,
   __resetAppleRateLimitersForTests,
+  applyAppleRateLimitCooldown,
   __setAppleLimiterClockForTests,
   APPLE_RATE_LIMITS,
 } from '../services/apple-rate-limiter';
@@ -325,24 +328,21 @@ describe('apple reconciler (real engine, mocked Apple transport)', () => {
     };
     const picked = selectEntry(resp, OTI);
     expect(picked.entry.transaction.transactionId).toBe('txn-mine');
-    expect(picked.group).toBe('a');
+    expect(picked.outerGroup).toBe('a');
     expect(() => selectEntry(resp, 'nope')).toThrow(AppleInvalidResponseError);
   });
 
-  it('SELECTION: literal duplicates tolerated, distinct transactions are AMBIGUOUS', () => {
-    const dup: AppleStatusResponse = {
-      environment: 'Production',
-      data: [{ subscriptionGroupIdentifier: 'g', lastTransactions: [entry({ transactionId: 'txn-1' }), entry({ transactionId: 'txn-1' })] }],
-    };
-    expect(selectEntry(dup, OTI).entry.transaction.transactionId).toBe('txn-1');
-
-    const ambiguous: AppleStatusResponse = {
-      environment: 'Production',
-      data: [{ subscriptionGroupIdentifier: 'g', lastTransactions: [entry({ transactionId: 'txn-1' }), entry({ transactionId: 'txn-2' })] }],
-    };
-    // Two DIFFERENT transactions for one subscription: refuse rather than invent
-    // an ordering the frozen design forbids.
-    expect(() => selectEntry(ambiguous, OTI)).toThrow(/ambiguous/);
+  it('SELECTION: ANY multiple match is ambiguous, equal transactionIds included', () => {
+    // Equal transactionIds are not proof of literal duplication — status, group
+    // and renewal data can still differ — so collapsing by array position is
+    // refused outright rather than tolerated.
+    for (const ids of [['txn-1', 'txn-1'], ['txn-1', 'txn-2']]) {
+      const resp: AppleStatusResponse = {
+        environment: 'Production',
+        data: [{ subscriptionGroupIdentifier: 'g', lastTransactions: ids.map((id) => entry({ transactionId: id })) }],
+      };
+      expect(() => selectEntry(resp, OTI)).toThrow(/ambiguous/);
+    }
   });
 
   // ── Retry-After and the app-wide cooldown ──────────────────────────
@@ -468,6 +468,49 @@ describe('apple reconciler (real engine, mocked Apple transport)', () => {
     expect(String(j.nextAttemptAt) > new Date(nowMs).toISOString()).toBe(true);
   });
 
+  it('DEFERRAL is generation-aware: a stale worker cannot park newer work', async () => {
+    // The deferral equivalent of the stale-failure case. A notification arrives
+    // while the tokenless worker still holds the lease; its deferral must not
+    // push the brand-new generation out by the cooldown.
+    let nowMs = Date.now() + 5_000;
+    __setAppleLimiterClockForTests(() => nowMs);
+    const limiter = getAppleRateLimiter('Production');
+    for (let i = 0; i < APPLE_RATE_LIMITS.Production; i++) limiter.tryAcquire();
+    applyAppleRateLimitCooldown('Production', nowMs + 45_000);
+
+    await enqueue();
+    // Claim through the production path, then let a notification land while this
+    // worker still owns the lease — exactly the window the deferral writes into.
+    const claimed = await claimReconciliationJob('w1', { client: adapter });
+    expect(claimed!.generation).toBe(1);
+    await enqueue();
+    expect(Number((await job()).targetGeneration)).toBe(2);
+    expect(String((await job()).reconcileState)).toBe('running'); // intake left it running
+
+    // The stale G1 worker defers to +45s.
+    await deferReconciliation(claimed!, new Date(nowMs + 45_000), { client: adapter });
+
+    const j = await job();
+    expect(Number(j.targetGeneration)).toBe(2);
+    expect(String(j.reconcileState)).toBe('pending');
+    expect(j.leaseOwner).toBeNull();
+    // Due NOW for the new generation — not parked behind the stale cooldown.
+    expect(String(j.nextAttemptAt) < new Date(nowMs + 40_000).toISOString()).toBe(true);
+  });
+
+  it('DEFERRAL parks the CURRENT generation on the cooldown as intended', async () => {
+    // The other half: generation-awareness must not disable the deferral itself.
+    const dueAt = new Date(Date.now() + 45_000);
+    await enqueue();
+    const claimed = await claimReconciliationJob('w1', { client: adapter });
+    await deferReconciliation(claimed!, dueAt, { client: adapter });
+
+    const j = await job();
+    expect(String(j.reconcileState)).toBe('pending');
+    expect(j.leaseOwner).toBeNull();
+    expect(String(j.nextAttemptAt) > iso(40_000)).toBe(true);
+  });
+
   // ── transport failures ─────────────────────────────────────────────
 
   it('5xx / timeout / network failure goes through queue failure and backoff', async () => {
@@ -510,12 +553,16 @@ describe('apple reconciler (real engine, mocked Apple transport)', () => {
     const out = await reconcileOnce('w1', {
       client: adapter, transport: transportOf(async () => statusResponse()),
     });
-    expect(out.kind).toBe('invalid');
+    // Apple's response was VALID; our database failed. That is not 'invalid'.
+    expect(out.kind).toBe('persistence-failed');
 
-    expect(await subCount()).toBe(0);               // snapshot absent
+    expect(await subCount()).toBe(0);                  // snapshot absent
     const j = await job();
-    expect(String(j.reconcileState)).not.toBe('done'); // CAS rolled back
-    expect(j.leaseOwner).toBeNull();                  // lease released
+    expect(String(j.reconcileState)).toBe('failed');   // durable failure, not due-now
+    expect(Number(j.attemptCount)).toBe(1);            // counted
+    expect(String(j.lastError)).toContain('snapshot persistence failed');
+    expect(String(j.nextAttemptAt) > iso(1_000)).toBe(true);  // backed off, not hammering
+    expect(j.leaseOwner).toBeNull();                   // lease released
     expect(Number(j.targetGeneration)).toBe(1);
 
     // And the work is genuinely recoverable once the write can succeed.
@@ -558,5 +605,65 @@ describe('apple reconciler (real engine, mocked Apple transport)', () => {
     expect((await reconcileOnce('w1', {
       client: adapter, transport: transportOf(async () => { throw new Error('must not be called'); }),
     })).kind).toBe('idle');
+  });
+});
+
+describe('apple reconciler — verified group binding and duplicate refusal', () => {
+  const OTI2 = '2000000123456789';
+  const base = (over: Record<string, unknown> = {}): AppleStatusResponse => ({
+    environment: 'Production',
+    data: [{
+      subscriptionGroupIdentifier: (over.outerGroup as string) ?? 'group-1',
+      lastTransactions: [{
+        outerOriginalTransactionId: OTI2,
+        status: (over.status as number) ?? Status.ACTIVE,
+        transaction: {
+          transactionId: (over.transactionId as string) ?? 'txn-1',
+          originalTransactionId: OTI2,
+          productId: 'nala_pro_monthly',
+          subscriptionGroupIdentifier: over.verifiedGroup as string | undefined,
+          expiresDate: Date.now() + 86_400_000,
+        },
+        renewal: { originalTransactionId: OTI2, autoRenewStatus: 1 },
+      }],
+    }],
+  });
+
+  it('GROUP: persists the VERIFIED group, not the unsigned envelope copy', () => {
+    const snap = buildSnapshot('Production', OTI2, base({ outerGroup: 'group-1', verifiedGroup: 'group-1' }));
+    expect(snap.subscriptionGroupId).toBe('group-1');
+  });
+
+  it('GROUP: a disagreement between envelope and signed payload fails closed', () => {
+    expect(() => buildSnapshot('Production', OTI2, base({ outerGroup: 'group-B', verifiedGroup: 'group-A' })))
+      .toThrow(AppleInvalidResponseError);
+  });
+
+  it('GROUP: falls back to the envelope only when Apple omitted the signed copy', () => {
+    const snap = buildSnapshot('Production', OTI2, base({ outerGroup: 'group-1', verifiedGroup: undefined }));
+    expect(snap.subscriptionGroupId).toBe('group-1');
+  });
+
+  it('DUPLICATES: same transactionId but different STATUS is ambiguous, not collapsed', () => {
+    const a = base({ status: Status.ACTIVE }).data[0].lastTransactions[0];
+    const b = base({ status: Status.REVOKED }).data[0].lastTransactions[0];
+    const resp: AppleStatusResponse = {
+      environment: 'Production',
+      data: [{ subscriptionGroupIdentifier: 'g', lastTransactions: [a, b] }],
+    };
+    // Equal transactionIds do NOT make these literal duplicates; taking [0]
+    // would decide active-vs-revoked by array position.
+    expect(() => selectEntry(resp, OTI2)).toThrow(/ambiguous/);
+  });
+
+  it('DUPLICATES: same transactionId in different GROUPS is ambiguous', () => {
+    const resp: AppleStatusResponse = {
+      environment: 'Production',
+      data: [
+        { subscriptionGroupIdentifier: 'group-A', lastTransactions: [base().data[0].lastTransactions[0]] },
+        { subscriptionGroupIdentifier: 'group-B', lastTransactions: [base().data[0].lastTransactions[0]] },
+      ],
+    };
+    expect(() => selectEntry(resp, OTI2)).toThrow(/ambiguous/);
   });
 });

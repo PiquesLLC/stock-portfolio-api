@@ -308,9 +308,19 @@ export async function completeReconciliation(
       await releaseReconciliation(job, { now, client: db });
       return { committed: false, observed };
     }
-    // A snapshot-write failure rolled the CAS back with it. The job is still
-    // claimable, but its lease is ours until it expires, so hand it back.
-    await releaseReconciliation(job, { now, client: db }).catch(() => { /* best effort */ });
+    /**
+     * A snapshot-write failure rolled the CAS back with it — nothing persisted.
+     *
+     * The lease is deliberately NOT released here. Releasing due-now turns a
+     * persistent write problem (SQLITE_BUSY on a contended database is the live
+     * example) into an immediate reclaim-and-retry loop against the very
+     * resource that is struggling. The caller owns the recovery decision and
+     * should route this through failReconciliation so the failure gets
+     * attemptCount, backoff and lastError like any other.
+     *
+     * Keeping the lease is safe: if the process dies before the caller acts,
+     * lease expiry makes the job reclaimable anyway.
+     */
     throw err;
   }
 }
@@ -344,22 +354,54 @@ UPDATE "AppleReconciliation" SET
 WHERE "id" = ? AND "leaseOwner" = ?
 `.trim();
 
+/** Hand the job back, due immediately. Deliberately simple. */
 export async function releaseReconciliation(
   job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
-  opts: { now?: Date; client?: QueueClient; dueAt?: Date } = {},
+  opts: { now?: Date; client?: QueueClient } = {},
 ): Promise<void> {
   const db: QueueClient = opts.client ?? asQueueClient(prisma);
-  const now = opts.now ?? new Date();
-  const iso = now.toISOString();
-  /**
-   * `dueAt` lets a caller hand the job back but keep it out of the claim pool
-   * until a known time — the rate-limit deferral case. Releasing due-NOW under
-   * sustained rate pressure produces a claim/release loop that hammers the
-   * database while accomplishing nothing. Intake still resets nextAttemptAt, so
-   * a new notification is never left waiting behind a deferral.
-   */
-  const dueIso = (opts.dueAt ?? now).toISOString();
-  await db.$executeRawUnsafe(__TEST_ONLY_RELEASE_SQL, dueIso, iso, job.id, job.leaseToken);
+  const iso = (opts.now ?? new Date()).toISOString();
+  await db.$executeRawUnsafe(__TEST_ONLY_RELEASE_SQL, iso, iso, job.id, job.leaseToken);
+}
+
+/**
+ * DEFER — hand the job back but keep it out of the claim pool until `dueAt`.
+ *
+ * Used when the shared rate limiter has no token: releasing due-NOW under
+ * sustained pressure is a claim/release loop that hammers the database while
+ * accomplishing nothing.
+ *
+ * GENERATION-AWARE, and it must be. A worker deferring after an await can be
+ * stale: a notification may have arrived, bumped targetGeneration and reset
+ * nextAttemptAt to now, all while this worker still held the lease. Parking on
+ * `dueAt` regardless would let a stale worker delay brand-new work by up to the
+ * cooldown — the same defect already removed from failReconciliation, one
+ * function over. So the future due time applies ONLY while the generation is
+ * still ours; a superseded generation is released due-now.
+ */
+export const __TEST_ONLY_DEFER_SQL = `
+UPDATE "AppleReconciliation" SET
+  "reconcileState"  = 'pending',
+  "leaseOwner"      = NULL,
+  "leaseExpiresAt"  = NULL,
+  "nextAttemptAt"   = CASE WHEN "targetGeneration" = ? THEN ? ELSE ? END,
+  "updatedAt"       = ?
+WHERE "id" = ?
+  AND "leaseOwner" = ?
+  AND "reconcileState" = 'running'
+`.trim();
+
+export async function deferReconciliation(
+  job: Pick<ClaimedJob, 'id' | 'leaseToken' | 'generation'>,
+  dueAt: Date,
+  opts: { now?: Date; client?: QueueClient } = {},
+): Promise<void> {
+  const db: QueueClient = opts.client ?? asQueueClient(prisma);
+  const iso = (opts.now ?? new Date()).toISOString();
+  await db.$executeRawUnsafe(
+    __TEST_ONLY_DEFER_SQL,
+    job.generation, dueAt.toISOString(), iso, iso, job.id, job.leaseToken,
+  );
 }
 
 /**

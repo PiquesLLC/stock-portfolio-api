@@ -25,6 +25,8 @@ export interface DecodedTransaction {
   transactionId: string;
   originalTransactionId: string;
   productId: string;
+  /** Verified group identity. The outer response carries an UNSIGNED copy. */
+  subscriptionGroupIdentifier?: string;
   purchaseDate?: number;
   expiresDate?: number;
   revocationDate?: number;

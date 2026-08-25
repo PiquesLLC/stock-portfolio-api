@@ -3,7 +3,7 @@ import {
   claimReconciliationJob,
   completeReconciliation,
   failReconciliation,
-  releaseReconciliation,
+  deferReconciliation,
   type AppleEnvironment,
   type ClaimedJob,
   type QueueClient,
@@ -44,6 +44,7 @@ export type ReconcileOutcome =
   | { kind: 'rate-limited'; job: ClaimedJob; retryAfterMs: number }
   | { kind: 'transient'; job: ClaimedJob; error: string }
   | { kind: 'invalid'; job: ClaimedJob; error: string }
+  | { kind: 'persistence-failed'; job: ClaimedJob; error: string }
   | { kind: 'deferred'; environment: AppleEnvironment; waitMs: number };
 
 export interface ReconcilerDeps {
@@ -69,7 +70,8 @@ export function mapAppleStatus(status: number): string {
 }
 
 export interface SelectedEntry {
-  group: string | null;
+  /** From the UNSIGNED envelope. Cross-checked, never persisted on its own. */
+  outerGroup: string | null;
   entry: AppleStatusEntry;
 }
 
@@ -81,9 +83,16 @@ export interface SelectedEntry {
  * newest" or "the lowest id" among genuinely different transactions would be
  * inventing an authority Apple does not grant. So:
  *
- *   0 matches                       -> invalid
- *   1 distinct transactionId        -> selected (literal duplicates tolerated)
- *   2+ distinct transactionIds      -> ambiguous, therefore invalid
+ *   0 matches  -> invalid
+ *   1 match    -> selected
+ *   2+ matches -> ambiguous, therefore invalid
+ *
+ * Multiple matches are refused even when their transactionIds agree. Equal
+ * transactionIds do not make two entries LITERAL duplicates: status, group and
+ * renewal data can still differ, and collapsing them by taking matches[0] would
+ * quietly restore authority-by-array-position — the thing removing signedDate
+ * ordering was meant to eliminate. Proving field-by-field equivalence would be
+ * the only safe way to tolerate them, and nothing needs that today.
  */
 export function selectEntry(
   response: AppleStatusResponse,
@@ -94,7 +103,7 @@ export function selectEntry(
     for (const entry of group.lastTransactions) {
       // Identity comes from the signed payload, never the envelope.
       if (entry.transaction?.originalTransactionId === originalTransactionId) {
-        matches.push({ group: group.subscriptionGroupIdentifier || null, entry });
+        matches.push({ outerGroup: group.subscriptionGroupIdentifier || null, entry });
       }
     }
   }
@@ -103,10 +112,9 @@ export function selectEntry(
       `apple response contains no verified entry for originalTransactionId ${originalTransactionId}`,
     );
   }
-  const distinct = new Set(matches.map((m) => m.entry.transaction.transactionId));
-  if (distinct.size > 1) {
+  if (matches.length > 1) {
     throw new AppleInvalidResponseError(
-      `apple response is ambiguous for ${originalTransactionId}: ${distinct.size} distinct transactions`,
+      `apple response is ambiguous for ${originalTransactionId}: ${matches.length} matching entries`,
     );
   }
   return matches[0];
@@ -126,6 +134,7 @@ function assertConsistent(
   requestedOti: string,
   response: AppleStatusResponse,
   entry: AppleStatusEntry,
+  outerGroup: string | null,
 ): void {
   if (response.environment !== requestedEnv) {
     throw new AppleInvalidResponseError(
@@ -163,6 +172,18 @@ function assertConsistent(
   if (!t?.transactionId || !t?.productId) {
     throw new AppleInvalidResponseError('verified transaction missing transactionId or productId');
   }
+  /**
+   * The subscription group has exactly the same problem originalTransactionId
+   * had: the envelope's copy is unsigned. Apple's signed transaction carries it
+   * too, so when both are present they must agree, and we persist the VERIFIED
+   * one. Failing closed here rather than preferring one silently — a disagreement
+   * means the response cannot be trusted about which group this belongs to.
+   */
+  if (t.subscriptionGroupIdentifier && outerGroup && t.subscriptionGroupIdentifier !== outerGroup) {
+    throw new AppleInvalidResponseError(
+      `apple envelope subscription group ${outerGroup} does not match verified ${t.subscriptionGroupIdentifier}`,
+    );
+  }
 }
 
 export interface Snapshot {
@@ -186,8 +207,8 @@ export function buildSnapshot(
   originalTransactionId: string,
   response: AppleStatusResponse,
 ): Snapshot {
-  const { group, entry } = selectEntry(response, originalTransactionId);
-  assertConsistent(requested, originalTransactionId, response, entry);
+  const { outerGroup, entry } = selectEntry(response, originalTransactionId);
+  assertConsistent(requested, originalTransactionId, response, entry, outerGroup);
 
   const t = entry.transaction;
   const r = entry.renewal;
@@ -204,7 +225,9 @@ export function buildSnapshot(
     environment: requested,
     originalTransactionId,
     productId: t.productId,
-    subscriptionGroupId: group,
+    // Verified value wins; the envelope only fills in when Apple omitted it from
+    // the signed payload, and assertConsistent has already proven they agree.
+    subscriptionGroupId: t.subscriptionGroupIdentifier ?? outerGroup,
     plan,
     status: mapAppleStatus(entry.status),
     expiresAt: t.expiresDate ? new Date(t.expiresDate).toISOString() : null,
@@ -295,9 +318,9 @@ export async function reconcileOnce(
   if (!limiter.tryAcquire()) {
     const waitMs = Math.max(limiter.msUntilNextToken(), 0);
     const now = nowFn();
-    await releaseReconciliation(job, {
-      now, client, dueAt: new Date(now.getTime() + waitMs),
-    });
+    // Generation-aware: a notification may have arrived while we held the lease,
+    // and a stale worker must not park brand-new work behind a cooldown.
+    await deferReconciliation(job, new Date(now.getTime() + waitMs), { now, client });
     return { kind: 'deferred', environment: job.environment, waitMs };
   }
 
@@ -347,9 +370,18 @@ export async function reconcileOnce(
       ? { kind: 'committed', job }
       : { kind: 'stale', job, observed: result.observed };
   } catch (err) {
-    // The snapshot write itself failed; completeReconciliation rolled the CAS
-    // back with it and handed the lease back. The job remains claimable.
+    /**
+     * The snapshot write itself failed and completeReconciliation rolled the CAS
+     * back with it, keeping our lease. This is NOT an invalid response — Apple's
+     * answer was fine; our database was not. SQLITE_BUSY on a contended volume
+     * is the live example, and this repo has seen exactly that.
+     *
+     * So it goes through the normal failure machinery: attemptCount, backoff,
+     * lastError, lease released. Releasing due-now instead would let the next
+     * loop reclaim immediately and hammer the very database that is struggling.
+     */
     const message = err instanceof Error ? err.message : String(err);
-    return { kind: 'invalid', job, error: message };
+    await failReconciliation(job, `snapshot persistence failed: ${message}`, { now: nowFn(), client });
+    return { kind: 'persistence-failed', job, error: message };
   }
 }
