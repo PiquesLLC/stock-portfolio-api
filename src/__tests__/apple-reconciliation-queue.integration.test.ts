@@ -8,6 +8,8 @@ import {
   __TEST_ONLY_COMPLETE_CAS_SQL,
   __TEST_ONLY_FAIL_SQL,
   mintLeaseToken,
+  claimReconciliationJob,
+  type QueueClient,
 } from '../services/apple-reconciliation-queue.service';
 
 /**
@@ -46,6 +48,19 @@ const at = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString()
 
 describe('apple reconciliation queue — generation + lease (real libsql engine)', () => {
   let db: Client;
+
+  /**
+   * The seam that lets the PRODUCTION claim path run against this in-memory
+   * database. It forwards raw SQL verbatim — it is a transport, not a
+   * re-implementation of the query logic, so the statements under test remain
+   * the service's own. Reads `db` lazily because beforeEach replaces it.
+   */
+  const adapter: QueueClient = {
+    $executeRawUnsafe: async (sql: string, ...args: unknown[]) =>
+      Number((await db.execute({ sql, args: args as never })).rowsAffected),
+    $queryRawUnsafe: async <T,>(sql: string, ...args: unknown[]) =>
+      (await db.execute({ sql, args: args as never })).rows as T[],
+  };
 
   const row = async () => {
     const r = await db.execute({
@@ -378,6 +393,52 @@ describe('apple reconciliation queue — generation + lease (real libsql engine)
     expect(Number(r.attemptCount)).toBe(4);
     // attempt 4 -> 30 minutes, not the 30 seconds a captured 0 would have given.
     expect(String(r.nextAttemptAt) > at(20 * 60_000)).toBe(true);
+  });
+
+  it('INVARIANT: the PRODUCTION claim API mints a fresh token per acquisition', async () => {
+    // The tests above drive the lease with tokens they mint themselves, which
+    // proves the CAS fences correctly but NOT that claimReconciliationJob
+    // actually produces a fresh token. A future "simplification" to
+    //     const leaseToken = workerId;
+    // would leave every one of them green. This test closes that by going
+    // through the production claim path.
+    await enqueue();
+
+    // Same worker identity, twice — the reuse case that a bare identity hides.
+    const A = await claimReconciliationJob('worker-A', { client: adapter, leaseMs: -1_000 });
+    expect(A).not.toBeNull();
+    const B = await claimReconciliationJob('worker-A', { client: adapter });
+    expect(B).not.toBeNull();
+
+    expect(A!.leaseToken).not.toBe(B!.leaseToken);
+    expect(A!.workerId).toBe('worker-A');
+    expect(B!.workerId).toBe('worker-A');
+    expect(String((await row())!.leaseOwner)).toBe(B!.leaseToken);
+
+    // The first acquisition is fenced out; the second commits.
+    expect(await cas(A!.id, A!.generation, A!.leaseToken)).toBe(0);
+    expect(await cas(B!.id, B!.generation, B!.leaseToken)).toBe(1);
+    expect(String((await row())!.reconcileState)).toBe('done');
+  });
+
+  it('the production claim API reports the generation and attempt count it observed', async () => {
+    await enqueue();
+    await enqueue(); // generation 2
+    const job = await claimReconciliationJob('worker-A', { client: adapter });
+    expect(job!.generation).toBe(2);
+    expect(job!.attemptCount).toBe(0);
+    expect(job!.environment).toBe(ENV);
+    expect(job!.originalTransactionId).toBe(OTI);
+  });
+
+  it('the production claim API returns null when nothing is due', async () => {
+    await enqueue();
+    const id = String((await row())!.id);
+    await db.execute({
+      sql: `UPDATE "AppleReconciliation" SET "nextAttemptAt"=? WHERE "id"=?`,
+      args: [at(60_000), id],
+    });
+    expect(await claimReconciliationJob('worker-A', { client: adapter })).toBeNull();
   });
 
   it('a stale worker cannot release or fail a job owned by someone else', async () => {

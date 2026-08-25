@@ -49,6 +49,19 @@ export interface QueueKey {
   originalTransactionId: string;
 }
 
+/**
+ * The seam that lets the real-engine test drive the PRODUCTION claim path
+ * against an in-memory database instead of re-implementing it.
+ *
+ * It is deliberately two raw methods that PrismaClient already satisfies, rather
+ * than a mock of the Prisma query API: the point of the integration test is that
+ * the statements the service actually issues are the ones under test.
+ */
+export interface QueueClient {
+  $executeRawUnsafe(sql: string, ...args: unknown[]): Promise<number>;
+  $queryRawUnsafe<T = unknown>(sql: string, ...args: unknown[]): Promise<T[]>;
+}
+
 /** Default lease length. A worker that dies holding one is reclaimable after this. */
 export const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 
@@ -156,43 +169,52 @@ export function mintLeaseToken(workerId: string): string {
   return `${workerId}:${globalThis.crypto.randomUUID()}`;
 }
 
+export const __TEST_ONLY_CANDIDATES_SQL = `
+SELECT "id" FROM "AppleReconciliation"
+WHERE "nextAttemptAt" <= ?
+  AND ( "reconcileState" IN ('pending', 'failed')
+        OR ( "reconcileState" = 'running'
+             AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" <= ?) ) )
+ORDER BY "nextAttemptAt" ASC
+LIMIT ?
+`.trim();
+
+export const __TEST_ONLY_READBACK_SQL = `
+SELECT "id", "environment", "originalTransactionId", "targetGeneration",
+       "leaseOwner", "attemptCount"
+FROM "AppleReconciliation" WHERE "id" = ?
+`.trim();
+
 export async function claimReconciliationJob(
   workerId: string,
-  opts: { leaseMs?: number; now?: Date; limit?: number } = {},
+  opts: { leaseMs?: number; now?: Date; limit?: number; client?: QueueClient } = {},
 ): Promise<ClaimedJob | null> {
+  const db: QueueClient = opts.client ?? prisma;
   const now = opts.now ?? new Date();
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const nowIso = now.toISOString();
   const leaseUntil = new Date(now.getTime() + leaseMs).toISOString();
 
-  const candidates = await prisma.appleReconciliation.findMany({
-    where: {
-      nextAttemptAt: { lte: now },
-      OR: [
-        { reconcileState: { in: ['pending', 'failed'] } },
-        { reconcileState: 'running', leaseExpiresAt: { lte: now } },
-        { reconcileState: 'running', leaseExpiresAt: null },
-      ],
-    },
-    orderBy: { nextAttemptAt: 'asc' },
-    take: opts.limit ?? 10,
-    select: { id: true },
-  });
+  const candidates = await db.$queryRawUnsafe<{ id: string }>(
+    __TEST_ONLY_CANDIDATES_SQL, nowIso, nowIso, opts.limit ?? 10,
+  );
 
   for (const { id } of candidates) {
+    // Minted HERE, once per acquisition. A worker identity is not sufficient:
+    // the same identity reclaiming a lease it lost to expiry would otherwise
+    // present a value indistinguishable from the earlier lease's, letting stale
+    // work commit over the newer one.
     const leaseToken = mintLeaseToken(workerId);
-    const won = await prisma.$executeRawUnsafe(
+    const won = await db.$executeRawUnsafe(
       __TEST_ONLY_CLAIM_SQL, leaseToken, leaseUntil, nowIso, id, nowIso, nowIso,
     );
     if (won !== 1) continue; // someone else claimed it between SELECT and UPDATE
 
-    const row = await prisma.appleReconciliation.findUnique({
-      where: { id },
-      select: {
-        id: true, environment: true, originalTransactionId: true,
-        targetGeneration: true, leaseOwner: true, attemptCount: true,
-      },
-    });
+    const [row] = await db.$queryRawUnsafe<{
+      id: string; environment: string; originalTransactionId: string;
+      targetGeneration: number; leaseOwner: string | null; attemptCount: number;
+    }>(__TEST_ONLY_READBACK_SQL, id);
+
     // Read back under our own token. If it is not ours, another worker took the
     // row in the interval and we must not treat it as claimed.
     if (!row || row.leaseOwner !== leaseToken) continue;
@@ -201,10 +223,10 @@ export async function claimReconciliationJob(
       id: row.id,
       environment: row.environment as AppleEnvironment,
       originalTransactionId: row.originalTransactionId,
-      generation: row.targetGeneration,
+      generation: Number(row.targetGeneration),
       leaseToken,
       workerId,
-      attemptCount: row.attemptCount,
+      attemptCount: Number(row.attemptCount),
     };
   }
   return null;
