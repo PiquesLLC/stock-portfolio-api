@@ -51,6 +51,15 @@ import { runDiskGuard } from './services/disk-guard.service';
 import * as Sentry from '@sentry/node';
 import { scheduleV2ReconcileDaily } from './v2/reconciliation/cron';
 import { scheduleOffsiteBackups } from './services/offsite-backup.service';
+import {
+  startAppleWorker,
+  type AppleWorkerHandle,
+} from './services/apple-reconciliation-worker';
+import {
+  stopAppleWorkerThenDisconnect,
+  runCriticalStartup,
+  APPLE_WORKER_STOP_BUDGET_MS,
+} from './services/apple-worker-lifecycle';
 
 function assertSingleReplicaRefreshRotationSafety(): void {
   const replicaCountRaw = process.env.RAILWAY_REPLICA_COUNT;
@@ -431,6 +440,25 @@ function registerBackgroundJobHandlers(): void {
   registerJobHandler('stale_data_cleanup', cleanupStaleData);
 }
 
+/**
+ * Apple reconciliation worker handle, retained so central shutdown can stop it.
+ * Null when APPLE_RECONCILIATION_WORKER_ENABLED is not true — the disabled path
+ * constructs nothing, requires no credentials, and claims no work.
+ */
+let appleWorker: AppleWorkerHandle | null = null;
+
+
+/**
+ * Hard shutdown deadline.
+ *
+ * Raised from 8s because the Apple worker may legitimately hold a pass for up to
+ * its 15s transport timeout. This is only meaningful because railway.json now
+ * sets an explicit draining period ABOVE it — Railway's documented default is
+ * 0s, so without that setting the platform would SIGKILL long before this fires
+ * and the extra budget would be fiction.
+ */
+const SHUTDOWN_HARD_DEADLINE_MS = 30_000;
+
 let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
@@ -459,14 +487,15 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
   // Hard deadline: if any step below hangs (long-poll holding
   // server.close open, Sentry stuck on a slow upstream, libsql worker
-  // stalled in $disconnect), exit anyway before Railway's ~10s SIGKILL
-  // grace expires. Use process.stderr.write so the warning actually
-  // flushes to Railway's pipe before exit.
+  // stalled in $disconnect), exit anyway before Railway SIGKILLs us. The
+  // budget must exceed the Apple worker stop budget above, and railway.json
+  // sets a draining period above THIS. Use process.stderr.write so the warning
+  // actually flushes to Railway's pipe before exit.
   const hardExitTimer = setTimeout(() => {
     process.stderr.write('[Shutdown] hard-deadline reached; forcing exit\n', () =>
       process.exit(0),
     );
-  }, 8000);
+  }, SHUTDOWN_HARD_DEADLINE_MS);
   hardExitTimer.unref();
 
   // NOTE: we used to take a SQLite backup here, but reviewer flagged
@@ -475,10 +504,22 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // The daily-cron backup + documented pre-cutover manual snapshot
   // cover the freshness story without the shutdown-path fragility.
 
-  // Disconnect Prisma. Await so the pool teardown completes before
-  // Sentry.flush — otherwise a Sentry flush in-flight while Prisma
-  // shuts down its libsql worker can race.
-  await prisma.$disconnect().catch(() => undefined);
+  // Stop the Apple reconciliation worker BEFORE Prisma disconnects, then
+  // disconnect. One call so the ORDER is a tested unit rather than an
+  // assertion: the in-flight reconciliation pass still needs the database, so
+  // disconnecting first would fail a pass that was moments from committing.
+  //
+  // Await so the pool teardown completes before Sentry.flush — otherwise a
+  // Sentry flush in-flight while Prisma shuts down its libsql worker can race.
+  {
+    const worker = appleWorker;
+    appleWorker = null;
+    await stopAppleWorkerThenDisconnect(
+      worker,
+      () => prisma.$disconnect().catch(() => undefined),
+      { budgetMs: APPLE_WORKER_STOP_BUDGET_MS },
+    );
+  }
 
   // Flush Sentry so any captureMessage/Exception posted in the seconds
   // before SIGTERM is not dropped. 2s budget sits comfortably inside
@@ -489,6 +530,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   // server.close can resolve in finite time. server.closeAllConnections
   // is available since Node 18.2. Long-poll clients holding active
   // request scope still gate close — that's the hardExitTimer's job.
+  // startCriticalServices may still have been running when SIGTERM arrived, in
+  // which case there is no server to close.
+  if (!server) {
+    process.stdout.write('[Shutdown] Complete (server never listened)\n', () => process.exit(0));
+    return;
+  }
   if (typeof server.closeAllConnections === 'function') {
     server.closeAllConnections();
   }
@@ -499,7 +546,88 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   });
 }
 
-const server = app.listen(config.port, async () => {
+/**
+ * Start the Apple reconciliation worker, or refuse to boot.
+ *
+ * Deliberately BEFORE app.listen: if the worker is explicitly enabled and cannot
+ * start — unsupported singleton topology, missing Apple credentials — the API
+ * must not come up serving traffic while an operator believes reconciliation is
+ * running. A loud failed deploy is the cheaper failure.
+ *
+ * When the flag is not true this does nothing at all: no credentials are read,
+ * no transport is constructed, no work is claimed, and boot is unaffected.
+ */
+/**
+ * Critical startup, in a fixed order:
+ *
+ *   1. SQLite pragmas   busy_timeout + WAL must be established before ANY
+ *                       database work. prisma.ts states this must be awaited
+ *                       before app.listen and background jobs start.
+ *   2. Apple worker     it can claim a reconciliation job immediately, and that
+ *                       is database work — starting it before the pragmas were
+ *                       set would expose it to exactly the SQLITE_BUSY class
+ *                       this codebase has spent a long time hardening against.
+ *   3. app.listen       only once both have succeeded.
+ *
+ * Fail-closed: if either step throws, the server never begins listening.
+ *
+ * Returns true only when both steps completed AND shutdown had not begun.
+ * False means SIGTERM arrived while startup was awaiting, so the caller must
+ * not listen: startup does not get to resume past a shutdown already underway.
+ */
+async function startCriticalServices(): Promise<boolean> {
+  const outcome = await runCriticalStartup({
+    // Must run before any DB operations — concurrent reads + write queuing.
+    initDb: () => initSqlitePragmas(),
+    // Only reached once the database is safe for the worker to touch, and
+    // only if shutdown has not begun while initialisation was awaiting.
+    startWorker: () => {
+      appleWorker = startAppleWorker();
+      if (appleWorker) {
+        console.log(
+          `[boot] apple reconciliation worker started (singleton=${appleWorker.singletonMode}) ` +
+          `id=${appleWorker.workerId}`,
+        );
+      }
+    },
+    isShuttingDown: () => isShuttingDown,
+  });
+  return outcome === 'started';
+}
+
+/**
+ * Assigned only after startCriticalServices resolves. shutdown() guards on it,
+ * because SIGTERM can arrive while startup is still in progress.
+ */
+let server: import('http').Server | undefined;
+
+void (async () => {
+  let shouldListen: boolean;
+  try {
+    shouldListen = await startCriticalServices();
+  } catch (err) {
+    // A rejection caused BY the shutdown that just disconnected Prisma is not
+    // a startup failure. Treating it as fatal would turn an ordinary deploy
+    // into a crash-looking one.
+    if (isShuttingDown) return;
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[FATAL] critical startup failed, refusing to listen: ${detail}`);
+    console.error('[FATAL] Serving traffic before SQLite pragmas are set, or while an operator believes Apple reconciliation is running, is worse than a failed deploy.');
+    process.exit(1);
+    return;
+  }
+
+  // SIGTERM may have arrived while startup was awaiting. Startup must not
+  // resume past a shutdown that has already begun.
+  if (!shouldListen || isShuttingDown) {
+    console.log('[boot] startup cancelled by shutdown; not listening');
+    return;
+  }
+
+  // NOTE: the callback body below is intentionally left at its original
+  // indentation. Re-indenting ~680 lines to match the new nesting would bury
+  // this change in whitespace churn for no behavioural gain.
+  server = app.listen(config.port, async () => {
   console.log(`Stock Portfolio API running on http://localhost:${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
   // Deploy fingerprint — grep prod logs for "[boot] commit=" to confirm which commit
@@ -507,8 +635,6 @@ const server = app.listen(config.port, async () => {
   // API-only deploy (UI unchanged) be verified unambiguously instead of guessing.
   console.log(`[boot] commit=${(process.env.RAILWAY_GIT_COMMIT_SHA || 'local').slice(0, 7)} branch=${process.env.RAILWAY_GIT_BRANCH || 'n/a'} at ${new Date().toISOString()}`);
 
-  // Must run before any DB operations — enables concurrent reads + write queuing
-  await initSqlitePragmas();
 
   // Single-row table backing GET /health/deep's write probe. Raw SQL (not a
   // Prisma model) so it needs no migration and can't collide with one.
@@ -629,7 +755,7 @@ const server = app.listen(config.port, async () => {
   } catch (_error) {
     if (config.nodeEnv === 'production') {
       console.error('[Init] Billing deploy safety check failed — exiting:', _error instanceof Error ? _error.message : _error);
-      server.close(() => process.exit(1));
+      server?.close(() => process.exit(1));
       return;
     }
     console.warn('[Init] Billing deploy safety check failed (non-fatal in dev)');
@@ -1186,6 +1312,7 @@ const server = app.listen(config.port, async () => {
   // disaster-recovery independence from Railway's own backup infra.
   scheduleOffsiteBackups();
 });
+})();
 
 process.on('SIGTERM', () => {
   shutdown('SIGTERM').catch(err => {

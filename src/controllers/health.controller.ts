@@ -11,6 +11,7 @@ import prisma from '../utils/prisma';
 import { getJobRunnerMetrics, getActiveBackgroundJobCount, isDbBrownout } from '../services/job-runner.service';
 import { getWalWatchdogState } from '../services/db-watchdog.service';
 import { getLastBackupStatus } from '../services/backup.service';
+import { getAppleWorkerStatus } from '../services/apple-reconciliation-worker';
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
   const response: {
@@ -100,6 +101,43 @@ export async function healthDeep(_req: Request, res: Response): Promise<void> {
     totalMs: Date.now() - startedAt,
   };
   if (error) body.error = error;
+
+  // Apple reconciliation worker, surfaced through the EXISTING deep-health
+  // endpoint rather than a new admin route: an operator asking whether
+  // reconciliation is running should not need a second place to look.
+  //
+  // THIS ROUTE IS PUBLIC. It carries no auth and is listed in
+  // ORIGIN_LOCKDOWN_EXEMPT_PATHS so the platform healthcheck can reach it, so
+  // nothing customer-identifying may appear here. In particular:
+  //
+  //   currentJob  carries a live originalTransactionId — an internal billing
+  //               identifier for a real subscriber. Only a boolean is exposed.
+  //   workerId    embeds deployment/replica ids and a boot uuid; it is internal
+  //               topology detail with no operational value to the public.
+  //
+  // If the exact in-flight subscription is ever needed for debugging, it belongs
+  // behind the existing admin-authenticated diagnostics, not here.
+  const appleWorker = getAppleWorkerStatus();
+  body.appleWorker = {
+    enabled: appleWorker.enabled,
+    running: appleWorker.running,
+    stopping: appleWorker.stopping,
+    singletonMode: appleWorker.singletonMode,
+    startedAt: appleWorker.startedAt,
+    lastLoopAt: appleWorker.lastLoopAt,
+    lastOutcome: appleWorker.lastOutcome,
+    hasCurrentJob: appleWorker.currentJob !== null,
+    counts: {
+      processed: appleWorker.processedCount,
+      committed: appleWorker.committedCount,
+      stale: appleWorker.staleCount,
+      failed: appleWorker.failedCount,
+      rateLimited: appleWorker.rateLimitedCount,
+      parked: appleWorker.parkedCount,
+      deferred: appleWorker.deferredCount,
+      idle: appleWorker.idleCount,
+    },
+  };
 
   if (fs.existsSync('/data')) {
     const stats = fs.statfsSync('/data');
