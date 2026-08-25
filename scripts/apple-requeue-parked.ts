@@ -10,7 +10,6 @@ import type { AppleEnvironment } from '../src/services/apple-reconciliation-queu
  * Operator recovery for parked Apple reconciliation jobs.
  *
  *   npm run apple:requeue-parked -- --environment Production
- *   npm run apple:requeue-parked -- --original-transaction-id 2000000123456789
  *   npm run apple:requeue-parked -- --environment Production --original-transaction-id 2000000123456789
  *   npm run apple:requeue-parked -- --all
  *

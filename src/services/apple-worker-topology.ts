@@ -1,4 +1,5 @@
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Singleton-topology tripwire for the Apple reconciliation worker.
@@ -40,20 +41,32 @@ export class UnsupportedSingletonTopologyError extends Error {
 }
 
 /**
- * Resolve a `file:` DATABASE_URL to a filesystem path.
+ * Resolve a `file:` DATABASE_URL to a filesystem path, using Node's parser.
  *
- * The repo's production form is `file:/data/nala.db` (no authority), which
- * `fileURLToPath` rejects, so the scheme is stripped and the remainder resolved.
- * POSIX semantics are used deliberately: the deployment is Linux, and using the
- * host's path rules would make this behave differently on a Windows dev machine
- * than in the environment it is protecting.
+ * An earlier version hand-parsed this and was wrong twice, both in the
+ * permissive direction — the worst kind of error in a fail-closed guard:
+ *
+ *   file:/data/%2e%2e/tmp/nala.db
+ *       hand-parsed -> /data/%2e%2e/tmp/nala.db  (looks INSIDE /data)
+ *       fileURLToPath -> /tmp/nala.db            (correctly outside)
+ *     Percent-encoded traversal was never decoded.
+ *
+ *   file://evil-host/data/nala.db
+ *       hand-parsed -> /data/nala.db             (authority silently stripped)
+ *       fileURLToPath -> throws ERR_INVALID_FILE_URL_HOST
+ *     A non-local host was treated as a local path.
+ *
+ * `{ windows: false }` forces POSIX semantics regardless of the host OS, so this
+ * behaves on a Windows dev machine exactly as it does in the Linux deployment it
+ * protects. Anything unparseable returns null and the caller fails closed.
  */
 export function resolveFileDbPath(databaseUrl: string): string | null {
   if (!databaseUrl.startsWith('file:')) return null;
-  let raw = databaseUrl.slice('file:'.length);
-  // file://host/path and file:///path both collapse to the path component.
-  if (raw.startsWith('//')) raw = raw.replace(/^\/\/[^/]*/, '');
-  return path.posix.resolve(raw.split('?')[0]);
+  try {
+    return fileURLToPath(databaseUrl, { windows: false });
+  } catch {
+    return null;
+  }
 }
 
 /**

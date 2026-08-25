@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import {
   startAppleWorker,
+  __TEST_ONLY_startAppleWorker,
   __TEST_ONLY_runLoop,
   getAppleWorkerStatus,
   isAppleWorkerEnabled,
@@ -142,8 +143,20 @@ describe('singleton topology tripwire', () => {
       expect(isPathContained('/data', '/data')).toBe(false);
     });
 
+    it('the tripwire refuses a non-local host outright', () => {
+      expect(() => assertSupportedSingletonTopology({ ...railway, DATABASE_URL: 'file://evil-host/data/nala.db' }))
+        .toThrow(/not a file: database/);
+    });
+
     it('and the tripwire refuses each of those', () => {
-      for (const url of ['file:/database/nala.db', 'file:/data2/nala.db', 'file:/data/../tmp/nala.db']) {
+      for (const url of [
+        'file:/database/nala.db',
+        'file:/data2/nala.db',
+        'file:/data/../tmp/nala.db',
+        // Percent-encoded traversal: a hand-rolled parser never decodes this and
+        // sees it as inside /data. Node's parser resolves it to /tmp.
+        'file:/data/%2e%2e/tmp/nala.db',
+      ]) {
         expect(() => assertSupportedSingletonTopology({ ...railway, DATABASE_URL: url }), url)
           .toThrow(/does not resolve inside the mounted volume/);
       }
@@ -153,6 +166,12 @@ describe('singleton topology tripwire', () => {
       expect(resolveFileDbPath('file:/data/nala.db')).toBe('/data/nala.db');
       expect(resolveFileDbPath('file:///data/nala.db')).toBe('/data/nala.db');
       expect(resolveFileDbPath('postgresql://h/d')).toBeNull();
+      // Encoded traversal is decoded by the platform parser.
+      expect(resolveFileDbPath('file:/data/%2e%2e/tmp/nala.db')).toBe('/tmp/nala.db');
+      // A NON-LOCAL host is not a local path. The old hand parser stripped the
+      // authority and returned /data/nala.db, treating a remote host as inside
+      // the volume; the platform parser refuses it outright.
+      expect(resolveFileDbPath('file://evil-host/data/nala.db')).toBeNull();
     });
   });
 
@@ -201,7 +220,7 @@ describe('apple worker runtime (real engine)', () => {
 
   it('processes queued work and records observability', async () => {
     await enqueue();
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, maxPasses: 2, idleSleepMs: 1,
       __transportFactory: () => transportOf(async ({ originalTransactionId }) => okResponse(originalTransactionId) as never),
     })!;
@@ -222,7 +241,7 @@ describe('apple worker runtime (real engine)', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
 
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, maxPasses: 1, idleSleepMs: 1,
       __transportFactory: () => transportOf(async ({ originalTransactionId }) => {
         seen = getAppleWorkerStatus().currentJob;   // mid-request, as a stuck call would be
@@ -245,11 +264,11 @@ describe('apple worker runtime (real engine)', () => {
       env: goodEnv(), client: adapter, maxPasses: 3, idleSleepMs: 1,
       __transportFactory: () => transportOf(async () => { throw new Error('no work expected'); }),
     };
-    const first = startAppleWorker(opts)!;
-    expect(() => startAppleWorker(opts)).toThrow(AppleWorkerAlreadyRunningError);
+    const first = __TEST_ONLY_startAppleWorker(opts)!;
+    expect(() => __TEST_ONLY_startAppleWorker(opts)).toThrow(AppleWorkerAlreadyRunningError);
     expect(getAppleWorkerStatus().workerId).toBe(first.workerId);
     await first.stop();
-    const second = startAppleWorker(opts)!;      // allowed once stopped
+    const second = __TEST_ONLY_startAppleWorker(opts)!;      // allowed once stopped
     expect(second.workerId).not.toBe(first.workerId);
     await second.stop();
   });
@@ -259,7 +278,7 @@ describe('apple worker runtime (real engine)', () => {
     let called = false;
     // Production env with NO volume: if the flag were not checked first, the
     // topology tripwire would throw instead of returning null.
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv({ [WORKER_ENABLED_ENV]: 'false', NODE_ENV: 'production' }),
       client: adapter,
       __transportFactory: () => transportOf(async () => { called = true; return okResponse(OTI) as never; }),
@@ -274,14 +293,14 @@ describe('apple worker runtime (real engine)', () => {
   it('BAD CONFIG: refuses to start, by NAME, before claiming anything', async () => {
     await enqueue();
     let called = false;
-    expect(() => startAppleWorker({
+    expect(() => __TEST_ONLY_startAppleWorker({
       env: goodEnv({ APPLE_IAP_ISSUER_ID: '', APPLE_IAP_KEY_ID: '' }),
       client: adapter,
       __transportFactory: () => transportOf(async () => { called = true; return okResponse(OTI) as never; }),
     })).toThrow(AppleWorkerConfigError);
 
     try {
-      startAppleWorker({ env: goodEnv({ APPLE_IAP_ISSUER_ID: '' }), client: adapter });
+      __TEST_ONLY_startAppleWorker({ env: goodEnv({ APPLE_IAP_ISSUER_ID: '' }), client: adapter });
     } catch (err) {
       expect((err as AppleWorkerConfigError).missing).toEqual(['APPLE_IAP_ISSUER_ID']);
     }
@@ -294,7 +313,7 @@ describe('apple worker runtime (real engine)', () => {
     // pass validation for one credential set and then execute another.
     await enqueue();
     let sawConfig: { keyId: string; bundleId: string } | null = null;
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv({ APPLE_IAP_KEY_ID: 'the-validated-key' }), client: adapter, maxPasses: 1, idleSleepMs: 1,
       __transportFactory: (cfg) => {
         sawConfig = { keyId: cfg.auth.keyId, bundleId: cfg.auth.bundleId };
@@ -306,7 +325,7 @@ describe('apple worker runtime (real engine)', () => {
   });
 
   it('UNSUPPORTED TOPOLOGY: refuses to start even with valid config', async () => {
-    expect(() => startAppleWorker({
+    expect(() => __TEST_ONLY_startAppleWorker({
       env: goodEnv({ NODE_ENV: 'production', RAILWAY_SERVICE_ID: 'svc', DATABASE_URL: 'postgresql://h/d' }),
       client: adapter,
     })).toThrow(UnsupportedSingletonTopologyError);
@@ -321,7 +340,7 @@ describe('apple worker runtime (real engine)', () => {
     let passes = 0;
     let finishedFirst = false;
 
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, idleSleepMs: 1,
       __transportFactory: () => transportOf(async ({ originalTransactionId }) => {
         passes += 1;
@@ -341,7 +360,7 @@ describe('apple worker runtime (real engine)', () => {
   });
 
   it('SHUTDOWN: stop() wakes an idle sleep instead of waiting it out', async () => {
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, idleSleepMs: 60_000,   // would hang a naive stop
       __transportFactory: () => transportOf(async () => { throw new Error('unused'); }),
     })!;
@@ -353,7 +372,7 @@ describe('apple worker runtime (real engine)', () => {
 
   it('SHUTDOWN: work interrupted mid-pass stays recoverable through the queue lease', async () => {
     await enqueue();
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, idleSleepMs: 1,
       __transportFactory: () => transportOf(() => new Promise(() => { /* never resolves */ })),
     })!;
@@ -371,7 +390,7 @@ describe('apple worker runtime (real engine)', () => {
 
   it('installs NO signal handlers of its own — the app owns shutdown', async () => {
     const before = process.listenerCount('SIGTERM');
-    const handle = startAppleWorker({
+    const handle = __TEST_ONLY_startAppleWorker({
       env: goodEnv(), client: adapter, maxPasses: 1, idleSleepMs: 1,
       __transportFactory: () => transportOf(async () => okResponse(OTI) as never),
     })!;
@@ -500,5 +519,65 @@ describe('parked-job operator recovery (real engine)', () => {
     await seed('b1', 'Production', 60_000);
     expect(await countParkedAppleReconciliations({}, { client: adapter })).toBe(2);
     expect(await countParkedAppleReconciliations({ environment: 'Sandbox' }, { client: adapter })).toBe(0);
+  });
+});
+
+describe('production entrypoint is structurally unbypassable', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    __resetAppleWorkerForTests();
+  });
+
+  it('accepts NO arguments, so nothing can be injected at the call site', () => {
+    // Arity alone is not enough — a default parameter would still report 0 — so
+    // this also proves an injected environment is IGNORED. The real process.env
+    // has no enable flag here, so a worker that honoured the argument would try
+    // to start instead of returning null.
+    expect(startAppleWorker.length).toBe(0);
+    delete process.env[WORKER_ENABLED_ENV];
+    const injected = (startAppleWorker as unknown as (o: unknown) => unknown)({
+      env: goodEnv(), client: undefined, maxPasses: 1,
+      __transportFactory: () => transportOf(async () => { throw new Error('must not run'); }),
+    });
+    expect(injected).toBeNull();
+    expect(getAppleWorkerStatus().enabled).toBe(false);
+  });
+
+  it('reads the REAL process.env for the enable flag', () => {
+    delete process.env[WORKER_ENABLED_ENV];
+    expect(startAppleWorker()).toBeNull();
+    expect(getAppleWorkerStatus().enabled).toBe(false);
+  });
+
+  it('derives its configuration from the REAL process.env, not a caller', () => {
+    process.env[WORKER_ENABLED_ENV] = 'true';
+    delete process.env.APPLE_IAP_ISSUER_ID;
+    delete process.env.APPLE_IAP_KEY_ID;
+    delete process.env.APPLE_IAP_PRIVATE_KEY;
+    // Reaching the config gate at all proves the flag came from process.env; the
+    // missing names prove the config did too.
+    try {
+      startAppleWorker();
+      throw new Error('expected a config error');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppleWorkerConfigError);
+      expect((err as AppleWorkerConfigError).missing).toContain('APPLE_IAP_ISSUER_ID');
+    }
+  });
+
+  it('the injectable surface refuses to run outside a test process', () => {
+    const vitest = process.env.VITEST;
+    const nodeEnv = process.env.NODE_ENV;
+    delete process.env.VITEST;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => __TEST_ONLY_startAppleWorker({ env: { [WORKER_ENABLED_ENV]: 'false' } as NodeJS.ProcessEnv }))
+        .toThrow(/test-only entrypoint/);
+    } finally {
+      if (vitest === undefined) delete process.env.VITEST; else process.env.VITEST = vitest;
+      if (nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = nodeEnv;
+    }
   });
 });

@@ -68,7 +68,7 @@ export interface AppleWorkerStatus {
   idleCount: number;
 }
 
-export interface AppleWorkerOptions {
+export interface AppleWorkerTestOptions {
   env?: NodeJS.ProcessEnv;
   client?: QueueClient;
   idleSleepMs?: number;
@@ -145,7 +145,42 @@ export function __resetAppleWorkerForTests(): void {
  * a separately-supplied transport, so both checks were advisory: it could pass
  * validation for credentials it never used.
  */
-export function startAppleWorker(opts: AppleWorkerOptions = {}): AppleWorkerHandle | null {
+/**
+ * Guard for the test-only surface. Production has neither marker, so importing
+ * an injectable entrypoint into a production module fails loudly at call time
+ * rather than quietly handing a caller the ability to bypass every gate.
+ */
+function assertTestOnly(fnName: string): void {
+  const inTest = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
+  if (!inTest) {
+    throw new Error(
+      `${fnName} is a test-only entrypoint and must never be reached in production. ` +
+      'Use startAppleWorker(), which reads the real environment and builds the real transport.',
+    );
+  }
+}
+
+/**
+ * THE production entrypoint. It takes NO ARGUMENTS, deliberately.
+ *
+ * Every gate reads the real process environment and constructs the real
+ * transport, so none of them can be supplied — or bypassed — by a caller.
+ * A previous revision accepted env, client and a transport factory here, which
+ * meant the enable flag, the topology assertion, the validated configuration and
+ * even the authoritative database could all be substituted at the call site.
+ * The gates were load-bearing in intent and advisory in fact.
+ */
+export function startAppleWorker(): AppleWorkerHandle | null {
+  return startInternal({});
+}
+
+/** Injectable surface. Refuses to run outside a test process. */
+export function __TEST_ONLY_startAppleWorker(opts: AppleWorkerTestOptions = {}): AppleWorkerHandle | null {
+  assertTestOnly('__TEST_ONLY_startAppleWorker');
+  return startInternal(opts);
+}
+
+function startInternal(opts: AppleWorkerTestOptions): AppleWorkerHandle | null {
   const env = opts.env ?? process.env;
 
   // Flag first: a disabled worker must be inert even where the topology is
@@ -172,7 +207,7 @@ export function startAppleWorker(opts: AppleWorkerOptions = {}): AppleWorkerHand
 
 /* ── the loop ───────────────────────────────────────────────────────────── */
 
-interface LoopOptions extends AppleWorkerOptions {
+interface LoopOptions extends AppleWorkerTestOptions {
   env: NodeJS.ProcessEnv;
   singletonMode: SingletonMode;
   transport: AppleTransport;
@@ -284,6 +319,7 @@ function runLoop(opts: LoopOptions): AppleWorkerHandle {
 
 /** Test-only: run the loop with an explicit transport, bypassing env gates. */
 export function __TEST_ONLY_runLoop(opts: LoopOptions): AppleWorkerHandle {
+  assertTestOnly('__TEST_ONLY_runLoop');
   if (current) throw new AppleWorkerAlreadyRunningError();
   return runLoop(opts);
 }
