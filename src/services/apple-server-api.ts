@@ -1,3 +1,4 @@
+import { Status } from '@apple/app-store-server-library';
 import type { AppleEnvironment } from './apple-reconciliation-queue.service';
 
 /**
@@ -8,23 +9,17 @@ import type { AppleEnvironment } from './apple-reconciliation-queue.service';
  *
  * The transport is an INTERFACE so tests can drive every failure mode
  * adversarially. The real implementation fetches and verifies; the reconciler
- * consumes only the normalized shape below, so it never handles a JWS itself and
- * this module needs no Apple secrets to be unit-tested.
+ * consumes only the normalized shape below, so it never handles a JWS and this
+ * module needs no Apple secrets to be unit-tested.
  *
- * NOTE ON SCOPE: nothing in production constructs AppleServerApiTransport yet.
+ * SCOPE: nothing in production constructs AppleServerApiTransport yet.
  * APPLE_IAP_ENABLED remains false and no worker is started. The JWS verifier and
  * the ES256 token provider are injected rather than imported, so this file adds
  * no dependency on apple-iap.service and no credential handling.
  */
 
-/** Apple's subscription status codes. Read from the library enum at the edge. */
-export const APPLE_STATUS = {
-  ACTIVE: 1,
-  EXPIRED: 2,
-  BILLING_RETRY: 3,
-  GRACE: 4,
-  REVOKED: 5,
-} as const;
+/** Apple's subscription status codes, from the library rather than hardcoded. */
+export { Status as AppleStatus };
 
 export interface DecodedTransaction {
   transactionId: string;
@@ -41,6 +36,8 @@ export interface DecodedTransaction {
 }
 
 export interface DecodedRenewal {
+  /** Present in Apple's renewal payload; cross-checked against the transaction. */
+  originalTransactionId?: string;
   autoRenewStatus?: number;
   autoRenewProductId?: string;
   gracePeriodExpiresDate?: number;
@@ -50,9 +47,20 @@ export interface DecodedRenewal {
 }
 
 export interface AppleStatusEntry {
-  originalTransactionId: string;
+  /**
+   * The identifier from the UNSIGNED response envelope.
+   *
+   * Deliberately kept separate from the verified value and never used as
+   * identity. Apple signs the transaction; the envelope around it is not signed,
+   * so treating the outer id as authoritative would let a malformed or tampered
+   * response point us at the wrong subscription. It is retained only so the
+   * reconciler can assert the two AGREE.
+   */
+  outerOriginalTransactionId?: string;
   status: number;
+  /** Verified. This is the identity. */
   transaction: DecodedTransaction;
+  /** Verified. */
   renewal: DecodedRenewal;
 }
 
@@ -92,8 +100,9 @@ export class AppleTransientError extends Error {
 }
 
 /**
- * The response could not be trusted: unverifiable, malformed, or describing a
- * different environment than the one we asked about. NEVER projectable.
+ * The response could not be trusted: unverifiable, malformed, internally
+ * inconsistent, or describing a different environment or subscription than the
+ * one requested. NEVER projectable.
  */
 export class AppleInvalidResponseError extends Error {
   constructor(message: string) {
@@ -102,27 +111,47 @@ export class AppleInvalidResponseError extends Error {
   }
 }
 
+/** Current StoreKit domains. */
 export const APPLE_BASE_URL: Record<AppleEnvironment, string> = {
-  Production: 'https://api.storekit.itunes.apple.com',
-  Sandbox: 'https://api.storekit-sandbox.itunes.apple.com',
+  Production: 'https://api.storekit.apple.com',
+  Sandbox: 'https://api.storekit-sandbox.apple.com',
 };
 
+const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Parse Retry-After. Apple may send delta-seconds or an HTTP-date; anything else
- * (absent, malformed, negative, absurd) yields undefined so the caller applies a
- * conservative fallback rather than trusting a value it could not read.
+ * Parse Retry-After.
+ *
+ * The App Store Server API sends a UNIX timestamp in MILLISECONDS — the moment
+ * to retry AT, not a delay. That is the primary format, so the delay is
+ * `retryAt - now`. Reading it as delta-seconds would turn a timestamp like
+ * 1787620045000 into ~56,000 years.
+ *
+ * Generic HTTP forms are accepted secondarily (delta-seconds, HTTP-date) because
+ * an intermediary may rewrite the header. Anything past, negative, malformed, or
+ * beyond a day yields undefined so the caller applies a conservative fallback
+ * rather than trusting a value it could not read.
  */
 export function parseRetryAfterMs(header: string | null | undefined, now = Date.now()): number | undefined {
   if (!header) return undefined;
   const trimmed = header.trim();
+
   if (/^\d+$/.test(trimmed)) {
-    const ms = Number(trimmed) * 1000;
-    return ms >= 0 && ms <= 24 * 60 * 60 * 1000 ? ms : undefined;
+    const n = Number(trimmed);
+    // A value large enough to be a millisecond epoch is one: Apple's documented
+    // format. The threshold is far above any plausible delta-seconds value.
+    if (n > 1e12) {
+      const delay = n - now;
+      return delay > 0 && delay <= MAX_RETRY_AFTER_MS ? delay : undefined;
+    }
+    const ms = n * 1000; // secondary: generic delta-seconds
+    return ms >= 0 && ms <= MAX_RETRY_AFTER_MS ? ms : undefined;
   }
-  const date = Date.parse(trimmed);
+
+  const date = Date.parse(trimmed); // secondary: HTTP-date
   if (Number.isNaN(date)) return undefined;
-  const ms = date - now;
-  return ms > 0 && ms <= 24 * 60 * 60 * 1000 ? ms : undefined;
+  const delay = date - now;
+  return delay > 0 && delay <= MAX_RETRY_AFTER_MS ? delay : undefined;
 }
 
 export interface TransportDeps {
@@ -135,9 +164,7 @@ export interface TransportDeps {
   timeoutMs?: number;
 }
 
-/**
- * The real request path. Constructed by nothing in production yet.
- */
+/** The real request path. Constructed by nothing in production yet. */
 export class AppleServerApiTransport implements AppleTransport {
   constructor(private readonly deps: TransportDeps) {}
 
@@ -160,7 +187,6 @@ export class AppleServerApiTransport implements AppleTransport {
         signal: controller.signal,
       });
     } catch (err) {
-      // Abort, DNS, socket — all retryable, none authoritative.
       throw new AppleTransientError(err instanceof Error ? err.message : String(err));
     } finally {
       clearTimeout(timer);
@@ -196,13 +222,13 @@ export class AppleServerApiTransport implements AppleTransport {
         if (typeof t.signedTransactionInfo !== 'string' || typeof t.signedRenewalInfo !== 'string') {
           throw new AppleInvalidResponseError('apple status entry missing signed payloads');
         }
-        const transaction = await this.deps.verifyTransaction(t.signedTransactionInfo);
-        const renewal = await this.deps.verifyRenewal(t.signedRenewalInfo);
         entries.push({
-          originalTransactionId: String(t.originalTransactionId ?? transaction.originalTransactionId),
+          // Kept, never trusted — see AppleStatusEntry.
+          outerOriginalTransactionId:
+            typeof t.originalTransactionId === 'string' ? t.originalTransactionId : undefined,
           status: Number(t.status),
-          transaction,
-          renewal,
+          transaction: await this.deps.verifyTransaction(t.signedTransactionInfo),
+          renewal: await this.deps.verifyRenewal(t.signedRenewalInfo),
         });
       }
       groups.push({
@@ -210,6 +236,10 @@ export class AppleServerApiTransport implements AppleTransport {
         lastTransactions: entries,
       });
     }
-    return { environment: b.environment, bundleId: typeof b.bundleId === 'string' ? b.bundleId : undefined, data: groups };
+    return {
+      environment: b.environment,
+      bundleId: typeof b.bundleId === 'string' ? b.bundleId : undefined,
+      data: groups,
+    };
   }
 }

@@ -346,11 +346,20 @@ WHERE "id" = ? AND "leaseOwner" = ?
 
 export async function releaseReconciliation(
   job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
-  opts: { now?: Date; client?: QueueClient } = {},
+  opts: { now?: Date; client?: QueueClient; dueAt?: Date } = {},
 ): Promise<void> {
   const db: QueueClient = opts.client ?? asQueueClient(prisma);
-  const iso = (opts.now ?? new Date()).toISOString();
-  await db.$executeRawUnsafe(__TEST_ONLY_RELEASE_SQL, iso, iso, job.id, job.leaseToken);
+  const now = opts.now ?? new Date();
+  const iso = now.toISOString();
+  /**
+   * `dueAt` lets a caller hand the job back but keep it out of the claim pool
+   * until a known time — the rate-limit deferral case. Releasing due-NOW under
+   * sustained rate pressure produces a claim/release loop that hammers the
+   * database while accomplishing nothing. Intake still resets nextAttemptAt, so
+   * a new notification is never left waiting behind a deferral.
+   */
+  const dueIso = (opts.dueAt ?? now).toISOString();
+  await db.$executeRawUnsafe(__TEST_ONLY_RELEASE_SQL, dueIso, iso, job.id, job.leaseToken);
 }
 
 /**
