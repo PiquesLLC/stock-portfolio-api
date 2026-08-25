@@ -28,7 +28,8 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
-        "test:v2:integration": "cross-env RUN_V2_INTEGRATION=1 V2_DATABASE_URL=postgresql://nala_v2:dev_password_local_only@localhost:5432/nala_v2_ledger vitest run src/v2/ledger/__tests__/integration"
+        "test:v2:integration": "cross-env RUN_V2_INTEGRATION=1 V2_DATABASE_URL=postgresql://nala_v2:dev_password_local_only@localhost:5432/nala_v2_ledger vitest run src/v2/ledger/__tests__/integration",
+        "apple:requeue-parked": "npx ts-node scripts/apple-requeue-parked.ts"
     },
     "prisma": {
         "seed": "npx ts-node prisma/seed.ts"
