@@ -60,6 +60,17 @@ export interface QueueKey {
 export interface QueueClient {
   $executeRawUnsafe(sql: string, ...args: unknown[]): Promise<number>;
   $queryRawUnsafe<T = unknown>(sql: string, ...args: unknown[]): Promise<T[]>;
+  /**
+   * Interactive transaction. Required by completeReconciliation, which must bind
+   * the CAS and the snapshot write into one commit — the whole reason that
+   * function takes a callback.
+   */
+  $transaction<T>(fn: (tx: QueueClient) => Promise<T>): Promise<T>;
+}
+
+/** PrismaClient satisfies QueueClient structurally; this narrows the overloads. */
+function asQueueClient(p: typeof prisma): QueueClient {
+  return p as unknown as QueueClient;
 }
 
 /** Default lease length. A worker that dies holding one is reclaimable after this. */
@@ -274,11 +285,13 @@ WHERE "id" = ?
 
 export async function completeReconciliation(
   job: Pick<ClaimedJob, 'id' | 'generation' | 'leaseToken'>,
-  writeSnapshot: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<void>,
-  now: Date = new Date(),
+  writeSnapshot: (tx: QueueClient) => Promise<void>,
+  opts: { now?: Date; client?: QueueClient } = {},
 ): Promise<{ committed: boolean; observed?: StaleObservation }> {
+  const db: QueueClient = opts.client ?? asQueueClient(prisma);
+  const now = opts.now ?? new Date();
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const won = await tx.$executeRawUnsafe(
         __TEST_ONLY_COMPLETE_CAS_SQL, now.toISOString(), job.id, job.generation, job.leaseToken,
       );
@@ -291,10 +304,23 @@ export async function completeReconciliation(
     return { committed: true };
   } catch (err) {
     if (err instanceof StaleWorkError) {
-      const observed = await observeStaleCause(job);
-      await releaseReconciliation(job, now);
+      const observed = await observeStaleCause(job, db);
+      await releaseReconciliation(job, { now, client: db });
       return { committed: false, observed };
     }
+    /**
+     * A snapshot-write failure rolled the CAS back with it — nothing persisted.
+     *
+     * The lease is deliberately NOT released here. Releasing due-now turns a
+     * persistent write problem (SQLITE_BUSY on a contended database is the live
+     * example) into an immediate reclaim-and-retry loop against the very
+     * resource that is struggling. The caller owns the recovery decision and
+     * should route this through failReconciliation so the failure gets
+     * attemptCount, backoff and lastError like any other.
+     *
+     * Keeping the lease is safe: if the process dies before the caller acts,
+     * lease expiry makes the job reclaimable anyway.
+     */
     throw err;
   }
 }
@@ -302,13 +328,13 @@ export async function completeReconciliation(
 /** Diagnostic only — see StaleObservation. Never used for a decision. */
 async function observeStaleCause(
   job: Pick<ClaimedJob, 'id' | 'generation' | 'leaseToken'>,
+  db: QueueClient,
 ): Promise<StaleObservation> {
-  const row = await prisma.appleReconciliation.findUnique({
-    where: { id: job.id },
-    select: { targetGeneration: true, leaseOwner: true, reconcileState: true },
-  });
+  const [row] = await db.$queryRawUnsafe<{
+    targetGeneration: number; leaseOwner: string | null; reconcileState: string;
+  }>(`SELECT "targetGeneration", "leaseOwner", "reconcileState" FROM "AppleReconciliation" WHERE "id" = ?`, job.id);
   if (!row) return 'unknown';
-  if (row.targetGeneration !== job.generation) return 'generation-advanced';
+  if (Number(row.targetGeneration) !== job.generation) return 'generation-advanced';
   if (row.leaseOwner !== job.leaseToken) return 'lease-lost';
   if (row.reconcileState !== 'running') return 'not-running';
   return 'unknown';
@@ -318,14 +344,64 @@ async function observeStaleCause(
  * Release a job this worker can no longer finish. Guarded on the fencing token,
  * so a worker whose lease was reclaimed cannot disturb the new owner.
  */
+export const __TEST_ONLY_RELEASE_SQL = `
+UPDATE "AppleReconciliation" SET
+  "reconcileState"  = 'pending',
+  "leaseOwner"      = NULL,
+  "leaseExpiresAt"  = NULL,
+  "nextAttemptAt"   = ?,
+  "updatedAt"       = ?
+WHERE "id" = ? AND "leaseOwner" = ?
+`.trim();
+
+/** Hand the job back, due immediately. Deliberately simple. */
 export async function releaseReconciliation(
   job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
-  now: Date = new Date(),
+  opts: { now?: Date; client?: QueueClient } = {},
 ): Promise<void> {
-  await prisma.appleReconciliation.updateMany({
-    where: { id: job.id, leaseOwner: job.leaseToken },
-    data: { reconcileState: 'pending', leaseOwner: null, leaseExpiresAt: null, nextAttemptAt: now, updatedAt: now },
-  });
+  const db: QueueClient = opts.client ?? asQueueClient(prisma);
+  const iso = (opts.now ?? new Date()).toISOString();
+  await db.$executeRawUnsafe(__TEST_ONLY_RELEASE_SQL, iso, iso, job.id, job.leaseToken);
+}
+
+/**
+ * DEFER — hand the job back but keep it out of the claim pool until `dueAt`.
+ *
+ * Used when the shared rate limiter has no token: releasing due-NOW under
+ * sustained pressure is a claim/release loop that hammers the database while
+ * accomplishing nothing.
+ *
+ * GENERATION-AWARE, and it must be. A worker deferring after an await can be
+ * stale: a notification may have arrived, bumped targetGeneration and reset
+ * nextAttemptAt to now, all while this worker still held the lease. Parking on
+ * `dueAt` regardless would let a stale worker delay brand-new work by up to the
+ * cooldown — the same defect already removed from failReconciliation, one
+ * function over. So the future due time applies ONLY while the generation is
+ * still ours; a superseded generation is released due-now.
+ */
+export const __TEST_ONLY_DEFER_SQL = `
+UPDATE "AppleReconciliation" SET
+  "reconcileState"  = 'pending',
+  "leaseOwner"      = NULL,
+  "leaseExpiresAt"  = NULL,
+  "nextAttemptAt"   = CASE WHEN "targetGeneration" = ? THEN ? ELSE ? END,
+  "updatedAt"       = ?
+WHERE "id" = ?
+  AND "leaseOwner" = ?
+  AND "reconcileState" = 'running'
+`.trim();
+
+export async function deferReconciliation(
+  job: Pick<ClaimedJob, 'id' | 'leaseToken' | 'generation'>,
+  dueAt: Date,
+  opts: { now?: Date; client?: QueueClient } = {},
+): Promise<void> {
+  const db: QueueClient = opts.client ?? asQueueClient(prisma);
+  const iso = (opts.now ?? new Date()).toISOString();
+  await db.$executeRawUnsafe(
+    __TEST_ONLY_DEFER_SQL,
+    job.generation, dueAt.toISOString(), iso, iso, job.id, job.leaseToken,
+  );
 }
 
 /**
@@ -370,11 +446,21 @@ WHERE "id" = ?
 export async function failReconciliation(
   job: Pick<ClaimedJob, 'id' | 'leaseToken' | 'generation'>,
   error: string,
-  now: Date = new Date(),
+  opts: { now?: Date; client?: QueueClient; retryAfterMs?: number } = {},
 ): Promise<void> {
+  const db: QueueClient = opts.client ?? asQueueClient(prisma);
+  const now = opts.now ?? new Date();
   const iso = now.toISOString();
-  const after = (ms: number) => new Date(now.getTime() + ms).toISOString();
-  await prisma.$executeRawUnsafe(
+  /**
+   * When Apple tells us when to come back (Retry-After on a 429), that
+   * instruction wins over our own ladder: it is fed into every backoff slot so
+   * the chosen delay is Apple's regardless of attemptCount. A superseded
+   * generation is still released immediately — a rate limit must not park a
+   * newer generation any more than a failure may.
+   */
+  const after = (ms: number) =>
+    new Date(now.getTime() + (opts.retryAfterMs ?? ms)).toISOString();
+  await db.$executeRawUnsafe(
     __TEST_ONLY_FAIL_SQL,
     job.generation,                 // reconcileState CASE
     job.generation,                 // attemptCount CASE
