@@ -4,11 +4,10 @@ import { Status } from '@apple/app-store-server-library';
 import fs from 'fs';
 import path from 'path';
 import {
-  startAppleReconciliationWorker,
-  startAppleWorkerIfEnabled,
+  startAppleWorker,
+  __TEST_ONLY_runLoop,
   getAppleWorkerStatus,
   isAppleWorkerEnabled,
-  installAppleWorkerSignalHandlers,
   AppleWorkerAlreadyRunningError,
   AppleWorkerConfigError,
   __resetAppleWorkerForTests,
@@ -17,11 +16,14 @@ import {
 import {
   assertSupportedSingletonTopology,
   buildWorkerId,
+  isPathContained,
+  resolveFileDbPath,
   UnsupportedSingletonTopologyError,
 } from '../services/apple-worker-topology';
 import {
   requeueParkedAppleReconciliations,
   countParkedAppleReconciliations,
+  assertRequeueScope,
   RequeueScopeError,
   PARKED_THRESHOLD_MS,
   __PARK_EXCEEDS_THRESHOLD,
@@ -34,10 +36,9 @@ import {
 } from '../services/apple-reconciliation-queue.service';
 import { __resetAppleRateLimitersForTests } from '../services/apple-rate-limiter';
 import type { AppleTransport } from '../services/apple-server-api';
-import type { AppleTransportConfig } from '../services/apple-transport-factory';
 
 /**
- * Worker runtime: singleton enforcement, shutdown, and operator recovery.
+ * Worker runtime: singleton enforcement, gating, shutdown and operator recovery.
  *
  * The singleton story has three layers and only two are testable here — Railway
  * enforces the third by disallowing replicas on a volume-backed service. What IS
@@ -52,10 +53,14 @@ const MIGRATION = path.join(
   '20260824000000_apple_authoritative_state', 'migration.sql',
 );
 
-const goodConfig: AppleTransportConfig = {
-  auth: { issuerId: 'iss', keyId: 'kid', privateKey: 'pk', bundleId: 'com.nala.portfolio' },
-  verifier: { bundleId: 'com.nala.portfolio', appAppleId: 123 },
-};
+/** A complete, valid IAP environment — the worker builds its config from this. */
+const goodEnv = (over: Record<string, string> = {}): NodeJS.ProcessEnv => ({
+  [WORKER_ENABLED_ENV]: 'true',
+  NODE_ENV: 'development',
+  APPLE_IAP_ISSUER_ID: 'iss', APPLE_IAP_KEY_ID: 'kid', APPLE_IAP_PRIVATE_KEY: 'pk',
+  APPLE_BUNDLE_ID: 'com.nala.portfolio', APPLE_APP_APPLE_ID: '123',
+  ...over,
+} as NodeJS.ProcessEnv);
 
 const okResponse = (oti: string) => ({
   environment: 'Production',
@@ -73,9 +78,11 @@ const okResponse = (oti: string) => ({
   }],
 });
 
+const transportOf = (fn: AppleTransport['getAllSubscriptionStatuses']): AppleTransport =>
+  ({ getAllSubscriptionStatuses: fn });
+
 describe('singleton topology tripwire', () => {
   const railway = {
-    NODE_ENV: 'production',
     RAILWAY_SERVICE_ID: 'svc',
     RAILWAY_VOLUME_MOUNT_PATH: '/data',
     DATABASE_URL: 'file:/data/nala.db',
@@ -83,9 +90,18 @@ describe('singleton topology tripwire', () => {
 
   it('accepts the volume-backed Railway topology the worker was designed for', () => {
     expect(assertSupportedSingletonTopology(railway)).toBe('railway-volume');
+    expect(assertSupportedSingletonTopology({ ...railway, NODE_ENV: 'production' })).toBe('railway-volume');
   });
 
-  it('is unenforced outside production, so a local process can run one worker', () => {
+  it('RAILWAY PRESENCE IS AUTHORITATIVE regardless of NODE_ENV', () => {
+    // A Railway service running with NODE_ENV=development is still a Railway
+    // service that gains replicas the moment its volume goes away. Keying the
+    // check on NODE_ENV would let exactly that deployment skip the tripwire.
+    const noVolume = { RAILWAY_SERVICE_ID: 'svc', NODE_ENV: 'development', DATABASE_URL: 'postgresql://h/d' } as NodeJS.ProcessEnv;
+    expect(() => assertSupportedSingletonTopology(noVolume)).toThrow(UnsupportedSingletonTopologyError);
+  });
+
+  it('is unenforced only OFF Railway and outside production', () => {
     expect(assertSupportedSingletonTopology({ NODE_ENV: 'development' } as NodeJS.ProcessEnv))
       .toBe('unenforced-non-production');
   });
@@ -93,35 +109,60 @@ describe('singleton topology tripwire', () => {
   it('FAILS CLOSED when the volume is gone — Railway could then run replicas', () => {
     const { RAILWAY_VOLUME_MOUNT_PATH: _drop, ...noVolume } = railway;
     expect(() => assertSupportedSingletonTopology(noVolume as NodeJS.ProcessEnv))
-      .toThrow(UnsupportedSingletonTopologyError);
+      .toThrow(/may run multiple replicas/);
   });
 
   it('FAILS CLOSED when the database is no longer file-backed (the Postgres future)', () => {
-    expect(() => assertSupportedSingletonTopology({
-      ...railway, DATABASE_URL: 'postgresql://host/db',
-    } as NodeJS.ProcessEnv)).toThrow(/reachable from multiple replicas/);
-  });
-
-  it('FAILS CLOSED when the database is not on the mounted volume', () => {
-    expect(() => assertSupportedSingletonTopology({
-      ...railway, DATABASE_URL: 'file:/tmp/elsewhere.db',
-    } as NodeJS.ProcessEnv)).toThrow(/does not live under the mounted volume/);
+    expect(() => assertSupportedSingletonTopology({ ...railway, DATABASE_URL: 'postgresql://host/db' }))
+      .toThrow(/reachable from multiple replicas/);
   });
 
   it('FAILS CLOSED in production off Railway, where no platform guarantee exists', () => {
-    const { RAILWAY_SERVICE_ID: _drop, ...offRailway } = railway;
-    expect(() => assertSupportedSingletonTopology(offRailway as NodeJS.ProcessEnv))
+    expect(() => assertSupportedSingletonTopology({ NODE_ENV: 'production' } as NodeJS.ProcessEnv))
       .toThrow(/not on Railway/);
+  });
+
+  describe('path containment is filesystem semantics, not string prefixing', () => {
+    it('accepts a database genuinely inside the volume', () => {
+      expect(isPathContained('/data/nala.db', '/data')).toBe(true);
+      expect(isPathContained('/data/sub/nala.db', '/data')).toBe(true);
+    });
+
+    it('REJECTS a sibling directory that merely shares the prefix', () => {
+      // '/database/...' and '/data2/...' both pass a startsWith('/data') test.
+      expect(isPathContained('/database/nala.db', '/data')).toBe(false);
+      expect(isPathContained('/data2/nala.db', '/data')).toBe(false);
+    });
+
+    it('REJECTS traversal that starts with the mount but resolves outside', () => {
+      expect(isPathContained('/data/../tmp/nala.db', '/data')).toBe(false);
+    });
+
+    it('rejects the mount itself, which is a directory not a database', () => {
+      expect(isPathContained('/data', '/data')).toBe(false);
+    });
+
+    it('and the tripwire refuses each of those', () => {
+      for (const url of ['file:/database/nala.db', 'file:/data2/nala.db', 'file:/data/../tmp/nala.db']) {
+        expect(() => assertSupportedSingletonTopology({ ...railway, DATABASE_URL: url }), url)
+          .toThrow(/does not resolve inside the mounted volume/);
+      }
+    });
+
+    it('resolves the file: forms this repo actually uses', () => {
+      expect(resolveFileDbPath('file:/data/nala.db')).toBe('/data/nala.db');
+      expect(resolveFileDbPath('file:///data/nala.db')).toBe('/data/nala.db');
+      expect(resolveFileDbPath('postgresql://h/d')).toBeNull();
+    });
   });
 
   it('worker id carries deployment identity AND a random boot component', () => {
     const env = { RAILWAY_DEPLOYMENT_ID: 'dep-1', RAILWAY_REPLICA_ID: 'rep-1' } as NodeJS.ProcessEnv;
     const a = buildWorkerId(env);
-    const b = buildWorkerId(env);
     expect(a).toContain('dep-1');
     expect(a).toContain('rep-1');
     // Process identity must never double as fencing identity — the #34 lesson.
-    expect(a).not.toBe(b);
+    expect(a).not.toBe(buildWorkerId(env));
   });
 });
 
@@ -138,7 +179,6 @@ describe('apple worker runtime (real engine)', () => {
       catch (err) { await db.execute('ROLLBACK'); throw err; }
     },
   };
-  const devEnv = { NODE_ENV: 'development', [WORKER_ENABLED_ENV]: 'true' } as NodeJS.ProcessEnv;
 
   const enqueue = async (oti = OTI, environment: AppleEnvironment = 'Production') => {
     const now = new Date().toISOString();
@@ -159,50 +199,70 @@ describe('apple worker runtime (real engine)', () => {
   });
   afterEach(() => { db.close(); __resetAppleWorkerForTests(); __resetAppleRateLimitersForTests(); });
 
-  const transportOf = (fn: AppleTransport['getAllSubscriptionStatuses']): AppleTransport =>
-    ({ getAllSubscriptionStatuses: fn });
-
   it('processes queued work and records observability', async () => {
     await enqueue();
-    const handle = startAppleReconciliationWorker({
-      env: devEnv, transportConfig: goodConfig, maxPasses: 2, idleSleepMs: 1,
-      deps: { client: adapter, transport: transportOf(async ({ originalTransactionId }) => okResponse(originalTransactionId) as never) },
-    });
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, maxPasses: 2, idleSleepMs: 1,
+      __transportFactory: () => transportOf(async ({ originalTransactionId }) => okResponse(originalTransactionId) as never),
+    })!;
     await handle.done;
 
     expect(await subCount()).toBe(1);
     const s = getAppleWorkerStatus();
     expect(s.committedCount).toBe(1);
-    expect(s.processedCount).toBeGreaterThanOrEqual(1);
     expect(s.workerId).toContain('apple-worker');
     expect(s.singletonMode).toBe('unenforced-non-production');
-    expect(s.currentJob).toBeNull();          // identifiers only, cleared when idle
+    expect(s.currentJob).toBeNull();       // cleared once the pass ends
     expect(s.running).toBe(false);
+  });
+
+  it('OBSERVABILITY: currentJob is populated WHILE a pass is in flight', async () => {
+    await enqueue();
+    let seen: ReturnType<typeof getAppleWorkerStatus>['currentJob'] = null;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, maxPasses: 1, idleSleepMs: 1,
+      __transportFactory: () => transportOf(async ({ originalTransactionId }) => {
+        seen = getAppleWorkerStatus().currentJob;   // mid-request, as a stuck call would be
+        await gate;
+        return okResponse(originalTransactionId) as never;
+      }),
+    })!;
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await handle.done;
+
+    expect(seen).not.toBeNull();
+    expect(seen!.originalTransactionId).toBe(OTI);
+    expect(seen!.environment).toBe('Production');
+    expect(seen!.generation).toBe(1);
   });
 
   it('IN-PROCESS GUARD: a second start is refused, and only one loop exists', async () => {
     const opts = {
-      env: devEnv, transportConfig: goodConfig, maxPasses: 3, idleSleepMs: 1,
-      deps: { client: adapter, transport: transportOf(async () => { throw new Error('no work expected'); }) },
+      env: goodEnv(), client: adapter, maxPasses: 3, idleSleepMs: 1,
+      __transportFactory: () => transportOf(async () => { throw new Error('no work expected'); }),
     };
-    const first = startAppleReconciliationWorker(opts);
-    expect(() => startAppleReconciliationWorker(opts)).toThrow(AppleWorkerAlreadyRunningError);
+    const first = startAppleWorker(opts)!;
+    expect(() => startAppleWorker(opts)).toThrow(AppleWorkerAlreadyRunningError);
     expect(getAppleWorkerStatus().workerId).toBe(first.workerId);
     await first.stop();
-    // After it stops, a new one may start — the guard is about concurrency.
-    const second = startAppleReconciliationWorker(opts);
+    const second = startAppleWorker(opts)!;      // allowed once stopped
     expect(second.workerId).not.toBe(first.workerId);
     await second.stop();
   });
 
-  it('DISABLED: no worker, no Apple call, no topology assertion', async () => {
+  it('DISABLED: the flag is checked by the production entrypoint itself', async () => {
     await enqueue();
     let called = false;
-    const handle = startAppleWorkerIfEnabled({
-      // Production env with NO volume would fail the tripwire if it were reached.
-      env: { NODE_ENV: 'production', [WORKER_ENABLED_ENV]: 'false' } as NodeJS.ProcessEnv,
-      transportConfig: goodConfig,
-      deps: { client: adapter, transport: transportOf(async () => { called = true; return okResponse(OTI) as never; }) },
+    // Production env with NO volume: if the flag were not checked first, the
+    // topology tripwire would throw instead of returning null.
+    const handle = startAppleWorker({
+      env: goodEnv({ [WORKER_ENABLED_ENV]: 'false', NODE_ENV: 'production' }),
+      client: adapter,
+      __transportFactory: () => transportOf(async () => { called = true; return okResponse(OTI) as never; }),
     });
     expect(handle).toBeNull();
     expect(called).toBe(false);
@@ -214,30 +274,41 @@ describe('apple worker runtime (real engine)', () => {
   it('BAD CONFIG: refuses to start, by NAME, before claiming anything', async () => {
     await enqueue();
     let called = false;
-    expect(() => startAppleReconciliationWorker({
-      env: devEnv,
-      transportConfig: { auth: { issuerId: '', keyId: '', privateKey: '', bundleId: '' }, verifier: { bundleId: '' } },
-      deps: { client: adapter, transport: transportOf(async () => { called = true; return okResponse(OTI) as never; }) },
+    expect(() => startAppleWorker({
+      env: goodEnv({ APPLE_IAP_ISSUER_ID: '', APPLE_IAP_KEY_ID: '' }),
+      client: adapter,
+      __transportFactory: () => transportOf(async () => { called = true; return okResponse(OTI) as never; }),
     })).toThrow(AppleWorkerConfigError);
 
     try {
-      startAppleReconciliationWorker({
-        env: devEnv,
-        transportConfig: { auth: { issuerId: '', keyId: 'k', privateKey: 'p', bundleId: 'b' }, verifier: { bundleId: 'b', appAppleId: 1 } },
-        deps: { client: adapter, transport: transportOf(async () => okResponse(OTI) as never) },
-      });
+      startAppleWorker({ env: goodEnv({ APPLE_IAP_ISSUER_ID: '' }), client: adapter });
     } catch (err) {
       expect((err as AppleWorkerConfigError).missing).toEqual(['APPLE_IAP_ISSUER_ID']);
     }
     expect(called).toBe(false);
-    expect(await subCount()).toBe(0);   // nothing was claimed or reconciled
+    expect(await subCount()).toBe(0);
+  });
+
+  it('CONFIG AND TRANSPORT COME FROM THE SAME SOURCE', async () => {
+    // The transport is built FROM the validated config, so it is impossible to
+    // pass validation for one credential set and then execute another.
+    await enqueue();
+    let sawConfig: { keyId: string; bundleId: string } | null = null;
+    const handle = startAppleWorker({
+      env: goodEnv({ APPLE_IAP_KEY_ID: 'the-validated-key' }), client: adapter, maxPasses: 1, idleSleepMs: 1,
+      __transportFactory: (cfg) => {
+        sawConfig = { keyId: cfg.auth.keyId, bundleId: cfg.auth.bundleId };
+        return transportOf(async ({ originalTransactionId }) => okResponse(originalTransactionId) as never);
+      },
+    })!;
+    await handle.done;
+    expect(sawConfig).toEqual({ keyId: 'the-validated-key', bundleId: 'com.nala.portfolio' });
   });
 
   it('UNSUPPORTED TOPOLOGY: refuses to start even with valid config', async () => {
-    expect(() => startAppleReconciliationWorker({
-      env: { NODE_ENV: 'production', RAILWAY_SERVICE_ID: 'svc', DATABASE_URL: 'postgresql://h/d', [WORKER_ENABLED_ENV]: 'true' } as NodeJS.ProcessEnv,
-      transportConfig: goodConfig,
-      deps: { client: adapter, transport: transportOf(async () => okResponse(OTI) as never) },
+    expect(() => startAppleWorker({
+      env: goodEnv({ NODE_ENV: 'production', RAILWAY_SERVICE_ID: 'svc', DATABASE_URL: 'postgresql://h/d' }),
+      client: adapter,
     })).toThrow(UnsupportedSingletonTopologyError);
     expect(getAppleWorkerStatus().running).toBe(false);
   });
@@ -245,65 +316,80 @@ describe('apple worker runtime (real engine)', () => {
   it('SHUTDOWN: stop() prevents further claims but lets the current pass finish', async () => {
     await enqueue('oti-1');
     await enqueue('oti-2');
-
-    let inFlight!: () => void;
-    const gate = new Promise<void>((resolve) => { inFlight = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
     let passes = 0;
     let finishedFirst = false;
 
-    const handle = startAppleReconciliationWorker({
-      env: devEnv, transportConfig: goodConfig, idleSleepMs: 1,
-      deps: {
-        client: adapter,
-        transport: transportOf(async ({ originalTransactionId }) => {
-          passes += 1;
-          if (passes === 1) { await gate; finishedFirst = true; }
-          return okResponse(originalTransactionId) as never;
-        }),
-      },
-    });
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, idleSleepMs: 1,
+      __transportFactory: () => transportOf(async ({ originalTransactionId }) => {
+        passes += 1;
+        if (passes === 1) { await gate; finishedFirst = true; }
+        return okResponse(originalTransactionId) as never;
+      }),
+    })!;
 
-    // Ask it to stop while the first Apple call is still outstanding.
     const stopping = handle.stop();
-    inFlight();                       // let the in-flight call complete
+    release();
     await stopping;
 
-    expect(finishedFirst).toBe(true); // the in-flight pass was allowed to finish
-    expect(passes).toBe(1);           // and NO further job was claimed
+    expect(finishedFirst).toBe(true);   // in-flight pass allowed to finish
+    expect(passes).toBe(1);             // and NO further job claimed
     expect(await subCount()).toBe(1);
     expect(getAppleWorkerStatus().running).toBe(false);
   });
 
+  it('SHUTDOWN: stop() wakes an idle sleep instead of waiting it out', async () => {
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, idleSleepMs: 60_000,   // would hang a naive stop
+      __transportFactory: () => transportOf(async () => { throw new Error('unused'); }),
+    })!;
+    await new Promise((r) => setTimeout(r, 20));   // let it reach the idle sleep
+    const t0 = Date.now();
+    await handle.stop();
+    expect(Date.now() - t0).toBeLessThan(5_000);
+  });
+
   it('SHUTDOWN: work interrupted mid-pass stays recoverable through the queue lease', async () => {
     await enqueue();
-    // The transport hangs; we stop without letting it finish, as a crash would.
-    const handle = startAppleReconciliationWorker({
-      env: devEnv, transportConfig: goodConfig, idleSleepMs: 1,
-      deps: { client: adapter, transport: transportOf(() => new Promise(() => { /* never resolves */ })) },
-    });
-    handle.stop();                     // do not await — the pass cannot complete
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, idleSleepMs: 1,
+      __transportFactory: () => transportOf(() => new Promise(() => { /* never resolves */ })),
+    })!;
+    handle.stop();                       // do not await — the pass cannot complete
     await new Promise((r) => setTimeout(r, 30));
 
     const [row] = await rows();
-    // Still claimed by that worker, with a lease that will expire and let another
-    // worker reclaim it. The row was NOT force-released during shutdown.
+    // Still claimed, with a lease that will expire and allow reclaim. NOT
+    // force-released during shutdown.
     expect(String(row.reconcileState)).toBe('running');
     expect(row.leaseOwner).not.toBeNull();
     expect(row.leaseExpiresAt).not.toBeNull();
     expect(await subCount()).toBe(0);
   });
 
-  it('signal handlers can be installed and removed without leaking listeners', async () => {
+  it('installs NO signal handlers of its own — the app owns shutdown', async () => {
     const before = process.listenerCount('SIGTERM');
-    const handle = startAppleReconciliationWorker({
-      env: devEnv, transportConfig: goodConfig, maxPasses: 1, idleSleepMs: 1,
-      deps: { client: adapter, transport: transportOf(async () => okResponse(OTI) as never) },
-    });
-    const remove = installAppleWorkerSignalHandlers(handle);
-    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
-    remove();
+    const handle = startAppleWorker({
+      env: goodEnv(), client: adapter, maxPasses: 1, idleSleepMs: 1,
+      __transportFactory: () => transportOf(async () => okResponse(OTI) as never),
+    })!;
+    // A second SIGTERM listener would race index.ts's central shutdown, which
+    // disconnects Prisma and hard-exits at 8s while an Apple call may run 15s.
     expect(process.listenerCount('SIGTERM')).toBe(before);
     await handle.stop();
+  });
+
+  it('the test-only loop runner is still guarded against duplicates', async () => {
+    const opts = {
+      env: goodEnv(), client: adapter, maxPasses: 1, idleSleepMs: 1,
+      singletonMode: 'unenforced-non-production' as const,
+      transport: transportOf(async () => okResponse(OTI) as never),
+    };
+    const h = __TEST_ONLY_runLoop(opts);
+    expect(() => __TEST_ONLY_runLoop(opts)).toThrow(AppleWorkerAlreadyRunningError);
+    await h.stop();
   });
 });
 
@@ -326,8 +412,9 @@ describe('parked-job operator recovery (real engine)', () => {
       args: [crypto.randomUUID(), environment, oti, state, new Date(Date.now() + nextAttemptMs).toISOString(), now, now],
     });
   };
-  const row = async (oti: string) => (await db.execute({
-    sql: `SELECT * FROM "AppleReconciliation" WHERE "originalTransactionId"=?`, args: [oti],
+  const row = async (oti: string, environment: AppleEnvironment) => (await db.execute({
+    sql: `SELECT * FROM "AppleReconciliation" WHERE "originalTransactionId"=? AND "environment"=?`,
+    args: [oti, environment],
   })).rows[0] as Record<string, unknown>;
 
   beforeEach(async () => {
@@ -343,47 +430,68 @@ describe('parked-job operator recovery (real engine)', () => {
     expect(PERMANENT_PARK_MS).toBeGreaterThan(PARKED_THRESHOLD_MS);
   });
 
-  it('requeues ONLY parked rows, never rows merely backing off', async () => {
+  it('requeues ONLY parked rows, never rows merely backing off or running', async () => {
     await seed('parked', 'Production', PERMANENT_PARK_MS);
-    await seed('backing-off', 'Production', 30 * 60_000);   // ordinary backoff
+    await seed('backing-off', 'Production', 30 * 60_000);
     await seed('running-job', 'Production', PERMANENT_PARK_MS, 'running');
 
-    const n = await requeueParkedAppleReconciliations({ environment: 'Production' }, { client: adapter });
-    expect(n).toBe(1);
+    expect(await requeueParkedAppleReconciliations({ environment: 'Production' }, { client: adapter })).toBe(1);
 
-    const parked = await row('parked');
+    const parked = await row('parked', 'Production');
     expect(String(parked.reconcileState)).toBe('pending');
     expect(Number(parked.attemptCount)).toBe(0);
     expect(parked.lastError).toBeNull();
     expect(parked.leaseOwner).toBeNull();
 
-    // An hour-long backoff must survive: waking it would undo the backoff.
-    expect(String((await row('backing-off')).reconcileState)).toBe('failed');
-    // A running job belongs to a live worker and must not be yanked.
-    expect(String((await row('running-job')).reconcileState)).toBe('running');
+    expect(String((await row('backing-off', 'Production')).reconcileState)).toBe('failed');
+    expect(String((await row('running-job', 'Production')).reconcileState)).toBe('running');
   });
 
-  it('scopes by environment and by originalTransactionId', async () => {
-    await seed('p1', 'Production', PERMANENT_PARK_MS);
-    await seed('s1', 'Sandbox', PERMANENT_PARK_MS);
+  it('COMPOSITE IDENTITY: an originalTransactionId alone is refused', async () => {
+    // The same id exists independently in both environments; the schema enforces
+    // (environment, originalTransactionId). The recovery tool must not adopt a
+    // weaker identity rule than the system it repairs.
+    await seed(OTI, 'Production', PERMANENT_PARK_MS);
+    await seed(OTI, 'Sandbox', PERMANENT_PARK_MS);
 
-    expect(await requeueParkedAppleReconciliations({ environment: 'Sandbox' }, { client: adapter })).toBe(1);
-    expect(String((await row('p1')).reconcileState)).toBe('failed');   // untouched
-    expect(String((await row('s1')).reconcileState)).toBe('pending');
+    await expect(requeueParkedAppleReconciliations({ originalTransactionId: OTI }, { client: adapter }))
+      .rejects.toBeInstanceOf(RequeueScopeError);
+    expect(String((await row(OTI, 'Production')).reconcileState)).toBe('failed');
+    expect(String((await row(OTI, 'Sandbox')).reconcileState)).toBe('failed');
 
-    expect(await requeueParkedAppleReconciliations({ originalTransactionId: 'p1' }, { client: adapter })).toBe(1);
-    expect(String((await row('p1')).reconcileState)).toBe('pending');
+    // Scoped to one environment: only that row wakes.
+    expect(await requeueParkedAppleReconciliations(
+      { environment: 'Production', originalTransactionId: OTI }, { client: adapter })).toBe(1);
+    expect(String((await row(OTI, 'Production')).reconcileState)).toBe('pending');
+    expect(String((await row(OTI, 'Sandbox')).reconcileState)).toBe('failed');
+  });
+
+  it('COMPOSITE IDENTITY: --both-environments makes it deliberate', async () => {
+    await seed(OTI, 'Production', PERMANENT_PARK_MS);
+    await seed(OTI, 'Sandbox', PERMANENT_PARK_MS);
+    expect(await requeueParkedAppleReconciliations(
+      { originalTransactionId: OTI, bothEnvironments: true }, { client: adapter })).toBe(2);
+    expect(String((await row(OTI, 'Production')).reconcileState)).toBe('pending');
+    expect(String((await row(OTI, 'Sandbox')).reconcileState)).toBe('pending');
+  });
+
+  it('scope rules are enforced identically wherever they are checked', () => {
+    expect(() => assertRequeueScope({ environment: 'Production' })).not.toThrow();
+    expect(() => assertRequeueScope({ environment: 'Production', originalTransactionId: OTI })).not.toThrow();
+    expect(() => assertRequeueScope({ all: true })).not.toThrow();
+    expect(() => assertRequeueScope({ originalTransactionId: OTI, bothEnvironments: true })).not.toThrow();
+    expect(() => assertRequeueScope({ originalTransactionId: OTI })).toThrow(/BOTH environments/);
+    expect(() => assertRequeueScope({})).toThrow(/without an explicit --all/);
   });
 
   it('REFUSES an unscoped mass requeue without an explicit --all', async () => {
     await seed('p1', 'Production', PERMANENT_PARK_MS);
     await expect(requeueParkedAppleReconciliations({}, { client: adapter }))
       .rejects.toBeInstanceOf(RequeueScopeError);
-    expect(String((await row('p1')).reconcileState)).toBe('failed');
+    expect(String((await row('p1', 'Production')).reconcileState)).toBe('failed');
 
-    // ...and performs it when the operator says so explicitly.
     expect(await requeueParkedAppleReconciliations({ all: true }, { client: adapter })).toBe(1);
-    expect(String((await row('p1')).reconcileState)).toBe('pending');
+    expect(String((await row('p1', 'Production')).reconcileState)).toBe('pending');
   });
 
   it('counts parked rows for before/after reporting', async () => {

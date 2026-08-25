@@ -1,10 +1,17 @@
-import { reconcileOnce, type ReconcileOutcome, type ReconcilerDeps } from './apple-reconciler.service';
+import { reconcileOnce, type ReconcileOutcome } from './apple-reconciler.service';
+import type { ClaimedJob, QueueClient } from './apple-reconciliation-queue.service';
 import {
   assertSupportedSingletonTopology,
   buildWorkerId,
   type SingletonMode,
 } from './apple-worker-topology';
-import { missingAppleTransportConfig, type AppleTransportConfig } from './apple-transport-factory';
+import {
+  appleTransportConfigFromEnv,
+  missingAppleTransportConfig,
+  createProductionAppleTransport,
+  type AppleTransportConfig,
+} from './apple-transport-factory';
+import type { AppleTransport } from './apple-server-api';
 
 /**
  * The Apple reconciliation worker runtime.
@@ -14,20 +21,27 @@ import { missingAppleTransportConfig, type AppleTransportConfig } from './apple-
  * is how a "concurrency 1" worker quietly becomes concurrent. A while-loop that
  * awaits each pass cannot overlap by construction.
  *
- * Concurrency stays at 1 not because Apple requires it — the 50/s Production and
- * 5/s Sandbox limiter is the external ceiling — but because initial volume does
- * not justify a second concurrency state machine against SQLite. It can be
- * raised later without changing the shape of this file.
- *
  * SINGLETON: see apple-worker-topology.ts. Railway's volume-backed service
- * cannot have replicas, so the platform provides cross-process enforcement; this
- * module provides in-process enforcement; and the topology assertion fails
- * CLOSED if the platform guarantee ever stops holding.
+ * cannot have replicas; this module adds the in-process guard; the topology
+ * assertion fails CLOSED if the platform guarantee stops holding.
  *
- * NOTHING STARTS THIS AUTOMATICALLY. It is not registered at boot, and it is
- * gated on APPLE_RECONCILIATION_WORKER_ENABLED — deliberately separate from
- * APPLE_IAP_ENABLED, so exercising the runtime never means turning
- * customer-facing Apple IAP on.
+ * ── SHUTDOWN IS NOT WIRED HERE, DELIBERATELY ──────────────────────────────
+ *
+ * There is no SIGTERM listener in this module. index.ts already owns the
+ * application's shutdown: it begins teardown, disconnects Prisma, and enforces
+ * an 8-second hard exit. A second listener calling stop() would RACE that —
+ * Prisma could disconnect, or the process exit, while an Apple pass that is
+ * allowed 15 seconds is still in flight.
+ *
+ * The correct integration is for central shutdown to call worker.stop() and
+ * await it BEFORE disconnecting Prisma, with the app's hard deadline and
+ * Railway's draining period both raised above the Apple request timeout.
+ * Railway's documented default draining is 0 seconds and railway.json currently
+ * sets none, so that is a real configuration change, not an assumption.
+ *
+ * That integration — bootstrap + central-shutdown wiring + draining config — is
+ * a MANDATORY pre-enable stage of its own. It has not disappeared by being left
+ * out of this PR.
  */
 
 export const WORKER_ENABLED_ENV = 'APPLE_RECONCILIATION_WORKER_ENABLED';
@@ -42,7 +56,7 @@ export interface AppleWorkerStatus {
   startedAt: string | null;
   lastLoopAt: string | null;
   lastOutcome: ReconcileOutcome['kind'] | null;
-  /** Identifiers only — never a JWS, never a payload. */
+  /** Live while a pass is in flight. Identifiers only — never a JWS or payload. */
   currentJob: { environment: string; originalTransactionId: string; generation: number } | null;
   processedCount: number;
   committedCount: number;
@@ -55,14 +69,17 @@ export interface AppleWorkerStatus {
 }
 
 export interface AppleWorkerOptions {
-  deps: ReconcilerDeps;
-  /** Trust-boundary configuration, validated before the loop starts. */
-  transportConfig: AppleTransportConfig;
   env?: NodeJS.ProcessEnv;
+  client?: QueueClient;
   idleSleepMs?: number;
   /** Test seam: stop after N passes so a test need not race a real loop. */
   maxPasses?: number;
   onError?: (err: unknown) => void;
+  /**
+   * TEST SEAM ONLY. Production always builds the transport from the SAME
+   * configuration that was validated — see startAppleWorker.
+   */
+  __transportFactory?: (cfg: AppleTransportConfig) => AppleTransport;
 }
 
 export class AppleWorkerAlreadyRunningError extends Error {
@@ -74,7 +91,6 @@ export class AppleWorkerAlreadyRunningError extends Error {
 
 export class AppleWorkerConfigError extends Error {
   constructor(readonly missing: string[]) {
-    // Names only. Never values.
     super(`Apple reconciliation worker cannot start: missing ${missing.join(', ')}`);
     this.name = 'AppleWorkerConfigError';
   }
@@ -83,13 +99,12 @@ export class AppleWorkerConfigError extends Error {
 export interface AppleWorkerHandle {
   workerId: string;
   singletonMode: SingletonMode;
-  /** Resolves when the loop has fully stopped. */
+  /** Stops claiming, awaits the in-flight pass, resolves when fully stopped. */
   stop(): Promise<void>;
-  /** Resolves when the loop exits on its own (maxPasses, or stop()). */
   done: Promise<void>;
 }
 
-/* ── module-level state: the in-process singleton guard ─────────────────── */
+/* ── module state: the in-process singleton guard ───────────────────────── */
 
 let current: AppleWorkerHandle | null = null;
 let status: AppleWorkerStatus = emptyStatus();
@@ -117,59 +132,103 @@ export function __resetAppleWorkerForTests(): void {
   status = emptyStatus();
 }
 
-/** Interruptible sleep so stop() does not wait out a full idle interval. */
-function sleep(ms: number, signal: { stopping: boolean }): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.stopping) return resolve();
-    const timer = setTimeout(resolve, ms);
-    // Do not hold the process open on this timer.
-    (timer as unknown as { unref?: () => void }).unref?.();
-  });
-}
-
 /**
- * Start the worker. Refuses if one is already running in this process.
+ * THE production entrypoint. There is no other way to start a loop.
  *
- * Order matters: topology first, then configuration, then the loop. Both checks
- * are FATAL and happen before any job is claimed — discovering missing
- * credentials per-job would mean burning attemptCount on rows that never had a
- * chance.
+ * Every gate is inside, in order, and none can be supplied by the caller:
+ *
+ *   flag → topology → config from env → validate → build transport FROM THAT
+ *   SAME config → loop
+ *
+ * The transport is derived from the validated configuration rather than accepted
+ * as a parameter. Previously the worker validated one config object and then ran
+ * a separately-supplied transport, so both checks were advisory: it could pass
+ * validation for credentials it never used.
  */
-export function startAppleReconciliationWorker(opts: AppleWorkerOptions): AppleWorkerHandle {
+export function startAppleWorker(opts: AppleWorkerOptions = {}): AppleWorkerHandle | null {
+  const env = opts.env ?? process.env;
+
+  // Flag first: a disabled worker must be inert even where the topology is
+  // unsupported and no Apple credentials exist — which is today's production.
+  if (!isAppleWorkerEnabled(env)) {
+    status = { ...emptyStatus(), enabled: false };
+    return null;
+  }
+
   if (current) throw new AppleWorkerAlreadyRunningError();
 
-  const env = opts.env ?? process.env;
   const singletonMode = assertSupportedSingletonTopology(env);
 
-  const missing = missingAppleTransportConfig(opts.transportConfig);
+  const transportConfig = appleTransportConfigFromEnv(env);
+  const missing = missingAppleTransportConfig(transportConfig);
   if (missing.length > 0) throw new AppleWorkerConfigError(missing);
 
-  const workerId = buildWorkerId(env);
+  const transport = opts.__transportFactory
+    ? opts.__transportFactory(transportConfig)
+    : createProductionAppleTransport(transportConfig).transport;
+
+  return runLoop({ ...opts, env, singletonMode, transport });
+}
+
+/* ── the loop ───────────────────────────────────────────────────────────── */
+
+interface LoopOptions extends AppleWorkerOptions {
+  env: NodeJS.ProcessEnv;
+  singletonMode: SingletonMode;
+  transport: AppleTransport;
+}
+
+function runLoop(opts: LoopOptions): AppleWorkerHandle {
+  const workerId = buildWorkerId(opts.env);
   const idleSleepMs = opts.idleSleepMs ?? DEFAULT_IDLE_SLEEP_MS;
-  const signal = { stopping: false };
+
+  /** Interruptible sleep: stop() wakes it instead of waiting out the interval. */
+  const control = { stopping: false, wake: null as null | (() => void) };
+  const sleep = (ms: number) => new Promise<void>((resolve) => {
+    if (control.stopping) return resolve();
+    const timer = setTimeout(finish, ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    control.wake = finish;
+    function finish() {
+      clearTimeout(timer);
+      control.wake = null;
+      resolve();
+    }
+  });
 
   status = {
     ...emptyStatus(),
-    enabled: true, running: true, workerId, singletonMode,
+    enabled: true, running: true, workerId, singletonMode: opts.singletonMode,
     startedAt: new Date().toISOString(),
   };
 
   const loop = (async () => {
     let passes = 0;
-    while (!signal.stopping) {
+    while (!control.stopping) {
       if (opts.maxPasses != null && passes >= opts.maxPasses) break;
       passes += 1;
 
       let outcome: ReconcileOutcome;
       try {
-        outcome = await reconcileOnce(workerId, opts.deps);
+        outcome = await reconcileOnce(workerId, {
+          client: opts.client,
+          transport: opts.transport,
+          // Live observability: set the moment a job is claimed, so a stuck
+          // Apple request is visible rather than reported as null.
+          onJobClaimed: (job: ClaimedJob) => {
+            status.currentJob = {
+              environment: job.environment,
+              originalTransactionId: job.originalTransactionId,
+              generation: job.generation,
+            };
+          },
+        });
       } catch (err) {
-        // A throw here means something outside the reconciler's own handling.
-        // Keep the loop alive; the queue's lease expiry covers anything left.
         opts.onError?.(err);
         status.failedCount += 1;
         status.lastLoopAt = new Date().toISOString();
-        await sleep(idleSleepMs, signal);
+        status.currentJob = null;
+        await sleep(idleSleepMs);
         continue;
       }
 
@@ -188,11 +247,7 @@ export function startAppleReconciliationWorker(opts: AppleWorkerOptions): AppleW
         default: status.failedCount += 1; break;   // transient | invalid | persistence-failed
       }
 
-      // Work happened -> look again immediately. Nothing to do -> back off a
-      // little so an empty queue does not spin.
-      if (outcome.kind === 'idle' || outcome.kind === 'deferred') {
-        await sleep(idleSleepMs, signal);
-      }
+      if (outcome.kind === 'idle' || outcome.kind === 'deferred') await sleep(idleSleepMs);
     }
 
     status.running = false;
@@ -203,7 +258,7 @@ export function startAppleReconciliationWorker(opts: AppleWorkerOptions): AppleW
 
   const handle: AppleWorkerHandle = {
     workerId,
-    singletonMode,
+    singletonMode: opts.singletonMode,
     done: loop,
     async stop() {
       /**
@@ -211,13 +266,14 @@ export function startAppleReconciliationWorker(opts: AppleWorkerOptions): AppleW
        *
        * The in-flight reconciliation's lease is deliberately NOT released. If the
        * pass completes, its generation + fencing CAS decides whether it may
-       * commit, exactly as normal. If the process dies first, the queue's lease
-       * expiry makes the row reclaimable — a mechanism already reviewed in #34.
-       * Releasing here would invent a third path and risk handing the row to
-       * another worker while this one is still talking to Apple.
+       * commit. If the process dies first, the queue's lease expiry makes the row
+       * reclaimable — a mechanism already reviewed in #34. Releasing here would
+       * invent a third path and risk handing the row to another worker while this
+       * one is still talking to Apple.
        */
-      signal.stopping = true;
+      control.stopping = true;
       status.stopping = true;
+      control.wake?.();          // do not wait out an idle interval
       await loop;
     },
   };
@@ -226,40 +282,8 @@ export function startAppleReconciliationWorker(opts: AppleWorkerOptions): AppleW
   return handle;
 }
 
-/**
- * The gated entry point a bootstrap would call.
- *
- * Returns null when APPLE_RECONCILIATION_WORKER_ENABLED is not exactly 'true',
- * WITHOUT touching Apple, the queue or the topology assertion. That ordering
- * matters: a disabled worker must be inert even in a deployment with no Apple
- * credentials and no volume, which is exactly today's production.
- *
- * The flag is separate from APPLE_IAP_ENABLED on purpose — exercising this
- * runtime must never be the same act as turning customer-facing Apple IAP on.
- */
-export function startAppleWorkerIfEnabled(opts: AppleWorkerOptions): AppleWorkerHandle | null {
-  const env = opts.env ?? process.env;
-  if (!isAppleWorkerEnabled(env)) {
-    status = { ...emptyStatus(), enabled: false };
-    return null;
-  }
-  return startAppleReconciliationWorker(opts);
-}
-
-/**
- * Wire SIGTERM to a graceful stop. Returns a function that removes the handler.
- *
- * Railway sends SIGTERM before stopping a deployment and allows a draining
- * period. The Apple HTTP transport already times out at 15s and reconciliation
- * leases last 2 minutes, so a drain comfortably above the network timeout (~30s)
- * lets an in-flight pass finish rather than needing cancellation semantics here.
- */
-export function installAppleWorkerSignalHandlers(handle: AppleWorkerHandle): () => void {
-  const onSignal = () => { void handle.stop(); };
-  process.once('SIGTERM', onSignal);
-  process.once('SIGINT', onSignal);
-  return () => {
-    process.removeListener('SIGTERM', onSignal);
-    process.removeListener('SIGINT', onSignal);
-  };
+/** Test-only: run the loop with an explicit transport, bypassing env gates. */
+export function __TEST_ONLY_runLoop(opts: LoopOptions): AppleWorkerHandle {
+  if (current) throw new AppleWorkerAlreadyRunningError();
+  return runLoop(opts);
 }

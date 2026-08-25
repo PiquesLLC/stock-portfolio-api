@@ -11,7 +11,13 @@ import type { AppleEnvironment } from '../src/services/apple-reconciliation-queu
  *
  *   npm run apple:requeue-parked -- --environment Production
  *   npm run apple:requeue-parked -- --original-transaction-id 2000000123456789
+ *   npm run apple:requeue-parked -- --environment Production --original-transaction-id 2000000123456789
  *   npm run apple:requeue-parked -- --all
+ *
+ * Apple identity here is the COMPOSITE (environment, originalTransactionId), so
+ * --original-transaction-id alone is refused: the same id exists independently in
+ * Production and Sandbox. Pass --environment, or --both-environments to act on
+ * both deliberately.
  *
  * Use after fixing a cause that parked rows through no fault of Apple's — a
  * wrong APPLE_BUNDLE_ID, bad IAP credentials, a stale root certificate, a
@@ -33,6 +39,7 @@ async function main(): Promise<void> {
   const environment = arg('environment') as AppleEnvironment | undefined;
   const originalTransactionId = arg('original-transaction-id');
   const all = flag('all');
+  const bothEnvironments = flag('both-environments');
   const dryRun = flag('dry-run');
 
   if (environment && environment !== 'Production' && environment !== 'Sandbox') {
@@ -57,7 +64,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    const updated = await requeueParkedAppleReconciliations({ environment, originalTransactionId, all });
+    const updated = await requeueParkedAppleReconciliations({ environment, originalTransactionId, all, bothEnvironments });
     console.log(`requeued ${updated} row(s); they are now pending and due immediately`);
   } catch (err) {
     if (err instanceof RequeueScopeError) {

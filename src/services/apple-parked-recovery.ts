@@ -34,16 +34,51 @@ export interface RequeueFilter {
   originalTransactionId?: string;
   /** Required to requeue everything. A typo must not wake every subscription. */
   all?: boolean;
+  /**
+   * Required to act on an originalTransactionId across BOTH environments.
+   *
+   * Apple subscription identity in this system is the COMPOSITE
+   * (environment, originalTransactionId) — the schema enforces it, because the
+   * same identifiers exist independently in Production and Sandbox. An operator
+   * tool must not quietly adopt a weaker identity rule than the system it
+   * repairs: `--original-transaction-id X` alone would touch a Sandbox row while
+   * the operator was thinking about Production.
+   */
+  bothEnvironments?: boolean;
 }
 
 export class RequeueScopeError extends Error {
-  constructor() {
+  constructor(readonly reason: 'unscoped' | 'ambiguous-environment') {
     super(
-      'refusing to requeue every parked Apple reconciliation without an explicit --all: ' +
-      'pass an environment, an originalTransactionId, or --all',
+      reason === 'unscoped'
+        ? 'refusing to requeue every parked Apple reconciliation without an explicit --all: ' +
+          'pass --environment, or --environment with --original-transaction-id, or --all'
+        : 'refusing to requeue an originalTransactionId across BOTH environments: ' +
+          'Apple identity here is (environment, originalTransactionId), and the same id ' +
+          'exists independently in Production and Sandbox. Pass --environment, or ' +
+          '--both-environments to act on both deliberately',
     );
     this.name = 'RequeueScopeError';
   }
+}
+
+/**
+ * Scope rules, enforced identically by the service and the CLI:
+ *
+ *   --environment E                              -> all parked rows in E
+ *   --environment E --original-transaction-id X  -> exactly that subscription
+ *   --original-transaction-id X                  -> REFUSED (ambiguous)
+ *   --original-transaction-id X --both-environments -> deliberate, allowed
+ *   --all                                        -> deliberate, allowed
+ */
+export function assertRequeueScope(filter: RequeueFilter): void {
+  if (filter.environment) return;                       // environment scopes it
+  if (filter.originalTransactionId) {
+    if (filter.bothEnvironments) return;                // deliberate cross-environment
+    throw new RequeueScopeError('ambiguous-environment');
+  }
+  if (filter.all) return;
+  throw new RequeueScopeError('unscoped');
 }
 
 /**
@@ -68,8 +103,7 @@ export async function requeueParkedAppleReconciliations(
   filter: RequeueFilter,
   opts: { client?: QueueClient; now?: Date } = {},
 ): Promise<number> {
-  const scoped = Boolean(filter.environment || filter.originalTransactionId);
-  if (!scoped && !filter.all) throw new RequeueScopeError();
+  assertRequeueScope(filter);
 
   const db = (opts.client ?? (prisma as unknown as QueueClient));
   const now = opts.now ?? new Date();

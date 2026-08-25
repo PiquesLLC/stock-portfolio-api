@@ -1,3 +1,5 @@
+import path from 'path';
+
 /**
  * Singleton-topology tripwire for the Apple reconciliation worker.
  *
@@ -7,21 +9,20 @@
  * does not permit replicas on a service with an attached volume, and the
  * authoritative SQLite database lives on that volume — so a second worker
  * sharing this database cannot exist in the current topology. A lease table
- * would add schema, a migration (into unresolved migration-history drift) and
- * ceremony while protecting a failure mode the platform already prevents.
+ * would add schema and a migration (into unresolved migration-history drift)
+ * while protecting a failure mode the platform already prevents.
  *
- * The enforcement is therefore three layers:
+ * Enforcement is three layers:
  *
  *   1. Railway + volume   cross-process: the platform disallows replicas.
- *   2. In-process guard   startAppleReconciliationWorker refuses a second loop.
+ *   2. In-process guard   the worker refuses a second loop.
  *   3. This tripwire      fails CLOSED if layer 1 ever stops being true.
  *
- * Layer 3 is the point of this file. The day the primary database moves to
- * Postgres, or the volume is detached, Railway replicas become possible again —
- * and N replicas would each hold a full 50/s Production budget, silently
- * multiplying the request rate the limiter exists to bound. That must become a
- * BOOT FAILURE demanding a distributed worker lease, not an unnoticed
- * regression.
+ * Layer 3 is the point. The day the primary database moves to Postgres, or the
+ * volume is detached, replicas become possible again — and N replicas would each
+ * hold a full 50/s Production budget, silently multiplying the request rate the
+ * limiter exists to bound. That must become a BOOT FAILURE demanding a
+ * distributed worker lease.
  */
 
 export type SingletonMode = 'railway-volume' | 'unenforced-non-production';
@@ -39,26 +40,64 @@ export class UnsupportedSingletonTopologyError extends Error {
 }
 
 /**
+ * Resolve a `file:` DATABASE_URL to a filesystem path.
+ *
+ * The repo's production form is `file:/data/nala.db` (no authority), which
+ * `fileURLToPath` rejects, so the scheme is stripped and the remainder resolved.
+ * POSIX semantics are used deliberately: the deployment is Linux, and using the
+ * host's path rules would make this behave differently on a Windows dev machine
+ * than in the environment it is protecting.
+ */
+export function resolveFileDbPath(databaseUrl: string): string | null {
+  if (!databaseUrl.startsWith('file:')) return null;
+  let raw = databaseUrl.slice('file:'.length);
+  // file://host/path and file:///path both collapse to the path component.
+  if (raw.startsWith('//')) raw = raw.replace(/^\/\/[^/]*/, '');
+  return path.posix.resolve(raw.split('?')[0]);
+}
+
+/**
+ * True only when `dbPath` is genuinely INSIDE `mountPath`.
+ *
+ * String prefixing is not containment: with a mount of `/data`, `/database/x.db`
+ * shares the prefix without being inside it, and `/data/../tmp/x.db` starts with
+ * it while resolving outside. Both would have passed a startsWith test.
+ */
+export function isPathContained(dbPath: string, mountPath: string): boolean {
+  const mount = path.posix.resolve(mountPath);
+  const target = path.posix.resolve(dbPath);
+  const rel = path.posix.relative(mount, target);
+  return rel !== '' && !rel.startsWith('..') && !path.posix.isAbsolute(rel);
+}
+
+/**
  * Assert the deployment still matches the topology the worker was designed for.
  *
- * Outside production this returns `unenforced-non-production`: a developer
- * running one process locally is not the failure mode being guarded, and
- * demanding Railway variables would make the worker untestable.
+ * RAILWAY PRESENCE IS AUTHORITATIVE, regardless of NODE_ENV. A Railway service
+ * running with NODE_ENV unset or 'development' is still a Railway service that
+ * can gain replicas the moment its volume goes away; keying the check on
+ * NODE_ENV would let exactly that deployment skip the tripwire.
+ *
+ * Off Railway, production still fails closed — nothing there enforces one
+ * worker. Non-production off Railway is unenforced, because one developer
+ * running one process is not the failure mode being guarded and demanding
+ * Railway variables would make the worker untestable.
  */
 export function assertSupportedSingletonTopology(
   env: NodeJS.ProcessEnv = process.env,
 ): SingletonMode {
-  if (env.NODE_ENV !== 'production') return 'unenforced-non-production';
+  const onRailway = Boolean(env.RAILWAY_SERVICE_ID);
 
-  // On Railway? Without the platform guarantee there is nothing enforcing one
-  // worker, and we must not assume a bare process is alone.
-  if (!env.RAILWAY_SERVICE_ID) {
-    throw new UnsupportedSingletonTopologyError(
-      'running in production but not on Railway, so no platform singleton guarantee applies',
-    );
+  if (!onRailway) {
+    if (env.NODE_ENV === 'production') {
+      throw new UnsupportedSingletonTopologyError(
+        'running in production but not on Railway, so no platform singleton guarantee applies',
+      );
+    }
+    return 'unenforced-non-production';
   }
 
-  // A volume is what makes replicas impossible. No volume, no guarantee.
+  // On Railway: the volume is what makes replicas impossible.
   const mountPath = env.RAILWAY_VOLUME_MOUNT_PATH;
   if (!mountPath) {
     throw new UnsupportedSingletonTopologyError(
@@ -66,22 +105,16 @@ export function assertSupportedSingletonTopology(
     );
   }
 
-  /**
-   * The database must actually live on that volume. A network database is
-   * reachable from every replica, which is precisely the situation the volume
-   * restriction stops being able to prevent — and the likely shape of a future
-   * Postgres migration.
-   */
   const url = env.DATABASE_URL ?? '';
-  if (!url.startsWith('file:')) {
+  const dbPath = resolveFileDbPath(url);
+  if (!dbPath) {
     throw new UnsupportedSingletonTopologyError(
       'DATABASE_URL is not a file: database, so it is reachable from multiple replicas',
     );
   }
-  const dbPath = url.slice('file:'.length);
-  if (!dbPath.startsWith(mountPath)) {
+  if (!isPathContained(dbPath, mountPath)) {
     throw new UnsupportedSingletonTopologyError(
-      'DATABASE_URL does not live under the mounted volume, so the volume does not bound access to it',
+      'DATABASE_URL does not resolve inside the mounted volume, so the volume does not bound access to it',
     );
   }
 

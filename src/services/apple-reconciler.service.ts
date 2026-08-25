@@ -54,6 +54,12 @@ export interface ReconcilerDeps {
   transport: AppleTransport;
   client?: QueueClient;
   now?: () => Date;
+  /**
+   * Called immediately after a job is claimed, before the Apple request.
+   * Observability only — it exists so a worker can report a STUCK request rather
+   * than reporting null for the whole time an operator cares about.
+   */
+  onJobClaimed?: (job: ClaimedJob) => void;
   /** Fallback when a 429 carries no usable Retry-After. Conservative on purpose. */
   rateLimitFallbackMs?: number;
 }
@@ -316,6 +322,7 @@ export async function reconcileOnce(
 
   const job = await claimReconciliationJob(workerId, { client, now: nowFn() });
   if (!job) return { kind: 'idle' };
+  deps.onJobClaimed?.(job);
 
   const limiter = getAppleRateLimiter(job.environment);
   if (!limiter.tryAcquire()) {
