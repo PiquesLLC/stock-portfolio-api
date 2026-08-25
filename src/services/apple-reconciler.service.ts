@@ -4,6 +4,7 @@ import {
   completeReconciliation,
   failReconciliation,
   deferReconciliation,
+  PERMANENT_PARK_MS,
   type AppleEnvironment,
   type ClaimedJob,
   type QueueClient,
@@ -18,6 +19,7 @@ import {
 } from './apple-server-api';
 import { getAppleRateLimiter, applyAppleRateLimitCooldown } from './apple-rate-limiter';
 import { planForAppleProduct, UnknownAppleProductError } from './apple-product-plan';
+import { AppleVerificationPermanentError, AppleVerificationTransientError } from './apple-verifier';
 
 /**
  * The reconciler: claim work, ask Apple for CURRENT state, persist an
@@ -45,6 +47,7 @@ export type ReconcileOutcome =
   | { kind: 'transient'; job: ClaimedJob; error: string }
   | { kind: 'invalid'; job: ClaimedJob; error: string }
   | { kind: 'persistence-failed'; job: ClaimedJob; error: string }
+  | { kind: 'permanently-invalid'; job: ClaimedJob; error: string }
   | { kind: 'deferred'; environment: AppleEnvironment; waitMs: number };
 
 export interface ReconcilerDeps {
@@ -340,9 +343,27 @@ export async function reconcileOnce(
       await failReconciliation(job, 'apple 429', { now, client, retryAfterMs });
       return { kind: 'rate-limited', job, retryAfterMs };
     }
+    const message = err instanceof Error ? err.message : String(err);
+
+    /**
+     * A verification failure that is permanent must NOT retry forever: the
+     * signature, bundle or environment will not change by waiting. It is parked
+     * instead, and a new Apple notification revives it through intake.
+     *
+     * A verification failure that could not COMPLETE (OCSP unreachable and the
+     * like) says nothing about the payload, so it takes ordinary backoff.
+     */
+    if (err instanceof AppleVerificationPermanentError) {
+      await failReconciliation(job, message, { now: nowFn(), client, retryAfterMs: PERMANENT_PARK_MS });
+      return { kind: 'permanently-invalid', job, error: message };
+    }
+    if (err instanceof AppleVerificationTransientError) {
+      await failReconciliation(job, message, { now: nowFn(), client });
+      return { kind: 'transient', job, error: message };
+    }
+
     const transient = err instanceof AppleTransientError;
     const invalid = err instanceof AppleInvalidResponseError;
-    const message = err instanceof Error ? err.message : String(err);
     await failReconciliation(job, message, { now: nowFn(), client });
     return invalid ? { kind: 'invalid', job, error: message } : { kind: 'transient', job, error: transient ? message : String(err) };
   }

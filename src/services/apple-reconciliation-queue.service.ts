@@ -82,6 +82,22 @@ export const DEFAULT_LEASE_MS = 2 * 60 * 1000;
  * never against a value the worker captured before its await.
  */
 const BACKOFF_MS = [0, 30_000, 2 * 60_000, 10 * 60_000, 30 * 60_000, 60 * 60_000];
+
+/**
+ * Park a job that can never succeed on its own.
+ *
+ * Passed as `retryAfterMs` for a permanently-invalid outcome — a payload Apple
+ * signed badly, for the wrong app, or for the wrong environment will not become
+ * valid by waiting, and retrying it hourly forever buries real failures.
+ *
+ * This is deliberately a very distant due time rather than a new terminal state:
+ * the schema's reconcileState CHECK admits only pending/running/failed/done, and
+ * adding a state would need a migration. Parking has a property a terminal state
+ * would lack anyway — intake resets nextAttemptAt, so a genuinely NEW Apple
+ * notification revives the job immediately, which is exactly when a retry is
+ * worth attempting again.
+ */
+export const PERMANENT_PARK_MS = 100 * 365 * 24 * 60 * 60 * 1000;
 export function backoffForAttempt(attemptCount: number): number {
   return BACKOFF_MS[Math.min(Math.max(attemptCount, 0), BACKOFF_MS.length - 1)];
 }
