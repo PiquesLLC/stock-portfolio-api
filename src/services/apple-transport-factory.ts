@@ -60,15 +60,32 @@ export function createProductionAppleTransport(cfg: AppleTransportConfig): Produ
  * tests never touch process.env, and so a caller can see exactly which variables
  * are required before anything is constructed.
  *
- * APPLE_ISSUER_ID is the App Store Connect Issuer ID (a UUID) — deliberately NOT
+ * ── WHY THESE NAMES ARE APPLE_IAP_-PREFIXED ───────────────────────────────
+ *
+ * The App Store Server API key is generated separately in App Store Connect
+ * (Users and Access → Integrations → In-App Purchase) and Apple states it cannot
+ * be shared with other Apple services. The generic names are already taken in
+ * this repo, and NOT harmlessly:
+ *
+ *   APPLE_KEY_ID / APPLE_TEAM_ID / APPLE_PRIVATE_KEY are documented in
+ *   .env.example under "OAuth sign-in", AND config/index.ts uses them as APNs
+ *   fallbacks (apnsKeyId, apnsTeamId, apnsPrivateKey).
+ *
+ * So provisioning the IAP key into APPLE_KEY_ID would make push notifications
+ * sign with the wrong key, while leaving the sign-in/APNs key there would make
+ * App Store Server API authentication fail. Dedicated names remove the choice.
+ *
+ * APPLE_IAP_ISSUER_ID is the App Store Connect Issuer ID (a UUID) — NOT
  * APPLE_TEAM_ID, which belongs to Sign in with Apple and is a different value.
+ * APPLE_BUNDLE_ID and APPLE_APP_APPLE_ID are genuinely shared and keep their
+ * names.
  */
 export function appleTransportConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppleTransportConfig {
   return {
     auth: {
-      issuerId: env.APPLE_ISSUER_ID ?? '',
-      keyId: env.APPLE_KEY_ID ?? '',
-      privateKey: (env.APPLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
+      issuerId: env.APPLE_IAP_ISSUER_ID ?? '',
+      keyId: env.APPLE_IAP_KEY_ID ?? '',
+      privateKey: (env.APPLE_IAP_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
       bundleId: env.APPLE_BUNDLE_ID ?? '',
     },
     verifier: {
@@ -82,9 +99,9 @@ export function appleTransportConfigFromEnv(env: NodeJS.ProcessEnv = process.env
 /** Which required settings are missing. Names only — never values. */
 export function missingAppleTransportConfig(cfg: AppleTransportConfig): string[] {
   const missing: string[] = [];
-  if (!cfg.auth.issuerId) missing.push('APPLE_ISSUER_ID');
-  if (!cfg.auth.keyId) missing.push('APPLE_KEY_ID');
-  if (!cfg.auth.privateKey) missing.push('APPLE_PRIVATE_KEY');
+  if (!cfg.auth.issuerId) missing.push('APPLE_IAP_ISSUER_ID');
+  if (!cfg.auth.keyId) missing.push('APPLE_IAP_KEY_ID');
+  if (!cfg.auth.privateKey) missing.push('APPLE_IAP_PRIVATE_KEY');
   if (!cfg.auth.bundleId) missing.push('APPLE_BUNDLE_ID');
   if (!cfg.verifier.appAppleId) missing.push('APPLE_APP_APPLE_ID');
   return missing;

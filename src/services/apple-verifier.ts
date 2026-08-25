@@ -69,25 +69,50 @@ const STATUS_REASON: Record<number, string> = {
 };
 
 /**
- * Classify a thrown verification error. Anything that is not explicitly
- * retryable is treated as permanent, and anything we cannot classify at all is
- * treated as TRANSIENT — an unrecognised failure is not evidence that Apple's
- * data is bad, and parking a subscription forever on an unknown is worse than
- * retrying one that will keep failing.
+ * Statuses that are statements about the DATA. Enumerated explicitly rather than
+ * "everything that is not retryable", so a status Apple adds later — or any
+ * value we do not recognise — cannot be silently promoted to permanent.
+ */
+const PERMANENT_STATUSES: ReadonlySet<number> = new Set([
+  VerificationStatus.VERIFICATION_FAILURE,
+  VerificationStatus.INVALID_APP_IDENTIFIER,
+  VerificationStatus.INVALID_ENVIRONMENT,
+  VerificationStatus.INVALID_CHAIN_LENGTH,
+  VerificationStatus.INVALID_CERTIFICATE,
+  VerificationStatus.FAILURE,
+]);
+
+const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([
+  VerificationStatus.RETRYABLE_VERIFICATION_FAILURE,
+]);
+
+/**
+ * Classify a thrown verification error.
+ *
+ * UNKNOWN IS TRANSIENT, in both directions:
+ *
+ *  - an unrecognised VerificationStatus (a value Apple adds, or anything outside
+ *    the enum) is transient, because we cannot claim it says the data is bad;
+ *  - a non-VerificationException error is transient, because it is an
+ *    infrastructure failure as far as we can tell.
+ *
+ * There is deliberately NO inspection of error message text. Inferring trust
+ * policy from English prose is unsound — an OCSP timeout whose message happens
+ * to contain "parse" would be promoted to permanent and park a healthy
+ * subscription forever. Apple's verifier already converts malformed JWS,
+ * validator and certificate problems into VerificationException statuses, so the
+ * enum is the whole signal.
  */
 export function classifyVerificationError(err: unknown): Error {
   if (err instanceof VerificationException) {
     const status = err.status as number;
-    const reason = STATUS_REASON[status] ?? `status ${status}`;
-    return status === VerificationStatus.RETRYABLE_VERIFICATION_FAILURE
-      ? new AppleVerificationTransientError(reason)
-      : new AppleVerificationPermanentError(reason);
-  }
-  // A malformed JWS never reaches VerificationException — the library throws
-  // while parsing. That IS a statement about the data, so it is permanent.
-  const message = err instanceof Error ? err.message : String(err);
-  if (/malformed|invalid jwt|jws|decode|parse|Unexpected token/i.test(message)) {
-    return new AppleVerificationPermanentError('malformed signed payload');
+    if (PERMANENT_STATUSES.has(status)) {
+      return new AppleVerificationPermanentError(STATUS_REASON[status] ?? `status ${status}`);
+    }
+    if (RETRYABLE_STATUSES.has(status)) {
+      return new AppleVerificationTransientError(STATUS_REASON[status] ?? `status ${status}`);
+    }
+    return new AppleVerificationTransientError(`unrecognised verification status ${status}`);
   }
   return new AppleVerificationTransientError('verifier infrastructure error');
 }
@@ -138,14 +163,29 @@ export function createAppleVerifier(
     return v;
   };
 
-  /** Belt-and-braces identity assertions on the DECODED payload. */
-  const assertIdentity = (env: AppleEnvironment, decoded: Record<string, unknown>): void => {
-    const bundleId = decoded.bundleId as string | undefined;
-    if (bundleId && bundleId !== cfg.bundleId) {
-      throw new AppleVerificationPermanentError('app identifier mismatch');
+  /**
+   * Independent assertions on the DECODED payload.
+   *
+   * These REQUIRE the fields rather than checking them "if present". Apple's
+   * library already refuses a transaction whose bundle or environment is missing
+   * or mismatched, so demanding exact equality costs nothing against real
+   * payloads — and it is what makes this check genuinely independent of the
+   * library rather than a restatement of it. An "if present" check passes
+   * vacuously exactly when the payload is most suspicious.
+   */
+  const assertIdentity = (
+    env: AppleEnvironment,
+    decoded: Record<string, unknown>,
+    opts: { requireBundleId: boolean },
+  ): void => {
+    if (opts.requireBundleId) {
+      const bundleId = decoded.bundleId as string | undefined;
+      if (!bundleId || bundleId !== cfg.bundleId) {
+        throw new AppleVerificationPermanentError('app identifier mismatch');
+      }
     }
     const environment = decoded.environment as string | undefined;
-    if (environment && environment !== env) {
+    if (!environment || environment !== env) {
       throw new AppleVerificationPermanentError('environment mismatch');
     }
   };
@@ -158,7 +198,7 @@ export function createAppleVerifier(
       } catch (err) {
         throw classifyVerificationError(err);
       }
-      assertIdentity(environment, decoded);
+      assertIdentity(environment, decoded, { requireBundleId: true });
       if (typeof decoded.transactionId !== 'string' || typeof decoded.originalTransactionId !== 'string') {
         throw new AppleVerificationPermanentError('verified transaction missing required identifiers');
       }
@@ -172,7 +212,8 @@ export function createAppleVerifier(
       } catch (err) {
         throw classifyVerificationError(err);
       }
-      assertIdentity(environment, decoded);
+      // Renewal payloads carry environment but not bundleId.
+      assertIdentity(environment, decoded, { requireBundleId: false });
       return decoded as unknown as DecodedRenewal;
     },
   };

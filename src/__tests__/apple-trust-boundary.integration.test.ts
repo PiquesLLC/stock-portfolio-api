@@ -101,9 +101,20 @@ describe('apple verifier — classification', () => {
     }
   });
 
-  it('treats a malformed JWS as permanent — it is a statement about the DATA', () => {
-    expect(classifyVerificationError(new Error('malformed JWS payload')))
-      .toBeInstanceOf(AppleVerificationPermanentError);
+  it('does NOT infer permanence from error TEXT', () => {
+    // Message sniffing is unsound: an OCSP timeout whose text happens to contain
+    // 'parse' would park a healthy subscription forever.
+    for (const msg of ['malformed JWS payload', 'failed to parse OCSP response', 'decode error']) {
+      expect(classifyVerificationError(new Error(msg)), msg)
+        .toBeInstanceOf(AppleVerificationTransientError);
+    }
+  });
+
+  it('treats an UNRECOGNISED VerificationStatus as transient, not permanent', () => {
+    // A status Apple adds later must not be silently promoted to permanent.
+    const e = classifyVerificationError(new VerificationException(999 as VerificationStatus));
+    expect(e).toBeInstanceOf(AppleVerificationTransientError);
+    expect(e.message).toContain('unrecognised');
   });
 
   it('treats an UNRECOGNISED failure as transient, not permanent', () => {
@@ -144,8 +155,30 @@ describe('apple verifier — identity and environment', () => {
   });
 
   it('rejects a verified transaction missing its identifiers', async () => {
-    const v = verifier({ transaction: () => ({ productId: 'nala_pro_monthly', bundleId: BUNDLE }) });
+    const v = verifier({ transaction: () => ({ productId: 'nala_pro_monthly', bundleId: BUNDLE, environment: 'Production' }) });
     await expect(v.verifyTransaction('Production', 'JWS'))
+      .rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('REQUIRES bundleId and environment rather than checking them if present', async () => {
+    // An "if present" check passes vacuously exactly when the payload is most
+    // suspicious, which would make this defence a restatement of the library
+    // rather than independent of it.
+    const noBundle = verifier({ transaction: () => { const t = goodTransaction() as Record<string, unknown>; delete t.bundleId; return t; } });
+    await expect(noBundle.verifyTransaction('Production', 'JWS'))
+      .rejects.toBeInstanceOf(AppleVerificationPermanentError);
+
+    const noEnv = verifier({ transaction: () => { const t = goodTransaction() as Record<string, unknown>; delete t.environment; return t; } });
+    await expect(noEnv.verifyTransaction('Production', 'JWS'))
+      .rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('requires environment on a RENEWAL, but not a bundleId it never carries', async () => {
+    const v = verifier({ renewal: () => goodRenewal() });
+    await expect(v.verifyRenewal('Production', 'JWS')).resolves.toBeTruthy();
+
+    const wrongEnv = verifier({ renewal: () => goodRenewal({ environment: 'Sandbox' }) });
+    await expect(wrongEnv.verifyRenewal('Production', 'JWS'))
       .rejects.toBeInstanceOf(AppleVerificationPermanentError);
   });
 
@@ -270,7 +303,7 @@ describe('apple auth token provider', () => {
 describe('apple transport factory', () => {
   it('reads the ISSUER id, not the team id, and reports what is missing by name', () => {
     const cfg = appleTransportConfigFromEnv({
-      APPLE_ISSUER_ID: 'iss', APPLE_KEY_ID: 'kid', APPLE_PRIVATE_KEY: 'pk',
+      APPLE_IAP_ISSUER_ID: 'iss', APPLE_IAP_KEY_ID: 'kid', APPLE_IAP_PRIVATE_KEY: 'pk',
       APPLE_BUNDLE_ID: BUNDLE, APPLE_APP_APPLE_ID: '99',
       APPLE_TEAM_ID: 'TEAMSHOULDNOTBEUSED',
     } as never);
@@ -280,7 +313,7 @@ describe('apple transport factory', () => {
 
     const empty = appleTransportConfigFromEnv({} as never);
     expect(missingAppleTransportConfig(empty)).toEqual([
-      'APPLE_ISSUER_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY', 'APPLE_BUNDLE_ID', 'APPLE_APP_APPLE_ID',
+      'APPLE_IAP_ISSUER_ID', 'APPLE_IAP_KEY_ID', 'APPLE_IAP_PRIVATE_KEY', 'APPLE_BUNDLE_ID', 'APPLE_APP_APPLE_ID',
     ]);
   });
 
@@ -393,5 +426,78 @@ describe('verification failures through reconcileOnce (real engine)', () => {
       },
     });
     expect(out.kind).toBe('committed');
+  });
+});
+
+describe('apple IAP credentials are isolated from the other Apple keys', () => {
+  it('IGNORES the generic APPLE_KEY_ID / APPLE_PRIVATE_KEY / APPLE_TEAM_ID', () => {
+    // Those names belong to OAuth sign-in in .env.example AND are consumed as
+    // APNs fallbacks (config/index.ts apnsKeyId/apnsTeamId/apnsPrivateKey). If
+    // the IAP factory read them, provisioning the App Store Server API key would
+    // make push notifications sign with the wrong key. Apple also forbids
+    // sharing the In-App Purchase key with other services.
+    const cfg = appleTransportConfigFromEnv({
+      APPLE_KEY_ID: 'OAUTH_OR_APNS_KEY',
+      APPLE_PRIVATE_KEY: 'OAUTH_OR_APNS_PRIVATE_KEY',
+      APPLE_TEAM_ID: 'TEAMID',
+      APPLE_BUNDLE_ID: BUNDLE,
+      APPLE_APP_APPLE_ID: '99',
+    } as never);
+
+    expect(cfg.auth.keyId).toBe('');
+    expect(cfg.auth.privateKey).toBe('');
+    expect(cfg.auth.issuerId).toBe('');
+    const serialized = JSON.stringify(cfg);
+    for (const leaked of ['OAUTH_OR_APNS_KEY', 'OAUTH_OR_APNS_PRIVATE_KEY', 'TEAMID']) {
+      expect(serialized).not.toContain(leaked);
+    }
+    // ...and the IAP-specific names are reported missing, by name.
+    expect(missingAppleTransportConfig(cfg)).toEqual([
+      'APPLE_IAP_ISSUER_ID', 'APPLE_IAP_KEY_ID', 'APPLE_IAP_PRIVATE_KEY',
+    ]);
+  });
+
+  it('reads ONLY the dedicated APPLE_IAP_* names', () => {
+    const cfg = appleTransportConfigFromEnv({
+      APPLE_IAP_ISSUER_ID: 'iap-iss',
+      APPLE_IAP_KEY_ID: 'iap-kid',
+      APPLE_IAP_PRIVATE_KEY: 'iap-pk',
+      APPLE_KEY_ID: 'WRONG', APPLE_PRIVATE_KEY: 'WRONG', APPLE_TEAM_ID: 'WRONG',
+      APPLE_BUNDLE_ID: BUNDLE, APPLE_APP_APPLE_ID: '99',
+    } as never);
+    expect(cfg.auth).toMatchObject({ issuerId: 'iap-iss', keyId: 'iap-kid', privateKey: 'iap-pk' });
+    expect(JSON.stringify(cfg)).not.toContain('WRONG');
+    expect(missingAppleTransportConfig(cfg)).toEqual([]);
+  });
+});
+
+describe('the REAL SignedDataVerifier path (no injected factory)', () => {
+  /**
+   * Everything else stubs Apple's cryptography. This constructs the DEFAULT
+   * production path — the repo's embedded APPLE_ROOT_CERTS, the actual
+   * SignedDataVerifier constructor, our environment mapping, bundle id and app
+   * Apple id — and feeds it a deliberately malformed JWS.
+   *
+   * It proves our wiring and root parsing work, and that argument order and
+   * required-argument drift would be caught. Online revocation checks are off,
+   * so there is no network and no credentials.
+   */
+  const realVerifier = () =>
+    createAppleVerifier({ bundleId: BUNDLE, appAppleId: 123, enableOnlineChecks: false });
+
+  for (const env of ['Production', 'Sandbox'] as const) {
+    it(`constructs and rejects a malformed JWS in ${env}`, async () => {
+      const err = await realVerifier().verifyTransaction(env, 'this-is-not-a-jws').catch((e) => e as Error);
+      expect(err.constructor.name, `actual: ${err?.constructor?.name} :: ${err?.message}`)
+        .toBe('AppleVerificationPermanentError');
+      // Whatever the library reports, the JWS itself must never surface.
+      expect(err.message).not.toContain('this-is-not-a-jws');
+    });
+  }
+
+  it('rejects a malformed RENEWAL payload through the real path too', async () => {
+    const err = await realVerifier().verifyRenewal('Production', 'nope').catch((e) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).not.toContain('nope');
   });
 });
