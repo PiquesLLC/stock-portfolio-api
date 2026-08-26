@@ -106,11 +106,24 @@ subscription produce **one** reconciliation request. There is no "latest JWS
 wins" and no expiry comparison anywhere.
 
 Verification happens outside any write transaction, capped at 50 entries so one
-authenticated request cannot trigger unbounded OCSP work. A permanent failure on
-one entry drops that entry; a **transient** failure aborts the whole call with
-503, because "we could not check" must never be reported to a paying customer as
-"you own nothing". An empty result is `no-restorable-purchases`, never
-`plan: free`.
+authenticated request cannot trigger unbounded OCSP work.
+
+Three outcomes are kept distinct, because collapsing them misinforms a paying
+customer:
+
+| Outcome | Result |
+|---|---|
+| Permanently invalid JWS, or unrecognised product | **aborts** the call (400) |
+| Transient verification failure | **aborts** the call (503) |
+| Valid but not owned by this account | excluded, call continues |
+
+Only the third is a statement about ownership. "This payload is invalid" and
+"we could not check" must never be reported as "you have no purchases". An empty
+result is `no-restorable-purchases`, never `plan: free`.
+
+Ownership is judged per JWS BEFORE deduplication. Deduplicating first would let
+array order decide: given a tokenless and a tokenized JWS for one subscription,
+whichever arrived first would be the one ownership was judged on.
 
 ## Sandbox
 
@@ -120,8 +133,22 @@ Sandbox allowlist is introduced.
 
 ## Verification
 
-- 36 tests in `apple-activation-ownership.integration.test.ts` against a real
-  libsql engine and the real migration.
-- Full suite 145 files / 1811 passed / 19 skipped; `tsc` 0; ESLint 0 errors.
-- Scope: no `billing.service.ts`, no `railway.json`, no notification-intake,
-  queue, worker-runtime or projector changes.
+- 44 tests in `apple-activation-ownership.integration.test.ts` against a real
+  libsql engine and the real migration, including the full post-charge Stripe
+  race end to end and a lost lease proving it cannot bind.
+- Full suite 145 files / 1819 passed / 19 skipped; `tsc` 0; ESLint 0 errors.
+- `prisma migrate diff --from-migrations --to-schema` reports No difference.
+
+## Migration ordering
+
+The directory is `20260826_user_apple_app_account_token` and the name is
+load-bearing: Prisma applies migrations lexicographically, and this must sort
+AFTER the two 20260826_ repair migrations from the history reconciliation. A
+14-digit stamp would NOT achieve that — `_` (0x5F) sorts above every digit, so
+`20260826000001_...` comes BEFORE `20260826_reconcile_...` and the on-disk
+history would claim the Apple work predates its own prerequisite.
+
+## Scope
+
+No `billing.service.ts`, no `railway.json`, no notification-intake, queue,
+worker-runtime or projector changes.

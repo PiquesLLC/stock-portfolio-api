@@ -91,6 +91,17 @@ const db = (deps: ActivationDeps): QueueClient =>
   deps.client ?? (prisma as unknown as QueueClient);
 
 /**
+ * Is a Stripe rail persisted for this account?
+ *
+ * Deliberately NON-NULL rather than non-empty. A persisted rail identity is
+ * enough to treat Stripe as capable of collecting, whatever the current plan
+ * says. An empty string would be malformed state, but it is still non-null
+ * rail state — and admitting a second billing rail because the first one was
+ * stored badly fails in the direction that double-bills a customer.
+ */
+const hasStripeRail = (v: unknown): boolean => v !== null && v !== undefined;
+
+/**
  * Verify a client-submitted transaction without trusting it to say where it came
  * from.
  *
@@ -183,7 +194,7 @@ export async function createPurchaseContext(
     `SELECT "stripeSubscriptionId" FROM "User" WHERE "id" = ?`, userId,
   );
   if (rows.length === 0) throw new AppleOwnershipRejectedError('user not found');
-  if (typeof rows[0].stripeSubscriptionId === 'string' && rows[0].stripeSubscriptionId.length > 0) {
+  if (hasStripeRail(rows[0].stripeSubscriptionId)) {
     throw new AppleStripeRailActiveError();
   }
 
@@ -299,8 +310,7 @@ export async function activatePurchase(
   const rail = await client.$queryRawUnsafe<{ stripeSubscriptionId: unknown }>(
     `SELECT "stripeSubscriptionId" FROM "User" WHERE "id" = ?`, userId,
   );
-  const stripeId = rail[0]?.stripeSubscriptionId;
-  if (typeof stripeId === 'string' && stripeId.length > 0) {
+  if (hasStripeRail(rail[0]?.stripeSubscriptionId)) {
     throw new ApplePostChargeRailConflictError();
   }
 
@@ -340,47 +350,59 @@ export async function restoreAppleSubscriptions(
    * Verify everything first, outside any write transaction — certificate and
    * OCSP work must never hold the SQLite write lock.
    *
-   * A permanent failure on one entry only drops that entry: a restore batch is
-   * whatever the device happened to have, and one unparseable item must not
-   * deny a customer their other purchases. A TRANSIENT failure is different and
-   * aborts the whole call, because "we could not check" must never be reported
-   * as "you own nothing".
+   * A permanent verification failure ABORTS the whole call. "This signed
+   * payload is invalid" is a different statement from "you have no purchases",
+   * and collapsing the first into the second would tell a customer their
+   * subscription does not exist because their client sent something malformed.
+   * An unrecognised product is the same kind of statement, so it fails closed
+   * rather than silently vanishing from the batch.
+   *
+   * Not-owned purchases are different again: a restore batch legitimately
+   * contains everything the Apple ID ever bought, including subscriptions
+   * belonging to other Nala accounts. Those are excluded, not errors.
    */
-  const candidates = new Map<string, { environment: AppleEnvironment; transaction: DecodedTransaction }>();
+  const verified: Array<{ environment: AppleEnvironment; transaction: DecodedTransaction }> = [];
   for (const signed of signedTransactions) {
-    let verified;
+    const v = await verifyTransactionAnyEnvironment(deps.verifier, signed);
     try {
-      verified = await verifyTransactionAnyEnvironment(deps.verifier, signed);
+      planForAppleProduct(v.transaction.productId);
     } catch (err) {
-      if (err instanceof AppleVerificationTransientError) throw err;
-      continue;
+      if (err instanceof UnknownAppleProductError) {
+        throw new AppleVerificationPermanentError('restore contains a purchase for an unrecognised product');
+      }
+      throw err;
     }
-    try {
-      planForAppleProduct(verified.transaction.productId);
-    } catch {
-      continue;   // not one of ours
-    }
-    // Deduplicated by subscription identity, so multiple JWS values for the
-    // same subscription produce ONE reconciliation request.
-    const key = `${verified.environment}::${verified.transaction.originalTransactionId}`;
-    if (!candidates.has(key)) candidates.set(key, verified);
+    verified.push(v);
   }
 
-  let queued = 0;
-  for (const { environment, transaction } of candidates.values()) {
+  /**
+   * Ownership-qualify EVERY verified candidate, and only then deduplicate.
+   *
+   * Deduplicating first would quietly restore array-order authority: given a
+   * tokenless JWS and a tokenized JWS for the SAME subscription, whichever
+   * arrived first would be the one ownership was judged on, so the caller’s
+   * result would depend on the order the device happened to hand them over.
+   * Qualifying first means any one qualifying JWS is enough, and the dedupe
+   * then collapses them to a single reconciliation target.
+   */
+  const targets = new Map<string, { environment: AppleEnvironment; originalTransactionId: string }>();
+  for (const { environment, transaction } of verified) {
     try {
       await assertCallerOwns(client, userId, environment, transaction);
     } catch (err) {
-      if (err instanceof AppleOwnershipRejectedError) continue;   // not this account's
+      if (err instanceof AppleOwnershipRejectedError) continue;   // not this account’s
       throw err;
     }
-    await enqueueReconciliation(
-      { environment, originalTransactionId: transaction.originalTransactionId },
-      client, now,
-    );
-    queued += 1;
+    const key = `${environment}::${transaction.originalTransactionId}`;
+    if (!targets.has(key)) {
+      targets.set(key, { environment, originalTransactionId: transaction.originalTransactionId });
+    }
   }
 
+  for (const target of targets.values()) {
+    await enqueueReconciliation(target, client, now);
+  }
+  const queued = targets.size;
   // Deliberately not "plan: free": absence of a restorable purchase is not an
   // authoritative statement about entitlement.
   return queued === 0

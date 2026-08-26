@@ -144,6 +144,27 @@ export async function bindSubscriptionOwner(
         'subscription is bound to one account while its verified appAccountToken belongs to another',
       );
     }
+
+    /**
+     * The token agrees with the durable binding — but the transitional column
+     * may still name a third account for this same subscription. That state is
+     * contradictory and a machine cannot pick a winner, so it is an operator
+     * condition rather than something to accept silently just because the
+     * binding itself looks settled.
+     *
+     * Only checked when a token is present. Without one there is nothing
+     * authoritative to contradict, and durable AppleSubscription.userId simply
+     * wins.
+     */
+    if (tokenOwner) {
+      const legacyOwner = await legacyOtiOwner(tx, key.originalTransactionId);
+      if (legacyOwner && legacyOwner !== existingUserId) {
+        throw new AppleOwnershipConflictError(
+          'bound subscription and the transitional appleOriginalTransactionId name different accounts',
+        );
+      }
+    }
+
     return { outcome: 'already-bound', userId: existingUserId };
   }
 

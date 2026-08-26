@@ -565,11 +565,12 @@ describe('apple activation and ownership (real engine)', () => {
     expect(String((await rows('AppleReconciliation'))[0].originalTransactionId)).toBe(OTI);
   });
 
-  it('restore ignores unregistered tokens and unknown products', async () => {
-    const r = await restoreAppleSubscriptions('user_a', ['unknown-token', 'bad-product'], deps({
+  it('restore EXCLUDES an unregistered token without failing the call', async () => {
+    // Not-owned is a legitimate outcome; a restore batch contains whatever the
+    // Apple ID ever bought.
+    const r = await restoreAppleSubscriptions('user_a', ['unknown-token'], deps({
       verifier: verifierFor({
         'unknown-token': { environment: 'Production', transaction: txn({ appAccountToken: crypto.randomUUID() }) },
-        'bad-product': { environment: 'Production', transaction: txn({ productId: 'nala_mystery', originalTransactionId: 'OTI-X' }) },
       }),
     }));
     expect(r).toEqual({ status: 'no-restorable-purchases', queued: 0 });
@@ -645,5 +646,251 @@ describe('apple activation and ownership (real engine)', () => {
     expect(controller).not.toContain('verifyAndActivatePlan');
     expect(controller).not.toContain('already have an active subscription');   // no message sniffing
     expect(controller).toContain('AppleOwnershipRejectedError');
+  });
+});
+
+/**
+ * Regressions for the five review blockers, plus the two frozen adversarial
+ * cases that had to be proven end-to-end rather than inferred.
+ */
+describe('apple activation — review regressions', () => {
+  let db: Client;
+
+  const adapter: QueueClient = {
+    $executeRawUnsafe: async (sql: string, ...args: unknown[]) =>
+      Number((await db.execute({ sql, args: args as never })).rowsAffected),
+    $queryRawUnsafe: async <T,>(sql: string, ...args: unknown[]) =>
+      (await db.execute({ sql, args: args as never })).rows as T[],
+    $transaction: async <T,>(fn: (tx: QueueClient) => Promise<T>): Promise<T> => {
+      await db.execute('BEGIN');
+      try { const out = await fn(adapter); await db.execute('COMMIT'); return out; }
+      catch (err) {
+        try { await db.execute('ROLLBACK'); } catch { /* already unwound */ }
+        throw err;
+      }
+    },
+  };
+
+  const deps = (over: Record<string, unknown> = {}) => ({
+    verifier: verifierFor({}),
+    workerAvailable: () => true,
+    client: adapter,
+    now: () => NOW,
+    ...over,
+  } as Parameters<typeof activatePurchase>[2]);
+
+  const rows = async (t: string) =>
+    (await db.execute(`SELECT * FROM "${t}"`)).rows as Record<string, unknown>[];
+  const user = async (id: string) =>
+    (await db.execute({ sql: `SELECT * FROM "User" WHERE "id"=?`, args: [id] })).rows[0] as Record<string, unknown>;
+
+  const addUser = async (id: string, over: Record<string, unknown> = {}) => {
+    const u = { plan: 'free', stripeSubscriptionId: null, appleAppAccountToken: null, appleOriginalTransactionId: null, ...over };
+    await db.execute({
+      sql: `INSERT INTO "User" ("id","plan","planExpiresAt","planStartedAt","stripeSubscriptionId","applePurchaseSource","appleOriginalTransactionId","appleAppAccountToken")
+            VALUES (?,?,NULL,NULL,?,NULL,?,?)`,
+      args: [id, u.plan, u.stripeSubscriptionId, u.appleOriginalTransactionId, u.appleAppAccountToken] as never,
+    });
+  };
+
+  const enqueue = async (oti = OTI, environment: AppleEnvironment = 'Production') => {
+    const iso = NOW.toISOString();
+    await db.execute({
+      sql: __TEST_ONLY_ENQUEUE_SQL,
+      args: [crypto.randomUUID(), environment, oti, iso, iso, iso] as never,
+    });
+  };
+
+  const transportOf = (fn: AppleTransport['getAllSubscriptionStatuses']): AppleTransport =>
+    ({ getAllSubscriptionStatuses: fn });
+
+  const statusResponse = (appAccountToken?: string): AppleStatusResponse => ({
+    environment: 'Production',
+    data: [{
+      subscriptionGroupIdentifier: 'group-1',
+      lastTransactions: [{
+        outerOriginalTransactionId: OTI,
+        status: Status.ACTIVE,
+        transaction: {
+          transactionId: 'txn-1', originalTransactionId: OTI, productId: PRODUCT,
+          expiresDate: at(30 * DAY), signedDate: at(0), appAccountToken,
+        },
+        renewal: { originalTransactionId: OTI, autoRenewStatus: 1, autoRenewProductId: PRODUCT },
+      }],
+    }],
+  });
+
+  beforeEach(async () => {
+    __resetAppleRateLimitersForTests();
+    db = createClient({ url: ':memory:' });
+    await db.execute(`CREATE TABLE "User" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "plan" TEXT NOT NULL DEFAULT 'free',
+      "planExpiresAt" DATETIME, "planStartedAt" DATETIME,
+      "stripeSubscriptionId" TEXT, "applePurchaseSource" TEXT,
+      "appleOriginalTransactionId" TEXT,
+      "appleAppAccountToken" TEXT
+    )`);
+    await db.execute(`CREATE UNIQUE INDEX "User_appleAppAccountToken_key" ON "User"("appleAppAccountToken")`);
+    const sql = fs.readFileSync(MIGRATION, 'utf8')
+      .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+    for (const stmt of sql.split(';')) { const t = stmt.trim(); if (t) await db.execute(t); }
+    await db.execute('PRAGMA foreign_keys = ON');
+    await addUser('user_a');
+    await addUser('user_b');
+  });
+
+  afterEach(() => { db.close(); __resetAppleRateLimitersForTests(); });
+
+  // ── blocker 1: invalid input is not "no purchases" ──────────────────────
+
+  it('RESTORE: a permanently invalid JWS aborts rather than reporting no purchases', async () => {
+    // "This payload is invalid" and "you own nothing" are different statements.
+    await expect(restoreAppleSubscriptions('user_a', ['garbage'], deps({
+      verifier: verifierFor({}),   // nothing verifies
+    }))).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+    expect(await rows('AppleReconciliation')).toHaveLength(0);
+  });
+
+  it('RESTORE: an unknown product fails closed rather than vanishing', async () => {
+    const token = await issueAppAccountToken('user_a', deps());
+    await expect(restoreAppleSubscriptions('user_a', ['j1'], deps({
+      verifier: verifierFor({
+        j1: { environment: 'Production', transaction: txn({ appAccountToken: token, productId: 'nala_mystery' }) },
+      }),
+    }))).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  // ── blocker 2: array order must not decide ownership ────────────────────
+
+  it('RESTORE: the SAME two JWS give the same result in either order', async () => {
+    /**
+     * A tokenless and a tokenized JWS for ONE subscription. Deduplicating before
+     * ownership meant whichever arrived first was judged, so the result depended
+     * on the order the device handed them over.
+     */
+    const token = await issueAppAccountToken('user_a', deps());
+    const table = {
+      tokenless: { environment: 'Production' as const, transaction: txn() },
+      tokenized: { environment: 'Production' as const, transaction: txn({ appAccountToken: token }) },
+    };
+
+    const forward = await restoreAppleSubscriptions('user_a', ['tokenless', 'tokenized'], deps({ verifier: verifierFor(table) }));
+    const afterForward = (await rows('AppleReconciliation')).length;
+    await db.execute(`DELETE FROM "AppleReconciliation"`);
+    const reverse = await restoreAppleSubscriptions('user_a', ['tokenized', 'tokenless'], deps({ verifier: verifierFor(table) }));
+    const afterReverse = (await rows('AppleReconciliation')).length;
+
+    expect(forward).toEqual(reverse);
+    expect(forward.queued).toBe(1);          // one subscription, one request
+    expect(afterForward).toBe(afterReverse);
+    expect(afterForward).toBe(1);
+  });
+
+  // ── blocker 3: a bound row still conflicts with a stale legacy link ─────
+
+  it('BOUND subscription whose transitional OTI names another account is a conflict', async () => {
+    const tokenA = await issueAppAccountToken('user_a', deps());
+    await db.execute({
+      sql: `INSERT INTO "AppleSubscription"
+        ("id","environment","originalTransactionId","userId","productId","plan","status",
+         "autoRenewStatus","appAccountToken","currentTransactionId","appliedGeneration","createdAt","updatedAt")
+        VALUES (?,'Production',?,'user_a',?,'pro','active',1,?,'txn-1',1,?,?)`,
+      args: [crypto.randomUUID(), OTI, PRODUCT, tokenA, NOW.toISOString(), NOW.toISOString()] as never,
+    });
+    // A stale compatibility link on a THIRD party.
+    await db.execute(`UPDATE "User" SET "appleOriginalTransactionId"=? WHERE "id"=?`.replace(/\?/g, (m, i) => m), );
+    await db.execute({ sql: `UPDATE "User" SET "appleOriginalTransactionId"=? WHERE "id"=?`, args: [OTI, 'user_b'] as never });
+
+    await expect(
+      bindSubscriptionOwner(adapter, { environment: 'Production', originalTransactionId: OTI }, NOW),
+    ).rejects.toBeInstanceOf(AppleOwnershipConflictError);
+
+    // Nothing was reassigned or deleted.
+    expect(String((await rows('AppleSubscription'))[0].userId)).toBe('user_a');
+    expect(String((await user('user_b')).appleOriginalTransactionId)).toBe(OTI);
+  });
+
+  // ── blocker 4: any non-null Stripe rail blocks ──────────────────────────
+
+  it('an EMPTY-STRING Stripe subscription id still blocks purchase context', async () => {
+    // Malformed persisted state is still rail state. Admitting Apple because
+    // Stripe was stored badly fails in the double-billing direction.
+    await addUser('user_empty', { stripeSubscriptionId: '' });
+    await expect(createPurchaseContext('user_empty', deps()))
+      .rejects.toBeInstanceOf(AppleStripeRailActiveError);
+    expect((await user('user_empty')).appleAppAccountToken).toBe(null);
+  });
+
+  it('an EMPTY-STRING Stripe id post-charge still conflicts, and still enqueues', async () => {
+    const token = await issueAppAccountToken('user_a', deps());
+    await db.execute({ sql: `UPDATE "User" SET "stripeSubscriptionId"=? WHERE "id"=?`, args: ['', 'user_a'] as never });
+
+    await expect(activatePurchase('user_a', 'jws', deps({
+      verifier: verifierFor({ jws: { environment: 'Production', transaction: txn({ appAccountToken: token }) } }),
+    }))).rejects.toBeInstanceOf(ApplePostChargeRailConflictError);
+
+    expect(await rows('AppleReconciliation')).toHaveLength(1);   // the purchase survives
+  });
+
+  // ── frozen adversarial case: the FULL post-charge race ──────────────────
+
+  it('FULL POST-CHARGE RACE: Apple never overwrites Stripe, and the job parks', async () => {
+    /**
+     * The whole story: purchase-context clean -> token issued -> Stripe appears
+     * -> activation verifies and enqueues -> 409 -> worker reconciles -> binding
+     * inside the fence -> projector sees the Stripe rail -> permanent park.
+     */
+    const ctx = await createPurchaseContext('user_a', deps());
+    await db.execute({ sql: `UPDATE "User" SET "stripeSubscriptionId"=?, "plan"=? WHERE "id"=?`, args: ['sub_live', 'premium', 'user_a'] as never });
+
+    await expect(activatePurchase('user_a', 'jws', deps({
+      verifier: verifierFor({ jws: { environment: 'Production', transaction: txn({ appAccountToken: ctx.appAccountToken }) } }),
+    }))).rejects.toBeInstanceOf(ApplePostChargeRailConflictError);
+    expect(await rows('AppleReconciliation')).toHaveLength(1);
+
+    const out = await reconcileOnce('w1', {
+      client: adapter, now: () => NOW,
+      transport: transportOf(async () => statusResponse(ctx.appAccountToken)),
+    });
+
+    // Parked for an operator, not retried on a ladder that cannot change it.
+    expect(out.kind).toBe('permanently-invalid');
+    const job = (await rows('AppleReconciliation'))[0];
+    expect(new Date(String(job.nextAttemptAt)).getTime() - NOW.getTime()).toBeGreaterThan(365 * DAY);
+
+    // Stripe's entitlement is untouched, and no partial Apple state survived.
+    const u = await user('user_a');
+    expect(u.plan).toBe('premium');
+    expect(u.stripeSubscriptionId).toBe('sub_live');
+    expect(u.applePurchaseSource).toBe(null);
+    expect(await rows('AppleSubscription')).toHaveLength(0);   // rolled back with the fence
+  });
+
+  // ── frozen adversarial case: a lost lease cannot bind ───────────────────
+
+  it('LOST LEASE cannot bind, even with a matching token', async () => {
+    /**
+     * The CAS checks the per-acquisition lease as well as the generation.
+     * Binding is a NEW side effect behind that same fence, so it must be equally
+     * unreachable once another worker has reclaimed the row.
+     */
+    const token = await issueAppAccountToken('user_a', deps());
+    await enqueue();
+
+    const out = await reconcileOnce('w1', {
+      client: adapter, now: () => NOW,
+      transport: transportOf(async () => {
+        // Another worker reclaims the row while this request is in flight.
+        await db.execute({ sql: `UPDATE "AppleReconciliation" SET "leaseOwner"=?`, args: ['w2-stole-it'] as never });
+        return statusResponse(token);
+      }),
+    });
+
+    expect(out.kind).toBe('stale');
+    expect(await rows('AppleSubscription')).toHaveLength(0);   // no snapshot, no binding
+    const u = await user('user_a');
+    expect(u.plan).toBe('free');
+    expect(u.appleOriginalTransactionId).toBe(null);           // no dual-write either
   });
 });
