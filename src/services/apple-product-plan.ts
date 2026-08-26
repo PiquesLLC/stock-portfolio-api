@@ -1,11 +1,11 @@
 /**
  * Canonical Apple product -> Nala plan mapping.
  *
- * Centralized here so the reconciler and any future Apple code share one table.
- * `apple-iap.service.ts` still carries a private copy of the same map; it is not
- * touched by this PR (scope), so converging it onto this module is a follow-up.
- * The two tables are identical today — if they ever diverge, THIS one is
- * authoritative for snapshot normalization.
+ * Centralized here so every Apple path shares one table. The duplicate private
+ * map that used to live in apple-iap.service.ts is gone with that file: a
+ * second copy of a product->plan table is a silent divergence waiting to
+ * happen, and the copy that mapped unknown products to ‘free’ was the dangerous
+ * one.
  *
  * IMPORTANT DIFFERENCE FROM THE LEGACY COPY: an unknown product is an ERROR
  * here, not 'free'. Mapping an unrecognised product to the free tier would let a

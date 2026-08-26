@@ -239,7 +239,7 @@ describe('AppleServerApiTransport wired into the reconciler (full seam)', () => 
   beforeEach(async () => {
     __resetAppleRateLimitersForTests();
     db = createClient({ url: ':memory:' });
-    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY)`);
+    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "appleAppAccountToken" TEXT, "appleOriginalTransactionId" TEXT)`);
     const sql = fs.readFileSync(MIGRATION, 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
     for (const stmt of sql.split(';')) { const s = stmt.trim(); if (s) await db.execute(s); }

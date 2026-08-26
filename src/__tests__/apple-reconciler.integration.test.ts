@@ -126,7 +126,7 @@ describe('apple reconciler (real engine, mocked Apple transport)', () => {
   beforeEach(async () => {
     __resetAppleRateLimitersForTests();
     db = createClient({ url: ':memory:' });
-    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "plan" TEXT NOT NULL DEFAULT 'free')`);
+    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "plan" TEXT NOT NULL DEFAULT 'free', "appleAppAccountToken" TEXT, "appleOriginalTransactionId" TEXT)`);
     await db.execute(`INSERT INTO "User" ("id","plan") VALUES ('user_1','free')`);
     const sql = fs.readFileSync(MIGRATION, 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');

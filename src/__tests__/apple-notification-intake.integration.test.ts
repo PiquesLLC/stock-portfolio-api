@@ -140,7 +140,7 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
       "plan" TEXT NOT NULL DEFAULT 'free',
       "planExpiresAt" DATETIME, "planStartedAt" DATETIME,
       "stripeSubscriptionId" TEXT, "applePurchaseSource" TEXT,
-      "appleOriginalTransactionId" TEXT
+      "appleOriginalTransactionId" TEXT, "appleAppAccountToken" TEXT
     )`);
     await db.execute(`INSERT INTO "User" ("id","plan") VALUES ('user_1','free')`);
     const sql = fs.readFileSync(MIGRATION, 'utf8')
@@ -895,20 +895,31 @@ describe('the notification path cannot touch entitlement', () => {
     expect(intake).toBeGreaterThan(gate);
   });
 
-  it('the legacy service no longer carries the notification machinery', () => {
-    const legacy = read('services/apple-iap.service.ts');
-    for (const gone of ['handleAppleNotification', 'processAppleNotification', 'verifySignedNotification', 'appleIAPWebhookEvent', 'runJob']) {
-      // Prose in the tombstone comment is fine; a call or definition is not.
-      const codeUses = legacy
-        .split(eolOf(legacy))
-        .filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//'))
-        .filter((l) => l.includes(gone));
-      expect(codeUses, gone).toEqual([]);
-    }
-    // Activation/restore are deliberately untouched by this stage.
-    expect(legacy).toContain('export async function verifyAndActivatePlan');
-    expect(legacy).toContain('export async function restorePurchases');
-  });
+  it('the legacy apple-iap service is gone entirely', () => {
+    /**
+     * It carried a SignedDataVerifier whose environment came from NODE_ENV, a
+     * private duplicate of the product->plan map, and activation/restore code
+     * that wrote User.plan straight from a client-submitted JWS. All of it was
+     * replaced: notification intake in the previous stage, activation and
+     * restore in this one. Deleting the file is the strongest available proof
+     * that none of it can be reached.
+     */
+    expect(fs.existsSync(path.join(__dirname, '..', 'services/apple-iap.service.ts'))).toBe(false);
+
+    // And nothing imports it any more.
+    const dir = path.join(__dirname, '..');
+    const offenders: string[] = [];
+    const walk = (d: string) => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, entry.name);
+        if (entry.isDirectory()) { if (entry.name !== 'generated') walk(p); continue; }
+        if (!entry.name.endsWith('.ts')) continue;
+        const src = fs.readFileSync(p, 'utf8');
+        if (/from '[^']*apple-iap\.service'/.test(src)) offenders.push(p);
+      }
+    };
+    walk(dir);
+    expect(offenders).toEqual([]);  });
 
   it('no dedupe marker is ever deleted', () => {
     const src = read('services/apple-notification-intake.service.ts');
@@ -917,9 +928,6 @@ describe('the notification path cannot touch entitlement', () => {
   });
 });
 
-function eolOf(text: string): string {
-  return text.includes('\r\n') ? '\r\n' : '\n';
-}
 
 /**
  * Two independent connections to ONE database file.
@@ -990,7 +998,7 @@ describe('notification intake under real concurrency', () => {
     }
     const sql = fs.readFileSync(MIGRATION, 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
-    await a.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "plan" TEXT NOT NULL DEFAULT 'free')`);
+    await a.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "plan" TEXT NOT NULL DEFAULT 'free', "appleAppAccountToken" TEXT, "appleOriginalTransactionId" TEXT)`);
     for (const stmt of sql.split(';')) { const t = stmt.trim(); if (t) await a.execute(t); }
   });
 

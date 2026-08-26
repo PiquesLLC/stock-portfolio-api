@@ -13,10 +13,11 @@ import type { DecodedTransaction, DecodedRenewal } from './apple-server-api';
  *
  * Everything downstream of this module treats decoded payloads as verified fact,
  * so this is the single place where "Apple said so" is established. It is
- * deliberately separate from the legacy apple-iap.service.ts verifier, which
- * builds ONE verifier whose environment is derived from NODE_ENV — fine for a
- * single-environment webhook path, wrong for a reconciler that must serve
- * Production and Sandbox side by side and never let one vouch for the other.
+ * the ONLY verifier in the codebase. The legacy apple-iap.service.ts built one
+ * whose environment came from NODE_ENV, so a Sandbox payload could be checked
+ * against Production rules depending on where the code happened to run. That
+ * file is deleted; every path now goes through the per-environment instances
+ * here, and one environment can never vouch for the other.
  *
  * ── THE ERROR TAXONOMY IS LOAD-BEARING ────────────────────────────────────
  *

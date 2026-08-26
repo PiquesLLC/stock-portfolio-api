@@ -25,6 +25,10 @@ import {
   AppleProjectionDataError,
   PRODUCTION_ENVIRONMENT,
 } from './apple-entitlement-projection.service';
+import {
+  bindSubscriptionOwner,
+  AppleOwnershipConflictError,
+} from './apple-ownership.service';
 import { AppleVerificationPermanentError, AppleVerificationTransientError } from './apple-verifier';
 
 /**
@@ -408,28 +412,31 @@ export async function reconcileOnce(
         await writeSnapshot(tx, snapshot, job.generation, commitNow);
 
         /**
-         * Entitlement projection, in the SAME transaction as the snapshot and
-         * behind the same generation fence. A stale generation loses the CAS
-         * above and never reaches this line; a projection failure rolls the
-         * snapshot and the queue transition back with it.
+         * Ownership binding, in the SAME transaction as the snapshot and behind
+         * the same generation fence.
          *
-         * Ownership is NOT invented here. Projection runs only for a userId
-         * that is already durably bound to the row — binding belongs to the
-         * later activation/restore stage. An unbound subscription still
-         * commits its snapshot; it simply has no user to project onto.
+         * This is where a purchase becomes a customer’s. It is derived from the
+         * AUTHORITATIVE snapshot Apple’s Server API just returned — the token
+         * Apple echoed back — never from anything a client submitted. A stale
+         * generation loses the CAS above and cannot bind; a worker that lost its
+         * lease cannot bind; and a projection failure below rolls a fresh binding
+         * back with it.
          *
-         * Sandbox is inert: only a Production reconciliation may recompute a
-         * plan, so a Sandbox row can never move User.plan even for a user who
-         * also holds a Production subscription.
+         * Sandbox DOES bind, so a test purchase is attributable and auditable.
+         * What Sandbox may never do is project: only a Production reconciliation
+         * may recompute a plan.
          */
-        if (snapshot.environment !== PRODUCTION_ENVIRONMENT) return;
-        const bound = await tx.$queryRawUnsafe<{ userId: string | null }>(
-          `SELECT "userId" FROM "AppleSubscription" WHERE "environment" = ? AND "originalTransactionId" = ?`,
-          snapshot.environment,
-          snapshot.originalTransactionId,
+        const binding = await bindSubscriptionOwner(
+          tx,
+          {
+            environment: snapshot.environment,
+            originalTransactionId: snapshot.originalTransactionId,
+          },
+          commitNow,
         );
-        const userId = bound[0]?.userId ?? null;
-        if (userId) await projectAppleEntitlementForUser(tx, userId, commitNow);
+
+        if (snapshot.environment !== PRODUCTION_ENVIRONMENT) return;
+        if (binding.userId) await projectAppleEntitlementForUser(tx, binding.userId, commitNow);
       },
       { now: commitNow, client },
     );
@@ -457,7 +464,11 @@ export async function reconcileOnce(
      * recovery requeues it once an operator has resolved the underlying
      * double rail or bad row.
      */
-    if (err instanceof BillingRailConflictError || err instanceof AppleProjectionDataError) {
+    if (
+      err instanceof BillingRailConflictError
+      || err instanceof AppleProjectionDataError
+      || err instanceof AppleOwnershipConflictError
+    ) {
       await failReconciliation(job, `projection blocked: ${message}`, {
         now: nowFn(), client, retryAfterMs: PERMANENT_PARK_MS,
       });
