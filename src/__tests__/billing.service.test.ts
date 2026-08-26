@@ -87,9 +87,11 @@ describe('billing webhook handling', () => {
     prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
     // The Apple-aware plan writer resolves users first and asks Apple whether a
     // rail blocks. Default: one ordinary Stripe user with no Apple rail.
-    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1', applePurchaseSource: null }]);
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', applePurchaseSource: null });
+    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1' }]);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1' });
     (prismaMock as any).$queryRawUnsafe.mockResolvedValue([]);
+    // Downgrades are one conditional UPDATE; 1 = the row was not Apple-owned.
+    (prismaMock as any).$executeRawUnsafe.mockResolvedValue(1);
     (prismaMock.user as any).findFirst.mockResolvedValue({
       id: 'user_refund_1',
       stripeSubscriptionId: 'sub_refund_1',
@@ -134,12 +136,15 @@ describe('billing webhook handling', () => {
     expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'user_1' }, data: { stripeCustomerId: 'cus_1' } })
     );
+    // Rail identity is persisted independently of the plan grant.
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeSubscriptionId: 'sub_1' } })
+    );
     expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'user_1' },
         data: expect.objectContaining({
           plan: 'pro',
-          stripeSubscriptionId: 'sub_1',
           applePurchaseSource: null,
         }),
       })
@@ -175,11 +180,13 @@ describe('billing webhook handling', () => {
       expect.objectContaining({ where: { stripeCustomerId: 'cus_2' } })
     );
     expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeSubscriptionId: 'sub_2' } })
+    );
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'user_1' },
         data: expect.objectContaining({
           plan: 'premium',
-          stripeSubscriptionId: 'sub_2',
           applePurchaseSource: null,
         }),
       })
@@ -210,17 +217,16 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
-    // A downgrade, so no ownership claim is made.
+    // Rail identity still recorded...
     expect(prismaMock.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user_1' },
-        data: expect.objectContaining({
-          plan: 'free',
-          stripeSubscriptionId: 'sub_unpaid_1',
-          planExpiresAt: null,
-        }),
-      })
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeSubscriptionId: 'sub_unpaid_1' } })
     );
+    // ...and the plan downgrade goes through the ATOMIC guard, never a plain write.
+    const [sql, plan, expiry, , userId] = (prismaMock as any).$executeRawUnsafe.mock.calls[0];
+    expect(String(sql)).toContain('"applePurchaseSource" IS NULL');
+    expect(plan).toBe('free');
+    expect(expiry).toBe(null);
+    expect(userId).toBe('user_1');
   });
 
   it('processes customer.subscription.deleted and downgrades to free', async () => {
@@ -236,16 +242,15 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
+    // The dead Stripe rail is cleared unconditionally...
     expect(prismaMock.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user_1' },
-        data: expect.objectContaining({
-          plan: 'free',
-          stripeSubscriptionId: null,
-          planExpiresAt: null,
-        }),
-      })
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeSubscriptionId: null } })
     );
+    // ...and the plan downgrade is the atomic, Apple-guarded write.
+    expect((prismaMock as any).$executeRawUnsafe).toHaveBeenCalled();
+    const call = (prismaMock as any).$executeRawUnsafe.mock.calls[0];
+    expect(String(call[0])).toContain('"applePurchaseSource" <> ?');
+    expect(call[1]).toBe('free');
   });
 
   it('processes invoice.payment_failed and downgrades plan access immediately', async () => {
@@ -264,18 +269,13 @@ describe('billing webhook handling', () => {
     expect((prismaMock.user as any).findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { stripeCustomerId: 'cus_4', plan: { not: 'free' } } })
     );
-    expect(prismaMock.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user_1' },
-        data: { plan: 'free', planExpiresAt: null },
-      })
-    );
+    const call = (prismaMock as any).$executeRawUnsafe.mock.calls[0];
+    expect(String(call[0])).toContain('"applePurchaseSource" IS NULL');
+    expect(call[1]).toBe('free');
+    expect(call[4]).toBe('user_1');
     // stripeSubscriptionId must SURVIVE dunning: Stripe keeps the subscription
     // alive, and the Stripe->Apple exclusion depends on that id still being there.
-    const failedCall = prismaMock.user.update.mock.calls.find(
-      (c: any) => c[0]?.data?.plan === 'free' && c[0]?.where?.id === 'user_1',
-    );
-    expect(failedCall?.[0]?.data).not.toHaveProperty('stripeSubscriptionId');
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it('ignores duplicate event deliveries by event id', async () => {
@@ -531,8 +531,11 @@ describe('stale Stripe events cannot erase Apple entitlement', () => {
     prismaMock.user.update.mockResolvedValue({});
     (prismaMock as any).$queryRawUnsafe.mockResolvedValue([]);
     // The user on this Stripe customer is currently Apple-owned.
-    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1', applePurchaseSource: APPLE_PURCHASE_SOURCE }]);
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', applePurchaseSource: APPLE_PURCHASE_SOURCE });
+    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1' }]);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1' });
+    // The atomic guard reports 0 rows changed: the row IS Apple-owned. Nothing
+    // in the handler reads ownership any more, so this is the only signal.
+    (prismaMock as any).$executeRawUnsafe.mockResolvedValue(0);
   });
 
   it('a stale subscription.deleted does not free an Apple-owned plan', async () => {
@@ -541,8 +544,12 @@ describe('stale Stripe events cannot erase Apple entitlement', () => {
       data: { object: { customer: 'cus_apple' } },
     } as any);
 
+    // The plan write was attempted, but as a GUARDED statement that matched no
+    // row. No unguarded plan write exists anywhere on this path.
     const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
     expect(planWrites).toHaveLength(0);
+    const guarded = (prismaMock as any).$executeRawUnsafe.mock.calls[0];
+    expect(String(guarded[0])).toContain('"applePurchaseSource"');
 
     // The dead Stripe rail IS cleared, which also resolves the double-rail state.
     const railWrites = prismaMock.user.update.mock.calls.filter(
@@ -552,6 +559,30 @@ describe('stale Stripe events cannot erase Apple entitlement', () => {
     expect(railWrites[0][0].data.stripeSubscriptionId).toBe(null);
   });
 
+  it('tells the operator when a stale downgrade was blocked', async () => {
+    // The blocked-downgrade warning is the ONLY signal that a stale Stripe event
+    // was stopped from erasing a paid Apple plan. If the guard silently reported
+    // success, this money-path event would vanish from the logs.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await handleWebhookEvent({
+      id: 'evt_del_warn', type: 'customer.subscription.deleted',
+      data: { object: { customer: 'cus_apple' } },
+    } as any);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Apple-owned'));
+    warn.mockRestore();
+  });
+
+  it('does NOT warn when the downgrade legitimately applies', async () => {
+    (prismaMock as any).$executeRawUnsafe.mockResolvedValue(1);   // row was not Apple-owned
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await handleWebhookEvent({
+      id: 'evt_del_ok', type: 'customer.subscription.deleted',
+      data: { object: { customer: 'cus_plain' } },
+    } as any);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Apple-owned'));
+    warn.mockRestore();
+  });
+
   it('a stale invoice.payment_failed does not free an Apple-owned plan', async () => {
     await handleWebhookEvent({
       id: 'evt_pf_apple', type: 'invoice.payment_failed',
@@ -559,6 +590,7 @@ describe('stale Stripe events cannot erase Apple entitlement', () => {
     } as any);
     const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
     expect(planWrites).toHaveLength(0);
+    expect((prismaMock as any).$executeRawUnsafe).toHaveBeenCalled();   // guarded, matched nothing
   });
 
   it('a Stripe GRANT is refused while a blocking Apple rail exists', async () => {
@@ -581,5 +613,15 @@ describe('stale Stripe events cannot erase Apple entitlement', () => {
 
     const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
     expect(planWrites).toHaveLength(0);
+
+    /**
+     * ...but the Stripe subscription REALLY EXISTS at the provider and may be
+     * charging the customer, so its identity must be durable. Without this the
+     * Apple projector would see no Stripe rail, grant normally, and the double
+     * rail would never be parked.
+     */
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeSubscriptionId: 'sub_x' } })
+    );
   });
 });

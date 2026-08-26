@@ -14,6 +14,7 @@ import {
   projectAppleEntitlementForUser,
   findBlockingAppleRail,
   userHasBlockingAppleRail,
+  downgradeIfNotAppleOwned,
   evaluateAppleEntitlement,
   isEntitled,
   mayAppleCollect,
@@ -703,5 +704,166 @@ describe('apple entitlement projection (real engine)', () => {
     const u = await user();
     expect(u.plan).toBe('pro');
     expect(u.stripeSubscriptionId).toBe('sub_live');
+  });
+});
+
+/**
+ * The two review blockers, as regressions.
+ *
+ * Both concern the SECOND rail: what happens to Stripe state while Apple holds
+ * the plan. Neither is the deferred simultaneous-purchase reservation problem —
+ * these are ordinary ordering defects with concrete money consequences.
+ */
+describe('cross-rail durability and ordering', () => {
+  let db: Client;
+
+  const adapter: QueueClient = {
+    $executeRawUnsafe: async (sql: string, ...args: unknown[]) =>
+      Number((await db.execute({ sql, args: args as never })).rowsAffected),
+    $queryRawUnsafe: async <T,>(sql: string, ...args: unknown[]) =>
+      (await db.execute({ sql, args: args as never })).rows as T[],
+    $transaction: async <T,>(fn: (tx: QueueClient) => Promise<T>): Promise<T> => {
+      await db.execute('BEGIN');
+      try { const out = await fn(adapter); await db.execute('COMMIT'); return out; }
+      catch (err) { await db.execute('ROLLBACK'); throw err; }
+    },
+  };
+
+  const user = async () => (await db.execute({
+    sql: `SELECT * FROM "User" WHERE "id"=?`, args: [USER],
+  })).rows[0] as Record<string, unknown>;
+
+  const insertUser = async (over: Record<string, unknown> = {}) => {
+    const u = {
+      plan: 'free', planExpiresAt: null, planStartedAt: null,
+      stripeSubscriptionId: null, applePurchaseSource: null, ...over,
+    };
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO "User"
+        ("id","plan","planExpiresAt","planStartedAt","stripeCustomerId","stripeSubscriptionId","applePurchaseSource","appleOriginalTransactionId")
+        VALUES (?,?,?,?,NULL,?,?,NULL)`,
+      args: [USER, u.plan, u.planExpiresAt, u.planStartedAt, u.stripeSubscriptionId, u.applePurchaseSource] as never,
+    });
+  };
+
+  const insertSub = async (over: Record<string, unknown> = {}) => {
+    const sb = { status: 'active', expiresAt: iso(plus(30 * DAY)), plan: 'pro', ...over };
+    await db.execute({
+      sql: `INSERT INTO "AppleSubscription"
+        ("id","environment","originalTransactionId","userId","productId","plan","status",
+         "expiresAt","autoRenewStatus","currentTransactionId","appliedGeneration","createdAt","updatedAt")
+        VALUES (?,'Production',?,?,?,?,?,?,1,'txn-1',1,?,?)`,
+      args: [crypto.randomUUID(), OTI, USER, PRODUCT, sb.plan, sb.status, sb.expiresAt, iso(NOW), iso(NOW)] as never,
+    });
+  };
+
+  beforeEach(async () => {
+    __resetAppleRateLimitersForTests();
+    db = createClient({ url: ':memory:' });
+    await db.execute(`CREATE TABLE "User" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "plan" TEXT NOT NULL DEFAULT 'free',
+      "planExpiresAt" DATETIME, "planStartedAt" DATETIME,
+      "stripeCustomerId" TEXT, "stripeSubscriptionId" TEXT,
+      "applePurchaseSource" TEXT, "appleOriginalTransactionId" TEXT
+    )`);
+    const sql = fs.readFileSync(MIGRATION, 'utf8')
+      .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+    for (const stmt of sql.split(';')) { const t = stmt.trim(); if (t) await db.execute(t); }
+    await db.execute('PRAGMA foreign_keys = ON');
+    await insertUser();
+  });
+
+  afterEach(() => { db.close(); __resetAppleRateLimitersForTests(); });
+
+  // ── blocker 2: the ownership guard must be decided AT the write ──────────
+
+  it('TOCTOU: Apple claiming the plan mid-flight makes the Stripe downgrade a no-op', async () => {
+    // 1. A Stripe downgrade handler begins while the plan is NOT Apple-owned.
+    //    This is exactly the value the old code read and then trusted for the
+    //    rest of the handler.
+    await insertUser({ plan: 'pro', planExpiresAt: iso(plus(5 * DAY)), applePurchaseSource: null });
+    expect((await user()).applePurchaseSource).toBe(null);
+
+    // 2. An Apple reconciliation overtakes it: grants, and claims ownership.
+    await insertSub();
+    await projectAppleEntitlementForUser(adapter, USER, NOW);
+    expect((await user()).applePurchaseSource).toBe(APPLE_PURCHASE_SOURCE);
+
+    // 3. Only NOW does the Stripe downgrade reach its write, still carrying the
+    //    stale observation from step 1. Because the guard is part of the write,
+    //    it matches zero rows instead of erasing a plan Apple just granted.
+    const changed = await downgradeIfNotAppleOwned(adapter, USER, 'free', null, null);
+    expect(changed).toBe(false);
+
+    const u = await user();
+    expect(u.plan).toBe('pro');
+    expect(String(u.planExpiresAt)).toBe(iso(plus(30 * DAY)));
+    expect(u.applePurchaseSource).toBe(APPLE_PURCHASE_SOURCE);
+  });
+
+  it('the guard still lets an ordinary Stripe downgrade through when the marker is NULL', async () => {
+    // The SQL NULL trap: `applePurchaseSource <> 'app_store'` is NULL for these
+    // rows, so a naive predicate would skip every ordinary Stripe user.
+    await insertUser({ plan: 'pro', planExpiresAt: iso(plus(5 * DAY)), applePurchaseSource: null });
+    expect(await downgradeIfNotAppleOwned(adapter, USER, 'free', null, null)).toBe(true);
+    const u = await user();
+    expect(u.plan).toBe('free');
+    expect(u.planExpiresAt).toBe(null);
+  });
+
+  it('the guard lets a downgrade through for a non-Apple marker', async () => {
+    await insertUser({ plan: 'pro', applePurchaseSource: 'some_other_source' });
+    expect(await downgradeIfNotAppleOwned(adapter, USER, 'free', null, null)).toBe(true);
+    expect((await user()).plan).toBe('free');
+  });
+
+  it('a downgrade preserves planStartedAt when the caller supplies none', async () => {
+    const started = iso(plus(-200 * DAY));
+    await insertUser({ plan: 'pro', planStartedAt: started, applePurchaseSource: null });
+    await downgradeIfNotAppleOwned(adapter, USER, 'free', null, null);
+    expect(String((await user()).planStartedAt)).toBe(started);
+  });
+
+  // ── blocker 1: a refused Stripe grant must leave a DURABLE conflict ──────
+
+  it('CHAIN: a recorded Stripe rail turns a refused grant into a parked conflict', async () => {
+    /**
+     * Second half of the story that begins in billing.service.test.ts ("a Stripe
+     * GRANT is refused while a blocking Apple rail exists"). That handler refuses
+     * the plan but RECORDS stripeSubscriptionId, because Stripe may really be
+     * charging the customer.
+     *
+     * Why recording it matters: the projector detects the double rail ONLY
+     * through that non-null id. With it, the next reconciliation parks. Without
+     * it — the bug this fixes — Apple grants normally and the conflict never
+     * surfaces.
+     */
+    await insertUser({
+      plan: 'pro', planExpiresAt: iso(plus(20 * DAY)),
+      applePurchaseSource: APPLE_PURCHASE_SOURCE,
+      stripeSubscriptionId: 'sub_x',          // recorded by the refused grant
+    });
+    await insertSub({ status: 'active' });
+
+    await expect(projectAppleEntitlementForUser(adapter, USER, NOW))
+      .rejects.toBeInstanceOf(BillingRailConflictError);
+
+    // Nothing decided on the customer's behalf, and no Stripe field cleared.
+    const u = await user();
+    expect(u.plan).toBe('pro');
+    expect(u.stripeSubscriptionId).toBe('sub_x');
+  });
+
+  it('CHAIN: without the recorded Stripe id the conflict would be INVISIBLE', async () => {
+    // The same state minus the recorded subscription id — i.e. the old buggy
+    // behaviour. Apple grants happily and nothing is ever parked. This test
+    // makes the consequence of dropping that write explicit.
+    await insertUser({ plan: 'free', stripeSubscriptionId: null });
+    await insertSub({ status: 'active' });
+
+    const r = await projectAppleEntitlementForUser(adapter, USER, NOW);
+    expect(r.action).toBe('granted');     // no conflict raised: nothing to detect
+    expect((await user()).plan).toBe('pro');
   });
 });

@@ -407,3 +407,48 @@ export async function findBlockingAppleRail(
 export async function userHasBlockingAppleRail(db: QueueClient, userId: string): Promise<boolean> {
   return (await findBlockingAppleRail(db, userId)) !== null;
 }
+
+/**
+ * Downgrade a plan ONLY if Apple does not currently own it.
+ *
+ * The ownership test is part of the WHERE clause, not a value read earlier and
+ * trusted later. That distinction is the whole point: a Stripe webhook handler
+ * that reads `applePurchaseSource`, then writes, can be overtaken between the
+ * two by an Apple reconciliation that grants and claims the plan — and would
+ * then free a plan Apple had just paid-up. Re-reading immediately before the
+ * write only shrinks that window; deciding at the write closes it.
+ *
+ * NULL is spelled out rather than left to `<>`. In SQL, `applePurchaseSource <>
+ * 'app_store'` is NULL — and therefore not true — for every row where the column
+ * is NULL, which is most of them. Written the obvious way this guard would
+ * silently skip every ordinary Stripe user.
+ *
+ * planStartedAt uses COALESCE so a caller that supplies one writes it and a
+ * caller that does not leaves history alone.
+ *
+ * @returns true if the row was actually changed.
+ */
+export const DOWNGRADE_IF_NOT_APPLE_OWNED_SQL = `
+UPDATE "User"
+SET "plan" = ?, "planExpiresAt" = ?, "planStartedAt" = COALESCE(?, "planStartedAt")
+WHERE "id" = ?
+  AND ("applePurchaseSource" IS NULL OR "applePurchaseSource" <> ?)
+`.trim();
+
+export async function downgradeIfNotAppleOwned(
+  db: QueueClient,
+  userId: string,
+  plan: string,
+  planExpiresAt: Date | null,
+  planStartedAt: Date | null,
+): Promise<boolean> {
+  const changed = await db.$executeRawUnsafe(
+    DOWNGRADE_IF_NOT_APPLE_OWNED_SQL,
+    plan,
+    planExpiresAt ? planExpiresAt.toISOString() : null,
+    planStartedAt ? planStartedAt.toISOString() : null,
+    userId,
+    APPLE_PURCHASE_SOURCE,
+  );
+  return changed > 0;
+}

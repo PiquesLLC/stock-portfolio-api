@@ -85,7 +85,13 @@ What exists today:
    Apple rail exists, **before** the Stripe customer or session is created.
 2. If a Stripe grant webhook nevertheless arrives while a blocking Apple rail
    exists, it is refused and logged as `RAIL CONFLICT` rather than silently
-   overwriting Apple.
+   overwriting Apple — **but the Stripe subscription id is recorded first**.
+   That ordering is load-bearing. The Stripe subscription really exists at the
+   provider and may be charging the customer, and the projector detects a
+   double rail *only* through a non-null `stripeSubscriptionId`. A refused
+   grant that returned without recording it would leave Stripe billing a
+   customer while Nala believed there was no Stripe rail at all, and the next
+   Apple reconciliation would grant normally and never park the conflict.
 3. If the Apple projection finds a blocking rail alongside a live
    `stripeSubscriptionId`, it raises `BillingRailConflictError`, changes nothing,
    clears no Stripe field, and the job is parked permanently
@@ -106,11 +112,36 @@ violates the frozen authority model. Those routes are safe only because
 `APPLE_IAP_ENABLED=false`. Authoritative webhook intake and the activation/restore
 rewrite replace them before the flag can be turned on.
 
+## The ownership guard is decided at the write
+
+A Stripe downgrade must never free a plan Apple owns. The obvious shape —
+read `applePurchaseSource`, branch on it, then write — is a check-then-write
+race: an Apple reconciliation can grant and claim the plan in between, and the
+downgrade then erases a subscription that was just paid for.
+
+So no Stripe handler reads ownership at all any more. The test is part of the
+WHERE clause of the downgrade itself (`downgradeIfNotAppleOwned`), and a
+blocked downgrade reports zero rows changed, which is what raises the operator
+warning. Re-reading just before the write would only have narrowed the window.
+
+The NULL branch is written out explicitly:
+
+```sql
+AND ("applePurchaseSource" IS NULL OR "applePurchaseSource" <> ?)
+```
+
+`applePurchaseSource <> 'app_store'` alone evaluates to NULL — and therefore
+not true — for every row where the column is NULL, which is most of them.
+Written the obvious way, this guard would silently skip every ordinary Stripe
+user and no downgrade would ever apply.
+
 ## Verification
 
-- 46 tests in `apple-entitlement-projection.integration.test.ts` (real libsql
-  engine, real migration), 21 in `billing.service.test.ts`.
-- Full suite 1656 passed / 19 skipped; `tsc` 0; ESLint 0 errors.
-- 16 mutations, each verified to apply, each killed — including projection
-  outside the CAS, every predicate collapse, both revocation guards, the
-  ownership checks, the Sandbox filter, and all four Stripe-side guards.
+- 52 tests in `apple-entitlement-projection.integration.test.ts` (real libsql
+  engine, real migration), 23 in `billing.service.test.ts`.
+- `tsc` 0; ESLint 0 errors.
+- Mutations, each verified to apply, each killed — including projection outside
+  the CAS, every predicate collapse, both revocation guards, the ownership
+  checks, the Sandbox filter, every Stripe-side guard, dropping the rail-identity
+  write, dropping the ownership predicate from the downgrade, dropping its NULL
+  branch, and reporting a blocked downgrade as successful.

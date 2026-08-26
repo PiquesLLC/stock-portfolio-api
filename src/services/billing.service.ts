@@ -4,7 +4,7 @@ import { config } from '../config';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
 import {
   userHasBlockingAppleRail,
-  APPLE_PURCHASE_SOURCE,
+  downgradeIfNotAppleOwned,
 } from './apple-entitlement-projection.service';
 import type { QueueClient } from './apple-reconciliation-queue.service';
 
@@ -268,9 +268,12 @@ async function updateUserPlanByCustomer(
   },
   intent: 'grant' | 'downgrade',
 ): Promise<void> {
+  // id ONLY. Reading applePurchaseSource here and acting on it later is the
+  // check-then-write race this code used to have; the ownership test now lives
+  // in the WHERE clause of the write itself, so there is nothing to go stale.
   const users = await prisma.user.findMany({
     where: { stripeCustomerId },
-    select: { id: true, applePurchaseSource: true },
+    select: { id: true },
   });
   for (const user of users) {
     await applyStripePlanChange(user, data, intent);
@@ -278,7 +281,7 @@ async function updateUserPlanByCustomer(
 }
 
 async function applyStripePlanChange(
-  user: { id: string; applePurchaseSource: string | null },
+  user: { id: string },
   data: {
     plan: PlanTier;
     stripeSubscriptionId?: string | null;
@@ -289,34 +292,55 @@ async function applyStripePlanChange(
 ): Promise<void> {
   const { plan, planExpiresAt, planStartedAt, ...railData } = data;
 
+  /**
+   * The Stripe rail identity is a FACT about what exists at the provider, and
+   * it is persisted FIRST — before, and independently of, whether the plan
+   * grant is permitted.
+   *
+   * This is load-bearing for the double-rail safety net. The Apple projector
+   * detects a conflict through a non-null stripeSubscriptionId; if a refused
+   * grant returned without recording sub_X, Stripe could be charging the
+   * customer while Nala believed there was no Stripe rail at all, and the next
+   * Apple reconciliation would grant normally and never park the conflict.
+   */
+  if ('stripeSubscriptionId' in railData) {
+    await prisma.user.update({ where: { id: user.id }, data: railData, select: { id: true } });
+  }
+
   if (intent === 'downgrade') {
-    if (user.applePurchaseSource === APPLE_PURCHASE_SOURCE) {
+    /**
+     * Atomic: Apple ownership is tested in the WHERE clause of this very write,
+     * so an Apple reconciliation that claims the plan after this handler started
+     * makes the downgrade affect zero rows instead of erasing a fresh grant.
+     */
+    const changed = await downgradeIfNotAppleOwned(
+      appleDb(), user.id, plan, planExpiresAt ?? null, planStartedAt ?? null,
+    );
+    if (!changed) {
       console.warn(
-        `[Billing] Stripe downgrade ignored for user ${user.id}: the current plan is Apple-owned. ` +
-        'Stripe rail fields still applied.',
+        `[Billing] Stripe downgrade did not apply for user ${user.id}: the current ` +
+        'plan is Apple-owned. Stripe rail fields were still applied.',
       );
-      if ('stripeSubscriptionId' in railData) {
-        await prisma.user.update({ where: { id: user.id }, data: railData, select: { id: true } });
-      }
-      return;
     }
-    await prisma.user.update({ where: { id: user.id }, data, select: { id: true } });
     return;
   }
 
   if (await userHasBlockingAppleRail(appleDb(), user.id)) {
     // Should be unreachable: createCheckoutSession refuses this up front. If it
     // happens anyway the two rails raced, and silently overwriting Apple would
-    // double-bill. Leave both rails intact for an operator.
+    // double-bill. The Stripe rail identity is already recorded above, so the
+    // next Apple reconciliation sees a double rail and parks it for an operator
+    // rather than granting as though Stripe were not there.
     console.error(
       `[Billing] RAIL CONFLICT: Stripe grant for user ${user.id} refused — ` +
-      'a blocking Production Apple subscription already exists.',
+      'a blocking Production Apple subscription already exists. ' +
+      'The Stripe subscription id has been recorded so the conflict is durable.',
     );
     return;
   }
   await prisma.user.update({
     where: { id: user.id },
-    data: { ...data, applePurchaseSource: null },
+    data: { plan, planExpiresAt, planStartedAt, applePurchaseSource: null },
     select: { id: true },
   });
 }
@@ -363,7 +387,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
           });
           const target = await prisma.user.findUnique({
             where: { id: userId },
-            select: { id: true, applePurchaseSource: true },
+            select: { id: true },
           });
           if (target) {
             await applyStripePlanChange(target, {
@@ -469,7 +493,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
         // Apple-aware: a Stripe refund must not free a plan Apple currently owns.
         const refundTarget = await prisma.user.findUnique({
           where: { id: refundedUser.id },
-          select: { id: true, applePurchaseSource: true },
+          select: { id: true },
         });
         if (refundTarget) {
           await applyStripePlanChange(refundTarget, {
@@ -497,7 +521,7 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<void> {
          */
         const failedUsers = await prisma.user.findMany({
           where: { stripeCustomerId, plan: { not: 'free' } },
-          select: { id: true, applePurchaseSource: true },
+          select: { id: true },
         });
         for (const failedUser of failedUsers) {
           await applyStripePlanChange(failedUser, { plan: 'free', planExpiresAt: null }, 'downgrade');
