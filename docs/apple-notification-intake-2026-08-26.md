@@ -66,6 +66,30 @@ because our own OCSP path was down. The test covers both orders — with the
 transient raised first the rule is satisfied by accident, since it is also the
 first error recorded.
 
+## Envelope shapes, and why they are not enumerated
+
+v3.1.0 `verifyAndDecodeNotification` resolves app identity and environment from
+whichever envelope a notification uses — `data`, `summary`,
+`externalPurchaseToken` (deriving the environment from a `SANDBOX` prefix on
+`externalPurchaseId`) or `appData` — and then refuses the payload unless the
+bundle id matches and the environment equals the verifier instance’s. A payload
+with no envelope it recognises leaves the environment undefined and fails that
+same check.
+
+So a successful verification IS proof of app and environment, and the wrapper
+does not re-derive it. An earlier version knew only `data` and `summary` and
+rejected the rest as "carries no environment" — turning a correctly signed
+external-purchase notification into a 400 instead of the audited, ignored, 200
+the design calls for. Enumerating shapes goes stale the next time Apple adds
+one, and fails in the direction of rejecting valid mail.
+
+The independent cross-checks remain wherever an explicit field exists to check
+(`environment` on data/summary/appData, `bundleId` on all four). They are
+defence in depth against a library regression, never the primary control.
+
+External-purchase and app-data notifications therefore verify cleanly, are
+audited as `ignored`, write no transaction fact and request no reconciliation.
+
 ## The refund / reversal state machine
 
 The projector reads an active revocation as `revokedAt !== null && reversedAt

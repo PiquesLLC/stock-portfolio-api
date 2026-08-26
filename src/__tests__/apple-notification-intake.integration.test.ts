@@ -634,6 +634,59 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
     expect(await count('AppleTransaction')).toBe(0);
   });
 
+  it('a valid EXTERNAL PURCHASE notification is audited and ignored, not rejected', async () => {
+    /**
+     * The end-to-end shape of the regression: Apple signs an envelope we do not
+     * support, it verifies cleanly, and it must be recorded and dropped — not
+     * 400’d at the trust boundary, and not guessed into subscription handling.
+     */
+    const r = await ingestAppleNotification(payload('Production'), {
+      verifier: {
+        async verifyNotification() {
+          return {
+            notificationUUID: 'n-ext', notificationType: 'EXTERNAL_PURCHASE_TOKEN',
+            signedDate: at(0), environment: 'Production',
+          };
+        },
+        async verifyTransaction() { throw new Error('no nested transaction'); },
+        async verifyRenewal() { throw new Error('no nested renewal'); },
+      },
+      client: adapter, now: () => NOW,
+    });
+
+    expect(r.outcome).toBe('ignored');
+    expect(r.enqueued).toBe(false);
+    expect(String(r.reason)).toContain('unsupported');
+
+    const n = (await rows('AppleNotification'))[0];
+    expect(String(n.notificationType)).toBe('EXTERNAL_PURCHASE_TOKEN');
+    expect(String(n.environment)).toBe('Production');
+    expect(await count('AppleTransaction')).toBe(0);      // stays out of the machinery
+    expect(await count('AppleReconciliation')).toBe(0);   // and asks for no work
+  });
+
+  it('a valid appData notification is audited and ignored, not rejected', async () => {
+    const r = await ingestAppleNotification(payload('Production'), {
+      verifier: {
+        async verifyNotification() {
+          return {
+            notificationUUID: 'n-appdata', notificationType: 'METADATA_UPDATE',
+            signedDate: at(0), environment: 'Production',
+          };
+        },
+        async verifyTransaction() { throw new Error('no nested transaction'); },
+        async verifyRenewal() { throw new Error('no nested renewal'); },
+      },
+      client: adapter, now: () => NOW,
+    });
+
+    expect(r.outcome).toBe('ignored');
+    expect(r.enqueued).toBe(false);
+    expect(await count('AppleNotification')).toBe(1);
+    expect(await count('AppleTransaction')).toBe(0);
+    expect(await count('AppleReconciliation')).toBe(0);
+  });
+
   it('an unknown notification type is ignored with a reason, never guessed', async () => {
     const r = await ingest({ notificationType: 'ONE_TIME_CHARGE', notificationUUID: 'n-new' });
     expect(r.outcome).toBe('ignored');

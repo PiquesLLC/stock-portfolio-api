@@ -244,29 +244,44 @@ export function createAppleVerifier(
       }
 
       /**
-       * Environment is re-established from the SIGNED payload, then required to
-       * equal the instance that verified it. Apple places it on `data` for
-       * transactional notifications and on `summary` for the aggregate ones;
-       * both are inside the signature, so either is trustworthy — but they must
-       * agree with each other when both appear, and a payload carrying neither
-       * is refused rather than defaulted.
+       * ENVIRONMENT IS ALREADY PROVEN AT THIS POINT.
+       *
+       * verifyAndDecodeNotification resolves the app identity and environment
+       * from whichever envelope the notification uses — `data`, `summary`,
+       * `externalPurchaseToken` (whose environment it derives from the
+       * externalPurchaseId prefix) or `appData` — and then refuses the payload
+       * unless the bundle id matches AND the environment equals this instance’s.
+       * A payload with no envelope it recognises leaves the environment
+       * undefined and fails that same check. So reaching this line IS proof that
+       * the signed payload belongs to this app and this environment.
+       *
+       * Deliberately NOT re-listing the accepted envelope shapes here. An earlier
+       * version knew only `data` and `summary` and rejected the other two as
+       * "carries no environment" — turning a correctly signed external-purchase
+       * notification into a 400 instead of the audited, ignored, 200 the design
+       * calls for. Enumerating shapes means going stale the next time Apple adds
+       * one, and being wrong in the direction of rejecting valid mail.
+       *
+       * The independent checks below therefore apply only where an explicit
+       * field exists to check. They are defence in depth against a library
+       * regression, never the primary control.
        */
       const data = decoded.data as Record<string, unknown> | undefined;
       const summary = decoded.summary as Record<string, unknown> | undefined;
-      const envs = [data?.environment, summary?.environment]
-        .filter((e): e is string => typeof e === 'string');
-      if (envs.length === 0) {
-        throw new AppleVerificationPermanentError('verified notification carries no environment');
-      }
-      if (envs.some((e) => e !== environment)) {
-        throw new AppleVerificationPermanentError('environment mismatch');
-      }
+      const appData = decoded.appData as Record<string, unknown> | undefined;
+      const externalPurchase = decoded.externalPurchaseToken as Record<string, unknown> | undefined;
 
-      // Independent of the library, as elsewhere in this module: require the app
-      // identity rather than checking it only when present.
-      const bundleId = data?.bundleId;
-      if (bundleId !== undefined && bundleId !== cfg.bundleId) {
-        throw new AppleVerificationPermanentError('app identifier mismatch');
+      // externalPurchaseToken carries no explicit environment field — the library
+      // derives it — so there is nothing independent to compare for that shape.
+      for (const claimed of [data?.environment, summary?.environment, appData?.environment]) {
+        if (typeof claimed === 'string' && claimed !== environment) {
+          throw new AppleVerificationPermanentError('environment mismatch');
+        }
+      }
+      for (const claimed of [data?.bundleId, summary?.bundleId, appData?.bundleId, externalPurchase?.bundleId]) {
+        if (claimed !== undefined && claimed !== cfg.bundleId) {
+          throw new AppleVerificationPermanentError('app identifier mismatch');
+        }
       }
 
       const nested = (v: unknown): string | undefined =>

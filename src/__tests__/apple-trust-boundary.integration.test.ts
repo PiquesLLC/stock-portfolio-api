@@ -539,8 +539,79 @@ describe('apple verifier — notifications', () => {
     await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
   });
 
-  it('REFUSES a notification carrying no environment at all', async () => {
-    const v = verifier({ notification: () => goodNotification({ data: { bundleId: BUNDLE } }) });
+  it('propagates the library’s own rejection of an unrecognised envelope', async () => {
+    /**
+     * The library resolves identity from data / summary / externalPurchaseToken
+     * / appData and then refuses anything whose environment does not equal this
+     * instance’s — a payload with no envelope it knows leaves that undefined and
+     * fails the same check. That is where this control lives, so the wrapper’s
+     * job is to surface it as PERMANENT, not to re-derive it.
+     */
+    const v = verifier({
+      notification: () => { throw new VerificationException(VerificationStatus.INVALID_ENVIRONMENT); },
+    });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('accepts an externalPurchaseToken envelope', async () => {
+    /**
+     * Regression. An earlier wrapper knew only data/summary and rejected this as
+     * "carries no environment", turning a correctly signed Apple notification
+     * into a 400. Valid-but-unsupported must reach the intake layer so it can be
+     * audited and ignored — never rejected at the trust boundary.
+     */
+    const v = verifier({
+      notification: () => ({
+        notificationUUID: 'ntf-ext', notificationType: 'EXTERNAL_PURCHASE_TOKEN',
+        data: undefined,
+        externalPurchaseToken: { externalPurchaseId: 'ext-123', appAppleId: 123, bundleId: BUNDLE },
+      }),
+    });
+    const n = await v.verifyNotification('Production', 'JWS');
+    expect(n.notificationUUID).toBe('ntf-ext');
+    expect(n.environment).toBe('Production');
+    expect(n.signedTransactionInfo).toBeUndefined();
+  });
+
+  it('accepts an appData envelope', async () => {
+    const v = verifier({
+      notification: () => ({
+        notificationUUID: 'ntf-app', notificationType: 'METADATA_UPDATE',
+        data: undefined, appData: { environment: 'Production', appAppleId: 123, bundleId: BUNDLE },
+      }),
+    });
+    const n = await v.verifyNotification('Production', 'JWS');
+    expect(n.environment).toBe('Production');
+  });
+
+  it('a SANDBOX externalPurchaseToken envelope verifies under Sandbox', async () => {
+    const v = verifier({
+      notification: () => ({
+        notificationUUID: 'ntf-ext-sb', notificationType: 'EXTERNAL_PURCHASE_TOKEN',
+        data: undefined, externalPurchaseToken: { externalPurchaseId: 'SANDBOX_ext-9', bundleId: BUNDLE },
+      }),
+    });
+    expect((await v.verifyNotification('Sandbox', 'JWS')).environment).toBe('Sandbox');
+  });
+
+  it('still refuses an appData envelope claiming another environment', async () => {
+    // The independent check survives wherever an explicit field exists.
+    const v = verifier({
+      notification: () => ({
+        notificationUUID: 'ntf-app', notificationType: 'METADATA_UPDATE',
+        data: undefined, appData: { environment: 'Sandbox', bundleId: BUNDLE },
+      }),
+    });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('still refuses an externalPurchaseToken envelope for another app', async () => {
+    const v = verifier({
+      notification: () => ({
+        notificationUUID: 'ntf-ext', notificationType: 'EXTERNAL_PURCHASE_TOKEN',
+        data: undefined, externalPurchaseToken: { externalPurchaseId: 'ext-1', bundleId: 'com.evil.app' },
+      }),
+    });
     await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
   });
 
