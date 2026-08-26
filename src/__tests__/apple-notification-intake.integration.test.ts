@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import fs from 'fs';
 import path from 'path';
-import type { QueueClient, AppleEnvironment } from '../services/apple-reconciliation-queue.service';
+import os from 'os';
+import {
+  __TEST_ONLY_ENQUEUE_SQL,
+  type QueueClient,
+  type AppleEnvironment,
+} from '../services/apple-reconciliation-queue.service';
 import {
   ingestAppleNotification,
   decodeEnvironmentHint,
@@ -200,18 +205,9 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
     expect(Number((await rows('AppleReconciliation'))[0].targetGeneration)).toBe(1);
   });
 
-  it('CONCURRENCY: the same UUID twice at once yields one row and one bump', async () => {
-    // Serialised by the engine, but both callers believe they are first — which
-    // is precisely what find-then-insert gets wrong.
-    await Promise.all([
-      ingest({ notificationType: 'DID_RENEW' }),
-      ingest({ notificationType: 'DID_RENEW' }).catch(() => undefined),
-    ]);
-    expect(await count('AppleNotification')).toBe(1);
-    expect(Number((await rows('AppleReconciliation'))[0].targetGeneration)).toBe(1);
-  });
-
   it('two distinct notifications for the same subscription advance the generation twice', async () => {
+    // Sequential form. The genuinely concurrent version, on two connections to
+    // one database file, is in the suite at the end of this file.
     await ingest({ notificationUUID: 'ntf-a', notificationType: 'DID_RENEW' }, undefined, 'a');
     await ingest({
       notificationUUID: 'ntf-b', notificationType: 'DID_RENEW',
@@ -241,17 +237,67 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
 
   // ── transaction ordering ────────────────────────────────────────────────
 
-  it('an equal signedDate is superseded, not applied a second time', async () => {
+  it('an equal signedDate does not reapply the fact, but STILL requests reconciliation', async () => {
+    /**
+     * Two separate questions. Whether this JWS is newer decides whether the
+     * stored fact changes; whether the notification is reconcile-worthy decides
+     * whether we go and ask Apple. A distinct DID_RENEW is a reason to fetch
+     * current state even if its transaction copy is one we have already seen.
+     */
     await ingest({ notificationUUID: 'ntf-a', notificationType: 'DID_RENEW' }, undefined, 'a');
     const r = await ingest({
       notificationUUID: 'ntf-b', notificationType: 'DID_RENEW',
       transaction: { signedDate: at(0), productId: PRODUCT },
     }, undefined, 'b');
 
-    expect(r.outcome).toBe('superseded');
-    expect(r.enqueued).toBe(false);
+    expect(r.outcome).toBe('superseded');   // the FACT was not reapplied
+    expect(r.enqueued).toBe(true);          // but the pass was still requested
+    expect(Number((await rows('AppleReconciliation'))[0].targetGeneration)).toBe(2);
     expect(String((await rows('AppleNotification')).find((n) => n.notificationUUID === 'ntf-b')!.outcome))
       .toBe('superseded');
+  });
+
+  it('a stale REFUND after a reversal changes no fact but still asks Apple', async () => {
+    await ingest({
+      notificationUUID: 'n-refund', notificationType: 'REFUND',
+      transaction: { signedDate: 200, revocationDate: 150, revocationType: 'REFUND_FULL' },
+    }, undefined, 'r1');
+    await ingest({
+      notificationUUID: 'n-reversed', notificationType: 'REFUND_REVERSED',
+      transaction: { signedDate: 300 },
+    }, undefined, 'r2');
+
+    const stale = await ingest({
+      notificationUUID: 'n-stale', notificationType: 'REFUND',
+      transaction: { signedDate: 250, revocationDate: 240, revocationType: 'FAMILY_REVOKE' },
+    }, undefined, 'r3');
+
+    expect(stale.outcome).toBe('superseded');
+    expect(stale.enqueued).toBe(true);   // cheap insurance; the API is authoritative
+    expect(Number((await rows('AppleReconciliation'))[0].targetGeneration)).toBe(3);
+  });
+
+  it('a reconcile-worthy event with only renewal identity still queues work', async () => {
+    // Previously downgraded to "ignored" for want of a queue identity.
+    const r = await ingestAppleNotification(payload('Production'), {
+      verifier: {
+        async verifyNotification() {
+          return {
+            notificationUUID: 'n-renewal-only', notificationType: 'DID_CHANGE_RENEWAL_STATUS',
+            signedDate: at(0), environment: 'Production', signedRenewalInfo: 'renew.jws',
+          };
+        },
+        async verifyTransaction() { throw new Error('no transaction on this notification'); },
+        async verifyRenewal() { return { originalTransactionId: OTI, environment: 'Production' } as DecodedRenewal; },
+      },
+      client: adapter, now: () => NOW,
+    });
+
+    expect(r.outcome).toBe('accepted');
+    expect(r.enqueued).toBe(true);
+    const job = (await rows('AppleReconciliation'))[0];
+    expect(String(job.originalTransactionId)).toBe(OTI);
+    expect(await count('AppleTransaction')).toBe(0);   // no transaction to record
   });
 
   it('a stale REFUND cannot re-revoke after a newer REFUND_REVERSED', async () => {
@@ -303,6 +349,97 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
     expect(t.reversedAt).toBe(null);
   });
 
+  it('a NEWER refund after a reversal reactivates the revocation', async () => {
+    /**
+     * The projector reads an active revocation as `revokedAt !== null &&
+     * reversedAt === null`. If a newer refund left the old reversal marker in
+     * place, this sequence would read as "already reversed" and the customer
+     * would keep paid access through a live refund.
+     */
+    await ingest({
+      notificationUUID: 'n-1', notificationType: 'REFUND',
+      transaction: { signedDate: 200, revocationDate: 150, revocationType: 'REFUND_FULL' },
+    }, undefined, 'a');
+    await ingest({
+      notificationUUID: 'n-2', notificationType: 'REFUND_REVERSED',
+      transaction: { signedDate: 300 },
+    }, undefined, 'b');
+    expect((await rows('AppleTransaction'))[0].reversedAt).not.toBe(null);
+
+    await ingest({
+      notificationUUID: 'n-3', notificationType: 'REFUND',
+      transaction: { signedDate: 400, revocationDate: 380, revocationType: 'REFUND_FULL' },
+    }, undefined, 'c');
+
+    const t = (await rows('AppleTransaction'))[0];
+    expect(t.revokedAt).not.toBe(null);
+    expect(t.reversedAt).toBe(null);        // reactivated, not left reversed
+    expect(t.reversedByUUID).toBe(null);
+    // The earlier reversal still exists where history belongs.
+    expect((await rows('AppleNotification')).some((n) => n.notificationUUID === 'n-2')).toBe(true);
+  });
+
+  it('a REVOKE after a reversal also reactivates the revocation', async () => {
+    await ingest({
+      notificationUUID: 'n-1', notificationType: 'REFUND',
+      transaction: { signedDate: 200, revocationDate: 150, revocationType: 'REFUND_FULL' },
+    }, undefined, 'a');
+    await ingest({
+      notificationUUID: 'n-2', notificationType: 'REFUND_REVERSED', transaction: { signedDate: 300 },
+    }, undefined, 'b');
+    await ingest({
+      notificationUUID: 'n-3', notificationType: 'REVOKE',
+      transaction: { signedDate: 400, revocationDate: 390, revocationType: 'FAMILY_REVOKE' },
+    }, undefined, 'c');
+
+    const t = (await rows('AppleTransaction'))[0];
+    expect(t.reversedAt).toBe(null);
+    expect(String(t.revocationType)).toBe('FAMILY_REVOKE');
+  });
+
+  it('a REFUND_REVERSED seen FIRST is recorded as a reversal, not a clean transaction', async () => {
+    // We never saw the refund it reverses, so revokedAt stays null — which is
+    // exactly what we know, and reads correctly as "no active revocation".
+    const r = await ingest({
+      notificationUUID: 'n-rev-first', notificationType: 'REFUND_REVERSED',
+      transaction: { signedDate: 300 },
+    });
+    expect(r.outcome).toBe('accepted');
+
+    const t = (await rows('AppleTransaction'))[0];
+    expect(t.revokedAt).toBe(null);
+    expect(t.reversedAt).not.toBe(null);
+    expect(String(t.reversedByUUID)).toBe('n-rev-first');
+  });
+
+  it('a revocation timestamp is NEVER fabricated from our own clock', async () => {
+    // Apple’s revocationDate is when the App Store refunded. Inventing it would
+    // manufacture a money fact the projector treats as a real revocation.
+    const r = await ingest({
+      notificationUUID: 'n-no-date', notificationType: 'REFUND',
+      transaction: { signedDate: 200, revocationDate: undefined, revocationType: 'REFUND_FULL' },
+    });
+    expect(r.outcome).toBe('failed');
+    expect(String(r.reason)).toContain('revocationDate');
+    expect(await count('AppleTransaction')).toBe(0);
+  });
+
+  it('the reversal timestamp is the reversal’s signing date, not the refund date', async () => {
+    await ingest({
+      notificationUUID: 'n-1', notificationType: 'REFUND',
+      transaction: { signedDate: 200, revocationDate: 150, revocationType: 'REFUND_FULL' },
+    }, undefined, 'a');
+    await ingest({
+      notificationUUID: 'n-2', notificationType: 'REFUND_REVERSED',
+      transaction: { signedDate: 300, revocationDate: 150 },
+    }, undefined, 'b');
+
+    const t = (await rows('AppleTransaction'))[0];
+    // NOT 150: that is when the refund happened, not when it was reversed.
+    expect(new Date(String(t.reversedAt)).getTime()).not.toBe(150);
+    expect(new Date(String(t.revokedAt)).getTime()).toBe(150);
+  });
+
   it('REFUND_PRORATED stores Apple’s raw type and percentage', async () => {
     await ingest({
       notificationUUID: 'n-prorated', notificationType: 'REFUND',
@@ -348,6 +485,36 @@ describe('apple notification intake (real engine, stubbed verifier)', () => {
     const y = all.find((t) => t.transactionId === 'txn-Y')!;
     expect(x.revokedAt).not.toBe(null);
     expect(y.revokedAt).toBe(null);
+  });
+
+  it('a changed purchaseDate under the same transactionId is refused', async () => {
+    // Purchase identity is part of transaction identity; a later JWS must not
+    // silently rewrite when a historical transaction was bought.
+    await ingest({ notificationUUID: 'n-a', notificationType: 'DID_RENEW' }, undefined, 'a');
+
+    const r = await ingest({
+      notificationUUID: 'n-b', notificationType: 'DID_RENEW',
+      transaction: { signedDate: at(1000), purchaseDate: at(-999 * DAY) },
+    }, undefined, 'b');
+
+    expect(r.outcome).toBe('failed');
+    expect(String(r.reason)).toContain('purchaseDate');
+    expect(new Date(String((await rows('AppleTransaction'))[0].purchaseDate)).getTime())
+      .toBe(at(-30 * DAY));
+  });
+
+  it('an ordinary update never rewrites purchaseDate', async () => {
+    await ingest({ notificationUUID: 'n-a', notificationType: 'SUBSCRIBED' }, undefined, 'a');
+    const before = String((await rows('AppleTransaction'))[0].purchaseDate);
+
+    await ingest({
+      notificationUUID: 'n-b', notificationType: 'DID_RENEW',
+      transaction: { signedDate: at(5000), expiresDate: at(90 * DAY) },
+    }, undefined, 'b');
+
+    const t = (await rows('AppleTransaction'))[0];
+    expect(String(t.purchaseDate)).toBe(before);
+    expect(new Date(String(t.expiresDate)).getTime()).toBe(at(90 * DAY));   // this DID update
   });
 
   it('a changed originalTransactionId under the same transactionId is refused', async () => {
@@ -700,3 +867,155 @@ describe('the notification path cannot touch entitlement', () => {
 function eolOf(text: string): string {
   return text.includes('\r\n') ? '\r\n' : '\n';
 }
+
+/**
+ * Two independent connections to ONE database file.
+ *
+ * Two `:memory:` clients would be two separate databases, and two transactions
+ * on a single connection cannot overlap at all. A file-backed database with two
+ * connections is the smallest setup where the engine actually has to serialise
+ * competing writers.
+ *
+ * HONEST LIMIT OF THIS SUITE. libsql’s node driver is synchronous, so two write
+ * transactions cannot genuinely overlap inside one process: a second BEGIN
+ * IMMEDIATE blocks the whole thread, so the connection holding the lock cannot
+ * reach its COMMIT. Concurrent *delivery* is real here — the async verification
+ * phases interleave and both writers contend for the same file — but the commits
+ * are serialised by the engine, as they are in production.
+ *
+ * What that leaves proven: exactly-once application under concurrent delivery of
+ * one notification (below), and that two deliveries across two connections each
+ * advance the generation. What it cannot prove by construction is a lost
+ * read-modify-write increment — which is why the increment is a single atomic SQL
+ * statement rather than application-level arithmetic, asserted directly.
+ */
+describe('notification intake under real concurrency', () => {
+  let dir: string;
+  let a: Client;
+  let b: Client;
+
+  const clientFor = (db: Client): QueueClient => {
+    const c: QueueClient = {
+      $executeRawUnsafe: async (sql: string, ...args: unknown[]) =>
+        Number((await db.execute({ sql, args: args as never })).rowsAffected),
+      $queryRawUnsafe: async <T,>(sql: string, ...args: unknown[]) =>
+        (await db.execute({ sql, args: args as never })).rows as T[],
+      $transaction: async <T,>(fn: (tx: QueueClient) => Promise<T>): Promise<T> => {
+        await db.execute('BEGIN IMMEDIATE');
+        try {
+          const out = await fn(c);
+          await db.execute('COMMIT');
+          return out;
+        } catch (err) {
+          // A rollback that itself fails must not mask the real error, and must
+          // not leave the connection believing it is still in a transaction.
+          try { await db.execute('ROLLBACK'); } catch { /* already unwound */ }
+          throw err;
+        }
+      },
+    };
+    return c;
+  };
+
+  beforeEach(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apple-intake-'));
+    const url = 'file:' + path.join(dir, 'test.db').split(path.sep).join('/');
+    a = createClient({ url });
+    b = createClient({ url });
+    for (const c of [a, b]) {
+      await c.execute('PRAGMA journal_mode = WAL');
+      /**
+       * Deliberately SHORT, with a retry in `run` below.
+       *
+       * libsql’s driver is synchronous, so a blocked BEGIN IMMEDIATE stalls the
+       * whole Node thread — a long busy_timeout means the connection holding the
+       * lock cannot reach its COMMIT, and the two deadlock until the waiter
+       * times out. Failing fast and retrying is both what unblocks this and what
+       * production actually does under contention.
+       */
+      await c.execute('PRAGMA busy_timeout = 25');
+    }
+    const sql = fs.readFileSync(MIGRATION, 'utf8')
+      .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+    await a.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "plan" TEXT NOT NULL DEFAULT 'free')`);
+    for (const stmt of sql.split(';')) { const t = stmt.trim(); if (t) await a.execute(t); }
+  });
+
+  afterEach(() => {
+    a.close(); b.close();
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* windows lock */ }
+  });
+
+  /** Retries only SQLITE_BUSY, exactly as a contended writer must. */
+  const run = async (client: QueueClient, spec: StubSpec, salt: string) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await ingestAppleNotification(payload('Production', salt), {
+          verifier: stubVerifier(spec), client, now: () => NOW,
+        });
+      } catch (err) {
+        const busy = String((err as { code?: string })?.code ?? err) .includes('SQLITE_BUSY')
+          || String((err as Error)?.message ?? '').includes('database is locked');
+        if (!busy || attempt >= 50) throw err;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    }
+  };
+
+  it('the generation increment is atomic SQL, not application arithmetic', async () => {
+    /**
+     * The property the driver cannot let us race for. A lost update needs a
+     * read-modify-write in application space; the queue primitive increments
+     * inside a single UPSERT, so two committed enqueues can only ever produce
+     * two increments no matter how they interleave.
+     */
+    expect(__TEST_ONLY_ENQUEUE_SQL).toMatch(/targetGeneration"?\s*\+\s*1/);
+    // ...and intake never computes a generation itself.
+    const src = fs.readFileSync(path.join(__dirname, '..', 'services/apple-notification-intake.service.ts'), 'utf8');
+    expect(src).not.toMatch(/targetGeneration/);
+  });
+
+  it('the SAME notification delivered twice at once applies exactly once', async () => {
+    const results = await Promise.allSettled([
+      run(clientFor(a), { notificationUUID: 'dup-1', notificationType: 'DID_RENEW' }, 'a'),
+      run(clientFor(b), { notificationUUID: 'dup-1', notificationType: 'DID_RENEW' }, 'b'),
+    ]);
+    const done = results.filter((r) => r.status === 'fulfilled')
+      .map((r) => (r as PromiseFulfilledResult<{ outcome: string }>).value.outcome);
+
+    // Whoever lost the race must have seen the unique index, not a second apply.
+    expect(done.filter((o) => o === 'accepted').length).toBeLessThanOrEqual(1);
+    const notifications = (await a.execute('SELECT * FROM "AppleNotification"')).rows;
+    expect(notifications).toHaveLength(1);
+    const jobs = (await a.execute('SELECT * FROM "AppleReconciliation"')).rows;
+    expect(jobs).toHaveLength(1);
+    expect(Number(jobs[0].targetGeneration)).toBe(1);   // exactly one bump
+  });
+
+  it('two DISTINCT notifications on two connections each advance the generation', async () => {
+    // Awaited rather than raced, for the driver reason in the suite comment.
+    // Two separate connections still means neither can see the other’s
+    // uncommitted state, which is the part that matters for the increment.
+    await run(clientFor(a), { notificationUUID: 'race-a', notificationType: 'DID_RENEW' }, 'a');
+    await run(clientFor(b), { notificationUUID: 'race-b', notificationType: 'DID_RENEW', transaction: { signedDate: at(1000) } }, 'b');
+
+    expect((await a.execute('SELECT * FROM "AppleNotification"')).rows).toHaveLength(2);
+    const jobs = (await a.execute('SELECT * FROM "AppleReconciliation"')).rows;
+    expect(jobs).toHaveLength(1);
+    // The read-modify-write this guards against would leave 1.
+    expect(Number(jobs[0].targetGeneration)).toBe(2);
+  });
+
+  it('notifications on both connections advance a RUNNING job without disturbing it', async () => {
+    await run(clientFor(a), { notificationUUID: 'first', notificationType: 'DID_RENEW' }, 'a');
+    await a.execute(`UPDATE "AppleReconciliation" SET "reconcileState"='running', "leaseOwner"='w1'`);
+
+    await run(clientFor(a), { notificationUUID: 'race-1', notificationType: 'EXPIRED', transaction: { signedDate: at(1000) } }, 'x');
+    await run(clientFor(b), { notificationUUID: 'race-2', notificationType: 'DID_RENEW', transaction: { signedDate: at(2000) } }, 'y');
+
+    const job = (await a.execute('SELECT * FROM "AppleReconciliation"')).rows[0];
+    expect(Number(job.targetGeneration)).toBe(3);
+    expect(String(job.reconcileState)).toBe('running');   // in-flight work untouched
+    expect(String(job.leaseOwner)).toBe('w1');
+  });
+});

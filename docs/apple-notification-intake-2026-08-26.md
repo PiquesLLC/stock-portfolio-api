@@ -66,6 +66,58 @@ because our own OCSP path was down. The test covers both orders — with the
 transient raised first the rule is satisfied by accident, since it is also the
 first error recorded.
 
+## The refund / reversal state machine
+
+The projector reads an active revocation as `revokedAt !== null && reversedAt
+=== null`, so every transition has to leave those two columns saying exactly
+what is true.
+
+| Event | `revokedAt` | reversal marker |
+|---|---|---|
+| REFUND / REVOKE | Apple’s `revocationDate`, required | **cleared** |
+| REFUND_REVERSED | preserved | set to the reversal’s signing date |
+| REFUND_REVERSED seen first | stays NULL (we never saw the refund) | set |
+| Any positive event | untouched | untouched |
+
+The clearing is the part that is easy to miss. Without it, refund → reversal →
+**newer** refund leaves the old `reversedAt` in place, the projector reads
+"already reversed", and the customer keeps paid access through a live refund.
+The superseded reversal survives in the `AppleNotification` audit trail, which
+is where history belongs.
+
+Two timestamps that must not be confused, and neither may come from our clock:
+`revocationDate` is when the App Store refunded, and a REFUND carrying none is
+a semantic failure rather than an invented fact; the reversal instant is when
+Apple **signed the reversal**, so dating it from `revocationDate` would place
+the reversal before the refund it undoes.
+
+## Transaction identity
+
+`originalTransactionId`, `productId` and `purchaseDate` are all immutable for a
+given `(environment, transactionId)`. A later verified JWS that changes any of
+them is audited as a contradiction rather than applied, and none of the three
+appears in any UPDATE SET list — a transaction’s purchase date is part of what
+it *is*, not a field to refresh.
+
+## What bumps the generation
+
+Whether a transaction JWS is newer and whether Apple’s current state is worth
+fetching are different questions:
+
+| | fact written | generation bumped |
+|---|---|---|
+| duplicate notification UUID | no | no |
+| distinct reconcile-worthy, newer fact | yes | yes |
+| distinct reconcile-worthy, stale/equal fact | no | **yes** |
+| semantic contradiction | no | no |
+| ignored / no-reconcile type | no | no |
+
+A stale REFUND arriving after a reversal changes no fact but still asks Apple —
+cheap insurance, because the Server API is authoritative and the notification
+delta is not. Queue identity comes from the verified transaction, falling back
+to the verified renewal (cross-checked against each other when both are
+present), so a renewal-only event is not silently downgraded to `ignored`.
+
 ## Durability
 
 Cryptography happens before the write transaction opens, so certificate/OCSP
@@ -97,12 +149,31 @@ Apple's Server API is reachable is irrelevant — the durable queue is the work
 queue. The two 503s share a status but carry different bodies, because an
 operator needs to tell "our OCSP path is down" from "our database is".
 
+## A limit worth stating
+
+libsql’s node driver is synchronous, so two write transactions cannot genuinely
+overlap inside one process: a second `BEGIN IMMEDIATE` blocks the whole thread,
+and the connection holding the lock never reaches its COMMIT. The concurrency
+suite therefore uses two connections to one database file and proves what that
+setup can prove — exactly-once application when one notification is delivered
+twice at once, and that deliveries across two connections each advance the
+generation.
+
+What it cannot stage is a lost read-modify-write increment. That is why the
+increment is a single atomic SQL statement inside the queue primitive rather
+than application-level arithmetic, asserted directly: intake never mentions
+`targetGeneration` at all.
+
 ## Verification
 
-- 40 intake tests (real libsql engine), 15 route tests, 7 new trust-boundary
-  tests for `verifyNotification`.
-- Full suite 142 files / 1726 passed / 19 skipped; `tsc` 0; ESLint 0 errors.
-- 20 mutations, each verified to apply, each killed.
+- 52 intake tests (real libsql engine), 15 route tests, 7 trust-boundary tests
+  for `verifyNotification`.
+- `tsc` 0; ESLint 0 errors.
+- 28 mutations, each verified to apply, each killed — including all eight
+  targeting the review fixes: stale facts skipping reconciliation, the renewal
+  identity fallback, a newer revocation leaving the reversal marker, a
+  fabricated `revokedAt`, a reversal dated from the refund, reversal-first
+  inserted as a clean transaction, and `purchaseDate` being mutable or rewritten.
 
 Six mutations survived the first run. Two were equivalent mutants whose tests
 were nonetheless tightened (the two 503 bodies; the two `ignored` reasons), and

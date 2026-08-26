@@ -152,6 +152,13 @@ async function verifyOuter(
 const asIso = (ms: number | undefined): string | null =>
   typeof ms === 'number' && Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 
+/** Stored DateTimes are ISO text, but this database provably holds legacy epoch-ms too. */
+function parseStoredTimestamp(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const d = typeof v === 'number' ? new Date(v) : new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
 interface VerifiedFacts {
   notification: DecodedNotification;
   transaction: DecodedTransaction | null;
@@ -208,7 +215,7 @@ WHERE "notificationUUID" = ?
 `.trim();
 
 const SELECT_TRANSACTION_SQL = `
-SELECT "originalTransactionId", "productId", "lastAppliedSignedDate"
+SELECT "originalTransactionId", "productId", "purchaseDate", "lastAppliedSignedDate"
 FROM "AppleTransaction" WHERE "environment" = ? AND "transactionId" = ?
 `.trim();
 
@@ -231,16 +238,31 @@ INSERT INTO "AppleTransaction" (
 const UPDATE_TRANSACTION_FACT_SQL = `
 UPDATE "AppleTransaction" SET
   "expiresDate" = ?, "type" = ?, "appAccountToken" = COALESCE(?, "appAccountToken"),
-  "purchaseDate" = ?, "lastAppliedSignedDate" = ?, "updatedAt" = ?
+  "lastAppliedSignedDate" = ?, "updatedAt" = ?
 WHERE "environment" = ? AND "transactionId" = ?
 `.trim();
 
+/**
+ * A newer revocation REACTIVATES revocation, so it must clear any earlier
+ * reversal marker.
+ *
+ * The projector reads an active revocation as `revokedAt !== null &&
+ * reversedAt === null`. Leaving a stale reversedAt from an older
+ * REFUND_REVERSED would make refund -> reversal -> NEWER refund read as
+ * "already reversed", and the customer would keep paid access through a live
+ * refund. The earlier reversal survives in the AppleNotification audit trail,
+ * which is where history belongs.
+ *
+ * purchaseDate is NOT in this SET list: it is part of transaction identity and
+ * is checked for contradiction instead of being rewritten.
+ */
 const UPDATE_TRANSACTION_REVOCATION_SQL = `
 UPDATE "AppleTransaction" SET
   "expiresDate" = ?, "type" = ?, "appAccountToken" = COALESCE(?, "appAccountToken"),
-  "purchaseDate" = ?, "lastAppliedSignedDate" = ?, "updatedAt" = ?,
+  "lastAppliedSignedDate" = ?, "updatedAt" = ?,
   "revokedAt" = ?, "revocationReason" = ?, "revocationType" = ?,
-  "revocationPercentage" = ?, "revokedSource" = 'notification'
+  "revocationPercentage" = ?, "revokedSource" = 'notification',
+  "reversedAt" = NULL, "reversedByUUID" = NULL
 WHERE "environment" = ? AND "transactionId" = ?
 `.trim();
 
@@ -273,11 +295,32 @@ async function applyTransactionFact(
   const t = facts.transaction!;
   const env = facts.notification.environment;
   const type = facts.notification.notificationType;
+  const isRevocation = REVOCATION_TYPES.has(type);
+  const isReversal = type === REVERSAL_TYPE;
 
   const signedDate = asIso(t.signedDate);
   if (!signedDate) throw new AppleIntakeSemanticError('verified transaction has no signedDate to order by');
   const purchaseDate = asIso(t.purchaseDate);
   if (!purchaseDate) throw new AppleIntakeSemanticError('verified transaction has no purchaseDate');
+
+  /**
+   * Apple's clock, never ours. revocationDate is when the App Store actually
+   * refunded or revoked the transaction; synthesising it from our own clock
+   * would invent a fact about a money event, and the projector treats any
+   * non-null revokedAt as a real revocation.
+   */
+  let revokedAt: string | null = null;
+  if (isRevocation) {
+    revokedAt = asIso(t.revocationDate);
+    if (!revokedAt) throw new AppleIntakeSemanticError('revocation carries no revocationDate');
+  }
+
+  /**
+   * The reversal instant is when Apple SIGNED the reversal. It is emphatically
+   * not revocationDate, which still describes the original refund — using that
+   * would date the reversal before it happened.
+   */
+  const reversedAt = isReversal ? (asIso(facts.notification.signedDate) ?? signedDate) : null;
 
   const existing = (await tx.$queryRawUnsafe<Record<string, unknown>>(
     SELECT_TRANSACTION_SQL, env, t.transactionId,
@@ -288,26 +331,37 @@ async function applyTransactionFact(
   const appAccountToken = t.appAccountToken ?? null;
 
   if (!existing) {
-    const revoking = REVOCATION_TYPES.has(type);
+    /**
+     * First contact with this transaction.
+     *
+     * A REFUND_REVERSED arriving first is handled deliberately rather than
+     * falling through as an ordinary clean transaction: the reversal marker is
+     * recorded, and revokedAt stays NULL because we never saw the refund it
+     * reverses. That is exactly what we know, and it reads correctly to the
+     * projector — no active revocation.
+     */
     await tx.$executeRawUnsafe(
       INSERT_TRANSACTION_SQL,
       globalThis.crypto.randomUUID(), env, t.transactionId, t.originalTransactionId,
       t.productId, purchaseDate, expiresDate, t.type ?? null, appAccountToken, signedDate,
-      revoking ? asIso(t.revocationDate) ?? iso : null,
-      revoking ? t.revocationReason ?? null : null,
-      revoking ? t.revocationType ?? null : null,
-      revoking ? t.revocationPercentage ?? null : null,
-      revoking ? 'notification' : null,
-      null, null, iso, iso,
+      revokedAt,
+      isRevocation ? t.revocationReason ?? null : null,
+      isRevocation ? t.revocationType ?? null : null,
+      isRevocation ? t.revocationPercentage ?? null : null,
+      isRevocation ? 'notification' : null,
+      reversedAt,
+      isReversal ? facts.notification.notificationUUID : null,
+      iso, iso,
     );
     return 'applied';
   }
 
   /**
-   * Transaction identity is immutable. A later JWS claiming the same
-   * transactionId belongs to a different subscription or product is not an
-   * update to apply — it is a contradiction, and guessing which copy is right
-   * is exactly how a customer ends up on someone else's plan.
+   * Transaction identity is immutable, and that includes WHEN it was purchased.
+   * A later JWS claiming the same transactionId belongs to a different
+   * subscription, a different product, or a different purchase is not an update
+   * to apply — it is a contradiction, and guessing which copy is right is how a
+   * customer ends up on someone else’s plan or with rewritten history.
    */
   if (existing.originalTransactionId !== t.originalTransactionId) {
     throw new AppleIntakeSemanticError('transaction originalTransactionId changed');
@@ -315,24 +369,28 @@ async function applyTransactionFact(
   if (existing.productId !== t.productId) {
     throw new AppleIntakeSemanticError('transaction productId changed');
   }
+  const storedPurchase = parseStoredTimestamp(existing.purchaseDate);
+  if (storedPurchase !== null && storedPurchase !== new Date(purchaseDate).getTime()) {
+    throw new AppleIntakeSemanticError('transaction purchaseDate changed');
+  }
 
   const storedSignedDate = String(existing.lastAppliedSignedDate ?? '');
   if (!(signedDate > storedSignedDate)) return 'superseded';
 
-  if (type === REVERSAL_TYPE) {
+  if (isReversal) {
     await tx.$executeRawUnsafe(
       UPDATE_TRANSACTION_REVERSAL_SQL,
-      signedDate, iso, asIso(t.revocationDate) ?? iso,
+      signedDate, iso, reversedAt,
       facts.notification.notificationUUID, env, t.transactionId,
     );
     return 'applied';
   }
 
-  if (REVOCATION_TYPES.has(type)) {
+  if (isRevocation) {
     await tx.$executeRawUnsafe(
       UPDATE_TRANSACTION_REVOCATION_SQL,
-      expiresDate, t.type ?? null, appAccountToken, purchaseDate, signedDate, iso,
-      asIso(t.revocationDate) ?? iso,
+      expiresDate, t.type ?? null, appAccountToken, signedDate, iso,
+      revokedAt,
       t.revocationReason ?? null,
       t.revocationType ?? null,
       // Milliunits, 0-100000, stored exactly as Apple sent it. Accounting and
@@ -345,7 +403,7 @@ async function applyTransactionFact(
 
   await tx.$executeRawUnsafe(
     UPDATE_TRANSACTION_FACT_SQL,
-    expiresDate, t.type ?? null, appAccountToken, purchaseDate, signedDate, iso,
+    expiresDate, t.type ?? null, appAccountToken, signedDate, iso,
     env, t.transactionId,
   );
   return 'applied';
@@ -434,7 +492,7 @@ export async function ingestAppleNotification(
         const applied = await applyTransactionFact(tx, facts, now);
         if (applied === 'superseded') {
           outcome = 'superseded';
-          reason = 'a newer JWS for this transaction was already applied';
+          reason = 'a newer JWS for this transaction was already applied; reconciliation still requested';
         }
       } catch (err) {
         if (!(err instanceof AppleIntakeSemanticError)) throw err;
@@ -446,8 +504,25 @@ export async function ingestAppleNotification(
       }
     }
 
-    if (reconcileWorthy && outcome === 'accepted') {
-      const oti = facts.transaction?.originalTransactionId;
+    /**
+     * A DISTINCT reconcile-worthy notification always asks for a pass.
+     *
+     * Whether its transaction JWS happened to be newer than what we already
+     * stored is a separate question from whether Apple’s current state is worth
+     * fetching. A stale REFUND arriving after a reversal changes no fact, but it
+     * is still a reason to go and ask — the Server API is authoritative, the
+     * notification delta is not. Only a duplicate UUID (already durably
+     * processed) and a semantic contradiction (nothing safe to act on) skip it.
+     */
+    const bumps = reconcileWorthy && outcome !== 'duplicate' && outcome !== 'failed';
+    if (bumps) {
+      /**
+       * Renewal identity is a valid fallback. It has been cross-checked against
+       * the transaction when both are present, so a reconcile-worthy event that
+       * carries only a verified renewal still has a queue identity instead of
+       * being silently downgraded to "ignored".
+       */
+      const oti = facts.transaction?.originalTransactionId ?? facts.renewal?.originalTransactionId;
       if (oti) {
         // The queue primitive owns the generation increment, and deliberately
         // leaves an already-running job running while advancing its target.
@@ -455,7 +530,7 @@ export async function ingestAppleNotification(
         enqueued = true;
       } else {
         outcome = 'ignored';
-        reason = 'no verified transaction identity to reconcile';
+        reason = 'no verified subscription identity to reconcile';
       }
     }
 
