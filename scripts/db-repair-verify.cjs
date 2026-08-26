@@ -7,39 +7,37 @@
  * the first place: MonitoringReport is recorded as applied in production while
  * its table does not exist, and the application writes to it.
  *
+ * Verification is SEMANTIC, and by this point stricter than the preflight was.
+ * Before the migration, a category-A object could legitimately be absent — the
+ * migration was about to create it. Afterwards nothing may be absent, and
+ * nothing may be wrong-shaped either: CREATE ... IF NOT EXISTS skips a
+ * same-named object with a different definition, so a name check here would let
+ * the ledger claim a migration was applied whose promised schema is not there.
+ * That is precisely the failure class being repaired.
+ *
  * Skips entirely on a fresh database, where the two repair migrations are
  * ordinary history rather than a repair.
  */
 
 const { createClient } = require('@libsql/client');
+const { inspectCategoryA, objectExists } = require('./db-repair-shared.cjs');
 
 const BASELINE = '20260826_reconcile_schema_history_baseline';
 const REPAIR = '20260826_restore_missing_schema_objects';
 
-const REQUIRED_TABLES = ['MonitoringReport'];
-const REQUIRED_INDEXES = [
-  'MonitoringReport_type_createdAt_idx',
-  'MonitoringReport_createdAt_idx',
-  'ContentStrike_createdAt_idx',
-  'CreatorPayout_stripeTransferId_idx',
-  'CreatorPayout_stripePayoutId_idx',
-  'CreatorSubscription_stripeSubscriptionId_idx',
-];
-
 const db = createClient({ url: process.env.DATABASE_URL || 'file:/data/nala.db' });
 const say = (m) => console.log(`[RepairVerify] ${m}`);
 let failures = 0;
-const check = (ok, label) => {
+const check = (ok, label, detail) => {
   if (!ok) failures += 1;
-  say(`${ok ? 'ok  ' : 'FAIL'} ${label}`);
+  say(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? `  (${detail})` : ''}`);
 };
 
 (async () => {
-  const ledgerExists = Number((await db.execute({
-    sql: 'SELECT COUNT(*) n FROM sqlite_master WHERE type = ? AND name = ?',
-    args: ['table', '_prisma_migrations'],
-  })).rows[0].n) > 0;
-  if (!ledgerExists) { say('no migration ledger — nothing to verify.'); process.exit(0); }
+  if (!(await objectExists(db, 'table', '_prisma_migrations'))) {
+    say('no migration ledger — nothing to verify.');
+    process.exit(0);
+  }
 
   const applied = async (name) => Number((await db.execute({
     sql: 'SELECT COUNT(*) n FROM _prisma_migrations WHERE migration_name = ? AND finished_at IS NOT NULL AND rolled_back_at IS NULL',
@@ -49,13 +47,13 @@ const check = (ok, label) => {
   check(await applied(BASELINE), `${BASELINE} applied`);
   check(await applied(REPAIR), `${REPAIR} applied`);
 
-  const obj = async (kind, name) => Number((await db.execute({
-    sql: 'SELECT COUNT(*) n FROM sqlite_master WHERE type = ? AND name = ?',
-    args: [kind, name],
-  })).rows[0].n) > 0;
-
-  for (const t of REQUIRED_TABLES) check(await obj('table', t), `table ${t} exists`);
-  for (const i of REQUIRED_INDEXES) check(await obj('index', i), `index ${i} exists`);
+  const a = await inspectCategoryA(db);
+  for (const r of a.results) {
+    check(r.state === 'correct', r.label,
+      r.state === 'correct' ? r.detail
+        : r.state === 'absent' ? 'MISSING after the repair migration'
+          : `WRONG SHAPE — ${r.detail}`);
+  }
 
   if (failures > 0) {
     say('');
@@ -63,8 +61,16 @@ const check = (ok, label) => {
     say(`SCHEMA REPAIR INCOMPLETE (${failures} failed checks). REFUSING TO START.`);
     say('');
     say('The application writes to MonitoringReport; starting against a database');
-    say('missing it repeats the defect this repair exists to fix.');
+    say('missing it, or carrying a differently-shaped copy of it, repeats the');
+    say('defect this repair exists to fix.');
     say('');
+    if (a.anyWrong) {
+      say('At least one object exists with the WRONG DEFINITION. The repair migration');
+      say('uses CREATE ... IF NOT EXISTS and will keep skipping it on every retry —');
+      say('this will not resolve itself. An operator must reconcile that object by');
+      say('hand against the definition in the 20260324_* migrations.');
+      say('');
+    }
     say('The restart policy will retry this boot and it will fail the same way.');
     say('An operator must resolve it:');
     say('');
@@ -72,7 +78,8 @@ const check = (ok, label) => {
     say(`  2. if ${REPAIR} is recorded FAILED:`);
     say(`       npx prisma migrate resolve --rolled-back ${REPAIR}`);
     say('       npx prisma migrate deploy        # safe: every statement is IF NOT EXISTS');
-    say('  3. if all objects exist and only the ledger entry is wrong:');
+    say('  3. if all objects exist AND match their definitions, and only the ledger');
+    say('     entry is wrong:');
     say(`       npx prisma migrate resolve --applied ${REPAIR}`);
     say('');
     say('Never hand-edit _prisma_migrations — that is what created this drift.');

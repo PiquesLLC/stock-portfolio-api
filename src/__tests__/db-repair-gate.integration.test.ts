@@ -109,9 +109,22 @@ describe('startup schema-repair gate', () => {
     }
   };
 
-  /** What the 20260324_* migrations produce when they actually run. */
+  /**
+   * VERBATIM from 20260324_add_monitoring_reports. An earlier version of this
+   * helper created a simplified MonitoringReport without status/data/source,
+   * and the "A fully present" test therefore asserted that a MALFORMED object
+   * was an acceptable state — which CREATE ... IF NOT EXISTS would skip
+   * forever.
+   */
   const addCategoryA = async () => {
-    await db.execute('CREATE TABLE "MonitoringReport" ("id" TEXT PRIMARY KEY, "type" TEXT, "createdAt" DATETIME)');
+    await db.execute(`CREATE TABLE "MonitoringReport" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "type" TEXT NOT NULL,
+        "status" TEXT NOT NULL,
+        "data" TEXT NOT NULL DEFAULT '{}',
+        "source" TEXT NOT NULL DEFAULT 'scheduled-agent',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
     await db.execute('CREATE INDEX "MonitoringReport_type_createdAt_idx" ON "MonitoringReport"("type", "createdAt")');
     await db.execute('CREATE INDEX "MonitoringReport_createdAt_idx" ON "MonitoringReport"("createdAt")');
     await db.execute('CREATE TABLE "ContentStrike" ("id" TEXT PRIMARY KEY, "createdAt" DATETIME)');
@@ -281,7 +294,7 @@ describe('startup schema-repair gate', () => {
     const { code, out } = runPreflight(file);
     expect(code, out).toBe(0);                       // and it is allowed to proceed
     expect(out).toContain('PREFLIGHT PASS');
-    expect(out).toContain('present (repair will no-op)');
+    expect(out).toContain('the repair migration will no-op');
   });
 
   it('category B correct + category A PARTIALLY present -> preflight PASS', async () => {
@@ -304,7 +317,7 @@ describe('startup schema-repair gate', () => {
     await addCategoryB();
     const { code, out } = runPreflight(file);
     expect(code, out).toBe(0);
-    expect(out).toContain('absent (repair will create)');
+    expect(out).toContain('the repair migration will create it');
   });
 
   it('the preflight still REFUSES when category B is wrong-shaped', async () => {
@@ -332,30 +345,68 @@ describe('startup schema-repair gate', () => {
     expect(code, out).toBe(1);
   });
 
-  // ── post-deploy verification: the other half of the startup invariant ──
+  it('a WRONG-SHAPED category-A table blocks the preflight', async () => {
+    /**
+     * IF NOT EXISTS converges absent objects and no-ops correct ones. It
+     * silently SKIPS a same-named object with a different definition — so
+     * letting this through would record the repair migration as applied while
+     * its promised schema is not present. That is the exact failure class this
+     * repair exists to remove.
+     */
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();
+    // The old test helper’s shape: missing status/data/source.
+    await db.execute('CREATE TABLE "MonitoringReport" ("id" TEXT PRIMARY KEY, "type" TEXT, "createdAt" DATETIME)');
 
-  it('VERIFY passes only when both migrations AND all seven objects exist', async () => {
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(1);
+    expect(out).toContain('IF NOT EXISTS CANNOT FIX THIS');
+  });
+
+  it('a WRONG-SHAPED category-A index blocks the preflight', async () => {
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();
+    await addCategoryA();
+    await db.execute('DROP INDEX "MonitoringReport_type_createdAt_idx"');
+    await db.execute('CREATE INDEX "MonitoringReport_type_createdAt_idx" ON "MonitoringReport"("createdAt", "type")');   // order swapped
+
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(1);
+  });
+
+  it('VERIFY refuses a wrong-shaped category-A object after the migration', async () => {
+    // Post-migration nothing may be absent OR wrong. A name check here would
+    // let the ledger claim a schema that is not there.
     await createLedger();
     await addMigration(LATE_MARKER);
     await addMigration(BASELINE);
     await addMigration(REPAIR);
-    await db.execute('CREATE TABLE "MonitoringReport" ("id" TEXT PRIMARY KEY, "type" TEXT, "createdAt" DATETIME)');
-    for (const [idx, tbl, col] of [
-      ['MonitoringReport_type_createdAt_idx','MonitoringReport','type'],
-      ['MonitoringReport_createdAt_idx','MonitoringReport','createdAt'],
-    ] as const) await db.execute(`CREATE INDEX "${idx}" ON "${tbl}"("${col}")`);
-    await db.execute('CREATE TABLE "ContentStrike" ("id" TEXT PRIMARY KEY, "createdAt" DATETIME)');
-    await db.execute('CREATE INDEX "ContentStrike_createdAt_idx" ON "ContentStrike"("createdAt")');
-    await db.execute('CREATE TABLE "CreatorPayout" ("id" TEXT PRIMARY KEY, "stripeTransferId" TEXT, "stripePayoutId" TEXT)');
-    await db.execute('CREATE INDEX "CreatorPayout_stripeTransferId_idx" ON "CreatorPayout"("stripeTransferId")');
-    await db.execute('CREATE INDEX "CreatorPayout_stripePayoutId_idx" ON "CreatorPayout"("stripePayoutId")');
-    await db.execute('CREATE TABLE "CreatorSubscription" ("id" TEXT PRIMARY KEY, "stripeSubscriptionId" TEXT)');
-    await db.execute('CREATE INDEX "CreatorSubscription_stripeSubscriptionId_idx" ON "CreatorSubscription"("stripeSubscriptionId")');
+    await addCategoryA();
+    await db.execute('DROP INDEX "ContentStrike_createdAt_idx"');
+    await db.execute('CREATE UNIQUE INDEX "ContentStrike_createdAt_idx" ON "ContentStrike"("createdAt")');   // now unique
+
+    const { code, out } = runVerify(file);
+    expect(code, out).toBe(1);
+    expect(out).toContain('WRONG SHAPE');
+    expect(out).toContain('will keep skipping it on every retry');
+  });
+
+  // ── post-deploy verification: the other half of the startup invariant ──
+
+  it('VERIFY passes when both migrations applied and all seven objects are CORRECT', async () => {
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await addMigration(BASELINE);
+    await addMigration(REPAIR);
+    await addCategoryA();       // the real migration DDL, not a simplified stand-in
 
     const { code, out } = runVerify(file);
     expect(code, out).toBe(0);
-    expect(out).toContain('schema repair verified');
-  });
+    expect(out).toContain('schema repair verified');  });
 
   it('VERIFY REFUSES the boot when MonitoringReport is missing', async () => {
     // The exact production defect: recorded as applied, object absent.
