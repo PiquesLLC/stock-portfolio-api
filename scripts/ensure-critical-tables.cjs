@@ -107,14 +107,24 @@ async function closeClient() {
   }
 }
 
+/**
+ * Sets process.exitCode and lets the process end when the loop drains, rather
+ * than calling process.exit().
+ *
+ * Under Railway, stdout is a PIPE, and writes to a pipe are asynchronous.
+ * process.exit() immediately after a console.log can discard output that has
+ * not flushed yet -- which would mean losing exactly the startup diagnostics
+ * this whole change exists to make visible. The client is closed first, so
+ * nothing is left holding the loop open.
+ */
 ensureCriticalTables()
   .then(async () => {
     await closeClient();
     console.log('[EnsureTables] complete');
-    process.exit(0);
+    process.exitCode = 0;
   })
   .catch(async (err) => {
     console.error('[EnsureTables] CRITICAL: did not complete:', err && err.message ? err.message : err);
     await closeClient();
-    process.exit(1);
+    process.exitCode = 1;
   });

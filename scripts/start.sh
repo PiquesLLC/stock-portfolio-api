@@ -80,7 +80,7 @@ ensure_status=$?
 if [ "$ensure_status" != "0" ]; then
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
   echo "WARNING: ensure-critical-tables.cjs did not complete (exit $ensure_status)."
-  echo "Boot continues: this block is a FALLBACK for a failed migrate deploy, and",
+  echo "Boot continues: this block is a FALLBACK for a failed migrate deploy, and"
   echo "the hard startup invariant is the repair verification further below."
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 fi
