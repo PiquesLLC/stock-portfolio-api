@@ -1,6 +1,71 @@
 #!/bin/bash
 set -uo pipefail
 
+# ============================================================================
+# 20260826 SCHEMA-HISTORY REPAIR GATE  (must stay first)
+# ============================================================================
+#
+# Runs before anything else touches the database, and long before
+# `exec node dist/index.js` opens the application Prisma pool. That window is
+# not a convenience — it is the only time this database is quiet enough for
+# Prisma's schema engine. Against the running app it fails deterministically
+# with "database is locked" (proven on production: seven attempts, while
+# ordinary writers were acquiring BEGIN IMMEDIATE in 1ms).
+#
+# Fail-closed on purpose. If the repair cannot be completed the container must
+# NOT start: booting against a half-repaired database is precisely how
+# "recorded as applied, objects absent" was created.
+#
+# Idempotent. Boot 1 repairs; every later boot takes the SKIP path.
+# See docs/database-repair-runbook-2026-08-26.md
+# ----------------------------------------------------------------------------
+echo "=== 20260826 schema-history repair gate ==="
+node scripts/db-repair-gate.cjs
+gate_status=$?
+
+if [ "$gate_status" = "0" ]; then
+  echo "[Repair] baseline resolution required — running semantic preflight"
+
+  # Proves production ALREADY satisfies every statement the baseline skips:
+  # column type/nullability/default/pk, index uniqueness and column ORDER.
+  # A name check is not enough — that class of evidence is what produced this
+  # drift. Category A is separately proven absent.
+  node scripts/db-repair-preflight.cjs
+  if [ $? -ne 0 ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "CRITICAL: schema-repair preflight FAILED."
+    echo "The A/B classification does not match this database."
+    echo "REFUSING TO START. Do not resolve the baseline by hand."
+    echo "See docs/database-repair-runbook-2026-08-26.md"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    exit 1
+  fi
+
+  echo "[Repair] preflight passed — recording the baseline as applied"
+  npx prisma migrate resolve --applied 20260826_reconcile_schema_history_baseline
+  if [ $? -ne 0 ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "CRITICAL: could not record the baseline migration."
+    echo "Nothing has been changed. REFUSING TO START."
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    exit 1
+  fi
+
+  # Confirm the ledger row actually landed before continuing to deploy.
+  node scripts/db-repair-gate.cjs
+  if [ $? -ne 10 ]; then
+    echo "CRITICAL: baseline still not recorded after resolve. REFUSING TO START."
+    exit 1
+  fi
+  echo "[Repair] baseline recorded; migrate deploy will apply the category-A repair"
+
+elif [ "$gate_status" = "10" ]; then
+  echo "[Repair] no baseline action needed."
+else
+  echo "CRITICAL: repair gate could not inspect the migration ledger. REFUSING TO START."
+  exit 1
+fi
+
 # Ensure critical tables exist BEFORE resolving migrations.
 # Migrations marked as "applied" require the tables to actually exist.
 echo "=== Ensuring critical tables ==="
@@ -70,8 +135,22 @@ npx prisma migrate resolve --applied 20260319_add_social_platform 2>&1 || true
 npx prisma migrate resolve --applied 20260320_add_appeals 2>&1 || true
 npx prisma migrate resolve --applied 20260320_add_content_moderation 2>&1 || true
 npx prisma migrate resolve --applied 20260323_creator_visibility_defaults 2>&1 || true
-npx prisma migrate resolve --applied 20260324_add_monitoring_reports 2>&1 || true
-npx prisma migrate resolve --applied 20260324_add_stripe_indexes 2>&1 || true
+# REMOVED 2026-08-26 — these two were the proven cause of the schema drift.
+#
+#   npx prisma migrate resolve --applied 20260324_add_monitoring_reports || true
+#   npx prisma migrate resolve --applied 20260324_add_stripe_indexes || true
+#
+# They ran unconditionally on every boot and marked both migrations applied
+# whether or not their SQL had ever executed. Production ended up recording
+# both as applied while MonitoringReport and six indexes did not exist — and
+# the application writes to MonitoringReport. 20260826_restore_missing_schema_objects
+# creates those objects; nothing may mark them applied again without proof.
+#
+# The remaining unconditional resolves below are the same class of technical
+# debt and are NOT removed here — only these two are tied by evidence to the
+# current defect, and deleting the rest would put unrelated boot-behaviour
+# changes into a repair PR. Tracked in
+# docs/database-schema-drift-exceptions-2026-08-26.md for follow-up.
 npx prisma migrate resolve --applied 20260325_add_user_block 2>&1 || true
 npx prisma migrate resolve --applied 20260327_add_value_radar_cache 2>&1 || true
 npx prisma migrate resolve --applied 20260513_add_refresh_rotation_cache 2>&1 || true
@@ -172,6 +251,19 @@ else
       }
     })();
   " 2>&1 || echo "WARNING: Manual column fix also failed, continuing..."
+fi
+
+# ============================================================================
+# 20260826 REPAIR VERIFICATION — a startup invariant, not a warning
+# ============================================================================
+# Confirms both repair migrations are recorded applied AND that the objects
+# they promise actually exist. Everything above this line tolerates failure and
+# continues; this deliberately does not. The application writes to
+# MonitoringReport, so starting without it repeats the defect being repaired.
+echo "=== 20260826 schema-repair verification ==="
+node scripts/db-repair-verify.cjs
+if [ $? -ne 0 ]; then
+  exit 1
 fi
 
 # Pre-MIG-1 hygiene: ensure the v2 chart-of-accounts is fully seeded BEFORE
