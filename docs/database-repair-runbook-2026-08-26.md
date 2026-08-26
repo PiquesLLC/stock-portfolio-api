@@ -58,18 +58,28 @@ the application never starts**. Booting against a half-repaired database is how
 
 ### Idempotent by construction
 
-| Boot | Gate decision | Effect |
+| Database | Gate decision | Effect |
 |---|---|---|
-| First on production | repair | preflight → resolve → deploy applies category A |
-| Every later boot | skip (baseline applied) | deploy reports nothing pending |
-| Fresh database | skip (no/empty ledger) | deploy builds everything from history |
-| Mid-history database | skip (late marker absent) | deploy applies the baseline normally — correct there |
+| Drifted production (category B already present) | **repair** | preflight → resolve → deploy applies category A |
+| Any boot after the first (baseline applied) | skip | deploy reports nothing pending |
+| Fresh (no/empty ledger) | skip | deploy builds everything from history |
+| Mid-history (late marker absent) | skip | deploy applies the baseline normally — correct there |
+| **Normal current history (category B absent)** | **skip** | the baseline is ordinary pending work; deploy executes it |
+| Category B mixed or wrong-shaped | **abort** | neither branch is demonstrably safe |
 
-The fresh-database case is the one that matters: a fresh database legitimately
-lacks the category-B columns, and resolving the baseline there would record a
-migration whose SQL never ran — recreating this exact defect. The gate keys on
-the migration **ledger**, never on "does a table exist", because tables in this
-deployment are also created by the startup DDL block.
+The late marker only establishes *"recent enough to need classifying"*. It cannot
+pick the branch — the category-B state does. Any dev or staging database built
+from migrations reaches current history WITHOUT the portfolioId columns (that gap
+is why the baseline exists) and WITH category A present. Routing it into the
+repair would fail the preflight on every boot, and this gate runs on every boot,
+so that container would never start again.
+
+The same reasoning covers a fresh database: it legitimately lacks category B
+because history has not run, and resolving the baseline there would record a
+migration whose SQL never executed — this exact defect, recreated by its own
+repair. That is also why the gate keys on the migration **ledger** and never on
+"does a table exist": tables in this deployment are created by the startup DDL
+block too, so their presence says nothing about history.
 
 ---
 

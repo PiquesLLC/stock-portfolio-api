@@ -79,6 +79,35 @@ describe('startup schema-repair gate', () => {
     });
   };
 
+  /** The four tables the baseline migration touches, without portfolioId. */
+  const createBTables = async () => {
+    for (const t of ['DividendCredit', 'DividendReinvestment', 'Lot', 'PortfolioTrade']) {
+      await db.execute(`CREATE TABLE "${t}" ("id" TEXT PRIMARY KEY, "ticker" TEXT)`);
+    }
+  };
+
+  /** Exactly what the baseline migration would produce. */
+  const addCategoryB = async () => {
+    for (const t of ['DividendCredit', 'DividendReinvestment', 'Lot', 'PortfolioTrade']) {
+      await db.execute(`ALTER TABLE "${t}" ADD COLUMN "portfolioId" TEXT`);
+      await db.execute(`CREATE INDEX "${t}_portfolioId_ticker_idx" ON "${t}"("portfolioId", "ticker")`);
+    }
+  };
+
+  /** What the 20260324_* migrations produce when they actually run. */
+  const addCategoryA = async () => {
+    await db.execute('CREATE TABLE "MonitoringReport" ("id" TEXT PRIMARY KEY, "type" TEXT, "createdAt" DATETIME)');
+    await db.execute('CREATE INDEX "MonitoringReport_type_createdAt_idx" ON "MonitoringReport"("type", "createdAt")');
+    await db.execute('CREATE INDEX "MonitoringReport_createdAt_idx" ON "MonitoringReport"("createdAt")');
+    await db.execute('CREATE TABLE "ContentStrike" ("id" TEXT PRIMARY KEY, "createdAt" DATETIME)');
+    await db.execute('CREATE INDEX "ContentStrike_createdAt_idx" ON "ContentStrike"("createdAt")');
+    await db.execute('CREATE TABLE "CreatorPayout" ("id" TEXT PRIMARY KEY, "stripeTransferId" TEXT, "stripePayoutId" TEXT)');
+    await db.execute('CREATE INDEX "CreatorPayout_stripeTransferId_idx" ON "CreatorPayout"("stripeTransferId")');
+    await db.execute('CREATE INDEX "CreatorPayout_stripePayoutId_idx" ON "CreatorPayout"("stripePayoutId")');
+    await db.execute('CREATE TABLE "CreatorSubscription" ("id" TEXT PRIMARY KEY, "stripeSubscriptionId" TEXT)');
+    await db.execute('CREATE INDEX "CreatorSubscription_stripeSubscriptionId_idx" ON "CreatorSubscription"("stripeSubscriptionId")');
+  };
+
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repair-gate-'));
     file = path.join(dir, 'test.db');
@@ -105,13 +134,68 @@ describe('startup schema-repair gate', () => {
     expect(out).toContain('empty migration ledger');
   });
 
-  it('PRODUCTION: late marker applied, baseline absent -> REPAIR', async () => {
+  it('DRIFTED PRODUCTION: late marker, baseline absent, category B ALREADY present -> REPAIR', async () => {
     await createLedger();
     await addMigration('20260101_something_old');
     await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();       // production has these; history never created them
     const { code, out } = runGate(file);
     expect(code, out).toBe(0);
     expect(out).toContain('repair required');
+  });
+
+  it('NORMAL CURRENT HISTORY: late marker, baseline absent, category B ABSENT -> SKIP', async () => {
+    /**
+     * The database this gate could brick. Any dev/staging environment built
+     * from migrations reaches current history WITHOUT the portfolioId columns —
+     * that gap is the whole reason the baseline exists — and with category A
+     * present, because those migrations really ran there.
+     *
+     * Routing it into the repair would fail the preflight on every boot, and
+     * this gate runs on every boot, so the container would never start again.
+     * The baseline is ordinary pending work here: migrate deploy executes it.
+     */
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();      // tables exist, portfolioId does NOT
+    await addCategoryA();       // the 20260324_* migrations genuinely ran
+
+    const { code, out } = runGate(file);
+    expect(code, out).toBe(10);
+    expect(out).toContain('entirely absent');
+  });
+
+  it('MIXED category B -> ABORT rather than guess', async () => {
+    // Neither resolving nor executing the baseline is demonstrably safe.
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await db.execute('ALTER TABLE "Lot" ADD COLUMN "portfolioId" TEXT');
+    await db.execute('CREATE INDEX "Lot_portfolioId_ticker_idx" ON "Lot"("portfolioId", "ticker")');
+
+    const { code, out } = runGate(file);
+    expect(code, out).toBe(1);
+    expect(out).toContain('MIXED OR UNEXPECTED');
+  });
+
+  it('WRONG-SHAPED category B -> ABORT (a name is not proof)', async () => {
+    // portfolioId exists on every table, but one index is over the wrong
+    // columns. Baselining that would record SQL as applied that did not
+    // produce this state.
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    for (const t of ['DividendCredit', 'DividendReinvestment', 'Lot', 'PortfolioTrade']) {
+      await db.execute(`ALTER TABLE "${t}" ADD COLUMN "portfolioId" TEXT`);
+    }
+    await db.execute('CREATE INDEX "DividendCredit_portfolioId_ticker_idx" ON "DividendCredit"("ticker", "portfolioId")');   // order swapped
+    for (const t of ['DividendReinvestment', 'Lot', 'PortfolioTrade']) {
+      await db.execute(`CREATE INDEX "${t}_portfolioId_ticker_idx" ON "${t}"("portfolioId", "ticker")`);
+    }
+
+    const { code, out } = runGate(file);
+    expect(code, out).toBe(1);
   });
 
   it('ALREADY REPAIRED: baseline applied -> SKIP (every later boot)', async () => {
@@ -138,6 +222,8 @@ describe('startup schema-repair gate', () => {
     // Otherwise a failed attempt would permanently suppress the repair.
     await createLedger();
     await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();   // drifted-production shape
     await addMigration(BASELINE, { rolledBack: true });
     const { code, out } = runGate(file);
     expect(code, out).toBe(0);
@@ -146,6 +232,8 @@ describe('startup schema-repair gate', () => {
   it('an UNFINISHED baseline row does not count as applied -> REPAIR', async () => {
     await createLedger();
     await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();   // drifted-production shape
     await addMigration(BASELINE, { unfinished: true });
     const { code, out } = runGate(file);
     expect(code, out).toBe(0);
