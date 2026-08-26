@@ -1,230 +1,165 @@
-# Schema-history repair — production runbook
+# Schema-history repair — deployment runbook
 
-Executed **before merge**, so the Railway deployment that follows has nothing
-left to apply.
-
-Every command runs through `railway ssh`, because the database is a file on the
-Railway volume (`/data/nala.db`) and is unreachable from a workstation.
+The repair runs **automatically at container startup**, before the application
+opens its database pool. Merging this PR is what executes it. There is no manual
+pre-merge production procedure.
 
 ---
 
-## The thing that makes this runbook different from the first draft
+## Why it moved into the start command
 
-`railway ssh` enters the **currently deployed container**, which is built from
-the last merged commit. It does **not** contain this PR's migration directories —
-verified: the container reports 51 migration directories and no `20260826_*`.
+The first version of this runbook had an operator run
+`prisma migrate resolve --applied` against the live container over `railway ssh`.
+That is not possible, and the attempt is worth recording so nobody tries again:
 
-`prisma migrate resolve` needs the migration to exist in its migrations directory
-and fails with **P3017** ("migration could not be found") otherwise. So the
-reviewed files must be **staged into the running container** first. Step 2 does
-that and proves byte-equality by SHA-256, which is what gives step 5's checksum
-assertion a chain back to the reviewed artifact.
+- **Prisma's schema engine cannot get the locks it needs while the app runs.**
+  Seven deterministic `database is locked` failures on production, including a
+  retry loop and connection-timeout parameters — while ordinary writers were
+  acquiring `BEGIN IMMEDIATE` in **1 ms** and `/health/deep` reported
+  `writeOk: true`. The database was never the problem.
+- **There is no process to quiesce.** `start.sh` ends in
+  `exec node dist/index.js`, so Node is **PID 1**. Signalling the app means
+  ending the container, which takes `/app` and the SSH session with it.
+- **A volume-backed service cannot have two deployments mounted at once**, so a
+  replacement container gets the volume only after the old one releases it.
 
-Staged files go in the container's **ephemeral application filesystem** (`/app`).
-Nothing but the database and its backups may touch `/data`.
-
----
-
-## Why the preflight is not a formality
-
-`20260324_add_monitoring_reports` and `20260324_add_stripe_indexes` are recorded
-as **applied** in production, yet their objects do not exist. Both use
-`IF NOT EXISTS`, so they cannot have run and quietly failed — the marker was
-written without the SQL executing.
-
-That is the same operation step 6 performs. `resolve --applied` is a way to
-manufacture exactly this drift if used without proof, and a name check is not
-proof: a `portfolioId` of the wrong type, or an index over the wrong columns,
-would be baselined into history as though it matched. Step 4 verifies the
-**semantic result** of every statement being skipped.
+That last point is what makes startup the right place: the new container holds
+the volume alone, and `start.sh` runs before `node` connects. It is the only
+quiet window this database has — and it is how all 51 existing migrations were
+applied in the first place.
 
 ---
 
-## Step 1 — restorable copy
+## What runs, in order
 
-`resolve --applied` writes only to `_prisma_migrations`, but that ledger governs
-every future deploy. Take the artifact anyway.
-
-```bash
-railway ssh "ls -la /data/backups | tail -5"
+```
+container starts, volume mounted
+   ↓
+scripts/db-repair-gate.cjs          decide: repair / skip / abort
+   ↓ (repair only)
+scripts/db-repair-preflight.cjs     semantic proof, fail-closed
+   ↓
+prisma migrate resolve --applied 20260826_reconcile_schema_history_baseline
+   ↓
+db-repair-gate.cjs again            confirm the ledger row landed
+   ↓
+… existing startup DDL / legacy resolves …
+   ↓
+prisma migrate deploy               applies 20260826_restore_missing_schema_objects
+   ↓
+scripts/db-repair-verify.cjs        7 objects + 2 ledger rows, fail-closed
+   ↓
+exec node dist/index.js
 ```
 
-Confirm a recent verified backup, or take one, before continuing.
+Any failure in the gate, preflight, resolve, or verification **exits non-zero and
+the application never starts**. Booting against a half-repaired database is how
+"recorded as applied, objects absent" was created; a warning would repeat it.
+
+### Idempotent by construction
+
+| Boot | Gate decision | Effect |
+|---|---|---|
+| First on production | repair | preflight → resolve → deploy applies category A |
+| Every later boot | skip (baseline applied) | deploy reports nothing pending |
+| Fresh database | skip (no/empty ledger) | deploy builds everything from history |
+| Mid-history database | skip (late marker absent) | deploy applies the baseline normally — correct there |
+
+The fresh-database case is the one that matters: a fresh database legitimately
+lacks the category-B columns, and resolving the baseline there would record a
+migration whose SQL never ran — recreating this exact defect. The gate keys on
+the migration **ledger**, never on "does a table exist", because tables in this
+deployment are also created by the startup DDL block.
 
 ---
 
-## Step 2 — stage the reviewed migrations into the container
+## Deployment sequence
 
-From the **exact reviewed checkout**. Base64 avoids every quoting hazard and
-makes the transfer verifiable.
+1. Review the PR at its exact head.
+2. Confirm the verified backup is still available:
+   `railway ssh "cat /data/backups/.last-backup.json"`
+3. Merge with `--match-head-commit`.
+4. Railway builds, stops the old deployment, mounts the volume to the new one.
+   **A volume-backed service has an unavoidable downtime window here.**
+5. Startup repair runs, then the app starts and `/health` returns 200.
 
-```bash
-BASE=20260826_reconcile_schema_history_baseline
-REPAIR=20260826_restore_missing_schema_objects
-
-for M in "$BASE" "$REPAIR"; do
-  B64=$(base64 -w0 "prisma/migrations/$M/migration.sql")
-  railway ssh "mkdir -p /app/prisma/migrations/$M && echo '$B64' | base64 -d > /app/prisma/migrations/$M/migration.sql"
-done
-```
-
-## Step 3 — prove the staged files are the reviewed files
-
-```bash
-sha256sum prisma/migrations/20260826_*/migration.sql
-railway ssh "sha256sum /app/prisma/migrations/20260826_*/migration.sql"
-```
-
-The two hashes must match pairwise. **If they do not, stop** — everything after
-this point assumes the container holds exactly the reviewed SQL.
+The new image contains the migration files and both scripts natively — no
+base64 staging, and no dependence on anything an operator typed into a shell.
 
 ---
 
-## Step 4 — preflight (the gate)
+## Post-deploy verification
 
-`scripts/db-repair-preflight.cjs` is read-only. It verifies category B by column
-type, nullability, default and pk, and by index uniqueness and exact column
-order — not by name — and verifies every category A object is genuinely absent.
+Boot log should contain, in order:
 
-It must run from `/app`, not `/tmp`: Node resolves `@libsql/client` relative to
-the script, and `/tmp` is outside the container's `node_modules`.
-
-```bash
-B64=$(base64 -w0 scripts/db-repair-preflight.cjs)
-railway ssh "echo '$B64' | base64 -d > /app/db-repair-preflight.cjs && node /app/db-repair-preflight.cjs; echo \"EXIT=\$?\"; rm -f /app/db-repair-preflight.cjs"
+```
+=== 20260826 schema-history repair gate ===
+[RepairGate] existing history (53 ledger rows), baseline absent — repair required.
+[RepairGate] ... (preflight lines, all ok)
+[Repair] preflight passed — recording the baseline as applied
+[RepairGate] 20260826_reconcile_schema_history_baseline already applied — nothing to do.
+=== Prisma migrate deploy ===
+=== 20260826 schema-repair verification ===
+[RepairVerify] ok   ... (9 lines)
+[RepairVerify] schema repair verified.
+=== Starting server ===
 ```
 
-Expected: 8 category-B lines `ok`, 7 category-A lines `ok`,
-`PREFLIGHT PASS`, `EXIT=0`.
-
-**Any `FAIL` means the A/B classification is wrong. Stop.**
-
----
-
-## Step 5 — baseline (the only ledger mutation)
+Then confirm:
 
 ```bash
-railway ssh "cd /app && npx prisma migrate resolve --applied 20260826_reconcile_schema_history_baseline"
-```
-
-Records the migration **without executing its SQL** — correct, because step 4
-proved production already satisfies it.
-
----
-
-## Step 6 — verify the ledger row
-
-```bash
-railway ssh "node -e \"
-const{createClient}=require('/app/node_modules/@libsql/client');
-const db=createClient({url:process.env.DATABASE_URL});
-(async()=>{const r=await db.execute({sql:'SELECT migration_name,checksum,finished_at,rolled_back_at,applied_steps_count FROM _prisma_migrations WHERE migration_name=?',args:['20260826_reconcile_schema_history_baseline']});console.log(JSON.stringify(r.rows,null,2))})()\""
-```
-
-Assert: exactly one row; `finished_at` non-null; `rolled_back_at` null; the
-checksum corresponds to the SHA-verified `migration.sql` from step 3.
-
----
-
-## Step 7 — deploy the repair
-
-```bash
-railway ssh "cd /app && npx prisma migrate deploy"
-```
-
-Expected: the baseline is **skipped** (already applied) and
-`20260826_restore_missing_schema_objects` applies. **No line of the baseline SQL
-may execute.**
-
----
-
-## Step 8 — verify the repair landed
-
-```bash
-railway ssh "node -e \"
-const{createClient}=require('/app/node_modules/@libsql/client');
-const db=createClient({url:process.env.DATABASE_URL});
-(async()=>{
-  const obj=async(k,n)=>Number((await db.execute({sql:'SELECT COUNT(*) n FROM sqlite_master WHERE type=? AND name=?',args:[k,n]})).rows[0].n)>0;
-  console.log('MonitoringReport table = '+await obj('table','MonitoringReport'));
-  for(const i of ['MonitoringReport_type_createdAt_idx','MonitoringReport_createdAt_idx','ContentStrike_createdAt_idx','CreatorPayout_stripeTransferId_idx','CreatorPayout_stripePayoutId_idx','CreatorSubscription_stripeSubscriptionId_idx'])
-    console.log('index '+i+' = '+await obj('index',i));
-  console.log('MonitoringReport rows = '+JSON.stringify((await db.execute('SELECT COUNT(*) n FROM \\\"MonitoringReport\\\"')).rows));
-})()\""
-```
-
-All seven objects `true`; the table exists and is empty.
-
----
-
-## Step 9 — status and residual diff
-
-```bash
+curl -sS https://www.nalaai.com/health
 railway ssh "cd /app && npx prisma migrate status"
 railway ssh "cd /app && npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script"
 ```
 
-`migrate status` must report up to date. The remaining diff must be **exactly**
-the registered category-C exceptions and nothing else:
+`migrate status` up to date; the residual diff must be **exactly** the registered
+category-C exceptions (`HealthProbe`, the `ProfileStatsCache` index form, the
+three `updatedAt` defaults) and nothing else.
 
-- `DROP TABLE "HealthProbe"` — runtime-owned; never act on it
-- `ProfileStatsCache` index rename via `writable_schema` — never run
-- `Appeal` / `Post` / `ValueRadarCache` rebuilds — `updatedAt DEFAULT` only
-
-Anything else is unexplained drift: stop and investigate.
+**A second boot must show the skip path** — that is the proof it is idempotent
+rather than a one-shot that breaks the next restart.
 
 ---
 
-## Step 10 — application health
+## If the repair fails
+
+The container will not start, and the `ON_FAILURE` restart policy will retry the
+same deterministic failure. The log block from `db-repair-verify.cjs` names the
+remedy; the short version:
 
 ```bash
-curl -sS https://www.nalaai.com/health
-curl -sS https://www.nalaai.com/health/deep
-```
-
-Read/write green, no brownout.
-
----
-
-## Step 11 — merge, then confirm the deploy is boring
-
-Merge at the reviewed head. The Railway deployment applies **nothing** — both
-migrations are already in the ledger, and the staged copies vanish with the old
-container, replaced by the merged ones. Confirm in the boot window that no
-reconciliation SQL ran, that `migrate deploy` reported nothing pending, and that
-there is no `P3009` / `P3018`, no `SQLITE_BUSY`, and one `Starting Container`.
-
----
-
-## If step 7 fails midway
-
-The SQL is idempotent, but **Prisma is not**: a failed migration is recorded in
-`_prisma_migrations`, and the next `migrate deploy` refuses to proceed until it
-is resolved. Re-running `migrate deploy` is therefore **not** the first move.
-
-```bash
-# 1. Find out what actually landed.
 railway ssh "cd /app && npx prisma migrate status"
-#    plus the seven-object check from step 8.
 ```
 
-**If the repair is partial or nothing landed:**
+**Repair partially applied or not applied** — Prisma records the failed migration
+and refuses the next deploy until it is resolved. Idempotent SQL is not the same
+as an idempotent migration engine:
 
 ```bash
 railway ssh "cd /app && npx prisma migrate resolve --rolled-back 20260826_restore_missing_schema_objects"
 railway ssh "cd /app && npx prisma migrate deploy"
 ```
 
-Safe because every statement is `IF NOT EXISTS`, so whatever already exists is
-skipped on the retry.
+Safe on retry because every statement is `IF NOT EXISTS`.
 
-**If all seven objects exist and match their definitions:** the SQL completed and
-only the ledger entry is wrong.
+**All seven objects exist, only the ledger entry is wrong:**
 
 ```bash
 railway ssh "cd /app && npx prisma migrate resolve --applied 20260826_restore_missing_schema_objects"
 ```
 
-Never hand-edit `_prisma_migrations`. Use `resolve --rolled-back` or
-`resolve --applied`; those are the supported paths, and hand-editing the ledger is
-how the drift this PR repairs was created.
+Note that these commands face the same lock problem if the app is running — but
+in this failure mode the app is *not* running, which is what makes them possible.
+
+Never hand-edit `_prisma_migrations`. That is what created this drift.
+
+---
+
+## Rollback
+
+The verified backup from `/data/backups` is the rollback point. The repair's
+intended mutation is one ledger row, one empty table, and six indexes — no
+application data is touched, which is why a same-day verified backup was judged
+sufficient rather than pushing a 4.4 GB volume with 2.0 GB free toward its known
+disk guard by taking another 1.23 GB copy.

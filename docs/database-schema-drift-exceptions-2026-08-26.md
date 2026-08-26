@@ -125,6 +125,33 @@ was wrong rather than intentionally different:
   Described by `20260826_reconcile_schema_history_baseline`, which production
   records as applied without executing.
 
+## Follow-up required: the remaining unconditional startup resolves
+
+`scripts/start.sh` still contains eleven unconditional commands of the form:
+
+```bash
+npx prisma migrate resolve --applied <migration> 2>&1 || true
+```
+
+Two of them — `20260324_add_monitoring_reports` and `20260324_add_stripe_indexes`
+— were removed on 2026-08-26 because they are tied by direct evidence to the
+drift this document records: both were marked applied on every boot regardless
+of whether their SQL had ever run, and production ended up with both recorded
+as applied while their objects did not exist.
+
+The other nine were deliberately left in place. They are the same class of
+defect and can manufacture the same "applied but absent" state, but nothing
+currently ties them to a known missing object, and removing every legacy
+workaround inside a repair PR would have put unrelated boot-behaviour changes
+into it.
+
+**They must be eliminated before the migration system is considered clean.**
+The safe replacement is the pattern introduced by this repair: inspect the
+ledger, prove the objects exist, then resolve — never resolve unconditionally,
+and never with `|| true`. `src/__tests__/migration-history-integrity.test.ts`
+will now catch the schema consequences, but it cannot see a ledger entry that
+is a lie about production.
+
 ## Root cause, worth remembering
 
 `20260324_add_monitoring_reports` and `20260324_add_stripe_indexes` are both
