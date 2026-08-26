@@ -131,7 +131,26 @@ const ENVIRONMENT_MAP: Record<AppleEnvironment, Environment> = {
   Sandbox: Environment.SANDBOX,
 };
 
+/**
+ * The verified fields of an App Store Server Notification V2.
+ *
+ * Deliberately narrow. Anything not listed here has not been considered, and a
+ * field that is not read cannot influence a decision.
+ */
+export interface DecodedNotification {
+  notificationUUID: string;
+  notificationType: string;
+  subtype?: string;
+  signedDate?: number;
+  /** VERIFIED environment, re-established from the payload Apple signed. */
+  environment: AppleEnvironment;
+  /** Nested JWS strings. Still UNVERIFIED — each must go through its own verify call. */
+  signedTransactionInfo?: string;
+  signedRenewalInfo?: string;
+}
+
 export interface AppleVerifier {
+  verifyNotification(environment: AppleEnvironment, signedPayload: string): Promise<DecodedNotification>;
   verifyTransaction(environment: AppleEnvironment, jws: string): Promise<DecodedTransaction>;
   verifyRenewal(environment: AppleEnvironment, jws: string): Promise<DecodedRenewal>;
 }
@@ -191,6 +210,94 @@ export function createAppleVerifier(
   };
 
   return {
+    /**
+     * Verify an App Store Server Notification V2.
+     *
+     * `verifyAndDecodeNotification` checks the signature chain AND the app
+     * identity (bundle id / appAppleId) against the verifier this instance was
+     * built with, so a notification for another app cannot pass. The
+     * environment comes from the per-environment verifier instance, exactly as
+     * it does for transactions — a Sandbox notification presented as Production
+     * fails inside the library rather than at a downstream comparison.
+     *
+     * The nested `signedTransactionInfo` / `signedRenewalInfo` are returned as
+     * RAW STRINGS. Verifying the envelope says nothing about them; each must be
+     * put through verifyTransaction / verifyRenewal under this same verified
+     * environment before any field of theirs is believed.
+     */
+    async verifyNotification(environment, signedPayload) {
+      let decoded: Record<string, unknown>;
+      try {
+        decoded = (await verifierFor(environment)
+          .verifyAndDecodeNotification(signedPayload)) as unknown as Record<string, unknown>;
+      } catch (err) {
+        throw classifyVerificationError(err);
+      }
+
+      const notificationUUID = decoded.notificationUUID;
+      const notificationType = decoded.notificationType;
+      if (typeof notificationUUID !== 'string' || notificationUUID.length === 0) {
+        throw new AppleVerificationPermanentError('verified notification missing notificationUUID');
+      }
+      if (typeof notificationType !== 'string' || notificationType.length === 0) {
+        throw new AppleVerificationPermanentError('verified notification missing notificationType');
+      }
+
+      /**
+       * ENVIRONMENT IS ALREADY PROVEN AT THIS POINT.
+       *
+       * verifyAndDecodeNotification resolves the app identity and environment
+       * from whichever envelope the notification uses — `data`, `summary`,
+       * `externalPurchaseToken` (whose environment it derives from the
+       * externalPurchaseId prefix) or `appData` — and then refuses the payload
+       * unless the bundle id matches AND the environment equals this instance’s.
+       * A payload with no envelope it recognises leaves the environment
+       * undefined and fails that same check. So reaching this line IS proof that
+       * the signed payload belongs to this app and this environment.
+       *
+       * Deliberately NOT re-listing the accepted envelope shapes here. An earlier
+       * version knew only `data` and `summary` and rejected the other two as
+       * "carries no environment" — turning a correctly signed external-purchase
+       * notification into a 400 instead of the audited, ignored, 200 the design
+       * calls for. Enumerating shapes means going stale the next time Apple adds
+       * one, and being wrong in the direction of rejecting valid mail.
+       *
+       * The independent checks below therefore apply only where an explicit
+       * field exists to check. They are defence in depth against a library
+       * regression, never the primary control.
+       */
+      const data = decoded.data as Record<string, unknown> | undefined;
+      const summary = decoded.summary as Record<string, unknown> | undefined;
+      const appData = decoded.appData as Record<string, unknown> | undefined;
+      const externalPurchase = decoded.externalPurchaseToken as Record<string, unknown> | undefined;
+
+      // externalPurchaseToken carries no explicit environment field — the library
+      // derives it — so there is nothing independent to compare for that shape.
+      for (const claimed of [data?.environment, summary?.environment, appData?.environment]) {
+        if (typeof claimed === 'string' && claimed !== environment) {
+          throw new AppleVerificationPermanentError('environment mismatch');
+        }
+      }
+      for (const claimed of [data?.bundleId, summary?.bundleId, appData?.bundleId, externalPurchase?.bundleId]) {
+        if (claimed !== undefined && claimed !== cfg.bundleId) {
+          throw new AppleVerificationPermanentError('app identifier mismatch');
+        }
+      }
+
+      const nested = (v: unknown): string | undefined =>
+        (typeof v === 'string' && v.length > 0 ? v : undefined);
+
+      return {
+        notificationUUID,
+        notificationType,
+        subtype: typeof decoded.subtype === 'string' ? decoded.subtype : undefined,
+        signedDate: typeof decoded.signedDate === 'number' ? decoded.signedDate : undefined,
+        environment,
+        signedTransactionInfo: nested(data?.signedTransactionInfo),
+        signedRenewalInfo: nested(data?.signedRenewalInfo),
+      };
+    },
+
     async verifyTransaction(environment, jws) {
       let decoded: Record<string, unknown>;
       try {
