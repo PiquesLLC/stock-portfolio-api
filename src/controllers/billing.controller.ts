@@ -8,6 +8,7 @@ import {
   createCustomerPortalSession,
   getBillingStatus,
   handleWebhookEvent,
+  AppleBillingRailActiveError,
 } from '../services/billing.service';
 import { createCheckoutSchema } from '../validators/billing.validators';
 import { recordWebhookEvent } from '../utils/webhook-metrics';
@@ -40,6 +41,19 @@ export async function createCheckoutHandler(req: AuthRequest, res: Response): Pr
     const url = await createCheckoutSession(req.user!.userId, parsed.data.priceId);
     res.json({ url });
   } catch (error) {
+    /**
+     * A blocking Apple rail is a deterministic conflict, not a server fault. It
+     * gets its own status and a message the user can act on, because "Failed to
+     * create checkout session" would send someone to support for something they
+     * can only fix in the App Store.
+     */
+    if (error instanceof AppleBillingRailActiveError) {
+      res.status(409).json({
+        error: 'This account already has an Apple subscription. Manage it in the App Store.',
+        code: 'apple_billing_rail_active',
+      });
+      return;
+    }
     console.error('[Billing] Checkout session creation failed', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
