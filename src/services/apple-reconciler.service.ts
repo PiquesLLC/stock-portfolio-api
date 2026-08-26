@@ -19,6 +19,12 @@ import {
 } from './apple-server-api';
 import { getAppleRateLimiter, applyAppleRateLimitCooldown } from './apple-rate-limiter';
 import { planForAppleProduct, UnknownAppleProductError } from './apple-product-plan';
+import {
+  projectAppleEntitlementForUser,
+  BillingRailConflictError,
+  AppleProjectionDataError,
+  PRODUCTION_ENVIRONMENT,
+} from './apple-entitlement-projection.service';
 import { AppleVerificationPermanentError, AppleVerificationTransientError } from './apple-verifier';
 
 /**
@@ -389,10 +395,43 @@ export async function reconcileOnce(
   // THE AUTHORITY CHECK. Apple said 200 and the snapshot is well-formed, but the
   // queue decides whether this work may still commit.
   try {
+    /**
+     * ONE captured instant for the whole commit: the CAS stamp, the snapshot
+     * and every entitlement predicate. Calling nowFn() separately per step
+     * would let an expiry sit on one side of "now" for the snapshot and the
+     * other side for the projection.
+     */
+    const commitNow = nowFn();
     const result = await completeReconciliation(
       job,
-      async (tx) => { await writeSnapshot(tx, snapshot, job.generation, nowFn()); },
-      { now: nowFn(), client },
+      async (tx) => {
+        await writeSnapshot(tx, snapshot, job.generation, commitNow);
+
+        /**
+         * Entitlement projection, in the SAME transaction as the snapshot and
+         * behind the same generation fence. A stale generation loses the CAS
+         * above and never reaches this line; a projection failure rolls the
+         * snapshot and the queue transition back with it.
+         *
+         * Ownership is NOT invented here. Projection runs only for a userId
+         * that is already durably bound to the row — binding belongs to the
+         * later activation/restore stage. An unbound subscription still
+         * commits its snapshot; it simply has no user to project onto.
+         *
+         * Sandbox is inert: only a Production reconciliation may recompute a
+         * plan, so a Sandbox row can never move User.plan even for a user who
+         * also holds a Production subscription.
+         */
+        if (snapshot.environment !== PRODUCTION_ENVIRONMENT) return;
+        const bound = await tx.$queryRawUnsafe<{ userId: string | null }>(
+          `SELECT "userId" FROM "AppleSubscription" WHERE "environment" = ? AND "originalTransactionId" = ?`,
+          snapshot.environment,
+          snapshot.originalTransactionId,
+        );
+        const userId = bound[0]?.userId ?? null;
+        if (userId) await projectAppleEntitlementForUser(tx, userId, commitNow);
+      },
+      { now: commitNow, client },
     );
     return result.committed
       ? { kind: 'committed', job }
@@ -409,6 +448,22 @@ export async function reconcileOnce(
      * loop reclaim immediately and hammer the very database that is struggling.
      */
     const message = err instanceof Error ? err.message : String(err);
+
+    /**
+     * A billing-rail conflict, or corrupt persisted Apple state, is not a
+     * transient database problem and will not fix itself on the next attempt.
+     * Retrying it on the normal ladder would hammer the queue every few
+     * seconds forever. Park it durably instead; the existing parked-job
+     * recovery requeues it once an operator has resolved the underlying
+     * double rail or bad row.
+     */
+    if (err instanceof BillingRailConflictError || err instanceof AppleProjectionDataError) {
+      await failReconciliation(job, `projection blocked: ${message}`, {
+        now: nowFn(), client, retryAfterMs: PERMANENT_PARK_MS,
+      });
+      return { kind: 'permanently-invalid', job, error: message };
+    }
+
     await failReconciliation(job, `snapshot persistence failed: ${message}`, { now: nowFn(), client });
     return { kind: 'persistence-failed', job, error: message };
   }

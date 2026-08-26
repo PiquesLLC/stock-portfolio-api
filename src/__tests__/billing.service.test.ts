@@ -6,11 +6,15 @@ const {
   recordWebhookEventMock,
   subscriptionsCancelMock,
   subscriptionsRetrieveMock,
+  checkoutCreateMock,
+  customersCreateMock,
 } = vi.hoisted(() => ({
   invoicesRetrieveMock: vi.fn(),
   recordWebhookEventMock: vi.fn(),
   subscriptionsCancelMock: vi.fn(),
   subscriptionsRetrieveMock: vi.fn(),
+  checkoutCreateMock: vi.fn(),
+  customersCreateMock: vi.fn(),
 }));
 
 vi.mock('stripe', () => {
@@ -23,11 +27,11 @@ vi.mock('stripe', () => {
       retrieve: invoicesRetrieveMock,
     };
     customers = {
-      create: vi.fn(),
+      create: customersCreateMock,
     };
     checkout = {
       sessions: {
-        create: vi.fn(),
+        create: checkoutCreateMock,
       },
     };
     billingPortal = {
@@ -66,7 +70,10 @@ import {
   getBillingStatus,
   handleWebhookEvent,
   pollBillingStatusAfterCheckout,
+  createCheckoutSession,
+  AppleBillingRailActiveError,
 } from '../services/billing.service';
+import { APPLE_PURCHASE_SOURCE } from '../services/apple-entitlement-projection.service';
 
 describe('billing webhook handling', () => {
   beforeEach(() => {
@@ -78,6 +85,11 @@ describe('billing webhook handling', () => {
     prismaMock.billingWebhookEvent.deleteMany.mockResolvedValue({ count: 1 });
     prismaMock.user.update.mockResolvedValue({});
     prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
+    // The Apple-aware plan writer resolves users first and asks Apple whether a
+    // rail blocks. Default: one ordinary Stripe user with no Apple rail.
+    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1', applePurchaseSource: null }]);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', applePurchaseSource: null });
+    (prismaMock as any).$queryRawUnsafe.mockResolvedValue([]);
     (prismaMock.user as any).findFirst.mockResolvedValue({
       id: 'user_refund_1',
       stripeSubscriptionId: 'sub_refund_1',
@@ -116,13 +128,19 @@ describe('billing webhook handling', () => {
     expect(prismaMock.billingWebhookEvent.create).toHaveBeenCalledWith({
       data: { eventId: 'evt_checkout_1', eventType: 'checkout.session.completed' },
     });
+    // The customer id is Stripe rail state and applies directly; the PLAN goes
+    // through the Apple-aware writer, which also claims ownership by clearing
+    // applePurchaseSource so a later Apple recomputation cannot downgrade it.
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user_1' }, data: { stripeCustomerId: 'cus_1' } })
+    );
     expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'user_1' },
         data: expect.objectContaining({
           plan: 'pro',
-          stripeCustomerId: 'cus_1',
           stripeSubscriptionId: 'sub_1',
+          applePurchaseSource: null,
         }),
       })
     );
@@ -153,12 +171,16 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
-    expect(prismaMock.user.updateMany).toHaveBeenCalledWith(
+    expect((prismaMock.user as any).findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { stripeCustomerId: 'cus_2' } })
+    );
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { stripeCustomerId: 'cus_2' },
+        where: { id: 'user_1' },
         data: expect.objectContaining({
           plan: 'premium',
           stripeSubscriptionId: 'sub_2',
+          applePurchaseSource: null,
         }),
       })
     );
@@ -188,9 +210,10 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
-    expect(prismaMock.user.updateMany).toHaveBeenCalledWith(
+    // A downgrade, so no ownership claim is made.
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { stripeCustomerId: 'cus_unpaid_1' },
+        where: { id: 'user_1' },
         data: expect.objectContaining({
           plan: 'free',
           stripeSubscriptionId: 'sub_unpaid_1',
@@ -213,14 +236,16 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
-    expect(prismaMock.user.updateMany).toHaveBeenCalledWith({
-      where: { stripeCustomerId: 'cus_3' },
-      data: {
-        plan: 'free',
-        stripeSubscriptionId: null,
-        planExpiresAt: null,
-      },
-    });
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'user_1' },
+        data: expect.objectContaining({
+          plan: 'free',
+          stripeSubscriptionId: null,
+          planExpiresAt: null,
+        }),
+      })
+    );
   });
 
   it('processes invoice.payment_failed and downgrades plan access immediately', async () => {
@@ -236,15 +261,21 @@ describe('billing webhook handling', () => {
 
     await handleWebhookEvent(event as any);
 
-    expect(prismaMock.user.updateMany).toHaveBeenCalledWith(
+    expect((prismaMock.user as any).findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { stripeCustomerId: 'cus_4', plan: { not: 'free' } } })
+    );
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { stripeCustomerId: 'cus_4', plan: { not: 'free' } },
-        data: expect.objectContaining({
-          plan: 'free',
-          planExpiresAt: null,
-        }),
+        where: { id: 'user_1' },
+        data: { plan: 'free', planExpiresAt: null },
       })
     );
+    // stripeSubscriptionId must SURVIVE dunning: Stripe keeps the subscription
+    // alive, and the Stripe->Apple exclusion depends on that id still being there.
+    const failedCall = prismaMock.user.update.mock.calls.find(
+      (c: any) => c[0]?.data?.plan === 'free' && c[0]?.where?.id === 'user_1',
+    );
+    expect(failedCall?.[0]?.data).not.toHaveProperty('stripeSubscriptionId');
   });
 
   it('ignores duplicate event deliveries by event id', async () => {
@@ -417,5 +448,138 @@ describe('billing webhook handling', () => {
     expect(result.plan).toBe('pro');
     expect(statusFetcher).toHaveBeenCalledTimes(3);
     expect(sleepCalls).toEqual([200, 400]);
+  });
+});
+
+/**
+ * Apple <-> Stripe exclusion, from the Stripe side.
+ *
+ * The Apple side of these rules is proven against a real engine in
+ * apple-entitlement-projection.integration.test.ts. What is tested here is the
+ * half that lives in Stripe code: refusing a second rail at checkout, and
+ * refusing to let a stale Stripe event rewrite a plan Apple owns.
+ */
+describe('Apple -> Stripe exclusion', () => {
+  const appleRow = (over: Record<string, unknown> = {}) => ({
+    environment: 'Production',
+    originalTransactionId: '2000000123456789',
+    userId: 'user_1',
+    plan: 'pro',
+    status: 'active',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    gracePeriodExpiresAt: null,
+    autoRenewStatus: 1,
+    currentTransactionId: 'txn-1',
+    ...over,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'a@b.c', stripeCustomerId: 'cus_1' });
+    checkoutCreateMock.mockResolvedValue({ url: 'https://checkout.stripe.test/s/1' });
+    (prismaMock as any).$queryRawUnsafe.mockResolvedValue([]);
+  });
+
+  for (const status of ['active', 'grace', 'billing_retry'] as const) {
+    it(`REFUSES Stripe checkout while an Apple subscription is ${status}`, async () => {
+      (prismaMock as any).$queryRawUnsafe.mockResolvedValue([appleRow({ status, gracePeriodExpiresAt: status === 'grace' ? '2030-01-01T00:00:00.000Z' : null })]);
+
+      await expect(createCheckoutSession('user_1', 'price_pro'))
+        .rejects.toBeInstanceOf(AppleBillingRailActiveError);
+
+      // No provider-side paid rail may be created for a blocked user.
+      expect(checkoutCreateMock).not.toHaveBeenCalled();
+      expect(customersCreateMock).not.toHaveBeenCalled();
+    });
+  }
+
+  it('billing_retry blocks even though the user currently has NO paid access', async () => {
+    // The whole point of keeping the predicates separate: User.plan says free,
+    // Apple may still collect, so a second rail would double-bill.
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', email: 'a@b.c', stripeCustomerId: 'cus_1', plan: 'free' });
+    (prismaMock as any).$queryRawUnsafe.mockResolvedValue([appleRow({ status: 'billing_retry', expiresAt: '2020-01-01T00:00:00.000Z' })]);
+    await expect(createCheckoutSession('user_1', 'price_pro'))
+      .rejects.toBeInstanceOf(AppleBillingRailActiveError);
+  });
+
+  for (const status of ['expired', 'revoked'] as const) {
+    it(`ALLOWS Stripe checkout once the Apple subscription is ${status}`, async () => {
+      (prismaMock as any).$queryRawUnsafe.mockResolvedValue([appleRow({ status })]);
+      await expect(createCheckoutSession('user_1', 'price_pro')).resolves.toContain('https://');
+      expect(checkoutCreateMock).toHaveBeenCalled();
+    });
+  }
+
+  it('ALLOWS Stripe checkout for a user with no Apple rail at all', async () => {
+    await expect(createCheckoutSession('user_1', 'price_pro')).resolves.toContain('https://');
+  });
+
+  it('scopes the rail query to Production', async () => {
+    // Sandbox isolation is enforced by the query itself; the real-engine test
+    // proves the filtering, this proves the argument is actually passed.
+    await createCheckoutSession('user_1', 'price_pro');
+    const call = (prismaMock as any).$queryRawUnsafe.mock.calls[0];
+    expect(String(call[0])).toContain('"environment" = ?');
+    expect(call[2]).toBe('Production');
+  });
+});
+
+describe('stale Stripe events cannot erase Apple entitlement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.billingWebhookEvent.create.mockResolvedValue({ id: 'evt_1' });
+    prismaMock.user.update.mockResolvedValue({});
+    (prismaMock as any).$queryRawUnsafe.mockResolvedValue([]);
+    // The user on this Stripe customer is currently Apple-owned.
+    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1', applePurchaseSource: APPLE_PURCHASE_SOURCE }]);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user_1', applePurchaseSource: APPLE_PURCHASE_SOURCE });
+  });
+
+  it('a stale subscription.deleted does not free an Apple-owned plan', async () => {
+    await handleWebhookEvent({
+      id: 'evt_del_apple', type: 'customer.subscription.deleted',
+      data: { object: { customer: 'cus_apple' } },
+    } as any);
+
+    const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
+    expect(planWrites).toHaveLength(0);
+
+    // The dead Stripe rail IS cleared, which also resolves the double-rail state.
+    const railWrites = prismaMock.user.update.mock.calls.filter(
+      (c: any) => 'stripeSubscriptionId' in (c[0]?.data ?? {}),
+    );
+    expect(railWrites).toHaveLength(1);
+    expect(railWrites[0][0].data.stripeSubscriptionId).toBe(null);
+  });
+
+  it('a stale invoice.payment_failed does not free an Apple-owned plan', async () => {
+    await handleWebhookEvent({
+      id: 'evt_pf_apple', type: 'invoice.payment_failed',
+      data: { object: { customer: 'cus_apple' } },
+    } as any);
+    const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
+    expect(planWrites).toHaveLength(0);
+  });
+
+  it('a Stripe GRANT is refused while a blocking Apple rail exists', async () => {
+    // Should be unreachable via checkout, but the webhook path must not become
+    // a back door that silently overwrites Apple.
+    (prismaMock as any).$queryRawUnsafe.mockResolvedValue([{
+      environment: 'Production', originalTransactionId: '2000000123456789', userId: 'user_1',
+      plan: 'pro', status: 'active', expiresAt: '2030-01-01T00:00:00.000Z',
+      gracePeriodExpiresAt: null, autoRenewStatus: 1, currentTransactionId: 'txn-1',
+    }]);
+    (prismaMock.user as any).findMany.mockResolvedValue([{ id: 'user_1', applePurchaseSource: APPLE_PURCHASE_SOURCE }]);
+
+    await handleWebhookEvent({
+      id: 'evt_upd_conflict', type: 'customer.subscription.updated',
+      data: { object: {
+        id: 'sub_x', customer: 'cus_apple', status: 'active', start_date: 1700000000,
+        items: { data: [{ price: { id: 'price_pro' }, current_period_end: 1735000000 }] },
+      } },
+    } as any);
+
+    const planWrites = prismaMock.user.update.mock.calls.filter((c: any) => c[0]?.data?.plan !== undefined);
+    expect(planWrites).toHaveLength(0);
   });
 });
