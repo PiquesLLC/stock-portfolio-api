@@ -259,7 +259,7 @@ describe('apple entitlement projection (real engine)', () => {
       "stripeCustomerId" TEXT,
       "stripeSubscriptionId" TEXT,
       "applePurchaseSource" TEXT,
-      "appleOriginalTransactionId" TEXT
+      "appleOriginalTransactionId" TEXT, "appleAppAccountToken" TEXT
     )`);
     const sql = fs.readFileSync(MIGRATION, 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
@@ -765,7 +765,7 @@ describe('cross-rail durability and ordering', () => {
       "plan" TEXT NOT NULL DEFAULT 'free',
       "planExpiresAt" DATETIME, "planStartedAt" DATETIME,
       "stripeCustomerId" TEXT, "stripeSubscriptionId" TEXT,
-      "applePurchaseSource" TEXT, "appleOriginalTransactionId" TEXT
+      "applePurchaseSource" TEXT, "appleOriginalTransactionId" TEXT, "appleAppAccountToken" TEXT
     )`);
     const sql = fs.readFileSync(MIGRATION, 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');

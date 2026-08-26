@@ -166,6 +166,16 @@ model User {
   devicePushTokens       DevicePushToken[]
 
   // Apple IAP
+  /// Server-issued opaque StoreKit account token (UUIDv4).
+  ///
+  /// The durable link between a Nala account and an Apple purchase. It is
+  /// generated server-side, never supplied by a client, and is deliberately NOT
+  /// User.id: making the account identifier the purchase binder would let a
+  /// modified client pick another known user UUID and attach a purchase to it.
+  ///
+  /// Created lazily on the first authenticated purchase-context request, and
+  /// stable for the life of the account. There is no rotation endpoint.
+  appleAppAccountToken        String?   @unique
   appleOriginalTransactionId  String?   @unique
   applePurchaseSource         String?   // 'app_store'
   appleSubscriptions          AppleSubscription[]

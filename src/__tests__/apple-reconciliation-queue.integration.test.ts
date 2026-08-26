@@ -116,7 +116,7 @@ describe('apple reconciliation queue — generation + lease (real libsql engine)
   beforeEach(async () => {
     db = createClient({ url: ':memory:' });
     // AppleSubscription carries an FK to User, so a minimal parent must exist.
-    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY)`);
+    await db.execute(`CREATE TABLE "User" ("id" TEXT NOT NULL PRIMARY KEY, "appleAppAccountToken" TEXT, "appleOriginalTransactionId" TEXT)`);
     await db.execute(`INSERT INTO "User" ("id") VALUES ('user_1')`);
 
     // Strip comments BEFORE splitting on ';' — the migration's own commentary
