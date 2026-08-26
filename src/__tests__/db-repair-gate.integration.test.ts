@@ -22,6 +22,7 @@ import path from 'path';
 const REPO = path.join(__dirname, '..', '..');
 const GATE = path.join(REPO, 'scripts', 'db-repair-gate.cjs');
 const VERIFY = path.join(REPO, 'scripts', 'db-repair-verify.cjs');
+const PREFLIGHT = path.join(REPO, 'scripts', 'db-repair-preflight.cjs');
 const REPAIR = '20260826_restore_missing_schema_objects';
 const BASELINE = '20260826_reconcile_schema_history_baseline';
 const LATE_MARKER = '20260824000000_apple_authoritative_state';
@@ -30,6 +31,20 @@ const LATE_MARKER = '20260824000000_apple_authoritative_state';
 function runGate(dbFile: string): { code: number; out: string } {
   try {
     const out = execFileSync('node', [GATE], {
+      cwd: REPO, encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, DATABASE_URL: `file:${dbFile.split(path.sep).join('/')}` },
+    });
+    return { code: 0, out };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { code: e.status ?? 1, out: String(e.stdout ?? '') + String(e.stderr ?? '') };
+  }
+}
+
+/** 0 = safe to resolve the baseline, 1 = refuse. */
+function runPreflight(dbFile: string): { code: number; out: string } {
+  try {
+    const out = execFileSync('node', [PREFLIGHT], {
       cwd: REPO, encoding: 'utf8', timeout: 60_000,
       env: { ...process.env, DATABASE_URL: `file:${dbFile.split(path.sep).join('/')}` },
     });
@@ -244,6 +259,77 @@ describe('startup schema-repair gate', () => {
     await addMigration(LATE_MARKER, { rolledBack: true });
     const { code, out } = runGate(file);
     expect(code, out).toBe(10);
+  });
+
+  // ── the preflight must block on category B ONLY ─────────────────────────
+
+  it('category B correct + category A ALREADY PRESENT -> gate REPAIR, preflight PASS', async () => {
+    /**
+     * The second brick this gate could have caused. Category A appears in the
+     * OTHER migration, whose statements are all IF NOT EXISTS specifically so
+     * that any starting state converges. Its presence says nothing about
+     * whether the baseline may be resolved — but the preflight used to demand
+     * it be absent, which would exit non-zero on every boot.
+     */
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();       // baseline already satisfied
+    await addCategoryA();       // and the 20260324_* migrations ran here too
+
+    expect(runGate(file).code).toBe(0);              // repair
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(0);                       // and it is allowed to proceed
+    expect(out).toContain('PREFLIGHT PASS');
+    expect(out).toContain('present (repair will no-op)');
+  });
+
+  it('category B correct + category A PARTIALLY present -> preflight PASS', async () => {
+    // The repair migration fills the gaps; a partial set is not an error.
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();
+    await db.execute('CREATE TABLE "ContentStrike" ("id" TEXT PRIMARY KEY, "createdAt" DATETIME)');
+    await db.execute('CREATE INDEX "ContentStrike_createdAt_idx" ON "ContentStrike"("createdAt")');
+
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(0);
+  });
+
+  it('category B correct + category A absent -> preflight PASS (production shape)', async () => {
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    await addCategoryB();
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(0);
+    expect(out).toContain('absent (repair will create)');
+  });
+
+  it('the preflight still REFUSES when category B is wrong-shaped', async () => {
+    // The one thing it must block on, unchanged.
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    for (const t of ['DividendCredit', 'DividendReinvestment', 'Lot', 'PortfolioTrade']) {
+      await db.execute(`ALTER TABLE "${t}" ADD COLUMN "portfolioId" TEXT`);
+      await db.execute(`CREATE INDEX "${t}_portfolioId_ticker_idx" ON "${t}"("portfolioId", "ticker")`);
+    }
+    await db.execute('DROP INDEX "Lot_portfolioId_ticker_idx"');
+    await db.execute('CREATE INDEX "Lot_portfolioId_ticker_idx" ON "Lot"("ticker", "portfolioId")');   // wrong order
+
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(1);
+    expect(out).toContain('PREFLIGHT FAIL');
+  });
+
+  it('the preflight REFUSES when category B is absent', async () => {
+    await createLedger();
+    await addMigration(LATE_MARKER);
+    await createBTables();
+    const { code, out } = runPreflight(file);
+    expect(code, out).toBe(1);
   });
 
   // ── post-deploy verification: the other half of the startup invariant ──
