@@ -68,71 +68,37 @@ fi
 
 # Ensure critical tables exist BEFORE resolving migrations.
 # Migrations marked as "applied" require the tables to actually exist.
+#
+# This MUST stay a file invocation and never `node -e "..."`. Bash performs
+# command substitution inside double quotes, and a backticked comment in the old
+# inline block ran `prisma migrate deploy` on every boot, spliced its stdout into
+# the JavaScript, and killed the script with SyntaxError — hidden by `|| true`.
+# Proven on production 2026-08-26. See scripts/ensure-critical-tables.cjs.
 echo "=== Ensuring critical tables ==="
-node -e "
-  const { createClient } = require('@libsql/client');
-  const client = createClient({ url: process.env.DATABASE_URL || 'file:/data/nala.db' });
-  (async () => {
-    try {
-      await client.execute('CREATE TABLE IF NOT EXISTS \"UserBlock\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"blockerId\" TEXT NOT NULL, \"blockedId\" TEXT NOT NULL, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"UserBlock_blockerId_fkey\" FOREIGN KEY (\"blockerId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE, CONSTRAINT \"UserBlock_blockedId_fkey\" FOREIGN KEY (\"blockedId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
-      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"UserBlock_blockerId_blockedId_key\" ON \"UserBlock\"(\"blockerId\", \"blockedId\")');
-      await client.execute('CREATE TABLE IF NOT EXISTS \"ValueRadarCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"ticker\" TEXT NOT NULL, \"avgPE\" REAL, \"peHistoryJson\" TEXT, \"yearsOfData\" INTEGER, \"lastFetchedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
-      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"ValueRadarCache_ticker_key\" ON \"ValueRadarCache\"(\"ticker\")');
-      await client.execute('CREATE TABLE IF NOT EXISTS \"RefreshRotationCache\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"oldTokenHash\" TEXT NOT NULL, \"newTokenCipher\" TEXT NOT NULL, \"payloadJson\" TEXT NOT NULL, \"userId\" TEXT NOT NULL, \"family\" TEXT NOT NULL, \"consumed\" BOOLEAN NOT NULL DEFAULT false, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"RefreshRotationCache_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
-      await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"RefreshRotationCache_oldTokenHash_key\" ON \"RefreshRotationCache\"(\"oldTokenHash\")');
-      await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_userId_idx\" ON \"RefreshRotationCache\"(\"userId\")');
-      await client.execute('CREATE INDEX IF NOT EXISTS \"RefreshRotationCache_createdAt_idx\" ON \"RefreshRotationCache\"(\"createdAt\")');
-      await client.execute('CREATE TABLE IF NOT EXISTS \"PendingEmailChange\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"userId\" TEXT NOT NULL, \"newEmail\" TEXT NOT NULL, \"codeHash\" TEXT NOT NULL, \"expiresAt\" DATETIME NOT NULL, \"usedAt\" DATETIME, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"PendingEmailChange_userId_fkey\" FOREIGN KEY (\"userId\") REFERENCES \"User\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE)');
-      await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_userId_idx\" ON \"PendingEmailChange\"(\"userId\")');
-      await client.execute('CREATE INDEX IF NOT EXISTS \"PendingEmailChange_expiresAt_idx\" ON \"PendingEmailChange\"(\"expiresAt\")');
-      // CreatorWalletLedger DB-level idempotency (migration 20260527_add_ledger_idempotency).
-      // Runs the same backfills + UNIQUE INDEX as the migration in case
-      // `prisma migrate deploy` fails for any reason. Subsequent boots are no-ops:
-      // the UPDATEs only match rows still in the legacy shape, and the index
-      // uses IF NOT EXISTS.
-      try {
-        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = 'payout:' || rowid WHERE type = 'payout' AND description = 'Payout requested'\");
-        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = description || ':' || rowid WHERE description IN ('admin_fix:initial_payment', 'admin_fix:platform_fee')\");
-        await client.execute(\"UPDATE \\\"CreatorWalletLedger\\\" SET description = description || ':dup:' || rowid WHERE id IN (SELECT l1.id FROM \\\"CreatorWalletLedger\\\" l1 JOIN \\\"CreatorWalletLedger\\\" l2 ON l1.\\\"creatorUserId\\\" = l2.\\\"creatorUserId\\\" AND l1.description = l2.description AND l1.description IS NOT NULL AND l1.rowid > l2.rowid)\");
-        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"creator_wallet_ledger_creator_desc_unique\" ON \"CreatorWalletLedger\"(\"creatorUserId\", \"description\")');
-      } catch (e) {
-        console.warn('[Startup] Ledger idempotency setup non-fatal error:', e.message);
-      }
-      // Partial unique index: at most one pending payout per creator
-      // (migration 20260527_add_payout_pending_unique). Mirrors the migration
-      // in case prisma migrate deploy fails. Idempotent on subsequent boots.
-      //
-      // Pre-clean: if duplicate pending rows exist from before the constraint
-      // (kill switch was off historically, or a TOCTOU did once fire), the
-      // CREATE UNIQUE INDEX would fail and we'd silently keep running WITHOUT
-      // the constraint. Mark all-but-the-oldest pending row per-creator as
-      // 'failed' first. The compensating earning entry is intentionally NOT
-      // written here — that would require knowing which payouts actually
-      // initiated a Stripe transfer vs. which were stuck pre-transfer. Ops can
-      // backfill manually after inspecting CreatorPayout history; the failure
-      // status alone is enough to unblock the index creation.
-      try {
-        const dupResult = await client.execute(\"UPDATE \\\"CreatorPayout\\\" SET status = 'failed' WHERE status = 'pending' AND rowid NOT IN (SELECT MIN(rowid) FROM \\\"CreatorPayout\\\" WHERE status = 'pending' GROUP BY \\\"creatorUserId\\\")\");
-        if (dupResult.rowsAffected > 0) {
-          console.error('[Startup] WARNING: marked ' + dupResult.rowsAffected + ' duplicate pending CreatorPayout rows as failed to allow unique-index creation. Manual ledger reconciliation may be required.');
-        }
-        await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS \"creator_payout_pending_unique\" ON \"CreatorPayout\"(\"creatorUserId\") WHERE \"status\" = \\'pending\\'');
-      } catch (e) {
-        // Elevated to error (was warn) so this is visible in any log aggregator.
-        // The constraint is critical for payout safety — losing it silently is
-        // worse than crashing the boot.
-        console.error('[Startup] CRITICAL: Payout pending unique-index setup failed:', e.message);
-      }
-      console.log('[Startup] Critical tables ensured');
-    } catch (e) { console.warn('[Startup] Table ensure failed:', e.message); }
-  })();
-" 2>&1 || true
+node scripts/ensure-critical-tables.cjs
+ensure_status=$?
+if [ "$ensure_status" != "0" ]; then
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "WARNING: ensure-critical-tables.cjs did not complete (exit $ensure_status)."
+  echo "Boot continues: this block is a FALLBACK for a failed migrate deploy, and"
+  echo "the hard startup invariant is the repair verification further below."
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+fi
 
 # Resolve stuck/failed migrations by marking them as applied.
 echo "=== Resolving stuck migrations ==="
 npx prisma migrate resolve --rolled-back 20260319_add_post_attachments 2>&1 || true
 npx prisma migrate resolve --applied 20260319_add_social_platform 2>&1 || true
-npx prisma migrate resolve --applied 20260320_add_appeals 2>&1 || true
+# REMOVED 2026-08-27 — the proven root cause of the missing Appeal triggers.
+#
+#   npx prisma migrate resolve --applied 20260320_add_appeals || true
+#
+# 20260320_add_appeals failed partway on production and was marked rolled back;
+# this line then recorded it applied WITHOUT re-executing its SQL. The table and
+# indexes exist (the fallback above creates them), but its two status-enforcement
+# triggers never did, so Appeal.status had no database-level enforcement at all.
+# 20260827_restore_appeal_status_triggers creates them. Nothing may mark this
+# migration applied again without proof that its SQL actually ran.
 npx prisma migrate resolve --applied 20260320_add_content_moderation 2>&1 || true
 npx prisma migrate resolve --applied 20260323_creator_visibility_defaults 2>&1 || true
 # REMOVED 2026-08-26 — these two were the proven cause of the schema drift.
