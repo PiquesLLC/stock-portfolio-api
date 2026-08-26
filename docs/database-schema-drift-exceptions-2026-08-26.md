@@ -145,6 +145,14 @@ currently ties them to a known missing object, and removing every legacy
 workaround inside a repair PR would have put unrelated boot-behaviour changes
 into it.
 
+> **Update 2026-08-27.** A third one is now tied to evidence and has been
+> removed: `20260320_add_appeals`. Production was missing both Appeal.status
+> triggers, and that resolve is why — see
+> `docs/startup-shell-safety-and-appeal-triggers-2026-08-27.md`. **Eight
+> remain.** The prediction above ("nothing currently ties them to a known
+> missing object") held for exactly one day, which is the argument for
+> eliminating the rest rather than waiting for each to be caught.
+
 **They must be eliminated before the migration system is considered clean.**
 The safe replacement is the pattern introduced by this repair: inspect the
 ledger, prove the objects exist, then resolve — never resolve unconditionally,
@@ -167,3 +175,12 @@ manufacture exactly this class of drift.
 The two rolled-back history rows (`20260319_add_post_attachments`,
 `20260320_add_appeals`) are left untouched. They are historical evidence, and
 `prisma migrate status` does not treat them as blocking.
+
+> **Correction 2026-08-27.** Treating those rows as inert was wrong for
+> `20260320_add_appeals`. A rolled-back row that is ALSO recorded as applied is
+> not history — it is a statement that a migration failed partway and was then
+> declared complete without re-running. That migration's table and indexes exist
+> (the startup fallback creates them) but its two triggers never did.
+> `prisma migrate status` stayed clean throughout, because the applied row
+> satisfies Prisma. A rolled-back row paired with an applied row for the same
+> migration should be read as a drift SIGNAL, not as a scar.
