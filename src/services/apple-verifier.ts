@@ -131,7 +131,26 @@ const ENVIRONMENT_MAP: Record<AppleEnvironment, Environment> = {
   Sandbox: Environment.SANDBOX,
 };
 
+/**
+ * The verified fields of an App Store Server Notification V2.
+ *
+ * Deliberately narrow. Anything not listed here has not been considered, and a
+ * field that is not read cannot influence a decision.
+ */
+export interface DecodedNotification {
+  notificationUUID: string;
+  notificationType: string;
+  subtype?: string;
+  signedDate?: number;
+  /** VERIFIED environment, re-established from the payload Apple signed. */
+  environment: AppleEnvironment;
+  /** Nested JWS strings. Still UNVERIFIED — each must go through its own verify call. */
+  signedTransactionInfo?: string;
+  signedRenewalInfo?: string;
+}
+
 export interface AppleVerifier {
+  verifyNotification(environment: AppleEnvironment, signedPayload: string): Promise<DecodedNotification>;
   verifyTransaction(environment: AppleEnvironment, jws: string): Promise<DecodedTransaction>;
   verifyRenewal(environment: AppleEnvironment, jws: string): Promise<DecodedRenewal>;
 }
@@ -191,6 +210,79 @@ export function createAppleVerifier(
   };
 
   return {
+    /**
+     * Verify an App Store Server Notification V2.
+     *
+     * `verifyAndDecodeNotification` checks the signature chain AND the app
+     * identity (bundle id / appAppleId) against the verifier this instance was
+     * built with, so a notification for another app cannot pass. The
+     * environment comes from the per-environment verifier instance, exactly as
+     * it does for transactions — a Sandbox notification presented as Production
+     * fails inside the library rather than at a downstream comparison.
+     *
+     * The nested `signedTransactionInfo` / `signedRenewalInfo` are returned as
+     * RAW STRINGS. Verifying the envelope says nothing about them; each must be
+     * put through verifyTransaction / verifyRenewal under this same verified
+     * environment before any field of theirs is believed.
+     */
+    async verifyNotification(environment, signedPayload) {
+      let decoded: Record<string, unknown>;
+      try {
+        decoded = (await verifierFor(environment)
+          .verifyAndDecodeNotification(signedPayload)) as unknown as Record<string, unknown>;
+      } catch (err) {
+        throw classifyVerificationError(err);
+      }
+
+      const notificationUUID = decoded.notificationUUID;
+      const notificationType = decoded.notificationType;
+      if (typeof notificationUUID !== 'string' || notificationUUID.length === 0) {
+        throw new AppleVerificationPermanentError('verified notification missing notificationUUID');
+      }
+      if (typeof notificationType !== 'string' || notificationType.length === 0) {
+        throw new AppleVerificationPermanentError('verified notification missing notificationType');
+      }
+
+      /**
+       * Environment is re-established from the SIGNED payload, then required to
+       * equal the instance that verified it. Apple places it on `data` for
+       * transactional notifications and on `summary` for the aggregate ones;
+       * both are inside the signature, so either is trustworthy — but they must
+       * agree with each other when both appear, and a payload carrying neither
+       * is refused rather than defaulted.
+       */
+      const data = decoded.data as Record<string, unknown> | undefined;
+      const summary = decoded.summary as Record<string, unknown> | undefined;
+      const envs = [data?.environment, summary?.environment]
+        .filter((e): e is string => typeof e === 'string');
+      if (envs.length === 0) {
+        throw new AppleVerificationPermanentError('verified notification carries no environment');
+      }
+      if (envs.some((e) => e !== environment)) {
+        throw new AppleVerificationPermanentError('environment mismatch');
+      }
+
+      // Independent of the library, as elsewhere in this module: require the app
+      // identity rather than checking it only when present.
+      const bundleId = data?.bundleId;
+      if (bundleId !== undefined && bundleId !== cfg.bundleId) {
+        throw new AppleVerificationPermanentError('app identifier mismatch');
+      }
+
+      const nested = (v: unknown): string | undefined =>
+        (typeof v === 'string' && v.length > 0 ? v : undefined);
+
+      return {
+        notificationUUID,
+        notificationType,
+        subtype: typeof decoded.subtype === 'string' ? decoded.subtype : undefined,
+        signedDate: typeof decoded.signedDate === 'number' ? decoded.signedDate : undefined,
+        environment,
+        signedTransactionInfo: nested(data?.signedTransactionInfo),
+        signedRenewalInfo: nested(data?.signedRenewalInfo),
+      };
+    },
+
     async verifyTransaction(environment, jws) {
       let decoded: Record<string, unknown>;
       try {

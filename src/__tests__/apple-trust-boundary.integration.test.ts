@@ -55,6 +55,7 @@ const BUNDLE = 'com.nala.portfolio';
 function stubVerifier(behaviour: {
   transaction?: () => unknown;
   renewal?: () => unknown;
+  notification?: () => unknown;
 }) {
   return {
     verifyAndDecodeTransaction: async () => {
@@ -62,8 +63,16 @@ function stubVerifier(behaviour: {
       return r;
     },
     verifyAndDecodeRenewalInfo: async () => behaviour.renewal?.(),
+    verifyAndDecodeNotification: async () => behaviour.notification?.(),
   } as never;
 }
+
+const goodNotification = (over: Record<string, unknown> = {}) => ({
+  notificationUUID: 'ntf-1',
+  notificationType: 'DID_RENEW',
+  data: { environment: 'Production', bundleId: BUNDLE, signedTransactionInfo: 'nested.jws' },
+  ...over,
+});
 
 const goodTransaction = (over: Record<string, unknown> = {}) => ({
   transactionId: 'txn-1',
@@ -499,5 +508,59 @@ describe('the REAL SignedDataVerifier path (no injected factory)', () => {
     const err = await realVerifier().verifyRenewal('Production', 'nope').catch((e) => e as Error);
     expect(err).toBeInstanceOf(Error);
     expect(err.message).not.toContain('nope');
+  });
+});
+
+describe('apple verifier — notifications', () => {
+  const verifier = (behaviour: Parameters<typeof stubVerifier>[0]) =>
+    createAppleVerifier({ bundleId: BUNDLE, appAppleId: 123, enableOnlineChecks: false }, () => stubVerifier(behaviour));
+
+  it('verifies a notification and returns the nested JWS UNVERIFIED', async () => {
+    const v = verifier({ notification: () => goodNotification() });
+    const n = await v.verifyNotification('Production', 'JWS');
+    expect(n.notificationUUID).toBe('ntf-1');
+    expect(n.notificationType).toBe('DID_RENEW');
+    expect(n.environment).toBe('Production');
+    // Handed back as a raw string: verifying the envelope proves nothing about it.
+    expect(n.signedTransactionInfo).toBe('nested.jws');
+  });
+
+  it('REFUSES a notification whose signed environment is not the one being verified', async () => {
+    // The library instance is the Production one; the signed payload says
+    // Sandbox. Without this check a Sandbox event could be filed as Production.
+    const v = verifier({ notification: () => goodNotification({ data: { environment: 'Sandbox', bundleId: BUNDLE } }) });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('REFUSES a notification whose summary environment disagrees', async () => {
+    const v = verifier({ notification: () => goodNotification({
+      data: undefined, summary: { environment: 'Sandbox' },
+    }) });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('REFUSES a notification carrying no environment at all', async () => {
+    const v = verifier({ notification: () => goodNotification({ data: { bundleId: BUNDLE } }) });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('REFUSES a notification for another app', async () => {
+    const v = verifier({ notification: () => goodNotification({
+      data: { environment: 'Production', bundleId: 'com.evil.app' },
+    }) });
+    await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+  });
+
+  it('REFUSES a notification missing its UUID or type', async () => {
+    for (const over of [{ notificationUUID: undefined }, { notificationType: undefined }]) {
+      const v = verifier({ notification: () => goodNotification(over) });
+      await expect(v.verifyNotification('Production', 'JWS')).rejects.toBeInstanceOf(AppleVerificationPermanentError);
+    }
+  });
+
+  it('a SANDBOX notification verifies under the Sandbox instance', async () => {
+    const v = verifier({ notification: () => goodNotification({ data: { environment: 'Sandbox', bundleId: BUNDLE } }) });
+    const n = await v.verifyNotification('Sandbox', 'JWS');
+    expect(n.environment).toBe('Sandbox');
   });
 });

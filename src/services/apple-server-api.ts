@@ -31,6 +31,10 @@ export interface DecodedTransaction {
   expiresDate?: number;
   revocationDate?: number;
   revocationReason?: number;
+  /** Apple v3.1 puts these on the TRANSACTION payload, not the notification. */
+  revocationType?: string;
+  /** Milliunits, 0-100000. Accounting metadata only; never an entitlement input. */
+  revocationPercentage?: number;
   appAccountToken?: string;
   environment?: string;
   signedDate?: number;
