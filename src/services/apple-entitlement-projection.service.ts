@@ -284,6 +284,17 @@ FROM "AppleSubscription"
 WHERE "userId" = ? AND "environment" = ?
 `.trim();
 
+/**
+ * Existence only. Deliberately selects no columns and stops at one row: the
+ * caller must not be able to make an entitlement decision out of this answer.
+ */
+export const SELECT_PRODUCTION_SUBSCRIPTION_EXISTS_SQL = `
+SELECT 1 AS present
+FROM "AppleSubscription"
+WHERE "userId" = ? AND "environment" = ?
+LIMIT 1
+`.trim();
+
 export const SELECT_TRANSACTION_REVOCATION_SQL = `
 SELECT "revokedAt", "reversedAt"
 FROM "AppleTransaction"
@@ -323,6 +334,27 @@ export interface AppleProjectionResult {
 }
 
 /**
+ * Does this user have ANY Production Apple subscription row?
+ *
+ * Any status counts, expired included. A user who has ever held a Production
+ * Apple subscription is not a disposable QA account, and the Sandbox hatch must
+ * not touch their plan again.
+ *
+ * Existence only, by design — it returns a boolean and never surfaces plan,
+ * status or expiry, so a Production fact can never leak into a Sandbox
+ * entitlement calculation.
+ */
+export async function userHasProductionAppleSubscription(
+  db: QueueClient,
+  userId: string,
+): Promise<boolean> {
+  const rows = await db.$queryRawUnsafe<Record<string, unknown>>(
+    SELECT_PRODUCTION_SUBSCRIPTION_EXISTS_SQL, userId, PRODUCTION_ENVIRONMENT,
+  );
+  return rows.length > 0;
+}
+
+/**
  * Recompute `User.plan` from persisted Apple facts.
  *
  * MUST be called inside completeReconciliation's transaction, after
@@ -337,6 +369,40 @@ export async function projectAppleEntitlementForUser(
   now: Date,
   environment: string = PRODUCTION_ENVIRONMENT,
 ): Promise<AppleProjectionResult> {
+  /**
+   * PRODUCTION-PRESENCE VETO.
+   *
+   * `User.plan` and `User.applePurchaseSource` are global. `applePurchaseSource`
+   * records only 'app_store' — it does NOT record which environment established
+   * the plan. So reading one environment's rows is not on its own enough to keep
+   * the environments isolated: a Sandbox pass that finds an expired Sandbox row
+   * would see `applePurchaseSource = 'app_store'`, believe Apple owns the plan,
+   * and downgrade an entitlement Production had granted.
+   *
+   * The guard: if the user has ANY Production AppleSubscription row — any
+   * status, including expired — a non-Production projection mutates nothing.
+   * Production permanently outranks the QA hatch, which is only ever meant for
+   * disposable accounts with no Production Apple history at all.
+   *
+   * This is an ISOLATION check, not a second entitlement calculation. It asks
+   * one question — does a Production row exist — and never reads Production
+   * status, plan or expiry, so no Production fact can influence what Sandbox
+   * would have granted. Sandbox facts still persist, reconcile and bind; only
+   * the User.plan write is withheld.
+   *
+   * It lives here rather than at the reconciler's gate so it cannot be bypassed
+   * by a future caller — the authoritative webhook intake will call this same
+   * function. It runs on `tx`, the generation-fenced CAS transaction, so there
+   * is no check/write race with a concurrent Production reconciliation.
+   */
+  if (environment !== PRODUCTION_ENVIRONMENT
+      && await userHasProductionAppleSubscription(tx, userId)) {
+    return {
+      action: 'no-op', predicates: null, plan: null,
+      planExpiresAt: null, revokedCurrentTransaction: false,
+    };
+  }
+
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>>(
     SELECT_SUBSCRIPTIONS_FOR_ENVIRONMENT_SQL, userId, environment,
   );

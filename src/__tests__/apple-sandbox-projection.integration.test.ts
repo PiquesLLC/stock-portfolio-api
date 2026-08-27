@@ -5,6 +5,7 @@ import path from 'path';
 import type { QueueClient } from '../services/apple-reconciliation-queue.service';
 import {
   projectAppleEntitlementForUser,
+  userHasProductionAppleSubscription,
   resolveProjectionEnvironment,
   parseSandboxProjectionPolicy,
   SANDBOX_PROJECTION_DISABLED,
@@ -378,12 +379,182 @@ describe('sandbox projection against a real engine', () => {
       expect(prod?.plan).toBe('elite');
       expect((await user(QA_USER))?.plan).toBe('elite');
 
-      // Sandbox pass sees only the expired Sandbox row. It owns the plan now
-      // (Apple set applePurchaseSource above), so it downgrades from SANDBOX
-      // facts alone — it must not read the entitled Production row and re-grant.
+      /**
+       * The Sandbox pass must now do NOTHING.
+       *
+       * Reading only Sandbox rows is not sufficient isolation on its own:
+       * User.plan and applePurchaseSource are global, and applePurchaseSource
+       * says only 'app_store' — it carries no environment provenance. Without
+       * the Production-presence veto the Sandbox pass would see an expired
+       * Sandbox row plus an Apple-owned plan and downgrade an entitlement
+       * PRODUCTION granted. That is a Sandbox test destroying real access.
+       */
       const sandbox = await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER));
-      expect(sandbox?.action).toBe('downgraded');
+      expect(sandbox?.action).toBe('no-op');
+      expect(sandbox?.plan).toBeNull();
+      // The Production row vetoed Sandbox; it was never used to compute a plan.
       expect(sandbox?.predicates).toBeNull();
+
+      const after = await user(QA_USER);
+      expect(after?.plan).toBe('elite');
+      expect(after?.planExpiresAt).toBe(iso(plus(30 * DAY)));
+    });
+  });
+
+  // ── B2. PRODUCTION-PRESENCE VETO ───────────────────────────────────────────
+
+  describe('B2. a Production subscription vetoes Sandbox projection entirely', () => {
+    const prodSub = (over: Record<string, unknown> = {}) => insertSub({
+      environment: PRODUCTION_ENVIRONMENT, originalTransactionId: 'P-1',
+      currentTransactionId: 'p-txn', ...over,
+    });
+    const prodTxn = () => insertTxn({
+      environment: PRODUCTION_ENVIRONMENT, transactionId: 'p-txn', originalTransactionId: 'P-1',
+    });
+    const sandboxSub = (over: Record<string, unknown> = {}) => insertSub({
+      environment: SANDBOX_ENVIRONMENT, originalTransactionId: 'S-1',
+      currentTransactionId: 's-txn', ...over,
+    });
+    const sandboxTxn = () => insertTxn({
+      environment: SANDBOX_ENVIRONMENT, transactionId: 's-txn', originalTransactionId: 'S-1',
+    });
+
+    it('the existence helper answers only yes/no', async () => {
+      expect(await userHasProductionAppleSubscription(adapter, QA_USER)).toBe(false);
+      await sandboxSub();
+      expect(await userHasProductionAppleSubscription(adapter, QA_USER)).toBe(false);
+      await prodSub({ status: 'expired', expiresAt: iso(plus(-DAY)) });
+      expect(await userHasProductionAppleSubscription(adapter, QA_USER)).toBe(true);
+    });
+
+    it('1. Production active + Sandbox active => Sandbox cannot replace the Production plan', async () => {
+      await prodSub({ plan: 'elite' });
+      await prodTxn();
+      await project(PRODUCTION_ENVIRONMENT, QA_USER, allow(QA_USER));
+      expect((await user(QA_USER))?.plan).toBe('elite');
+
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await sandboxTxn();
+
+      const r = await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER));
+      expect(r?.action).toBe('no-op');
+      expect((await user(QA_USER))?.plan).toBe('elite');
+    });
+
+    it('2. Production active + Sandbox expired => Sandbox cannot downgrade', async () => {
+      await prodSub({ plan: 'elite' });
+      await prodTxn();
+      await project(PRODUCTION_ENVIRONMENT, QA_USER, allow(QA_USER));
+
+      await sandboxSub({ plan: 'pro', status: 'expired', expiresAt: iso(plus(-DAY)), autoRenewStatus: 0 });
+      await sandboxTxn();
+
+      const r = await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER));
+      expect(r?.action).toBe('no-op');
+      expect((await user(QA_USER))?.plan).toBe('elite');
+    });
+
+    it('3. Production EXPIRED + Sandbox active => still no Sandbox projection', async () => {
+      // Deliberately conservative: the veto is presence, not entitlement. Once
+      // an account has any Production Apple history it is not a disposable QA
+      // account, so the hatch stays shut.
+      await prodSub({ status: 'expired', expiresAt: iso(plus(-DAY)), autoRenewStatus: 0 });
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await sandboxTxn();
+
+      const r = await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER));
+      expect(r?.action).toBe('no-op');
+      const u = await user(QA_USER);
+      expect(u?.plan).toBe('free');
+      expect(u?.applePurchaseSource).toBeNull();
+    });
+
+    it('4. a Sandbox-only account keeps the full lifecycle', async () => {
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await sandboxTxn();
+      expect((await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('granted');
+      expect((await user(QA_USER))?.plan).toBe('pro');
+
+      await db.execute({
+        sql: `UPDATE "AppleSubscription" SET "status"='expired', "expiresAt"=? WHERE "environment"=?`,
+        args: [iso(plus(-DAY)), SANDBOX_ENVIRONMENT] as never,
+      });
+      expect((await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('downgraded');
+      expect((await user(QA_USER))?.plan).toBe('free');
+    });
+
+    it('5. Sandbox grants first, then Production appears => Production wins and Sandbox is frozen out', async () => {
+      // Clean QA account: Sandbox grants pro.
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await sandboxTxn();
+      expect((await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('granted');
+      expect((await user(QA_USER))?.plan).toBe('pro');
+
+      // A real Production subscription is later reconciled for the same user.
+      await prodSub({ plan: 'elite', status: 'active' });
+      await prodTxn();
+      expect((await project(PRODUCTION_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('granted');
+      expect((await user(QA_USER))?.plan).toBe('elite');
+
+      // Every later Sandbox reconciliation is now inert, in both directions.
+      await db.execute({
+        sql: `UPDATE "AppleSubscription" SET "status"='expired', "expiresAt"=?
+              WHERE "environment"=? AND "originalTransactionId"='S-1'`,
+        args: [iso(plus(-DAY)), SANDBOX_ENVIRONMENT] as never,
+      });
+      expect((await project(SANDBOX_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('no-op');
+      expect((await user(QA_USER))?.plan).toBe('elite');
+    });
+
+    it('6. a Production row on user A does not block Sandbox for allowlisted user B', async () => {
+      await insertUser({ id: OTHER_USER });
+      // User A holds Production Apple state.
+      await insertSub({
+        environment: PRODUCTION_ENVIRONMENT, originalTransactionId: 'P-A',
+        userId: QA_USER, currentTransactionId: 'pa-txn',
+      });
+      // User B is a clean QA account with only Sandbox state.
+      await insertSub({
+        environment: SANDBOX_ENVIRONMENT, originalTransactionId: 'S-B',
+        userId: OTHER_USER, plan: 'pro', status: 'active', currentTransactionId: 'sb-txn',
+      });
+      await insertTxn({ environment: SANDBOX_ENVIRONMENT, transactionId: 'sb-txn', originalTransactionId: 'S-B' });
+
+      expect(await userHasProductionAppleSubscription(adapter, OTHER_USER)).toBe(false);
+
+      const r = await project(SANDBOX_ENVIRONMENT, OTHER_USER, allow(OTHER_USER));
+      expect(r?.action).toBe('granted');
+      expect((await user(OTHER_USER))?.plan).toBe('pro');
+      // User A untouched.
+      expect((await user(QA_USER))?.plan).toBe('free');
+    });
+
+    it('7. flag-off / unallowlisted behaviour is unchanged by the veto', async () => {
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await sandboxTxn();
+
+      expect(await project(SANDBOX_ENVIRONMENT, QA_USER, SANDBOX_PROJECTION_DISABLED)).toBeNull();
+      expect(await project(SANDBOX_ENVIRONMENT, QA_USER, allow(OTHER_USER))).toBeNull();
+      expect((await user(QA_USER))?.plan).toBe('free');
+    });
+
+    it('Production projection itself is completely unaffected by the veto', async () => {
+      // The veto is scoped to non-Production environments. A user with both
+      // kinds of row still gets a normal Production projection, including a
+      // normal Production downgrade.
+      await prodSub({ plan: 'elite' });
+      await prodTxn();
+      await sandboxSub({ plan: 'pro', status: 'active' });
+      await project(PRODUCTION_ENVIRONMENT, QA_USER, allow(QA_USER));
+      expect((await user(QA_USER))?.plan).toBe('elite');
+
+      await db.execute({
+        sql: `UPDATE "AppleSubscription" SET "status"='expired', "expiresAt"=?
+              WHERE "environment"=? AND "originalTransactionId"='P-1'`,
+        args: [iso(plus(-DAY)), PRODUCTION_ENVIRONMENT] as never,
+      });
+      expect((await project(PRODUCTION_ENVIRONMENT, QA_USER, allow(QA_USER)))?.action).toBe('downgraded');
+      expect((await user(QA_USER))?.plan).toBe('free');
     });
   });
 
