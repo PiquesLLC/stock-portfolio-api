@@ -22,16 +22,98 @@ import type { QueueClient } from './apple-reconciliation-queue.service';
  */
 
 /**
- * Production only. A Sandbox subscription can never affect User.plan and can
- * never block Stripe — a tester holding a Sandbox row must not be able to mint
- * real entitlement, and TestFlight is not a signal that Sandbox is trustworthy.
- *
- * No Sandbox test-account exception is implemented in this PR. The frozen
- * contract permits a narrow, default-empty allowlist; deliberately not adding
- * one keeps the isolation absolute and the config surface at zero until there
- * is a real test account to admit.
+ * The only environment whose facts may project entitlement by default. A
+ * Sandbox subscription must never mint real entitlement, and TestFlight is not
+ * a signal that Sandbox is trustworthy.
  */
 export const PRODUCTION_ENVIRONMENT = 'Production';
+
+/**
+ * The QA-only environment, admitted ONLY through the explicit allowlist below.
+ * Never a synonym for "test mode" — see resolveProjectionEnvironment.
+ */
+export const SANDBOX_ENVIRONMENT = 'Sandbox';
+
+/**
+ * Server-side permission to project SANDBOX facts, for named users only.
+ *
+ * This exists so a disposable QA account can walk the complete
+ * purchase -> backend authority -> plan -> unlock path before Production is the
+ * first environment that path has ever run in. It is deliberately the narrowest
+ * possible hole:
+ *
+ *   - `enabled` is a server env var, never a request, header, body field, JWS
+ *     claim, appAccountToken, email or username. Nothing a client sends can
+ *     reach this decision.
+ *   - `userIds` holds server-side User UUIDs and defaults to EMPTY, which means
+ *     nobody. There is no "empty means everyone" fallback and no
+ *     "all Sandbox users" mode.
+ *   - There is no NODE_ENV shortcut. TestFlight talks to the real production
+ *     backend, so `NODE_ENV !== 'production'` would be both wrong and useless.
+ */
+export interface SandboxProjectionPolicy {
+  enabled: boolean;
+  userIds: ReadonlySet<string>;
+}
+
+/** The default in every environment: Sandbox projects for nobody. */
+export const SANDBOX_PROJECTION_DISABLED: SandboxProjectionPolicy = {
+  enabled: false,
+  userIds: new Set<string>(),
+};
+
+/**
+ * Parse the policy from raw environment variables. Pure, and fails CLOSED.
+ *
+ * `enabled` uses an exact `=== 'true'` match, so every other value — unset,
+ * empty, `TRUE`, `1`, `yes`, `false`, whitespace, a typo — is false. A flag that
+ * silently enabled on a malformed value would be the worst possible failure
+ * here, so nothing is coerced.
+ *
+ * `userIds` trims each entry and drops empties, which makes unset, `''`,
+ * `'   '`, `','` and `',,,'` all mean the same thing: nobody. Entries are NOT
+ * normalised in any other way — no lowercasing, no email/username acceptance —
+ * because the value is compared for exact equality against
+ * `AppleSubscription.userId`, and a fuzzy match here would be an authorization
+ * bug. A malformed entry simply never equals a real UUID.
+ */
+export function parseSandboxProjectionPolicy(
+  env: Record<string, string | undefined>,
+): SandboxProjectionPolicy {
+  return {
+    enabled: env.APPLE_SANDBOX_PROJECTION_ENABLED === 'true',
+    userIds: new Set(
+      (env.APPLE_SANDBOX_PROJECTION_USER_IDS || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  };
+}
+
+/**
+ * Which environment's facts may project for this binding, or null for "none".
+ *
+ * The returned value is the environment the projection will READ FROM, which is
+ * what keeps the two environments isolated: a Sandbox projection selects only
+ * Sandbox rows and a Production projection selects only Production rows, so a
+ * QA user holding both never mixes them into one entitlement decision.
+ *
+ * Every branch that is not explicitly Production or an allowlisted Sandbox
+ * returns null, including an unrecognised environment string — an environment
+ * Apple has not taught us about must not be assumed harmless.
+ */
+export function resolveProjectionEnvironment(
+  environment: string,
+  userId: string | null,
+  policy: SandboxProjectionPolicy,
+): string | null {
+  if (environment === PRODUCTION_ENVIRONMENT) return PRODUCTION_ENVIRONMENT;
+  if (environment !== SANDBOX_ENVIRONMENT) return null;
+  if (!policy.enabled) return null;
+  if (!userId) return null;
+  return policy.userIds.has(userId) ? SANDBOX_ENVIRONMENT : null;
+}
 
 /** The durable marker meaning "Apple owns the currently projected plan". */
 export const APPLE_PURCHASE_SOURCE = 'app_store';
@@ -195,7 +277,7 @@ export function rowToFacts(row: Record<string, unknown>): AppleSubscriptionFacts
   };
 }
 
-export const SELECT_PRODUCTION_SUBSCRIPTIONS_SQL = `
+export const SELECT_SUBSCRIPTIONS_FOR_ENVIRONMENT_SQL = `
 SELECT "environment", "originalTransactionId", "userId", "plan", "status",
        "expiresAt", "gracePeriodExpiresAt", "autoRenewStatus", "currentTransactionId"
 FROM "AppleSubscription"
@@ -253,9 +335,10 @@ export async function projectAppleEntitlementForUser(
   tx: QueueClient,
   userId: string,
   now: Date,
+  environment: string = PRODUCTION_ENVIRONMENT,
 ): Promise<AppleProjectionResult> {
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>>(
-    SELECT_PRODUCTION_SUBSCRIPTIONS_SQL, userId, PRODUCTION_ENVIRONMENT,
+    SELECT_SUBSCRIPTIONS_FOR_ENVIRONMENT_SQL, userId, environment,
   );
   const subs = rows.map(rowToFacts);
 
@@ -398,7 +481,7 @@ export async function findBlockingAppleRail(
   userId: string,
 ): Promise<AppleSubscriptionFacts | null> {
   const rows = await db.$queryRawUnsafe<Record<string, unknown>>(
-    SELECT_PRODUCTION_SUBSCRIPTIONS_SQL, userId, PRODUCTION_ENVIRONMENT,
+    SELECT_SUBSCRIPTIONS_FOR_ENVIRONMENT_SQL, userId, PRODUCTION_ENVIRONMENT,
   );
   return rows.map(rowToFacts).find((s) => blocksOtherBillingRail(s)) ?? null;
 }
