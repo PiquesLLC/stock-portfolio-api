@@ -21,9 +21,11 @@ import { getAppleRateLimiter, applyAppleRateLimitCooldown } from './apple-rate-l
 import { planForAppleProduct, UnknownAppleProductError } from './apple-product-plan';
 import {
   projectAppleEntitlementForUser,
+  resolveProjectionEnvironment,
+  parseSandboxProjectionPolicy,
   BillingRailConflictError,
   AppleProjectionDataError,
-  PRODUCTION_ENVIRONMENT,
+  type SandboxProjectionPolicy,
 } from './apple-entitlement-projection.service';
 import {
   bindSubscriptionOwner,
@@ -72,6 +74,13 @@ export interface ReconcilerDeps {
   onJobClaimed?: (job: ClaimedJob) => void;
   /** Fallback when a 429 carries no usable Retry-After. Conservative on purpose. */
   rateLimitFallbackMs?: number;
+  /**
+   * Sandbox projection permission. Omitted in production, where it is read
+   * from the process environment and therefore defaults to "nobody". Tests
+   * inject it rather than mutating process.env so one suite cannot leak
+   * permission into another.
+   */
+  sandboxProjection?: SandboxProjectionPolicy;
 }
 
 export const DEFAULT_RATE_LIMIT_FALLBACK_MS = 60_000;
@@ -329,6 +338,7 @@ export async function reconcileOnce(
 ): Promise<ReconcileOutcome> {
   const nowFn = deps.now ?? (() => new Date());
   const client = deps.client;
+  const sandboxPolicy = deps.sandboxProjection ?? parseSandboxProjectionPolicy(process.env);
 
   const job = await claimReconciliationJob(workerId, { client, now: nowFn() });
   if (!job) return { kind: 'idle' };
@@ -423,8 +433,7 @@ export async function reconcileOnce(
          * back with it.
          *
          * Sandbox DOES bind, so a test purchase is attributable and auditable.
-         * What Sandbox may never do is project: only a Production reconciliation
-         * may recompute a plan.
+         * Binding is NOT permission to project — see the projection gate below.
          */
         const binding = await bindSubscriptionOwner(
           tx,
@@ -435,8 +444,30 @@ export async function reconcileOnce(
           commitNow,
         );
 
-        if (snapshot.environment !== PRODUCTION_ENVIRONMENT) return;
-        if (binding.userId) await projectAppleEntitlementForUser(tx, binding.userId, commitNow);
+        /**
+         * Projection gate.
+         *
+         * Production always projects, exactly as before. Sandbox projects ONLY
+         * for a user named in the server-side allowlist while the server-side
+         * flag is on — nothing in the snapshot, the token or the request can
+         * reach this decision.
+         *
+         * The resolved environment is then what the projection READS FROM, so a
+         * QA account holding both Production and Sandbox rows never mixes them:
+         * a Sandbox pass sees only Sandbox facts and a Production pass only
+         * Production facts.
+         *
+         * Gating here rather than inside the projection is what keeps grant and
+         * downgrade symmetric. An unallowlisted Sandbox reconciliation performs
+         * NO projection at all, so it can neither hand out a plan nor take one
+         * away — there is no half-gated path where Sandbox may grant but not
+         * downgrade.
+         */
+        const projectionEnvironment = resolveProjectionEnvironment(
+          snapshot.environment, binding.userId, sandboxPolicy,
+        );
+        if (!projectionEnvironment || !binding.userId) return;
+        await projectAppleEntitlementForUser(tx, binding.userId, commitNow, projectionEnvironment);
       },
       { now: commitNow, client },
     );
