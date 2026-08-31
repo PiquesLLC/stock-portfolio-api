@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-24T00:00:00Z",
+  "generatedAt": "2026-08-31T00:00:00Z",
   "entries": [
     {
       "id": "nvda-accelerated-compute",
@@ -11,8 +11,8 @@
         "AMD",
         "TSM"
       ],
-      "thesisShort": "NVIDIA still supplies roughly 80-88% of the AI accelerator market, and Vera Rubin — in full production ramp since mid-2026 — extends that position as big-four hyperscaler capex steps up about 77% to roughly $725B in 2026.",
-      "thesisLong": "NVIDIA's chokehold on accelerated compute is the single most important bottleneck in the AI stack. Hopper gave way to Blackwell (B200/GB200 NVL72), then Blackwell Ultra (B300), and Vera Rubin moved into a full production ramp announced at GTC Taipei on 1 June 2026. The VR200 carries 288GB of HBM4 at 22 TB/s and roughly 50 PFLOPS of FP4 compute, about 3.3x the throughput of B300. Each generation has been allocation-constrained rather than demand-constrained: Rubin cloud instances are not expected before Q4 2026, and early supply is being routed to hyperscalers and frontier labs first.\n\nThe moat is not just silicon. CUDA, NCCL, TensorRT-LLM, and the Mellanox/NVLink fabric form a software-plus-network stack that competitors cannot replicate in a single product cycle. Every serious foundation model lab — OpenAI, Anthropic, Google DeepMind, Meta, xAI — runs production training on NVIDIA, and inference is following the same path.\n\nThe demand backdrop is the capex cycle underneath it. Amazon, Microsoft, Alphabet and Meta together plan roughly $725B of capital spending in 2026, up about 77% year over year, with roughly three-quarters of it AI-related. NVIDIA data center revenue was $75.2B in the April 2026 quarter alone, up 92% year over year and 21% sequentially, and the company guided its July quarter to about $91B of total revenue. Sovereign AI deals (Saudi Humain, UAE G42, Japan, France) add a second demand vector independent of US hyperscalers.\n\nThe pressure on the moat is now measurable rather than theoretical. TrendForce expects custom ASIC shipments to grow about 44.6% in 2026 against 16.1% for merchant GPUs, and Broadcom alone has booked multi-gigawatt XPU programs with Google, Anthropic, OpenAI and Meta. HBM4 supply and advanced-packaging capacity also physically cap how many Rubin racks can be built in 2026-2027. But on the bottleneck question — who gates AI compute supply in 2026 — the answer remains NVIDIA.",
+      "thesisShort": "NVIDIA still supplies roughly 80-88% of the AI accelerator market. Data center revenue set a record $89.0B in Q2 FY2027, up 117% year over year on the Blackwell Ultra ramp, with Vera Rubin shipping behind it and the October quarter guided to $108B as big-four hyperscaler capex steps up about 77% to roughly $725B in 2026.",
+      "thesisLong": "NVIDIA's chokehold on accelerated compute is the single most important bottleneck in the AI stack. Hopper gave way to Blackwell (B200/GB200 NVL72), then Blackwell Ultra (B300), and Vera Rubin moved into a full production ramp announced at GTC Taipei on 1 June 2026. The VR200 carries 288GB of HBM4 at 22 TB/s and roughly 50 PFLOPS of FP4 compute, about 3.3x the throughput of B300. Each generation has been allocation-constrained rather than demand-constrained: Rubin began shipping in Q3 2026 with the volume ramp in Q4 2026, and early supply is being routed to hyperscalers and frontier labs first while Blackwell Ultra carries current revenue.\n\nThe moat is not just silicon. CUDA, NCCL, TensorRT-LLM, and the Mellanox/NVLink fabric form a software-plus-network stack that competitors cannot replicate in a single product cycle. Every serious foundation model lab — OpenAI, Anthropic, Google DeepMind, Meta, xAI — runs production training on NVIDIA, and inference is following the same path.\n\nThe demand backdrop is the capex cycle underneath it. Amazon, Microsoft, Alphabet and Meta together plan roughly $725B of capital spending in 2026, up about 77% year over year, with roughly three-quarters of it AI-related. NVIDIA data center revenue reached a record $89.0B in the July 2026 quarter, up 117% year over year and 18% sequentially, on total revenue of $96.2B; the company guided the October quarter to $108B. Sovereign AI deals (Saudi Humain, UAE G42, Japan, France) add a second demand vector independent of US hyperscalers.\n\nThe pressure on the moat is now measurable rather than theoretical. TrendForce expects custom ASIC shipments to grow about 44.6% in 2026 against 16.1% for merchant GPUs, and Broadcom alone has booked multi-gigawatt XPU programs with Google, Anthropic, OpenAI and Meta. HBM4 supply and advanced-packaging capacity also physically cap how many Rubin racks can be built in 2026-2027. But on the bottleneck question — who gates AI compute supply in 2026 — the answer remains NVIDIA.",
       "chokepointMetrics": [
         {
           "label": "Merchant AI accelerator share",
@@ -20,7 +20,7 @@
         },
         {
           "label": "Data center revenue",
-          "value": "$75.2B in Q1 FY2027 (+92% YoY, +21% QoQ)"
+          "value": "Record $89.0B in Q2 FY2027 (+117% YoY, +18% QoQ)"
         },
         {
           "label": "Big-four hyperscaler capex",
@@ -31,16 +31,21 @@
           "value": "+44.6% vs +16.1% (2026E, TrendForce)"
         },
         {
-          "label": "Rubin cloud instance availability",
-          "value": "Q4 2026 at the earliest; early supply allocated to hyperscalers"
+          "label": "Vera Rubin ramp timing",
+          "value": "First shipments Q3 2026, volume ramp Q4 2026, building through 1H 2027"
+        },
+        {
+          "label": "Next-quarter revenue guidance",
+          "value": "$108B ±2% for Q3 FY2027 (issued 26 Aug 2026)"
         }
       ],
       "catalysts": [
-        "Q2 FY2027 results on 26 August 2026 against a $91B ±2% revenue guide",
-        "Vera Rubin rack volume through 2H 2026 into cloud availability from Q4 2026",
+        "October-quarter (Q3 FY2027) revenue guided to $108B ±2%",
+        "Vera Rubin volume ramp in Q4 2026 building through 1H 2027",
         "Sovereign AI build-outs (Saudi, UAE, Japan, France)",
         "Inference workloads scaling toward training-scale revenue",
-        "NVLink Fusion opening custom-silicon attach"
+        "NVLink Fusion opening custom-silicon attach",
+        "Management framing roughly 70% revenue growth for fiscal 2028"
       ],
       "risks": [
         "Custom ASIC unit growth (+44.6% 2026E) outpacing merchant GPU (+16.1%)",
@@ -49,7 +54,7 @@
         "HBM4 and fab/packaging limits capping Rubin rack output"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -74,8 +79,8 @@
           "value": "~40% (Q2 FY2026)"
         },
         {
-          "label": "Named multi-gigawatt XPU partners",
-          "value": "Google, Anthropic, OpenAI, Meta (as of Q2 FY2026)"
+          "label": "Core custom-chip customers",
+          "value": "Six core custom-chip customers; four named — Google, Anthropic, OpenAI, Meta (Q2 FY2026)"
         },
         {
           "label": "Orders booked from two new customers",
@@ -84,9 +89,18 @@
         {
           "label": "Top Ethernet switch throughput",
           "value": "102.4 Tbps shipping; 200 Tbps successor taped out (Q2 FY2026)"
+        },
+        {
+          "label": "Q3 FY2026 AI semiconductor guide",
+          "value": "$16.0B, >200% YoY growth (management, June 2026)"
+        },
+        {
+          "label": "FY2026 / FY2027 AI revenue framing",
+          "value": "~$56B in FY2026 (~180% growth); >$100B targeted for FY2027 (management, June 2026)"
         }
       ],
       "catalysts": [
+        "Q3 FY2026 results on 2 September 2026 against a $16.0B AI semiconductor guide",
         "1 GW XPU-plus-networking order beginning delivery in 2H 2027",
         "200-terabit switch moving from tape-out to sampling",
         "Multi-gigawatt deployments with Google, Anthropic, OpenAI and Meta starting fiscal 2027",
@@ -99,7 +113,7 @@
         "Revenue timing — the largest booked programs deliver from 2H 2027"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -133,23 +147,28 @@
         },
         {
           "label": "Helios rack revenue shipments",
-          "value": "Begin end of Q3 2026"
+          "value": "Shipping in Q3 2026, ramping in Q4 2026 (management, Q2 2026 call)"
+        },
+        {
+          "label": "Helios rack configuration",
+          "value": "72 MI455X GPUs + EPYC Venice, ~2.9 exaflops FP4 inference, ~$5.0-5.5M per rack (2026)"
         }
       ],
       "catalysts": [
-        "Helios rack-scale revenue shipments from the end of Q3 2026",
+        "Helios rack shipments in Q3 2026 ramping through Q4 2026",
         "MI500 platform detailed for 2027",
         "6th Gen EPYC (Venice) attach inside full-rack AI deals",
-        "Sovereign AI deals (Saudi Humain, EU)"
+        "Sovereign AI deals (Saudi Humain, EU)",
+        "Named Helios deployments at Microsoft Azure, Meta, OpenAI and Oracle"
       ],
       "risks": [
         "NVIDIA supply normalization compressing merchant pricing",
         "Custom silicon (TPU, Trainium, MTIA) absorbing merchant share",
         "Software ecosystem parity at training scale still closing",
-        "Helios ramp execution — revenue only begins at the end of Q3 2026"
+        "Helios ramp execution — the rack is only entering revenue shipment now, so 2026 contribution is back-end loaded"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -184,10 +203,14 @@
         {
           "label": "Q2 2026 net sales / gross margin",
           "value": "€9.3B at 54.0%"
+        },
+        {
+          "label": "High-NA production status",
+          "value": "First high-volume logic shipped — select Intel 18A layers dual-qualified on EXE (0.55 NA), yields matched to NXE (July 2026)"
         }
       ],
       "catalysts": [
-        "High-NA EXE:5200B qualification at Intel, Samsung and SK hynix",
+        "High-NA extending beyond the first Intel 18A layers to Samsung and SK hynix qualification",
         "imec High-NA qualification targeted for Q4 2026",
         "HBM4 base-die EUV adoption at Micron, SK hynix and Samsung",
         "Sovereign fab build-outs (Japan Rapidus, US, EU)",
@@ -200,7 +223,7 @@
         "Intel tooling 14A only against firm external commitments, capping one High-NA demand vector"
       ],
       "featured": true,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -369,7 +392,7 @@
         },
         {
           "label": "Quarterly revenue",
-          "value": "~$41.5B in FQ3 2026 (record)"
+          "value": "~$42B in FQ3 2026 (record, vs ~$9B a year earlier)"
         },
         {
           "label": "Gross margin",
@@ -382,9 +405,14 @@
         {
           "label": "HBM4 revenue",
           "value": ">$1B, ramping ~2x faster than HBM3E (FQ3 2026)"
+        },
+        {
+          "label": "Next-quarter guidance",
+          "value": "~$50B for FQ4 2026"
         }
       ],
       "catalysts": [
+        "FQ4 2026 guided to roughly $50B of revenue",
         "HBM4 volume at NVIDIA Rubin and AMD MI400",
         "HBM3E and HBM4 booked through calendar 2027 with demand extending into 2028",
         "Idaho and Japan fab capacity coming online",
@@ -397,7 +425,7 @@
         "Hyperscaler capex digestion"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -482,11 +510,15 @@
         },
         {
           "label": "14A anchor customer",
-          "value": "None named; PDK 0.9 due October 2026"
+          "value": "None named; PDK 0.9 to external customers October 2026, risk production 2028, high-volume manufacturing 2029"
+        },
+        {
+          "label": "High-NA EUV position",
+          "value": "First company to ship high-volume logic patterned with High-NA — select 18A layers, Oregon (July 2026)"
         }
       ],
       "catalysts": [
-        "Intel 14A PDK 0.9 release targeted for October 2026",
+        "Intel 14A PDK 0.9 to external customers in October 2026, ahead of 2028 risk production",
         "18A-P moving through risk production",
         "Fortinet agreement as the first named external customer disclosure",
         "Reported Terafab (Tesla / SpaceX / xAI) 14A decision expected 2H 2026 to 1H 2027"
@@ -498,7 +530,7 @@
         "Continued Foundry operating losses ($2.1B in Q2 2026)"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -980,12 +1012,12 @@
         "Restructuring benefits flowing through the P&L"
       ],
       "risks": [
-        "China export restrictions on advanced EDA tools removing historical revenue",
+        "Renewed China export restrictions — the May 2025 EDA licensing requirement was rescinded in July 2025, leaving policy a live swing factor on roughly 16% of revenue rather than a booked loss",
         "Ansys integration execution",
         "Cadence competitive intensity"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -1029,12 +1061,12 @@
         "IP attach to AI accelerator designs"
       ],
       "risks": [
-        "China export restrictions on advanced EDA tools",
+        "Renewed China export restrictions — the May 2025 EDA licensing requirement was rescinded in July 2025, leaving policy a live swing factor on roughly 12% of revenue",
         "Synopsys-Ansys combination competing across silicon-to-systems",
         "Renewal timing concentration in a backlog-driven model"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     },
     {
@@ -1203,7 +1235,7 @@
       "chokepointMetrics": [
         {
           "label": "Uranium spot price",
-          "value": "~$86.5/lb (early August 2026)"
+          "value": "~$90/lb (28 August 2026), up from ~$86.5/lb in early August"
         },
         {
           "label": "2026 production guidance",
@@ -1226,7 +1258,8 @@
         "Westinghouse IPO process following the 31 July 2026 confidential Form S-1",
         "Westinghouse plan for ten new US plants with construction from 2030",
         "Long-term contract pricing at multi-year highs against ~$86/lb spot",
-        "Reactor restart wave (Crane, Palisades, Duane Arnold) lifting fuel demand"
+        "Reactor restart wave (Crane, Palisades, Duane Arnold) lifting fuel demand",
+        "Kazatomprom supply constraints — TQZ sulphuric acid plant delays tightening 2026-2027 primary supply"
       ],
       "risks": [
         "Flooding and operational disruption at northern Saskatchewan mines",
@@ -1235,7 +1268,7 @@
         "Kazakh and Russian supply and policy shifts"
       ],
       "featured": false,
-      "lastUpdated": "2026-08-19",
+      "lastUpdated": "2026-08-31",
       "sector": "AI"
     }
   ]
